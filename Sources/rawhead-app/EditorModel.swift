@@ -44,6 +44,13 @@ final class EditorModel: ObservableObject {
     @Published private(set) var tile: PresentLayer?
     @Published private(set) var viewport = ViewportTransform(zoom: 1, center: .zero)
     @Published private(set) var histogram: Histogram?
+    @Published private(set) var waveform: Waveform?
+    @Published private(set) var vectorscope: Vectorscope?
+    /// Only the visible scope is computed (efficiency rule 2). Switching
+    /// re-measures the current analysis texture without re-rendering.
+    @Published var scope: ScopeKind = .histogram {
+        didSet { if scope != oldValue { updateScopes() } }
+    }
     @Published private(set) var status = "Open a raw file to begin"
     @Published private(set) var imageTitle: String?
     @Published private(set) var lastRenderMs: Double = 0
@@ -94,6 +101,10 @@ final class EditorModel: ObservableObject {
     private let pipeline: RenderPipeline?
     private let presenterInstance: Presenter?
     private let histogramCalculator: HistogramCalculator?
+    private let scopeCalculator: ScopeCalculator?
+    /// The small render the scopes measure. Kept so switching scope
+    /// doesn't need a render; replaced on every preview render.
+    private var analysisTexture: MTLTexture?
     private let exportService: ExportService?
     private var session: ImageSession?
     private var sourceURL: URL?
@@ -128,6 +139,7 @@ final class EditorModel: ObservableObject {
             self.pipeline = RenderPipeline(gpu: gpu)
             self.presenterInstance = Presenter(gpu: gpu)
             self.histogramCalculator = try? HistogramCalculator(gpu: gpu)
+            self.scopeCalculator = try? ScopeCalculator(gpu: gpu)
             self.exportService = ExportService(gpu: gpu)
             self.setupError = nil
         } catch {
@@ -135,6 +147,7 @@ final class EditorModel: ObservableObject {
             self.pipeline = nil
             self.presenterInstance = nil
             self.histogramCalculator = nil
+            self.scopeCalculator = nil
             self.exportService = nil
             self.setupError = String(describing: error)
             self.status = "Metal setup failed"
@@ -450,12 +463,33 @@ final class EditorModel: ObservableObject {
                                             info: &info)
         preview = PresentLayer(texture: rendered, coverage: info.sensorRect)
         previewQuads = quads
-        // The histogram always describes the whole image, whatever's on
-        // screen — so it comes from the preview, never from a tile. The
-        // preview is linear EDR; the kernel encodes it so the shape is the
-        // familiar one and anything above 1.0 counts as SDR clipping.
-        histogram = histogramCalculator?.compute(from: rendered, inputIsLinear: true)
+
+        // Scopes always describe the whole image, whatever's on screen —
+        // so they come from a small whole-image render, never from a
+        // tile. A few hundred thousand pixels is plenty for statistics,
+        // and with the demosaic cached this costs well under a millisecond.
+        // Bigger quads than the preview only when the preview is itself
+        // large; a tiny preview is already an analysis-sized image.
+        let analysisQuads = max(quads, 4)
+        analysisTexture = try pipeline.render(session, scale: .binned(quads: analysisQuads),
+                                              parameters: parameters, output: displayOutput)
+        updateScopes()
         return "preview \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
+    }
+
+    /// Measures the selected scope from the analysis texture. The texture
+    /// is linear EDR; the kernels encode it so the shapes are the familiar
+    /// ones and anything above 1.0 counts as SDR clipping.
+    private func updateScopes() {
+        guard let analysisTexture else { return }
+        switch scope {
+        case .histogram:
+            histogram = histogramCalculator?.compute(from: analysisTexture, inputIsLinear: true)
+        case .waveform:
+            waveform = scopeCalculator?.computeWaveform(from: analysisTexture, inputIsLinear: true)
+        case .vectorscope:
+            vectorscope = scopeCalculator?.computeVectorscope(from: analysisTexture, inputIsLinear: true)
+        }
     }
 
     @discardableResult

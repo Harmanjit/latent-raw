@@ -46,6 +46,8 @@ public final class GPUContext: @unchecked Sendable {
     let colorAndTonePSO: MTLComputePipelineState
     let presentPSO: MTLComputePipelineState
     let histogramPSO: MTLComputePipelineState
+    let waveformPSO: MTLComputePipelineState
+    let vectorscopePSO: MTLComputePipelineState
 
     // RCD demosaic, six passes (see RCD.metal).
     let rcdDirectionsVHPSO: MTLComputePipelineState
@@ -79,6 +81,8 @@ public final class GPUContext: @unchecked Sendable {
         let colorPSO = try makePipeline("colorAndTone")
         let presentPipeline = try makePipeline("presentToScreen")
         let histogramPipeline = try makePipeline("computeHistogram")
+        let waveformPipeline = try makePipeline("computeWaveform")
+        let vectorscopePipeline = try makePipeline("computeVectorscope")
         let vhPipeline = try makePipeline("rcdDirectionsVH")
         let lowPassPipeline = try makePipeline("rcdLowPass")
         let greenPipeline = try makePipeline("rcdGreen")
@@ -96,6 +100,8 @@ public final class GPUContext: @unchecked Sendable {
         self.colorAndTonePSO = colorPSO
         self.presentPSO = presentPipeline
         self.histogramPSO = histogramPipeline
+        self.waveformPSO = waveformPipeline
+        self.vectorscopePSO = vectorscopePipeline
         self.rcdDirectionsVHPSO = vhPipeline
         self.rcdLowPassPSO = lowPassPipeline
         self.rcdGreenPSO = greenPipeline
@@ -129,7 +135,7 @@ public final class GPUContext: @unchecked Sendable {
         // Every kernel source file must be listed here, or its functions
         // won't exist in the runtime-compiled library.
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
-                            "ColorPipeline", "Present", "Histogram", "RCD"]
+                            "ColorPipeline", "Present", "Histogram", "Scopes", "RCD"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound

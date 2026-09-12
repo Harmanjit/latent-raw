@@ -170,6 +170,41 @@ final class RenderPipelineTests: XCTestCase {
         XCTAssertLessThanOrEqual(edr, 2.0 + 1e-3, "never above the headroom")
     }
 
+    /// Every pixel lands in exactly one bin of each scope, so the totals
+    /// must equal the pixel count — the cheapest check that the binning
+    /// arithmetic isn't dropping or double-counting anything.
+    func testScopesCountEveryPixelOnce() throws {
+        let path = TestAssets.path("nikon_d750_sample.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
+                           "Drop a D750 NEF at \(path) — see TestAssets/README.md")
+
+        let file = try RawFile(path: path)
+        let gpu = try GPUContext()
+        let session = try ImageSession(file: file, gpu: gpu)
+        let pipeline = RenderPipeline(gpu: gpu)
+        let scopes = try ScopeCalculator(gpu: gpu)
+
+        let tex = try pipeline.render(session, scale: .binned(quads: 4),
+                                      parameters: .neutral, output: .edrDisplay(headroom: 2))
+        let pixels = UInt64(tex.width * tex.height)
+
+        let wave = try XCTUnwrap(scopes.computeWaveform(from: tex, inputIsLinear: true))
+        for channel in [wave.red, wave.green, wave.blue] {
+            XCTAssertEqual(channel.reduce(UInt64(0)) { $0 + UInt64($1) }, pixels)
+        }
+        XCTAssertGreaterThan(wave.peak, 0)
+
+        let vector = try XCTUnwrap(scopes.computeVectorscope(from: tex, inputIsLinear: true))
+        XCTAssertEqual(vector.counts.reduce(UInt64(0)) { $0 + UInt64($1) }, pixels)
+
+        // A real photo is mostly low-saturation: the centre of the
+        // vectorscope should hold far more than a corner.
+        let n = Vectorscope.size
+        let centre = vector.counts[(n / 2) * n + n / 2]
+        let corner = vector.counts[0]
+        XCTAssertGreaterThan(centre, corner)
+    }
+
     func testSonyCompressedARWRenders() throws {
         let path = TestAssets.path("sony_a7iii_compressed.arw")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path),

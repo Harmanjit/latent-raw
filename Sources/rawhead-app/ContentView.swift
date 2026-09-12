@@ -79,10 +79,7 @@ struct ContentView: View {
     private var adjustmentPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HistogramView(histogram: model.histogram)
-                    ClippingReadout(histogram: model.histogram)
-                }
+                ScopePanel(model: model)
 
                 if let title = model.imageTitle {
                     Text(title)
