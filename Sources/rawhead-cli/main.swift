@@ -38,6 +38,11 @@ if args.count >= 3, args[1] == "catalog" {
         for failure in report.failures {
             print("  FAILED \(failure.relPath): \(failure.reason)")
         }
+        let thumbs = try await catalog.generateMissingThumbnails()
+        print("Thumbnails: \(thumbs)")
+        for failure in thumbs.failures {
+            print("  FAILED \(failure.relPath): \(failure.reason)")
+        }
         let images = try await catalog.allImages()
         print("\(images.count) images:")
         let dateFormatter = DateFormatter()

@@ -153,10 +153,15 @@ public final class RawFile {
 
     /// The camera's embedded JPEG preview — the basis for unedited-image
     /// thumbnails (DESIGN.md §10). Returns nil if the file has none.
+    /// Diagnostic: the last return code from the thumbnail call.
+    public private(set) var lastThumbnailError: Int32 = 0
+
     public func embeddedJPEGPreview() -> Data? {
         guard let h = handle else { return nil }
         var length: Int = 0
-        guard clibraw_get_thumbnail(h, nil, &length) == 0, length > 0 else { return nil }
+        let rc = clibraw_get_thumbnail(h, nil, &length)
+        lastThumbnailError = rc
+        guard rc == 0, length > 0 else { return nil }
         var data = Data(count: length)
         let ok = data.withUnsafeMutableBytes { buf -> Bool in
             var len = length

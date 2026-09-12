@@ -114,14 +114,41 @@ extern "C" const uint16_t *clibraw_get_raw_plane(CLibRawHandle *handle, size_t *
     return raw.raw_image;
 }
 
+// Picks the largest JPEG among the file's embedded previews. Many raws
+// carry several (a tiny EXIF thumbnail, a mid-size one, a full-size
+// preview); unpack_thumb() alone takes LibRaw's default choice, which for
+// some files is a non-JPEG bitmap or an empty slot. Returns the index in
+// thumbs_list, or -1 if there is no JPEG at all.
+static int clibraw_best_jpeg_thumb_index(LibRaw &processor) {
+    auto &list = processor.imgdata.thumbs_list;
+    int best = -1;
+    unsigned bestPixels = 0;
+    for (int i = 0; i < list.thumbcount && i < LIBRAW_THUMBNAIL_MAXCOUNT; i++) {
+        auto &item = list.thumblist[i];
+        if (item.tformat != LIBRAW_INTERNAL_THUMBNAIL_JPEG) continue;
+        unsigned pixels = static_cast<unsigned>(item.twidth) * item.theight;
+        if (pixels >= bestPixels) { bestPixels = pixels; best = i; }
+    }
+    return best;
+}
+
 extern "C" int clibraw_get_thumbnail(CLibRawHandle *handle, uint8_t *buffer, size_t *out_length) {
     if (!handle || !out_length) return -1;
+    auto &processor = handle->processor;
 
-    if (handle->processor.unpack_thumb() != LIBRAW_SUCCESS) {
+    int index = clibraw_best_jpeg_thumb_index(processor);
+    int rc = (index >= 0) ? processor.unpack_thumb_ex(index) : processor.unpack_thumb();
+    if (rc != LIBRAW_SUCCESS) {
+        // Pass LibRaw's own code through (negative; see libraw_const.h),
+        // offset so it can't collide with this shim's -1/-2.
         *out_length = 0;
-        return -1;
+        return -100 + rc;
     }
-    auto &thumb = handle->processor.imgdata.thumbnail;
+    auto &thumb = processor.imgdata.thumbnail;
+    if (thumb.tformat != LIBRAW_THUMBNAIL_JPEG || thumb.tlength == 0) {
+        *out_length = 0;
+        return -3; // no usable JPEG preview
+    }
 
     if (buffer == nullptr) {
         *out_length = static_cast<size_t>(thumb.tlength);
