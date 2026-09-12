@@ -6,6 +6,10 @@ import Catalog
 struct LibraryPanel: View {
     @ObservedObject var library: Library
     let onOpenFolder: () -> Void
+    let onRate: (Int) -> Void
+    let onFlag: (ImageFlag) -> Void
+
+    @State private var keywordText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -52,10 +56,67 @@ struct LibraryPanel: View {
                 subfolderPrompt
             }
 
+            if let selected = library.selectedImage {
+                selectionSection(selected)
+            }
+
             Spacer()
         }
         .padding(14)
         .frame(width: 220, alignment: .leading)
+        .onChange(of: library.selectedKeywords, initial: true) { _, keywords in
+            keywordText = keywords.joined(separator: ", ")
+        }
+    }
+
+    /// Rating, flag and keywords for the selected image. Keys do the same
+    /// (0-5, P/X/U); this is the visible, clickable version.
+    private func selectionSection(_ image: ImageRecord) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Selected")
+            Text(image.fileName)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            HStack(spacing: 2) {
+                ForEach(1...5, id: \.self) { star in
+                    Button {
+                        onRate(star == image.rating ? 0 : star)
+                    } label: {
+                        Text(star <= image.rating ? "★" : "☆")
+                            .foregroundStyle(star <= image.rating ? Color.yellow : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+                Picker("Flag", selection: Binding(
+                    get: { ImageFlag(rawValue: image.flag) ?? .none },
+                    set: { onFlag($0) })) {
+                    Text("–").tag(ImageFlag.none)
+                    Text("✓").tag(ImageFlag.picked)
+                    Text("✗").tag(ImageFlag.rejected)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.mini)
+                .frame(width: 80)
+            }
+
+            TextField("Keywords, comma separated", text: $keywordText)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .onSubmit {
+                    let keywords = keywordText.split(separator: ",").map(String.init)
+                    Task { try? await library.setKeywords(keywords) }
+                }
+
+            if image.userRotation != 0 {
+                Text("rotated \(image.userRotation * 90)°")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     /// DESIGN.md §5.2: a subfolder with no recorded mode is asked about

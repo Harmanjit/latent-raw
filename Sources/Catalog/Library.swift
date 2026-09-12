@@ -27,7 +27,9 @@ public final class Library: ObservableObject {
     @Published public private(set) var undecidedSubfolders: [String] = []
     /// Bumped whenever thumbnails land, so a grid knows to refresh cells.
     @Published public private(set) var thumbnailVersion = 0
-    @Published public var selectedImageID: Int64?
+    @Published public var selectedImageID: Int64? {
+        didSet { if selectedImageID != oldValue { Task { await reloadSelectedKeywords() } } }
+    }
 
     public private(set) var catalog: Catalog?
 
@@ -148,6 +150,49 @@ public final class Library: ObservableObject {
         guard let image = loaded?.cgImage else { return nil }
         thumbnailCache.setObject(image, forKey: NSNumber(value: id))
         return image
+    }
+
+    // MARK: - Metadata on the selection
+
+    /// Keywords of the selected image, refreshed whenever selection or
+    /// keywords change. Published separately because keywords live in
+    /// their own tables, not on the ImageRecord.
+    @Published public private(set) var selectedKeywords: [String] = []
+
+    private func reloadSelectedKeywords() async {
+        guard let id = selectedImageID, let catalog else { selectedKeywords = []; return }
+        selectedKeywords = (try? await catalog.keywords(forImageID: id)) ?? []
+    }
+
+    /// Runs a catalog change for the selected image, then refreshes that
+    /// one row locally so the UI updates without a full reload.
+    private func changeSelected(_ change: @Sendable (Catalog, Int64) async throws -> Void) async throws {
+        guard let id = selectedImageID, let catalog else { return }
+        try await change(catalog, id)
+        if let index = images.firstIndex(where: { $0.id == id }),
+           let fresh = try await catalog.image(forRelPath: images[index].relPath) {
+            images[index] = fresh
+        }
+        await reloadSelectedKeywords()
+    }
+
+    public func setRating(_ rating: Int) async throws {
+        try await changeSelected { try await $0.setRating(rating, forImageID: $1) }
+    }
+
+    public func setFlag(_ flag: ImageFlag) async throws {
+        try await changeSelected { try await $0.setFlag(flag, forImageID: $1) }
+    }
+
+    public func setKeywords(_ keywords: [String]) async throws {
+        try await changeSelected { try await $0.setKeywords(keywords, forImageID: $1) }
+    }
+
+    /// Adds quarter turns clockwise (negative for counter-clockwise).
+    public func rotateSelected(by quarterTurns: Int) async throws {
+        guard let current = selectedImage else { return }
+        let next = current.userRotation + quarterTurns
+        try await changeSelected { try await $0.setUserRotation(next, forImageID: $1) }
     }
 
     // MARK: - Navigation

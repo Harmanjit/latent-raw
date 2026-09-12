@@ -15,6 +15,10 @@ public enum XMPSidecar {
     public struct Fields: Equatable {
         public var rating: Int
         public var label: String?
+        /// -1 rejected, 0 none, 1 picked (rawhead:Flag).
+        public var flag: Int
+        /// Manual quarter turns clockwise (rawhead:Rotation).
+        public var rotation: Int
         public var keywords: [String]
         public var preservedFileName: String?
         /// Prefixed, e.g. "xxh64:ef46db3751d8e999".
@@ -25,12 +29,15 @@ public enum XMPSidecar {
         /// has no edits yet.
         public var editStackJSON: String
 
-        public init(rating: Int = 0, label: String? = nil, keywords: [String] = [],
+        public init(rating: Int = 0, label: String? = nil, flag: Int = 0, rotation: Int = 0,
+                    keywords: [String] = [],
                     preservedFileName: String? = nil, sourceHash: String,
                     schemaVersion: Int = 1, processVersion: String = "1.0",
                     editStackJSON: String = "") {
             self.rating = rating
             self.label = label
+            self.flag = flag
+            self.rotation = rotation
             self.keywords = keywords
             self.preservedFileName = preservedFileName
             self.sourceHash = sourceHash
@@ -80,7 +87,9 @@ public enum XMPSidecar {
             xmp:Rating="\(f.rating)"\(labelAttr)\(preservedAttr)
             rawhead:SchemaVersion="\(f.schemaVersion)"
             rawhead:ProcessVersion="\(escape(f.processVersion))"
-            rawhead:SourceHash="\(escape(f.sourceHash))">
+            rawhead:SourceHash="\(escape(f.sourceHash))"
+            rawhead:Flag="\(f.flag)"
+            rawhead:Rotation="\(f.rotation)">
            <dc:subject><rdf:Bag>
         \(keywordItems)
            </rdf:Bag></dc:subject>
@@ -149,6 +158,8 @@ public enum XMPSidecar {
         return Fields(
             rating: Int(property("xmp:Rating", local: "Rating") ?? "") ?? 0,
             label: property("xmp:Label", local: "Label").flatMap { $0.isEmpty ? nil : $0 },
+            flag: Int(property("rawhead:Flag", local: "Flag") ?? "") ?? 0,
+            rotation: Int(property("rawhead:Rotation", local: "Rotation") ?? "") ?? 0,
             keywords: keywords,
             preservedFileName: property("xmpMM:PreservedFileName", local: "PreservedFileName"),
             sourceHash: property("rawhead:SourceHash", local: "SourceHash") ?? "",

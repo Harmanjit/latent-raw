@@ -77,7 +77,7 @@ public enum Thumbnailer {
     }
 
     /// Rotates clockwise by `quarterTurns` × 90°.
-    static func rotated(_ image: CGImage, quarterTurns: Int) -> CGImage {
+    public static func rotated(_ image: CGImage, quarterTurns: Int) -> CGImage {
         let turns = ((quarterTurns % 4) + 4) % 4
         guard turns != 0 else { return image }
         let w = image.width, h = image.height

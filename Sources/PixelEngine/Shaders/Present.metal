@@ -14,9 +14,11 @@ using namespace metal;
 //           coordinates so the tile's border — where the demosaic had no
 //           neighbours and clamped to itself — is never shown.
 //
-// Both layers are placed by screen-space rectangles that the CPU computes
-// from the viewport transform; the kernel just samples. Bilinear filtering
-// keeps window resizes and mid-gesture upscales smooth rather than blocky.
+// Each layer is placed by a 3x2 affine matrix that takes a drawable pixel
+// straight to that layer's normalized texture coordinate. Zoom, pan and
+// rotation are all folded into it on the CPU; the kernel just samples.
+// That's how the image rotates without the pipeline ever moving a pixel.
+// Bilinear filtering keeps window resizes and mid-gesture upscales smooth.
 //
 // Pixel centres (+0.5) matter: at exactly 100% they make each screen pixel
 // sample exactly one texel instead of a blend of two.
@@ -24,8 +26,8 @@ kernel void presentToScreen(
     texture2d<float, access::sample> base     [[texture(0)]],
     texture2d<float, access::sample> tile     [[texture(1)]],
     texture2d<float, access::write>  drawable [[texture(2)]],
-    constant float4 &baseRect                 [[buffer(0)]],  // x, y, w, h on screen
-    constant float4 &tileRect                 [[buffer(1)]],
+    constant float3x2 &baseMap                [[buffer(0)]],  // screen px -> base uv
+    constant float3x2 &tileMap                [[buffer(1)]],  // screen px -> tile uv (inset region)
     constant float4 &tileSource               [[buffer(2)]],  // uv origin.xy, uv size.zw
     constant uint   &hasTile                  [[buffer(3)]],
     constant float  &backgroundLevel          [[buffer(4)]],
@@ -34,10 +36,10 @@ kernel void presentToScreen(
     if (gid.x >= drawable.get_width() || gid.y >= drawable.get_height()) return;
 
     constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);
-    float2 p = float2(gid) + 0.5;
+    float3 p = float3(float2(gid) + 0.5, 1.0);
 
     if (hasTile != 0) {
-        float2 uv = (p - tileRect.xy) / tileRect.zw;
+        float2 uv = tileMap * p;
         if (uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= 1.0 && uv.y <= 1.0) {
             float4 c = tile.sample(s, tileSource.xy + uv * tileSource.zw);
             drawable.write(float4(c.rgb, 1.0), gid);
@@ -45,7 +47,7 @@ kernel void presentToScreen(
         }
     }
 
-    float2 uv = (p - baseRect.xy) / baseRect.zw;
+    float2 uv = baseMap * p;
     if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
         // Outside the image: neutral surround. A mid-dark grey rather than
         // black — pure black next to an image biases how you judge its

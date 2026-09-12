@@ -159,11 +159,39 @@ final class EditorModel: ObservableObject {
     var presenter: Presenter? { presenterInstance }
     var hasImage: Bool { session != nil }
 
-    /// Full sensor dimensions of the open image.
-    private var sensorSize: CGSize {
+    /// Full sensor dimensions of the open image, as recorded.
+    var sensorSize: CGSize {
         guard let session else { return .zero }
         return CGSize(width: session.file.summary.rawWidth,
                       height: session.file.summary.rawHeight)
+    }
+
+    /// What the camera says the orientation was.
+    private var cameraRotation: ImageRotation = .none
+    /// Quarter turns the user added on top (kept in the catalog).
+    @Published private(set) var userRotation = 0
+    /// What's actually shown: camera orientation plus the user's turns.
+    var rotation: ImageRotation { cameraRotation.rotated(by: userRotation) }
+
+    /// The image as the user sees it — rotated. Zoom, pan and fit all
+    /// work in this space; the pipeline never sees it.
+    private var imageSize: CGSize { rotation.imageSize(forSensorSize: sensorSize) }
+
+    /// Called by the library when the user rotates, and when opening an
+    /// image that already has a stored rotation. Re-fits if fitted, else
+    /// keeps the same image-space centre; the tile is re-requested since
+    /// the visible sensor region changed.
+    func setUserRotation(_ quarterTurns: Int) {
+        let normalized = ((quarterTurns % 4) + 4) % 4
+        guard normalized != userRotation else { return }
+        userRotation = normalized
+        guard hasImage else { return }
+        if fitMode {
+            viewport = .fit(imageSize: imageSize, drawableSize: drawableSize)
+        } else {
+            viewport = viewport.clamped(imageSize: imageSize, drawableSize: drawableSize)
+        }
+        rerenderForViewport()
     }
 
     /// What the status bar shows: "Fit" or a percentage where 100% means
@@ -207,7 +235,9 @@ final class EditorModel: ObservableObject {
         open(url: url)
     }
 
-    func open(url: URL) {
+    /// `userRotation` is the catalog's stored manual rotation for this
+    /// image, if it came from a catalog.
+    func open(url: URL, userRotation: Int = 0) {
         guard let gpu = gpuContext else { return }
         status = "Opening \(url.lastPathComponent)…"
         do {
@@ -221,10 +251,12 @@ final class EditorModel: ObservableObject {
             tile = nil
             previewQuads = 0
             tileSize = .zero
+            cameraRotation = ImageRotation(libRawFlip: file.summary.orientation)
+            self.userRotation = ((userRotation % 4) + 4) % 4
 
             // A new image always opens fitted.
             fitMode = true
-            viewport = .fit(imageSize: sensorSize, drawableSize: drawableSize)
+            viewport = .fit(imageSize: imageSize, drawableSize: drawableSize)
 
             // Start from the camera's own white balance, expressed as
             // temperature and tint so the sliders show something meaningful
@@ -266,9 +298,9 @@ final class EditorModel: ObservableObject {
         drawableSize = size
         guard hasImage else { return }
         if fitMode {
-            viewport = .fit(imageSize: sensorSize, drawableSize: size)
+            viewport = .fit(imageSize: imageSize, drawableSize: size)
         } else {
-            viewport = viewport.clamped(imageSize: sensorSize, drawableSize: size)
+            viewport = viewport.clamped(imageSize: imageSize, drawableSize: size)
         }
         scheduleRender()
     }
@@ -298,7 +330,7 @@ final class EditorModel: ObservableObject {
     func zoomToFit() {
         guard hasImage else { return }
         fitMode = true
-        viewport = .fit(imageSize: sensorSize, drawableSize: drawableSize)
+        viewport = .fit(imageSize: imageSize, drawableSize: drawableSize)
         rerenderForViewport()
     }
 
@@ -322,8 +354,8 @@ final class EditorModel: ObservableObject {
     /// Every gesture lands here: clamp, publish (the view redraws at once),
     /// and queue a render for when the gesture settles.
     private func apply(_ proposed: ViewportTransform) {
-        let clamped = proposed.clamped(imageSize: sensorSize, drawableSize: drawableSize)
-        fitMode = clamped.isFit(imageSize: sensorSize, drawableSize: drawableSize)
+        let clamped = proposed.clamped(imageSize: imageSize, drawableSize: drawableSize)
+        fitMode = clamped.isFit(imageSize: imageSize, drawableSize: drawableSize)
         guard clamped != viewport else { return }
         viewport = clamped
         scheduleRender()
@@ -363,9 +395,15 @@ final class EditorModel: ObservableObject {
 
     /// The tile region for the current view: the visible area plus margin,
     /// sized by zoom alone so panning keeps reusing the same textures.
+    /// The visible area in *sensor* space: the viewport's visible rect is
+    /// in rotated image space, so it's mapped back before asking for a tile.
+    private var visibleSensorRect: CGRect {
+        let visibleImage = viewport.visibleSensorRect(drawableSize: drawableSize)
+        return rotation.sensorRect(fromImageRect: visibleImage, sensorSize: sensorSize)
+    }
+
     private func wantedTileRegion() -> (x: Int, y: Int, width: Int, height: Int) {
-        let visible = viewport.visibleSensorRect(drawableSize: drawableSize)
-            .insetBy(dx: -Self.tileMargin, dy: -Self.tileMargin)
+        let visible = visibleSensorRect.insetBy(dx: -Self.tileMargin, dy: -Self.tileMargin)
         let width = min(Int(visible.width.rounded(.up)), Int(sensorSize.width))
         let height = min(Int(visible.height.rounded(.up)), Int(sensorSize.height))
         return (Int(visible.origin.x.rounded(.down)), Int(visible.origin.y.rounded(.down)),
@@ -377,7 +415,7 @@ final class EditorModel: ObservableObject {
     private var tileCoversView: Bool {
         guard let tile, tile.texture.width == Int(tileSize.width),
               tile.texture.height == Int(tileSize.height) else { return false }
-        let visible = viewport.visibleSensorRect(drawableSize: drawableSize)
+        let visible = visibleSensorRect
         let usable = tile.coverage.insetBy(dx: Self.tileInset, dy: Self.tileInset)
         // Only the part of the view that's actually over the image matters.
         let sensorBounds = CGRect(origin: .zero, size: sensorSize)
@@ -530,6 +568,7 @@ final class EditorModel: ObservableObject {
         guard let exportService, let sourceURL else { return }
         let settings = exportSettings
         let params = parameters
+        let userRotation = self.userRotation
 
         isExporting = true
         status = "Exporting at full resolution…"
@@ -539,7 +578,8 @@ final class EditorModel: ObservableObject {
                 let elapsed = try await exportService.export(from: sourceURL,
                                                               to: destination,
                                                               parameters: params,
-                                                              settings: settings)
+                                                              settings: settings,
+                                                              userRotation: userRotation)
                 isExporting = false
                 status = String(format: "Exported %@ in %.1fs",
                                  destination.lastPathComponent, elapsed)

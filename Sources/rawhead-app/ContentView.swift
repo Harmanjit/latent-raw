@@ -34,7 +34,8 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                LibraryPanel(library: library, onOpenFolder: showOpenFolderPanel)
+                LibraryPanel(library: library, onOpenFolder: showOpenFolderPanel,
+                             onRate: rate, onFlag: flag)
                 Divider()
                 switch mode {
                 case .library:
@@ -89,8 +90,30 @@ struct ContentView: View {
     private func openInEditor(_ record: ImageRecord) {
         guard let url = library.fileURL(for: record) else { return }
         library.selectedImageID = record.id
-        model.open(url: url)
+        model.open(url: url, userRotation: record.userRotation)
         mode = .develop
+    }
+
+    // MARK: - Metadata shortcuts (both modes)
+
+    private func rate(_ stars: Int) {
+        Task { try? await library.setRating(stars) }
+    }
+
+    private func flag(_ flag: ImageFlag) {
+        Task { try? await library.setFlag(flag) }
+    }
+
+    /// Rotates the selected image in the catalog and, if it's the one in
+    /// the editor, on screen too.
+    private func rotate(by quarterTurns: Int) {
+        Task {
+            try? await library.rotateSelected(by: quarterTurns)
+            if let selected = library.selectedImage,
+               model.imageTitle == selected.fileName {
+                model.setUserRotation(selected.userRotation)
+            }
+        }
     }
 
     /// Left/right arrows step through the catalog; in Develop that also
@@ -108,6 +131,18 @@ struct ContentView: View {
             Button("") {
                 if model.hasImage { mode = .develop }
             }.keyboardShortcut("d", modifiers: [])
+
+            // Ratings 0-5, flags P/X/U, rotation Cmd-[ / Cmd-] — the same
+            // keys Lightroom uses, so muscle memory carries over.
+            ForEach(0...5, id: \.self) { stars in
+                Button("") { rate(stars) }
+                    .keyboardShortcut(KeyEquivalent(Character(String(stars))), modifiers: [])
+            }
+            Button("") { flag(.picked) }.keyboardShortcut("p", modifiers: [])
+            Button("") { flag(.rejected) }.keyboardShortcut("x", modifiers: [])
+            Button("") { flag(.none) }.keyboardShortcut("u", modifiers: [])
+            Button("") { rotate(by: -1) }.keyboardShortcut("[", modifiers: .command)
+            Button("") { rotate(by: 1) }.keyboardShortcut("]", modifiers: .command)
         }
         .opacity(0)
         .frame(width: 0, height: 0)
@@ -127,6 +162,8 @@ struct ContentView: View {
                 MetalImageView(preview: preview,
                                 tile: model.tile,
                                 transform: model.viewport,
+                                rotation: model.rotation,
+                                sensorSize: model.sensorSize,
                                 presenter: presenter,
                                 device: device,
                                 onResize: { model.viewportDidResize(to: $0) },
@@ -197,20 +234,24 @@ struct ContentView: View {
                                value: $model.parameters.greyPoint,
                                range: 0.05...0.5, format: "%.3f")
 
-                    Toggle(isOn: $model.hdrDisplayEnabled) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("HDR display")
-                                .font(.subheadline)
-                            Text(model.displayHasHeadroom
-                                 ? String(format: "this screen: %.1f× above white", model.displayHeadroom)
-                                 : "this screen has no HDR headroom")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                    // Only offered on screens that can actually show more
+                    // than paper white; on an SDR display it would be a
+                    // switch that does nothing.
+                    if model.displayHasHeadroom {
+                        Toggle(isOn: $model.hdrDisplayEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("HDR display")
+                                    .font(.subheadline)
+                                Text(String(format: "this screen: %.1f× above white",
+                                            model.displayHeadroom))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .disabled(!model.hasImage)
                     }
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .disabled(!model.hasImage || !model.displayHasHeadroom)
                 }
 
                 DisclosureGroup {
@@ -341,6 +382,14 @@ struct ContentView: View {
             Button("Open File…") { model.showOpenPanel(); mode = .develop }
                 .controlSize(.small)
                 .disabled(!model.isReady)
+
+            HStack(spacing: 4) {
+                Button("↺") { rotate(by: -1) }
+                Button("↻") { rotate(by: 1) }
+            }
+            .controlSize(.small)
+            .disabled(library.selectedImage == nil)
+            .help("Rotate the selected image (⌘[ and ⌘]). Remembered in the catalog.")
 
             Text(model.setupError ?? (mode == .library ? library.statusText : model.status))
                 .font(.caption)

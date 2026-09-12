@@ -121,6 +121,7 @@ extension Catalog {
                 fresh.rating = previous.rating
                 fresh.label = previous.label
                 fresh.flag = previous.flag
+                fresh.userRotation = previous.userRotation
                 fresh.preservedName = previous.preservedName
                 fresh.sidecarMtime = previous.sidecarMtime
                 fresh.thumbKey = nil   // pixels changed; thumbnail is stale
@@ -304,6 +305,8 @@ extension Catalog {
                 var row = record
                 row.rating = fields?.rating ?? 0
                 row.label = fields?.label
+                row.flag = fields?.flag ?? 0
+                row.userRotation = fields?.rotation ?? 0
                 row.preservedName = fields?.preservedFileName ?? row.preservedName
                 row.sidecarMtime = mtime
                 try row.update(db)

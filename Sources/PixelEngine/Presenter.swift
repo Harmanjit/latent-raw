@@ -1,6 +1,7 @@
 import Foundation
 import Metal
 import QuartzCore
+import simd
 
 /// One texture and where it belongs in sensor space.
 public struct PresentLayer {
@@ -61,39 +62,44 @@ public final class Presenter {
                          backgroundLevel: Float = 0.12) {
         let drawableSize = CGSize(width: drawable.texture.width, height: drawable.texture.height)
         let imageSize = CGSize(width: texture.width, height: texture.height)
-        let rect = Self.fitRect(imageSize: imageSize, drawableSize: drawableSize)
-        draw(base: texture, baseRect: rect, tile: nil, tileRect: .zero,
-             tileSource: SIMD4<Float>(0, 0, 1, 1),
-             into: drawable, backgroundLevel: backgroundLevel)
+        let transform = ViewportTransform.fit(imageSize: imageSize, drawableSize: drawableSize)
+        present(base: PresentLayer(texture: texture, coverage: CGRect(origin: .zero, size: imageSize)),
+                tile: nil, transform: transform, rotation: .none, sensorSize: imageSize,
+                to: drawable, backgroundLevel: backgroundLevel)
     }
 
     /// Draws the base layer, then the tile on top if there is one, both
-    /// placed by `transform`.
+    /// placed by `transform` (which works in rotated image space) and
+    /// `rotation` (which maps that back onto the unrotated textures).
     public func present(base: PresentLayer,
                          tile: PresentLayer?,
                          transform: ViewportTransform,
+                         rotation: ImageRotation,
+                         sensorSize: CGSize,
                          to drawable: CAMetalDrawable,
                          backgroundLevel: Float = 0.12) {
         let drawableSize = CGSize(width: drawable.texture.width, height: drawable.texture.height)
-        let baseRect = transform.screenRect(forSensorRect: base.coverage, drawableSize: drawableSize)
+        let baseMap = transform.screenToTextureMap(coverage: base.coverage, rotation: rotation,
+                                                   sensorSize: sensorSize, drawableSize: drawableSize)
 
-        var tileRect = CGRect.zero
+        var tileMap = baseMap
         var tileSource = SIMD4<Float>(0, 0, 1, 1)
         if let tile {
             let shown = tile.coverage.insetBy(dx: tile.inset, dy: tile.inset)
-            tileRect = transform.screenRect(forSensorRect: shown, drawableSize: drawableSize)
+            tileMap = transform.screenToTextureMap(coverage: shown, rotation: rotation,
+                                                   sensorSize: sensorSize, drawableSize: drawableSize)
             let w = Float(tile.texture.width), h = Float(tile.texture.height)
             let i = Float(tile.inset)
             tileSource = SIMD4<Float>(i / w, i / h, (w - 2 * i) / w, (h - 2 * i) / h)
         }
 
-        draw(base: base.texture, baseRect: baseRect,
-             tile: tile?.texture, tileRect: tileRect, tileSource: tileSource,
+        draw(base: base.texture, baseMap: baseMap,
+             tile: tile?.texture, tileMap: tileMap, tileSource: tileSource,
              into: drawable, backgroundLevel: backgroundLevel)
     }
 
-    private func draw(base: MTLTexture, baseRect: CGRect,
-                      tile: MTLTexture?, tileRect: CGRect, tileSource: SIMD4<Float>,
+    private func draw(base: MTLTexture, baseMap: simd_float3x2,
+                      tile: MTLTexture?, tileMap: simd_float3x2, tileSource: SIMD4<Float>,
                       into drawable: CAMetalDrawable, backgroundLevel: Float) {
         guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
               let encoder = cmdBuffer.makeComputeCommandEncoder() else { return }
@@ -105,15 +111,13 @@ public final class Presenter {
         encoder.setTexture(tile ?? base, index: 1)
         encoder.setTexture(drawable.texture, index: 2)
 
-        var baseRectV = SIMD4<Float>(Float(baseRect.origin.x), Float(baseRect.origin.y),
-                                     Float(baseRect.width), Float(baseRect.height))
-        var tileRectV = SIMD4<Float>(Float(tileRect.origin.x), Float(tileRect.origin.y),
-                                     Float(tileRect.width), Float(tileRect.height))
+        var baseMapV = baseMap
+        var tileMapV = tileMap
         var tileSourceV = tileSource
         var hasTile: UInt32 = tile == nil ? 0 : 1
         var background = backgroundLevel
-        encoder.setBytes(&baseRectV, length: 16, index: 0)
-        encoder.setBytes(&tileRectV, length: 16, index: 1)
+        encoder.setBytes(&baseMapV, length: MemoryLayout<simd_float3x2>.size, index: 0)
+        encoder.setBytes(&tileMapV, length: MemoryLayout<simd_float3x2>.size, index: 1)
         encoder.setBytes(&tileSourceV, length: 16, index: 2)
         encoder.setBytes(&hasTile, length: 4, index: 3)
         encoder.setBytes(&background, length: 4, index: 4)

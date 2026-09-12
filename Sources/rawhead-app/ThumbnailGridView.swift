@@ -139,12 +139,17 @@ final class ThumbnailItem: NSCollectionViewItem {
     private let ratingLabel = NSTextField(labelWithString: "")
 
     private(set) var representedID: Int64?
+    private var userRotation = 0
     var onDoubleClick: (() -> Void)?
 
+    /// The cached, camera-oriented thumbnail; the user's extra turns are
+    /// applied here at display time (512px, sub-millisecond) rather than
+    /// baked into the file, so rotating never regenerates a thumbnail.
     var thumbnail: CGImage? {
         didSet {
-            thumbnailView.image = thumbnail.map {
-                NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height))
+            thumbnailView.image = thumbnail.map { image in
+                let shown = Thumbnailer.rotated(image, quarterTurns: userRotation)
+                return NSImage(cgImage: shown, size: NSSize(width: shown.width, height: shown.height))
             }
         }
     }
@@ -190,15 +195,22 @@ final class ThumbnailItem: NSCollectionViewItem {
 
     func configure(record: ImageRecord, thumbnail: CGImage?) {
         representedID = record.id
+        userRotation = record.userRotation
         nameLabel.stringValue = record.fileName
-        ratingLabel.stringValue = record.rating > 0
-            ? String(repeating: "★", count: record.rating) : ""
+        var badges: [String] = []
+        if record.flag > 0 { badges.append("✓") }
+        if record.flag < 0 { badges.append("✗") }
+        if record.rating > 0 { badges.append(String(repeating: "★", count: record.rating)) }
+        ratingLabel.stringValue = badges.joined(separator: "  ")
+        ratingLabel.textColor = record.flag < 0 ? .systemRed
+            : record.flag > 0 ? .systemGreen : .tertiaryLabelColor
         self.thumbnail = thumbnail
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         representedID = nil
+        userRotation = 0
         thumbnail = nil
         onDoubleClick = nil
     }

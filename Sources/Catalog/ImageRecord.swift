@@ -34,10 +34,13 @@ public struct ImageRecord: Codable, FetchableRecord, MutablePersistableRecord,
     public var flag: Int
     public var sidecarMtime: Int64?
     public var thumbKey: Data?
+    /// Manual rotation in quarter turns clockwise, on top of `orientation`.
+    public var userRotation: Int = 0
 
     enum CodingKeys: String, CodingKey {
         case id, size, mtime, xxhash, camera, lens, iso, shutter, aperture, focal
         case width, height, orientation, rating, label, flag
+        case userRotation = "user_rotation"
         case relPath = "rel_path"
         case preservedName = "preserved_name"
         case captureTime = "capture_time"
@@ -65,6 +68,13 @@ public struct ImageRecord: Codable, FetchableRecord, MutablePersistableRecord,
     static func milliseconds(_ date: Date) -> Int64 {
         Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
+}
+
+/// Pick / reject flag values stored in `images.flag`.
+public enum ImageFlag: Int, Sendable, CaseIterable {
+    case rejected = -1
+    case none = 0
+    case picked = 1
 }
 
 /// How a subfolder relates to its parent catalog (DESIGN.md §5.2).

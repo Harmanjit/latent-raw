@@ -45,14 +45,17 @@ public actor ExportService {
     public func export(from sourceURL: URL,
                         to destinationURL: URL,
                         parameters: EditParameters,
-                        settings: ExportSettings) throws -> TimeInterval {
+                        settings: ExportSettings,
+                        userRotation: Int = 0) throws -> TimeInterval {
         let start = Date()
 
         let file = try RawFile(path: sourceURL.path)
         let session = try ImageSession(file: file, gpu: gpu)
         let rendered = try pipeline.render(session, scale: .full, parameters: parameters)
+        let rotation = ImageRotation(libRawFlip: file.summary.orientation).rotated(by: userRotation)
         try exporter.write(rendered, to: destinationURL,
-                            settings: settings, colorSpace: parameters.outputSpace)
+                            settings: settings, colorSpace: parameters.outputSpace,
+                            rotation: rotation)
 
         // The session goes out of scope here, taking its textures with it —
         // the RCD intermediates alone run to several hundred megabytes at

@@ -96,6 +96,15 @@ enum Schema {
             }
         }
 
+        migrator.registerMigration("v2_user_rotation") { db in
+            // Quarter turns clockwise the user added on top of the camera's
+            // orientation. Kept separate from `orientation` (what the camera
+            // recorded) so re-reading EXIF never clobbers a manual fix.
+            try db.alter(table: "images") { t in
+                t.add(column: "user_rotation", .integer).notNull().defaults(to: 0)
+            }
+        }
+
         return migrator
     }
 }

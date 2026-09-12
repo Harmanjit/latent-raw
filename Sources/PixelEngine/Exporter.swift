@@ -106,10 +106,19 @@ public final class Exporter {
     public func write(_ texture: MTLTexture,
                        to url: URL,
                        settings: ExportSettings,
-                       colorSpace: ColorKit.OutputSpace) throws {
-        let pixels = try readBack(texture)
+                       colorSpace: ColorKit.OutputSpace,
+                       rotation: ImageRotation = .none) throws {
+        var pixels = try readBack(texture)
+        var width = texture.width, height = texture.height
+        if rotation != .none {
+            // The pipeline renders the sensor as recorded; the file gets
+            // real rotated pixels rather than an orientation tag, because
+            // not every viewer honours the tag.
+            pixels = Self.rotate(pixels, width: width, height: height, rotation: rotation)
+            if rotation.swapsAxes { swap(&width, &height) }
+        }
         let cgImage = try makeImage(from: pixels,
-                                     width: texture.width, height: texture.height,
+                                     width: width, height: height,
                                      settings: settings, colorSpace: colorSpace)
 
         guard let destination = CGImageDestinationCreateWithURL(
@@ -127,6 +136,31 @@ public final class Exporter {
         guard CGImageDestinationFinalize(destination) else {
             throw ExportError.writeFailed(url)
         }
+    }
+
+    // MARK: - Rotation
+
+    /// Rotates an RGBA half-float buffer by quarter turns clockwise.
+    static func rotate(_ src: [Float16], width w: Int, height h: Int,
+                       rotation: ImageRotation) -> [Float16] {
+        let outW = rotation.swapsAxes ? h : w
+        let outH = rotation.swapsAxes ? w : h
+        var dst = [Float16](repeating: 0, count: outW * outH * 4)
+        let size = CGSize(width: w, height: h)
+        for y in 0..<h {
+            for x in 0..<w {
+                // Map the *centre* of the source pixel so the result lands
+                // on integer coordinates for every rotation.
+                let p = rotation.imagePoint(fromSensorPoint: CGPoint(x: Double(x) + 0.5,
+                                                                     y: Double(y) + 0.5),
+                                            sensorSize: size)
+                let ox = Int(p.x), oy = Int(p.y)
+                let s = (y * w + x) * 4, d = (oy * outW + ox) * 4
+                dst[d] = src[s]; dst[d + 1] = src[s + 1]
+                dst[d + 2] = src[s + 2]; dst[d + 3] = src[s + 3]
+            }
+        }
+        return dst
     }
 
     // MARK: - Readback
