@@ -36,9 +36,12 @@ final class EditorModel: ObservableObject {
     @Published var parameters = EditParameters() {
         didSet { if parameters != oldValue { rerender() } }
     }
-    @Published private(set) var texture: MTLTexture?
-    /// The sensor rectangle `texture` covers.
-    @Published private(set) var coverage: CGRect = .zero
+    /// The whole image at preview resolution. Always drawn, so the view is
+    /// never empty however far the user pans or zooms mid-gesture.
+    @Published private(set) var preview: PresentLayer?
+    /// A full-resolution render of (a margin around) the visible area,
+    /// drawn on top of the preview when zoomed in close enough to need it.
+    @Published private(set) var tile: PresentLayer?
     @Published private(set) var viewport = ViewportTransform(zoom: 1, center: .zero)
     @Published private(set) var histogram: Histogram?
     @Published private(set) var status = "Open a raw file to begin"
@@ -75,14 +78,18 @@ final class EditorModel: ObservableObject {
 
     private var pendingRender: Task<Void, Never>?
 
-    /// Which pooled-texture footprint the last render used. When it
-    /// changes — a different bin factor, or a differently sized tile — the
-    /// old textures are released rather than left lying around.
-    private enum PlanKey: Equatable {
-        case binned(Int)
-        case tile(Int, Int)
-    }
-    private var lastPlanKey: PlanKey?
+    /// What the last renders used, so a viewport change can decide whether
+    /// anything actually needs re-rendering.
+    private var previewQuads = 0
+    private var tileSize = CGSize.zero
+
+    /// Extra sensor pixels rendered beyond each edge of the visible area,
+    /// so small pans stay inside the tile and need no render at all. Costs
+    /// about 25% more pixels per tile on a laptop-sized window.
+    private static let tileMargin: CGFloat = 128
+    /// Pixels trimmed from the tile's edge when drawing — the demosaic's
+    /// neighbourhood reach, where clamped reads produce colour fringes.
+    private static let tileInset: CGFloat = 8
 
     init() {
         do {
@@ -167,7 +174,10 @@ final class EditorModel: ObservableObject {
             sourceURL = url
             imageTitle = url.lastPathComponent
             asShotWhiteBalance = newSession.asShotWhiteBalance
-            lastPlanKey = nil
+            preview = nil
+            tile = nil
+            previewQuads = 0
+            tileSize = .zero
 
             // A new image always opens fitted.
             fitMode = true
@@ -190,7 +200,8 @@ final class EditorModel: ObservableObject {
         } catch {
             session = nil
             sourceURL = nil
-            texture = nil
+            preview = nil
+            tile = nil
             histogram = nil
             imageTitle = nil
             status = "Could not open: \(error)"
@@ -239,14 +250,14 @@ final class EditorModel: ObservableObject {
         guard hasImage else { return }
         fitMode = true
         viewport = .fit(imageSize: sensorSize, drawableSize: drawableSize)
-        rerender()
+        rerenderForViewport()
     }
 
     func zoomToActualSize() {
         guard hasImage else { return }
         let centre = CGPoint(x: drawableSize.width / 2, y: drawableSize.height / 2)
         apply(viewport.zoomed(by: 1 / viewport.zoom, about: centre, drawableSize: drawableSize))
-        rerender()
+        rerenderForViewport()
     }
 
     func zoomIn()  { zoomStep(2) }
@@ -256,7 +267,7 @@ final class EditorModel: ObservableObject {
         guard hasImage else { return }
         let centre = CGPoint(x: drawableSize.width / 2, y: drawableSize.height / 2)
         apply(viewport.zoomed(by: factor, about: centre, drawableSize: drawableSize))
-        rerender()
+        rerenderForViewport()
     }
 
     /// Every gesture lands here: clamp, publish (the view redraws at once),
@@ -278,78 +289,133 @@ final class EditorModel: ObservableObject {
         pendingRender = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(80))
             guard !Task.isCancelled else { return }
-            self?.rerender()
+            self?.rerenderForViewport()
         }
     }
 
     // MARK: - Rendering
 
-    /// Picks the render path for the current zoom.
-    ///
-    /// The dividing line is how many sensor pixels each screen pixel
-    /// covers. At 1.5 or more, binning whole quads is both cheaper and
-    /// *more* correct than demosaicing (it's a box filter, which is what a
-    /// downscale should be). Below that, a full-resolution tile of the
-    /// visible area is needed, with a margin so small pans don't reveal an
-    /// unrendered edge before the next render lands.
-    private func plan() -> (scale: RenderScale, key: PlanKey) {
-        guard drawableSize.width > 0, drawableSize.height > 0 else {
-            return (.binned(quads: 1), .binned(1))   // view not up yet
-        }
-        let sensorPerScreen = 1 / viewport.zoom
-        if sensorPerScreen >= 1.5 {
-            let quads = max(1, Int(sensorPerScreen / 2))
-            return (.binned(quads: quads), .binned(quads))
-        }
-
-        let margin: CGFloat = 32
-        let visible = viewport.visibleSensorRect(drawableSize: drawableSize)
-            .insetBy(dx: -margin, dy: -margin)
-        // Size is a function of zoom alone, so it stays constant while
-        // panning and the texture pool keeps reusing the same buffers.
-        let width = min(Int(visible.width.rounded(.up)), Int(sensorSize.width))
-        let height = min(Int(visible.height.rounded(.up)), Int(sensorSize.height))
-        return (.region(x: Int(visible.origin.x.rounded(.down)),
-                        y: Int(visible.origin.y.rounded(.down)),
-                        width: width, height: height),
-                .tile(width, height))
+    /// How many quads to bin for the preview at the current zoom. Zoomed
+    /// out, the preview is the only layer and should match the screen;
+    /// zoomed in, it's the soft backdrop under the tile, and half-size is
+    /// plenty.
+    private var wantedPreviewQuads: Int {
+        guard drawableSize.width > 0 else { return 1 }
+        return max(1, Int((1 / viewport.zoom) / 2))
     }
 
-    func rerender() {
+    /// Whether the current zoom needs a full-resolution tile at all. At 1.5
+    /// sensor pixels per screen pixel or more, binning whole quads is both
+    /// cheaper and *more* correct than demosaicing — it's a box filter,
+    /// which is what a downscale should be.
+    private var wantsTile: Bool {
+        drawableSize.width > 0 && (1 / viewport.zoom) < 1.5
+    }
+
+    /// The tile region for the current view: the visible area plus margin,
+    /// sized by zoom alone so panning keeps reusing the same textures.
+    private func wantedTileRegion() -> (x: Int, y: Int, width: Int, height: Int) {
+        let visible = viewport.visibleSensorRect(drawableSize: drawableSize)
+            .insetBy(dx: -Self.tileMargin, dy: -Self.tileMargin)
+        let width = min(Int(visible.width.rounded(.up)), Int(sensorSize.width))
+        let height = min(Int(visible.height.rounded(.up)), Int(sensorSize.height))
+        return (Int(visible.origin.x.rounded(.down)), Int(visible.origin.y.rounded(.down)),
+                width, height)
+    }
+
+    /// Does the tile on hand still cover what's on screen? If so, a pan
+    /// needs no render — the presenter just draws it in the new place.
+    private var tileCoversView: Bool {
+        guard let tile, tile.texture.width == Int(tileSize.width),
+              tile.texture.height == Int(tileSize.height) else { return false }
+        let visible = viewport.visibleSensorRect(drawableSize: drawableSize)
+        let usable = tile.coverage.insetBy(dx: Self.tileInset, dy: Self.tileInset)
+        // Only the part of the view that's actually over the image matters.
+        let sensorBounds = CGRect(origin: .zero, size: sensorSize)
+        return usable.contains(visible.intersection(sensorBounds))
+    }
+
+    /// Re-renders after a zoom or pan. Cheap when nothing changed: the
+    /// preview only re-renders if its bin factor changed, and the tile
+    /// only if the view has moved outside it or the zoom changed.
+    private func rerenderForViewport() {
         guard let session, let pipeline else { return }
-        pendingRender?.cancel()
-
-        let (scale, key) = plan()
-        if key != lastPlanKey {
-            // A tile at full resolution holds hundreds of megabytes of
-            // intermediates; don't keep last zoom level's around too.
-            session.releasePooledTextures()
-            lastPlanKey = key
-        }
-
         let start = Date()
+        var didWork = false
         do {
-            var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1,
-                                  isFullResolution: false)
-            let rendered = try pipeline.render(session, scale: scale,
-                                                parameters: parameters, info: &info)
-            texture = rendered
-            coverage = info.sensorRect
-            lastRenderMs = Date().timeIntervalSince(start) * 1000
-
-            // The histogram describes the whole image, not just the tile
-            // on screen. When zoomed in, measure a small binned render
-            // instead — about 1ms, and always whole-image.
-            if info.isFullResolution {
-                let overview = try pipeline.render(session, scale: .binned(quads: 4),
-                                                    parameters: parameters)
-                histogram = histogramCalculator?.compute(from: overview)
-            } else {
-                histogram = histogramCalculator?.compute(from: rendered)
+            if previewQuads != wantedPreviewQuads {
+                try renderPreview(session: session, pipeline: pipeline)
+                didWork = true
+            }
+            if wantsTile {
+                let region = wantedTileRegion()
+                let wantedSize = CGSize(width: region.width, height: region.height)
+                if wantedSize != tileSize {
+                    // Different zoom: the old tile's textures are the wrong
+                    // size and hold hundreds of megabytes. Let them go.
+                    session.releasePooledTextures()
+                    tileSize = wantedSize
+                    tile = nil
+                }
+                if !tileCoversView {
+                    try renderTile(session: session, pipeline: pipeline, region: region)
+                    didWork = true
+                }
+            } else if tile != nil {
+                tile = nil
+                session.releasePooledTextures()
+                tileSize = .zero
             }
         } catch {
             status = "Render failed: \(error)"
         }
+        if didWork { lastRenderMs = Date().timeIntervalSince(start) * 1000 }
+    }
+
+    /// Re-renders after an edit. Both layers show the edit, so both go.
+    func rerender() {
+        guard let session, let pipeline else { return }
+        pendingRender?.cancel()
+        let start = Date()
+        do {
+            try renderPreview(session: session, pipeline: pipeline)
+            if wantsTile {
+                let region = wantedTileRegion()
+                let wantedSize = CGSize(width: region.width, height: region.height)
+                if wantedSize != tileSize {
+                    session.releasePooledTextures()
+                    tileSize = wantedSize
+                }
+                try renderTile(session: session, pipeline: pipeline, region: region)
+            } else {
+                tile = nil
+            }
+        } catch {
+            status = "Render failed: \(error)"
+        }
+        lastRenderMs = Date().timeIntervalSince(start) * 1000
+    }
+
+    private func renderPreview(session: ImageSession, pipeline: RenderPipeline) throws {
+        let quads = wantedPreviewQuads
+        var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: false)
+        let rendered = try pipeline.render(session, scale: .binned(quads: quads),
+                                            parameters: parameters, info: &info)
+        preview = PresentLayer(texture: rendered, coverage: info.sensorRect)
+        previewQuads = quads
+        // The histogram always describes the whole image, whatever's on
+        // screen — so it comes from the preview, never from a tile.
+        histogram = histogramCalculator?.compute(from: rendered)
+    }
+
+    private func renderTile(session: ImageSession, pipeline: RenderPipeline,
+                            region: (x: Int, y: Int, width: Int, height: Int)) throws {
+        var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: true)
+        let rendered = try pipeline.render(
+            session,
+            scale: .region(x: region.x, y: region.y, width: region.width, height: region.height),
+            parameters: parameters, info: &info)
+        tile = PresentLayer(texture: rendered, coverage: info.sensorRect, inset: Self.tileInset)
     }
 
     // MARK: - Export

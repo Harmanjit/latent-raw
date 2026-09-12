@@ -19,9 +19,8 @@ import PixelEngine
 /// texture, coverage and transform it's told to. Keeping the maths out of
 /// here means it's testable in PixelEngine without a window.
 struct MetalImageView: NSViewRepresentable {
-    let texture: MTLTexture?
-    /// Which sensor rectangle `texture` covers.
-    let coverage: CGRect
+    let preview: PresentLayer
+    let tile: PresentLayer?
     let transform: ViewportTransform
     let presenter: Presenter
     let device: MTLDevice
@@ -46,7 +45,7 @@ struct MetalImageView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: MetalLayerView, context: Context) {
-        view.display(texture: texture, coverage: coverage, transform: transform)
+        view.display(preview: preview, tile: tile, transform: transform)
     }
 }
 
@@ -54,8 +53,8 @@ final class MetalLayerView: NSView {
     private var metalLayer: CAMetalLayer!
     private var presenter: Presenter?
 
-    private var currentTexture: MTLTexture?
-    private var currentCoverage: CGRect = .zero
+    private var currentPreview: PresentLayer?
+    private var currentTile: PresentLayer?
     private var currentTransform = ViewportTransform(zoom: 1, center: .zero)
     private var lastReportedSize: CGSize = .zero
 
@@ -124,18 +123,18 @@ final class MetalLayerView: NSView {
 
     // MARK: - Drawing
 
-    func display(texture: MTLTexture?, coverage: CGRect, transform: ViewportTransform) {
-        currentTexture = texture
-        currentCoverage = coverage
+    func display(preview: PresentLayer, tile: PresentLayer?, transform: ViewportTransform) {
+        currentPreview = preview
+        currentTile = tile
         currentTransform = transform
         redraw()
     }
 
     private func redraw() {
-        guard let metalLayer, let presenter, let texture = currentTexture,
+        guard let metalLayer, let presenter, let preview = currentPreview,
               metalLayer.drawableSize.width > 0,
               let drawable = metalLayer.nextDrawable() else { return }
-        presenter.present(texture, covering: currentCoverage,
+        presenter.present(base: preview, tile: currentTile,
                           transform: currentTransform, to: drawable)
     }
 

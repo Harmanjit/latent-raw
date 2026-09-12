@@ -57,6 +57,9 @@ public final class ImageSession {
         case cfa            // single-channel, post-white-balance CFA data
         case cameraRGB      // demosaiced, still in camera colour space
         case display        // after colour and tone, ready for screen or export
+        case displayPreview // same, but for the binned whole-image preview —
+                            // a separate role so a tile of the same size can
+                            // never overwrite the preview it's drawn over
         case rcdVHDir       // vertical/horizontal directional discrimination
         case rcdLowPass     // local average for ratio correction
         case rcdDiagonal    // packed P/Q diagonal high-pass statistics

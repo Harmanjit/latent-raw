@@ -2,18 +2,35 @@ import Foundation
 import Metal
 import QuartzCore
 
-/// Draws a rendered texture into a CAMetalLayer drawable.
+/// One texture and where it belongs in sensor space.
+public struct PresentLayer {
+    public let texture: MTLTexture
+    /// The sensor rectangle the texture covers.
+    public let coverage: CGRect
+    /// Pixels to trim from every edge before drawing. Full-resolution
+    /// tiles set this to hide the demosaic's degraded border.
+    public let inset: CGFloat
+
+    public init(texture: MTLTexture, coverage: CGRect, inset: CGFloat = 0) {
+        self.texture = texture
+        self.coverage = coverage
+        self.inset = inset
+    }
+}
+
+/// Draws rendered textures into a CAMetalLayer drawable.
 ///
 /// Kept separate from RenderPipeline because it isn't image processing —
-/// it's display plumbing. The pipeline produces a correct image covering
-/// some sensor rectangle; this places that rectangle on screen according
-/// to the current zoom and pan.
+/// it's display plumbing. The pipeline produces correct images covering
+/// some sensor rectangles; this places them on screen according to the
+/// current zoom and pan.
 ///
 /// Presenting is cheap (one sampling pass over the drawable), so it runs on
-/// every gesture event without waiting for the pipeline. If the texture on
-/// hand is a low-resolution preview and the user has zoomed in, it's
-/// upscaled and looks soft for a moment; the pipeline then re-renders at
-/// the right resolution and the next present sharpens it.
+/// every gesture event without waiting for the pipeline. The base layer is
+/// the whole image at preview resolution and is always drawn; the optional
+/// tile is a full-resolution render of the visible area drawn on top. Mid-
+/// gesture the tile may not cover the window, and the base shows through
+/// softly until the pipeline catches up.
 ///
 /// Known gap (DESIGN.md §8.3): this presents bounded, already-encoded sRGB.
 /// Real EDR display means keeping the pipeline output extended-linear and
@@ -45,37 +62,61 @@ public final class Presenter {
         let drawableSize = CGSize(width: drawable.texture.width, height: drawable.texture.height)
         let imageSize = CGSize(width: texture.width, height: texture.height)
         let rect = Self.fitRect(imageSize: imageSize, drawableSize: drawableSize)
-        draw(texture, into: drawable, at: rect, backgroundLevel: backgroundLevel)
+        draw(base: texture, baseRect: rect, tile: nil, tileRect: .zero,
+             tileSource: SIMD4<Float>(0, 0, 1, 1),
+             into: drawable, backgroundLevel: backgroundLevel)
     }
 
-    /// Draws `texture`, which covers `coverage` in sensor space, placed by
-    /// `transform`. Parts of the drawable the texture doesn't reach are
-    /// filled with the neutral surround.
-    public func present(_ texture: MTLTexture,
-                         covering coverage: CGRect,
+    /// Draws the base layer, then the tile on top if there is one, both
+    /// placed by `transform`.
+    public func present(base: PresentLayer,
+                         tile: PresentLayer?,
                          transform: ViewportTransform,
                          to drawable: CAMetalDrawable,
                          backgroundLevel: Float = 0.12) {
         let drawableSize = CGSize(width: drawable.texture.width, height: drawable.texture.height)
-        let rect = transform.screenRect(forSensorRect: coverage, drawableSize: drawableSize)
-        draw(texture, into: drawable, at: rect, backgroundLevel: backgroundLevel)
+        let baseRect = transform.screenRect(forSensorRect: base.coverage, drawableSize: drawableSize)
+
+        var tileRect = CGRect.zero
+        var tileSource = SIMD4<Float>(0, 0, 1, 1)
+        if let tile {
+            let shown = tile.coverage.insetBy(dx: tile.inset, dy: tile.inset)
+            tileRect = transform.screenRect(forSensorRect: shown, drawableSize: drawableSize)
+            let w = Float(tile.texture.width), h = Float(tile.texture.height)
+            let i = Float(tile.inset)
+            tileSource = SIMD4<Float>(i / w, i / h, (w - 2 * i) / w, (h - 2 * i) / h)
+        }
+
+        draw(base: base.texture, baseRect: baseRect,
+             tile: tile?.texture, tileRect: tileRect, tileSource: tileSource,
+             into: drawable, backgroundLevel: backgroundLevel)
     }
 
-    private func draw(_ texture: MTLTexture, into drawable: CAMetalDrawable,
-                      at rect: CGRect, backgroundLevel: Float) {
+    private func draw(base: MTLTexture, baseRect: CGRect,
+                      tile: MTLTexture?, tileRect: CGRect, tileSource: SIMD4<Float>,
+                      into drawable: CAMetalDrawable, backgroundLevel: Float) {
         guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
               let encoder = cmdBuffer.makeComputeCommandEncoder() else { return }
 
         encoder.setComputePipelineState(gpu.presentPSO)
-        encoder.setTexture(texture, index: 0)
-        encoder.setTexture(drawable.texture, index: 1)
+        encoder.setTexture(base, index: 0)
+        // Metal requires every declared texture slot to be bound, even if
+        // the kernel won't read it this time.
+        encoder.setTexture(tile ?? base, index: 1)
+        encoder.setTexture(drawable.texture, index: 2)
 
-        var origin = SIMD2<Float>(Float(rect.origin.x), Float(rect.origin.y))
-        var size = SIMD2<Float>(Float(rect.width), Float(rect.height))
+        var baseRectV = SIMD4<Float>(Float(baseRect.origin.x), Float(baseRect.origin.y),
+                                     Float(baseRect.width), Float(baseRect.height))
+        var tileRectV = SIMD4<Float>(Float(tileRect.origin.x), Float(tileRect.origin.y),
+                                     Float(tileRect.width), Float(tileRect.height))
+        var tileSourceV = tileSource
+        var hasTile: UInt32 = tile == nil ? 0 : 1
         var background = backgroundLevel
-        encoder.setBytes(&origin, length: 8, index: 0)
-        encoder.setBytes(&size, length: 8, index: 1)
-        encoder.setBytes(&background, length: 4, index: 2)
+        encoder.setBytes(&baseRectV, length: 16, index: 0)
+        encoder.setBytes(&tileRectV, length: 16, index: 1)
+        encoder.setBytes(&tileSourceV, length: 16, index: 2)
+        encoder.setBytes(&hasTile, length: 4, index: 3)
+        encoder.setBytes(&background, length: 4, index: 4)
 
         let pso = gpu.presentPSO
         let tw = pso.threadExecutionWidth

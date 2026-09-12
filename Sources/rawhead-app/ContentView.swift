@@ -44,9 +44,9 @@ struct ContentView: View {
             Color(white: 0.12)
 
             if let device = model.device, let presenter = model.presenter,
-               model.texture != nil {
-                MetalImageView(texture: model.texture,
-                                coverage: model.coverage,
+               let preview = model.preview {
+                MetalImageView(preview: preview,
+                                tile: model.tile,
                                 transform: model.viewport,
                                 presenter: presenter,
                                 device: device,

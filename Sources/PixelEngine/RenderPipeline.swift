@@ -187,11 +187,22 @@ public final class RenderPipeline {
         let rawH = summary.rawHeight
         let plan = Self.plan(rawWidth: rawW, rawHeight: rawH, scale: scale)
 
+        // Every stage of this render is encoded into ONE command buffer and
+        // submitted once. The GPU runs the stages back to back and the CPU
+        // waits a single time at the end. Submitting each stage separately
+        // (as this used to) added a full CPU-GPU round trip per stage.
+        guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer() else {
+            throw RenderError.commandBufferFailed
+        }
+
         let cameraRGB: MTLTexture
         let renderInfo: RenderInfo
+        let displayRole: ImageSession.TextureRole
         switch plan {
         case .fullResolution(let origin, let size):
-            cameraRGB = try renderFullResolution(session: session, order: order,
+            displayRole = .display
+            cameraRGB = try renderFullResolution(session: session, cmdBuffer: cmdBuffer,
+                                                  order: order,
                                                   multipliers: multipliers,
                                                   method: parameters.demosaic,
                                                   origin: origin, size: size)
@@ -202,7 +213,9 @@ public final class RenderPipeline {
                                      sensorRect: CGRect(x: origin.x, y: origin.y,
                                                         width: size.width, height: size.height))
         case .binned(let quads):
-            cameraRGB = try renderBinned(session: session, order: order,
+            displayRole = .displayPreview
+            cameraRGB = try renderBinned(session: session, cmdBuffer: cmdBuffer,
+                                          order: order,
                                           binQuads: quads, multipliers: multipliers)
             let span = quads * 2
             renderInfo = RenderInfo(outputWidth: cameraRGB.width,
@@ -214,11 +227,17 @@ public final class RenderPipeline {
                                                         height: cameraRGB.height * span))
         }
 
-        let final = try applyColorAndTone(session: session,
+        let final = try applyColorAndTone(session: session, cmdBuffer: cmdBuffer,
                                            input: cameraRGB,
+                                           outputRole: displayRole,
                                            cameraToWorking: cameraToWorking,
                                            multipliers: multipliers,
                                            parameters: parameters)
+
+        cmdBuffer.commit()
+        cmdBuffer.waitUntilCompleted()
+        if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
+
         info?.pointee = renderInfo
         return final
     }
@@ -255,15 +274,16 @@ public final class RenderPipeline {
     // MARK: - Colour stage
 
     private func applyColorAndTone(session: ImageSession,
+                                    cmdBuffer: MTLCommandBuffer,
                                     input: MTLTexture,
+                                    outputRole: ImageSession.TextureRole,
                                     cameraToWorking: simd_float3x3,
                                     multipliers: SIMD4<Float>,
                                     parameters: EditParameters) throws -> MTLTexture {
         let output = try session.texture(width: input.width, height: input.height,
-                                          pixelFormat: .rgba16Float, role: .display)
+                                          pixelFormat: .rgba16Float, role: outputRole)
 
-        guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
-              let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+        guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             throw RenderError.commandBufferFailed
         }
 
@@ -295,27 +315,27 @@ public final class RenderPipeline {
 
         dispatch(encoder, pso: gpu.colorAndTonePSO, width: input.width, height: input.height)
         encoder.endEncoding()
-
-        cmdBuffer.commit()
-        cmdBuffer.waitUntilCompleted()
-        if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
         return output
     }
 
     // MARK: - Full-resolution demosaic
 
-    private func renderFullResolution(session: ImageSession, order: UInt8,
+    private func renderFullResolution(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                                       order: UInt8,
                                        multipliers: SIMD4<Float>,
                                        method: DemosaicMethod,
                                        origin: (x: Int, y: Int),
                                        size: (width: Int, height: Int)) throws -> MTLTexture {
-        let cfaTex = try prepareCFA(session: session, multipliers: multipliers, order: order,
+        let cfaTex = try prepareCFA(session: session, cmdBuffer: cmdBuffer,
+                                    multipliers: multipliers, order: order,
                                     origin: origin, size: size)
         switch method {
         case .bilinear:
-            return try demosaicBilinear(session: session, cfa: cfaTex, order: order)
+            return try demosaicBilinear(session: session, cmdBuffer: cmdBuffer,
+                                        cfa: cfaTex, order: order)
         case .rcd:
-            return try demosaicRCD(session: session, cfa: cfaTex, order: order)
+            return try demosaicRCD(session: session, cmdBuffer: cmdBuffer,
+                                   cfa: cfaTex, order: order)
         }
     }
 
@@ -326,7 +346,8 @@ public final class RenderPipeline {
     /// differences of neighbouring samples, and half precision's ~1e-3
     /// relative error on those differences is enough to flip a directional
     /// decision and produce visible artifacts.
-    private func prepareCFA(session: ImageSession, multipliers: SIMD4<Float>,
+    private func prepareCFA(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                             multipliers: SIMD4<Float>,
                              order: UInt8,
                              origin: (x: Int, y: Int),
                              size: (width: Int, height: Int)) throws -> MTLTexture {
@@ -334,8 +355,7 @@ public final class RenderPipeline {
         let w = size.width, h = size.height
         let cfaTex = try session.texture(width: w, height: h, pixelFormat: .r32Float, role: .cfa)
 
-        guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
-              let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+        guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             throw RenderError.commandBufferFailed
         }
         encoder.setComputePipelineState(gpu.whiteBalanceBlackLevelPSO)
@@ -357,19 +377,15 @@ public final class RenderPipeline {
         encoder.setTexture(cfaTex, index: 0)
         dispatch(encoder, pso: gpu.whiteBalanceBlackLevelPSO, width: w, height: h)
         encoder.endEncoding()
-
-        cmdBuffer.commit()
-        cmdBuffer.waitUntilCompleted()
-        if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
         return cfaTex
     }
 
-    private func demosaicBilinear(session: ImageSession, cfa: MTLTexture,
+    private func demosaicBilinear(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                                   cfa: MTLTexture,
                                    order: UInt8) throws -> MTLTexture {
         let rgbTex = try session.texture(width: cfa.width, height: cfa.height,
                                           pixelFormat: .rgba16Float, role: .cameraRGB)
-        guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
-              let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+        guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             throw RenderError.commandBufferFailed
         }
         encoder.setComputePipelineState(gpu.demosaicBilinearPSO)
@@ -379,10 +395,6 @@ public final class RenderPipeline {
         encoder.setTexture(rgbTex, index: 1)
         dispatch(encoder, pso: gpu.demosaicBilinearPSO, width: cfa.width, height: cfa.height)
         encoder.endEncoding()
-
-        cmdBuffer.commit()
-        cmdBuffer.waitUntilCompleted()
-        if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
         return rgbTex
     }
 
@@ -399,7 +411,8 @@ public final class RenderPipeline {
     /// positions, but Metal still requires separate textures unless the
     /// texture is declared read_write, and the extra buffer is cheaper than
     /// the complexity.
-    private func demosaicRCD(session: ImageSession, cfa: MTLTexture,
+    private func demosaicRCD(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                              cfa: MTLTexture,
                               order: UInt8) throws -> MTLTexture {
         let w = cfa.width, h = cfa.height
 
@@ -409,10 +422,6 @@ public final class RenderPipeline {
         let pqDir = try session.texture(width: w, height: h, pixelFormat: .r16Float, role: .rcdPQDir)
         let rgbA = try session.texture(width: w, height: h, pixelFormat: .rgba16Float, role: .cameraRGB)
         let rgbB = try session.texture(width: w, height: h, pixelFormat: .rgba16Float, role: .rcdScratch)
-
-        guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer() else {
-            throw RenderError.commandBufferFailed
-        }
 
         func pass(_ pso: MTLComputePipelineState,
                    textures: [MTLTexture],
@@ -445,10 +454,6 @@ public final class RenderPipeline {
         try pass(gpu.rcdRedBlueAtOppositePSO, textures: [rgbA, pqDir, rgbB], passOrder: true)
         // 6. Red and blue at green sites.
         try pass(gpu.rcdRedBlueAtGreenPSO, textures: [rgbB, vhDir, rgbA], passOrder: true)
-
-        cmdBuffer.commit()
-        cmdBuffer.waitUntilCompleted()
-        if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
         return rgbA
     }
 
@@ -464,7 +469,8 @@ public final class RenderPipeline {
     /// fewer threads. Total reads are constant, which is why heavier
     /// binning shows diminishing returns — the cost floor is moving the
     /// sensor data, not the arithmetic.
-    private func renderBinned(session: ImageSession, order: UInt8, binQuads: Int,
+    private func renderBinned(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                               order: UInt8, binQuads: Int,
                                multipliers: SIMD4<Float>) throws -> MTLTexture {
         let summary = session.file.summary
         let rawW = summary.rawWidth, rawH = summary.rawHeight
@@ -474,8 +480,7 @@ public final class RenderPipeline {
 
         let rgbTex = try session.texture(width: outW, height: outH,
                                           pixelFormat: .rgba16Float, role: .cameraRGB)
-        guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
-              let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+        guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             throw RenderError.commandBufferFailed
         }
 
@@ -498,10 +503,6 @@ public final class RenderPipeline {
         encoder.setTexture(rgbTex, index: 0)
         dispatch(encoder, pso: gpu.demosaicBinnedPSO, width: outW, height: outH)
         encoder.endEncoding()
-
-        cmdBuffer.commit()
-        cmdBuffer.waitUntilCompleted()
-        if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
         return rgbTex
     }
 
