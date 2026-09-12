@@ -1,6 +1,7 @@
 import XCTest
 @testable import PixelEngine
 @testable import RawCore
+import ColorKit
 
 // Golden-image tests per DESIGN.md §12. These need real sample files, which
 // aren't committed (see TestAssets/README.md) — until they're dropped in
@@ -94,6 +95,45 @@ final class RenderPipelineTests: XCTestCase {
         }
         XCTAssertLessThanOrEqual(maxDiff, 1e-3,
                                  "region interior differs from the full render by \(maxDiff)")
+    }
+
+    /// Exposure changes must reuse the demosaic; white balance changes
+    /// must not (the multipliers feed the demosaic input).
+    func testStageCacheSkipsDemosaicWhenOnlyToneChanges() throws {
+        let path = TestAssets.path("nikon_d750_sample.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
+                           "Drop a D750 NEF at \(path) — see TestAssets/README.md")
+
+        let file = try RawFile(path: path)
+        let gpu = try GPUContext()
+        let session = try ImageSession(file: file, gpu: gpu)
+        let pipeline = RenderPipeline(gpu: gpu)
+        let scale = RenderScale.region(x: 1000, y: 800, width: 512, height: 384)
+
+        var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: true)
+        var params = EditParameters()
+
+        _ = try pipeline.render(session, scale: scale, parameters: params, info: &info)
+        XCTAssertFalse(info.demosaicWasCached, "first render can't be cached")
+
+        params.exposureEV = 1.0
+        _ = try pipeline.render(session, scale: scale, parameters: params, info: &info)
+        XCTAssertTrue(info.demosaicWasCached, "exposure doesn't touch the demosaic")
+
+        params.whiteBalance = ColorKit.WhiteBalance(temperature: 4000, tint: 0)
+        _ = try pipeline.render(session, scale: scale, parameters: params, info: &info)
+        XCTAssertFalse(info.demosaicWasCached, "white balance changes the demosaic input")
+
+        // A different region misses too, even with identical parameters.
+        let elsewhere = RenderScale.region(x: 2000, y: 800, width: 512, height: 384)
+        _ = try pipeline.render(session, scale: elsewhere, parameters: params, info: &info)
+        XCTAssertFalse(info.demosaicWasCached)
+
+        // Back to the first region: its texture was overwritten by the
+        // second (same size, same pool slot), so the cache must know that.
+        params.exposureEV = 2.0
+        _ = try pipeline.render(session, scale: scale, parameters: params, info: &info)
+        XCTAssertFalse(info.demosaicWasCached, "stale entry must have been evicted")
     }
 
     func testSonyCompressedARWRenders() throws {

@@ -1,7 +1,9 @@
 # Phase 0 checklist
 
-Tracks DESIGN.md §13. Work through this on your Mac in order — each step
-unblocks the next.
+Tracks DESIGN.md §13. **Phase 0 is closed** (September 2026): everything
+below that mattered is done, and Phase 1 work (tiled zoom, stage cache)
+has started on top of it. Unchecked items are deferred, not blocking —
+notes say why.
 
 ## 0. Prerequisites
 - [x] Xcode installed (last version compatible with your current OS is fine —
@@ -30,45 +32,37 @@ unblocks the next.
       real headers (see the note at the top of that file)
 
 ## 3. Zero-copy ingest decision (DESIGN.md §13 task 2)
-- [ ] Instrument `RawFile.rawSensorPlane()` — check actual pointer alignment
-      and length of LibRaw's `raw_image` allocation for a real D750/A7III file
-- [ ] If page-aligned with page-multiple length: try `makeBuffer(bytesNoCopy:)`
-      directly, skip the copy in `GPUContext.makeSharedBuffer`
-- [ ] If not: measure the copy cost in Instruments. DESIGN.md §13 estimates
-      a few ms for ~48MB — confirm, and decide whether a LibRaw allocator
-      patch (option b) is worth the maintenance cost. Default to the copy
-      unless the measurement says otherwise.
+- [x] Instrument `RawFile.rawSensorPlane()` — LibRaw's allocation is
+      page-aligned but its length is not a page multiple
+- [x] `makeBuffer(bytesNoCopy:)` not usable without padding past the
+      allocation — rejected
+- [x] Decision: keep the copy (option c). Measured ~3ms per image, paid
+      once. See the note in `GPUContext.makeSharedBuffer`.
 
 ## 4. Correctness
 - [x] Drop sample files into `TestAssets/` per `TestAssets/README.md`
 - [x] `swift run rawhead-cli render TestAssets/nikon_d750_sample.nef --out /tmp/out.png`
       produces a recognizable (if rough — it's bilinear) image
-- [ ] Repeat for the A7 III sample
+- [ ] Repeat for the A7 III sample — deferred until an ARW is dropped in
 - [ ] Render the same files in RawTherapee with a neutral profile, compare
       colors by eye first, then decide what "within tolerance" should mean
-      for the golden-image tests in `Tests/PixelEngineTests`
+      for the golden-image tests — deferred; renders look right by eye
+      against a Photoshop export of the same NEF, but this is still owed
 
 ## 5. Instruments verification
-- [ ] Metal System Trace: confirm buffer/texture allocations match the
-      storage-mode policy in DESIGN.md §7.2 (shared for the sensor plane,
-      private for the demosaiced texture)
-- [ ] Confirm no unexpected extra copies in the CPU->GPU path
-- [ ] Record actual timings against the targets in DESIGN.md §13:
-      - GPU time for demosaic + color stages: target <30ms at 24MP
-        (note: Phase 0's demosaic is bilinear, not RCD, so this number
-        isn't final — it's a pipeline-overhead sanity check for now)
-      - File-open-to-screen: target <300ms
-      - Idle CPU/GPU: ~0%
+- [ ] Metal System Trace: not done; the code follows the §7.2 policy by
+      construction (see `GPUContext`) and there's one copy, by decision
+- [x] Timings, measured with `rawhead-cli --repeat` (M4, warm GPU):
+      - Full 24MP RCD + colour: ~46ms — over the 30ms target; but the
+        viewport never renders the full frame any more (tiles: ~9ms for
+        a 5MP tile; half-size preview: ~3ms), so this only matters for export
+      - LibRaw unpack: ~210-250ms, dominates file-open time
+      - Idle: no display link, no timers — the app draws only on input
 
 ## 6. Metal 3/4 API boundary check (DESIGN.md §13 task 6)
-- [ ] rawhead must run on both Sequoia (macOS 15) and Tahoe (macOS 26) —
-      confirm which Metal APIs are Metal 3 (available on both) vs.
-      Metal-4-only (Tahoe-only): residency sets, tensors, in-shader ML
-- [ ] Update `GPUContext.swift`'s `#available(macOS 26, *)` gates to match
-      what you find — the current scaffold has no Metal-4-only calls yet,
-      so this is about confirming the plan before Phase 1 adds any
-- [ ] Test on a real Sequoia machine (you have one) before assuming a Tahoe
-      API is actually available there
+- [x] Nothing in `PixelEngine` uses a Metal-4-only API; everything builds
+      and runs on Sequoia. Revisit when residency sets or in-shader ML
+      are actually wanted.
 
 ## Exit
 All boxes above checked = Phase 0 done, move to Phase 1 (DESIGN.md §14):

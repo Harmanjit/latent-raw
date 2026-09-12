@@ -47,6 +47,9 @@ final class EditorModel: ObservableObject {
     @Published private(set) var status = "Open a raw file to begin"
     @Published private(set) var imageTitle: String?
     @Published private(set) var lastRenderMs: Double = 0
+    /// What the last action rendered, for the status bar: "preview 3016×2016
+    /// · 3.1 ms", "tile · demosaic cached · 1.2 ms", or "pan · no render".
+    @Published private(set) var renderReport = ""
 
     /// Export settings persist across exports within a session, so a second
     /// export doesn't mean re-choosing format and quality.
@@ -342,9 +345,10 @@ final class EditorModel: ObservableObject {
         guard let session, let pipeline else { return }
         let start = Date()
         var didWork = false
+        var what: [String] = []
         do {
             if previewQuads != wantedPreviewQuads {
-                try renderPreview(session: session, pipeline: pipeline)
+                what.append(try renderPreview(session: session, pipeline: pipeline))
                 didWork = true
             }
             if wantsTile {
@@ -358,7 +362,7 @@ final class EditorModel: ObservableObject {
                     tile = nil
                 }
                 if !tileCoversView {
-                    try renderTile(session: session, pipeline: pipeline, region: region)
+                    what.append(try renderTile(session: session, pipeline: pipeline, region: region))
                     didWork = true
                 }
             } else if tile != nil {
@@ -369,7 +373,12 @@ final class EditorModel: ObservableObject {
         } catch {
             status = "Render failed: \(error)"
         }
-        if didWork { lastRenderMs = Date().timeIntervalSince(start) * 1000 }
+        if didWork {
+            lastRenderMs = Date().timeIntervalSince(start) * 1000
+            renderReport = what.joined(separator: " + ") + String(format: " · %.1f ms", lastRenderMs)
+        } else {
+            renderReport = "view moved · no render"
+        }
     }
 
     /// Re-renders after an edit. Both layers show the edit, so both go.
@@ -377,8 +386,9 @@ final class EditorModel: ObservableObject {
         guard let session, let pipeline else { return }
         pendingRender?.cancel()
         let start = Date()
+        var what: [String] = []
         do {
-            try renderPreview(session: session, pipeline: pipeline)
+            what.append(try renderPreview(session: session, pipeline: pipeline))
             if wantsTile {
                 let region = wantedTileRegion()
                 let wantedSize = CGSize(width: region.width, height: region.height)
@@ -386,7 +396,7 @@ final class EditorModel: ObservableObject {
                     session.releasePooledTextures()
                     tileSize = wantedSize
                 }
-                try renderTile(session: session, pipeline: pipeline, region: region)
+                what.append(try renderTile(session: session, pipeline: pipeline, region: region))
             } else {
                 tile = nil
             }
@@ -394,9 +404,12 @@ final class EditorModel: ObservableObject {
             status = "Render failed: \(error)"
         }
         lastRenderMs = Date().timeIntervalSince(start) * 1000
+        renderReport = what.joined(separator: " + ") + String(format: " · %.1f ms", lastRenderMs)
     }
 
-    private func renderPreview(session: ImageSession, pipeline: RenderPipeline) throws {
+    /// Returns a short description of what ran, for the status bar.
+    @discardableResult
+    private func renderPreview(session: ImageSession, pipeline: RenderPipeline) throws -> String {
         let quads = wantedPreviewQuads
         var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: false)
         let rendered = try pipeline.render(session, scale: .binned(quads: quads),
@@ -406,16 +419,19 @@ final class EditorModel: ObservableObject {
         // The histogram always describes the whole image, whatever's on
         // screen — so it comes from the preview, never from a tile.
         histogram = histogramCalculator?.compute(from: rendered)
+        return "preview \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
 
+    @discardableResult
     private func renderTile(session: ImageSession, pipeline: RenderPipeline,
-                            region: (x: Int, y: Int, width: Int, height: Int)) throws {
+                            region: (x: Int, y: Int, width: Int, height: Int)) throws -> String {
         var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: true)
         let rendered = try pipeline.render(
             session,
             scale: .region(x: region.x, y: region.y, width: region.width, height: region.height),
             parameters: parameters, info: &info)
         tile = PresentLayer(texture: rendered, coverage: info.sensorRect, inset: Self.tileInset)
+        return "tile \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
 
     // MARK: - Export

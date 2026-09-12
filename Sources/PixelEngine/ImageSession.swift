@@ -76,6 +76,36 @@ public final class ImageSession {
 
     private var texturePool: [TextureKey: MTLTexture] = [:]
 
+    /// Everything the demosaiced camera-RGB stage depends on. Two renders
+    /// with equal keys produce identical camera-RGB textures, so the second
+    /// can skip demosaicing entirely (DESIGN.md §8.2, "stage cache").
+    ///
+    /// What's deliberately *not* in here: exposure, contrast, grey point,
+    /// highlight settings, output space — those all act after this stage.
+    struct StageKey: Hashable {
+        let isFullResolution: Bool
+        let originX: Int, originY: Int
+        let width: Int, height: Int
+        let quads: Int
+        let multipliers: SIMD4<Float>
+        let demosaic: DemosaicMethod
+    }
+
+    /// The camera-RGB texture last produced for each key. Values are
+    /// pooled textures, so an entry is only trustworthy until something
+    /// else renders into the same texture — `storeCameraRGB` evicts any
+    /// stale entries pointing at the texture it's recording.
+    private var stageCache: [StageKey: MTLTexture] = [:]
+
+    func cachedCameraRGB(for key: StageKey) -> MTLTexture? {
+        stageCache[key]
+    }
+
+    func storeCameraRGB(_ texture: MTLTexture, for key: StageKey) {
+        stageCache = stageCache.filter { $0.value !== texture }
+        stageCache[key] = texture
+    }
+
     public init(file: RawFile, gpu: GPUContext) throws {
         guard let plane = file.rawSensorPlane(),
               let buffer = gpu.makeSharedBuffer(from: plane) else {
@@ -135,6 +165,8 @@ public final class ImageSession {
         let rcdRoles: Set<TextureRole> = [.rcdVHDir, .rcdLowPass, .rcdDiagonal,
                                            .rcdPQDir, .rcdScratch]
         texturePool = texturePool.filter { !rcdRoles.contains($0.key.role) }
+        // The cached camera-RGB textures aren't RCD intermediates, so they
+        // survive this and the cache stays valid.
     }
 
     /// How much GPU memory this session holds, for diagnostics and for
@@ -159,5 +191,6 @@ public final class ImageSession {
     /// stays). For memory pressure, or when a zoom level won't return.
     public func releasePooledTextures() {
         texturePool.removeAll()
+        stageCache.removeAll()
     }
 }

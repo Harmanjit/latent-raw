@@ -136,17 +136,21 @@ public struct RenderInfo: Sendable {
     /// bin span); the clamped, snapped rectangle for region renders.
     /// The presenter uses this to place the texture on screen.
     public let sensorRect: CGRect
+    /// True when the demosaic stage was skipped because the session had an
+    /// identical result cached; only the colour/tone stage ran.
+    public let demosaicWasCached: Bool
     public var usedBinnedPath: Bool { !isFullResolution }
 
     public init(outputWidth: Int, outputHeight: Int, binQuads: Int,
                 isFullResolution: Bool, demosaicUsed: DemosaicMethod? = nil,
-                sensorRect: CGRect = .zero) {
+                sensorRect: CGRect = .zero, demosaicWasCached: Bool = false) {
         self.outputWidth = outputWidth
         self.outputHeight = outputHeight
         self.binQuads = binQuads
         self.isFullResolution = isFullResolution
         self.demosaicUsed = demosaicUsed
         self.sensorRect = sensorRect
+        self.demosaicWasCached = demosaicWasCached
     }
 }
 
@@ -195,28 +199,36 @@ public final class RenderPipeline {
             throw RenderError.commandBufferFailed
         }
 
+        // Stage cache (DESIGN.md §8.2): if the session already holds the
+        // demosaiced result for exactly these inputs, skip straight to the
+        // colour stage. Exposure and tone edits hit this every time; white
+        // balance and zoom changes miss.
+        let stageKey = Self.stageKey(plan: plan, multipliers: multipliers,
+                                     demosaic: parameters.demosaic)
+        let cached = session.cachedCameraRGB(for: stageKey)
+
         let cameraRGB: MTLTexture
         let renderInfo: RenderInfo
         let displayRole: ImageSession.TextureRole
         switch plan {
         case .fullResolution(let origin, let size):
             displayRole = .display
-            cameraRGB = try renderFullResolution(session: session, cmdBuffer: cmdBuffer,
-                                                  order: order,
-                                                  multipliers: multipliers,
-                                                  method: parameters.demosaic,
-                                                  origin: origin, size: size)
+            cameraRGB = try cached ?? renderFullResolution(
+                session: session, cmdBuffer: cmdBuffer, order: order,
+                multipliers: multipliers, method: parameters.demosaic,
+                origin: origin, size: size)
             renderInfo = RenderInfo(outputWidth: cameraRGB.width,
                                      outputHeight: cameraRGB.height,
                                      binQuads: 1, isFullResolution: true,
                                      demosaicUsed: parameters.demosaic,
                                      sensorRect: CGRect(x: origin.x, y: origin.y,
-                                                        width: size.width, height: size.height))
+                                                        width: size.width, height: size.height),
+                                     demosaicWasCached: cached != nil)
         case .binned(let quads):
             displayRole = .displayPreview
-            cameraRGB = try renderBinned(session: session, cmdBuffer: cmdBuffer,
-                                          order: order,
-                                          binQuads: quads, multipliers: multipliers)
+            cameraRGB = try cached ?? renderBinned(
+                session: session, cmdBuffer: cmdBuffer, order: order,
+                binQuads: quads, multipliers: multipliers)
             let span = quads * 2
             renderInfo = RenderInfo(outputWidth: cameraRGB.width,
                                      outputHeight: cameraRGB.height,
@@ -224,7 +236,11 @@ public final class RenderPipeline {
                                      demosaicUsed: nil,
                                      sensorRect: CGRect(x: 0, y: 0,
                                                         width: cameraRGB.width * span,
-                                                        height: cameraRGB.height * span))
+                                                        height: cameraRGB.height * span),
+                                     demosaicWasCached: cached != nil)
+        }
+        if cached == nil {
+            session.storeCameraRGB(cameraRGB, for: stageKey)
         }
 
         let final = try applyColorAndTone(session: session, cmdBuffer: cmdBuffer,
@@ -240,6 +256,22 @@ public final class RenderPipeline {
 
         info?.pointee = renderInfo
         return final
+    }
+
+    static func stageKey(plan: RenderPlan, multipliers: SIMD4<Float>,
+                         demosaic: DemosaicMethod) -> ImageSession.StageKey {
+        switch plan {
+        case .fullResolution(let origin, let size):
+            return .init(isFullResolution: true, originX: origin.x, originY: origin.y,
+                         width: size.width, height: size.height, quads: 0,
+                         multipliers: multipliers, demosaic: demosaic)
+        case .binned(let quads):
+            // Demosaic method is irrelevant to binning; normalize it so a
+            // method change doesn't needlessly miss the cache.
+            return .init(isFullResolution: false, originX: 0, originY: 0,
+                         width: 0, height: 0, quads: quads,
+                         multipliers: multipliers, demosaic: .bilinear)
+        }
     }
 
     /// Turns the requested scale into a concrete plan.

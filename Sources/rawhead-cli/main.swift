@@ -154,6 +154,29 @@ do {
     }
     print("  session holds: \(formatBytes(session.approximateBytesHeld)) of GPU memory")
 
+    if repeatCount > 1 {
+        // With --repeat, runs 2..N hit the stage cache: same white balance,
+        // same region, so only the colour stage runs. Show what that costs
+        // on its own — it's the slider-drag number for exposure and tone.
+        var cachedInfo = info
+        let c0 = Date()
+        texture = try pipeline.render(session, scale: scale, parameters: parameters, info: &cachedInfo)
+        let c1 = Date()
+        print(String(format: "  colour stage alone (demosaic cached: %@): %.2fms",
+                      cachedInfo.demosaicWasCached ? "yes" : "no",
+                      c1.timeIntervalSince(c0) * 1000))
+        // And the honest uncached number, by changing white balance so the
+        // demosaic must re-run.
+        var wbParams = parameters
+        wbParams.whiteBalance = ColorKit.WhiteBalance(temperature: 5000, tint: 0)
+        let u0 = Date()
+        texture = try pipeline.render(session, scale: scale, parameters: wbParams, info: &cachedInfo)
+        let u1 = Date()
+        print(String(format: "  full render, demosaic cached: %@: %.2fms",
+                      cachedInfo.demosaicWasCached ? "yes" : "no",
+                      u1.timeIntervalSince(u0) * 1000))
+    }
+
     if let outputPath {
         try writePNG(texture: finalTexture, to: outputPath)
         print("Wrote \(outputPath)")

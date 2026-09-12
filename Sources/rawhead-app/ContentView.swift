@@ -268,14 +268,17 @@ struct ContentView: View {
             .controlSize(.small)
             .disabled(!model.hasImage)
 
-            if model.lastRenderMs > 0 {
-                // Render time on screen during development: the Phase 1
-                // exit criterion is under 16ms at fit-to-window, and having
-                // it visible while dragging a slider is the only honest way
-                // to judge that.
-                Text(String(format: "%.1f ms", model.lastRenderMs))
+            if !model.renderReport.isEmpty {
+                // What the last action rendered and how long it took, on
+                // screen during development: the Phase 1 exit criterion is
+                // under 16ms at fit-to-window, and having it visible while
+                // dragging a slider is the only honest way to judge that.
+                // "no render" means the presenter just redrew, which is
+                // the cheap path pans are supposed to take.
+                Text(model.renderReport)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(model.lastRenderMs < 16 ? Color.secondary : Color.orange)
+                    .lineLimit(1)
             }
         }
         .padding(.horizontal, 12)
