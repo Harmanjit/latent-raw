@@ -253,6 +253,8 @@ The namespace URI never needs to resolve to a real page, but once released it mu
 
 ## 6. Import
 
+> **Status: not planned.** This section describes the card-import flow as originally designed. It was dropped in September 2026: rawhead's user copies files into a folder by other means and opens the folder, which creates the catalog in place (§5). Reconciliation (§5.3) handles duplicates-by-hash and renames well enough for that workflow. Kept for reference in case import is wanted later.
+
 Every import copies files into **one destination folder** that the user chooses, with the last-used folder offered as the default. If that folder already has a `_rawhead/` container, the imported images join the existing catalog; otherwise a new catalog is created.
 
 Import is designed as a single streaming pass, so each source file is read exactly once. That one pass performs four jobs at the same time:
@@ -488,7 +490,7 @@ Phase 0 is complete when all of the following hold:
 | 0. Spike | See §13 | See §13 |
 | 1. Core pipeline | Highlight reconstruction, sigmoid tone mapping, stage cache, viewport-resolution rendering, tiled zoom, GPU scopes | Slider-to-screen latency under 16 ms at fit-to-window |
 | 2. Catalogs | Folder catalogs, schema, XMP read/write, reconciliation, subfolder modes, grid view, ratings, flags and keywords | Scrolling a 20,000-image folder stays smooth; the catalog rebuilds from sidecars alone |
-| 3. Import | Single-pass copy with checksums, duplicate handling, backup destination, embedded-preview thumbnails | Card import runs at the source's read speed |
+| 3. Import | **Dropped (September 2026).** Users copy files into a folder themselves; opening that folder in rawhead creates its catalog in place. §6 is kept for reference only. | — |
 | 4. Pro pipeline | Lens corrections (Lensfun, embedded data, manual), denoise, sharpening, color grading, process versions | All current lenses are corrected automatically |
 | 5. Local edits | Parametric masks; AI masks from Vision and Core ML | AI mask generated in under 1 second |
 | 6. Output | Export queue, ICC soft-proofing, HDR gain-map export, DNG export | Batch export keeps the GPU busy without stalling the UI |
