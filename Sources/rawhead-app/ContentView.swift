@@ -30,6 +30,13 @@ struct ContentView: View {
             Divider()
             statusBar
         }
+        .onAppear {
+            // Developer convenience: `swift run rawhead-app photo.nef` opens
+            // the file straight away, skipping the Open dialog.
+            if let path = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") }) {
+                model.open(url: URL(fileURLWithPath: path))
+            }
+        }
     }
 
     private var imageArea: some View {
@@ -39,9 +46,14 @@ struct ContentView: View {
             if let device = model.device, let presenter = model.presenter,
                model.texture != nil {
                 MetalImageView(texture: model.texture,
+                                coverage: model.coverage,
+                                transform: model.viewport,
                                 presenter: presenter,
                                 device: device,
-                                onResize: { model.updateViewport(longEdge: $0) })
+                                onResize: { model.viewportDidResize(to: $0) },
+                                onZoom: { model.zoom(by: $0, about: $1) },
+                                onPan: { model.pan(by: $0) },
+                                onDoubleClick: { model.toggleZoom(at: $0) })
             } else {
                 VStack(spacing: 12) {
                     Text(model.isReady ? "No image open" : "Metal unavailable")
@@ -236,6 +248,25 @@ struct ContentView: View {
                 .truncationMode(.middle)
 
             Spacer()
+
+            // Zoom controls. Pinch, option-scroll and double-click do the
+            // same things from the image itself; these exist for the
+            // keyboard and for people who like buttons.
+            HStack(spacing: 6) {
+                Button("−") { model.zoomOut() }
+                    .keyboardShortcut("-", modifiers: .command)
+                Text(model.zoomLabel)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(minWidth: 40)
+                Button("+") { model.zoomIn() }
+                    .keyboardShortcut("=", modifiers: .command)
+                Button("Fit") { model.zoomToFit() }
+                    .keyboardShortcut("0", modifiers: .command)
+                Button("100%") { model.zoomToActualSize() }
+                    .keyboardShortcut("1", modifiers: .command)
+            }
+            .controlSize(.small)
+            .disabled(!model.hasImage)
 
             if model.lastRenderMs > 0 {
                 // Render time on screen during development: the Phase 1
