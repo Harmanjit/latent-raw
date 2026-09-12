@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    # GitHub-hosted macOS runners can build everything, but per DESIGN.md §12
+    # GPU-dependent tests (anything touching GPUContext/RenderPipeline) need
+    # a self-hosted Apple Silicon runner with real Metal access. Split into
+    # two jobs once that runner exists; for now this just builds + runs the
+    # CPU-only tests (Catalog), and GPU tests self-skip without TestAssets.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app
+      - name: Build vendor dependencies
+        run: |
+          echo "TODO: automate vendor/README.md's LibRaw XCFramework build here,"
+          echo "cached by LibRaw version tag so this doesn't rebuild every run."
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test

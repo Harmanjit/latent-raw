@@ -1,0 +1,22 @@
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+.DS_Store
+TestAssets/*
+!TestAssets/README.md
+vendor/*-src/
+vendor/*.xcframework/
+
+# Editor / tool state
+.claude/
+.idea/
+.vscode/
+*.swp
+*.orig
+
+# Rendered outputs from the CLI during development
+/out/
+*.png
+!TestAssets/README.md

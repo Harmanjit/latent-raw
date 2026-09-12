@@ -1,0 +1,12 @@
+rawhead is licensed under the GNU General Public License v3.0 (GPLv3).
+
+The canonical, authoritative license text is maintained by the Free Software
+Foundation and should be placed in this file verbatim before the first public
+push. Fetch it directly rather than trusting a copy pasted from elsewhere:
+
+    curl -o LICENSE https://www.gnu.org/licenses/gpl-3.0.txt
+
+(This placeholder exists because this scaffold was generated in an environment
+without network access to gnu.org. Replace this file's contents with the
+fetched text — do not delete this file or leave the repo without a full
+LICENSE file before pushing publicly.)
