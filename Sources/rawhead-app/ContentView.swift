@@ -2,6 +2,16 @@ import SwiftUI
 import Metal
 import PixelEngine
 import ColorKit
+import Catalog
+import UniformTypeIdentifiers
+
+/// Which half of the app is showing. Same two-mode shape as Lightroom's
+/// Library and Develop modules.
+enum AppMode: String, CaseIterable, Identifiable {
+    case library, develop
+    var id: String { rawValue }
+    var title: String { self == .library ? "Library" : "Develop" }
+}
 
 /// Layout follows Lightroom's Develop module, which is what people expect:
 /// image centred on a neutral surround, histogram at the top of the right
@@ -18,25 +28,94 @@ import ColorKit
 /// arrive.
 struct ContentView: View {
     @StateObject private var model = EditorModel()
+    @StateObject private var library = Library()
+    @State private var mode: AppMode = .library
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                imageArea
+                LibraryPanel(library: library, onOpenFolder: showOpenFolderPanel)
                 Divider()
-                adjustmentPanel
-                    .frame(width: 280)
+                switch mode {
+                case .library:
+                    ThumbnailGridView(library: library, onOpen: openInEditor)
+                case .develop:
+                    imageArea
+                    Divider()
+                    adjustmentPanel
+                        .frame(width: 280)
+                }
             }
             Divider()
             statusBar
         }
+        .background(navigationShortcuts)
         .onAppear {
-            // Developer convenience: `swift run rawhead-app photo.nef` opens
-            // the file straight away, skipping the Open dialog.
+            // Developer convenience: `swift run rawhead-app <folder-or-file>`
+            // opens it straight away, skipping the dialogs.
             if let path = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") }) {
-                model.open(url: URL(fileURLWithPath: path))
+                var isDir: ObjCBool = false
+                FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+                if isDir.boolValue {
+                    openFolder(URL(fileURLWithPath: path, isDirectory: true))
+                } else {
+                    model.open(url: URL(fileURLWithPath: path))
+                    mode = .develop
+                }
             }
         }
+    }
+
+    // MARK: - Library wiring
+
+    private func showOpenFolderPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a folder of raw files"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        openFolder(url)
+    }
+
+    private func openFolder(_ url: URL) {
+        mode = .library
+        Task {
+            do { try await library.open(folder: url) }
+            catch { model.reportError("Could not open folder: \(error)") }
+        }
+    }
+
+    private func openInEditor(_ record: ImageRecord) {
+        guard let url = library.fileURL(for: record) else { return }
+        library.selectedImageID = record.id
+        model.open(url: url)
+        mode = .develop
+    }
+
+    /// Left/right arrows step through the catalog; in Develop that also
+    /// loads the image, so you can flick through a shoot without going
+    /// back to the grid. Return opens the selection. Hidden buttons are
+    /// the least fussy way to get app-wide key handling in SwiftUI.
+    private var navigationShortcuts: some View {
+        Group {
+            Button("") { step(1) }.keyboardShortcut(.rightArrow, modifiers: [])
+            Button("") { step(-1) }.keyboardShortcut(.leftArrow, modifiers: [])
+            Button("") {
+                if let selected = library.selectedImage { openInEditor(selected) }
+            }.keyboardShortcut(.return, modifiers: [])
+            Button("") { mode = .library }.keyboardShortcut("g", modifiers: [])
+            Button("") {
+                if model.hasImage { mode = .develop }
+            }.keyboardShortcut("d", modifiers: [])
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+    }
+
+    private func step(_ offset: Int) {
+        guard let record = library.moveSelection(by: offset) else { return }
+        if mode == .develop { openInEditor(record) }
     }
 
     private var imageArea: some View {
@@ -251,11 +330,19 @@ struct ContentView: View {
 
     private var statusBar: some View {
         HStack(spacing: 12) {
-            Button("Open…") { model.showOpenPanel() }
+            Picker("Mode", selection: $mode) {
+                ForEach(AppMode.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(width: 150)
+
+            Button("Open File…") { model.showOpenPanel(); mode = .develop }
                 .controlSize(.small)
                 .disabled(!model.isReady)
 
-            Text(model.setupError ?? model.status)
+            Text(model.setupError ?? (mode == .library ? library.statusText : model.status))
                 .font(.caption)
                 .foregroundStyle(model.setupError == nil ? Color.secondary : Color.red)
                 .lineLimit(1)
@@ -280,9 +367,9 @@ struct ContentView: View {
                     .keyboardShortcut("1", modifiers: .command)
             }
             .controlSize(.small)
-            .disabled(!model.hasImage)
+            .disabled(!model.hasImage || mode != .develop)
 
-            if !model.renderReport.isEmpty {
+            if !model.renderReport.isEmpty && mode == .develop {
                 // What the last action rendered and how long it took, on
                 // screen during development: the Phase 1 exit criterion is
                 // under 16ms at fit-to-window, and having it visible while

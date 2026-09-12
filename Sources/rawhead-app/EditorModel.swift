@@ -550,6 +550,11 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    /// Lets other parts of the app put a message in the status bar.
+    func reportError(_ message: String) {
+        status = message
+    }
+
     func resetWhiteBalance() {
         parameters.whiteBalance = asShotWhiteBalance
     }

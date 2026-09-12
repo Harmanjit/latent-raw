@@ -84,7 +84,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "rawhead-app",
-            dependencies: ["RawCore", "PixelEngine", "ColorKit"],
+            dependencies: ["RawCore", "PixelEngine", "ColorKit", "Catalog"],
             path: "Sources/rawhead-app"
         ),
     ]
