@@ -53,15 +53,22 @@ inline float3 reconstructHighlights(float3 rgb, float3 clipLevel,
     return mix(rgb, neutralized, strength);
 }
 
-/// Naka-Rushton sigmoid: y = x^c / (x^c + k^c).
+/// Naka-Rushton sigmoid with a ceiling: y = H * x^c / (x^c + k'^c).
 ///
-/// Maps unbounded scene-linear values onto [0,1) without ever clipping.
-/// Middle grey (k) lands on exactly 0.5. Higher contrast steepens the
-/// midtones while keeping the smooth highlight rolloff.
-inline float3 toneMapSigmoid(float3 x, float contrast, float greyPoint) {
+/// Maps unbounded scene-linear values onto [0, H) without ever clipping.
+/// `headroom` (H) is how bright the display can go relative to paper
+/// white: 1.0 for an ordinary SDR screen, around 2 for a MacBook Pro XDR
+/// at normal brightness. Middle grey always lands on exactly 0.5 whatever
+/// H is — k' is solved so that y(k) = 0.5 — so raising the ceiling only
+/// stretches the highlights upward; it never brightens the whole image.
+///
+/// With H = 1 this is the plain sigmoid, which is what export uses.
+inline float3 toneMapSigmoid(float3 x, float contrast, float greyPoint, float headroom) {
     float3 xc = pow(max(x, 0.0), contrast);
     float kc = pow(max(greyPoint, 1e-6), contrast);
-    return xc / (xc + kc);
+    // y(k) = H * k^c / (k^c + k'^c) = 0.5  =>  k'^c = k^c * (2H - 1)
+    float kPrime = kc * max(2.0 * headroom - 1.0, 1e-6);
+    return headroom * xc / (xc + kPrime);
 }
 
 /// sRGB opto-electronic transfer function (the "gamma" encoding).
@@ -88,6 +95,8 @@ kernel void colorAndTone(
     constant float3 &clipLevel                   [[buffer(5)]],
     constant float &highlightThreshold           [[buffer(6)]],
     constant float &highlightStrength            [[buffer(7)]],
+    constant float &headroom                     [[buffer(8)]],
+    constant uint  &encodeOutput                 [[buffer(9)]],
     uint2 gid                                    [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
@@ -107,12 +116,15 @@ kernel void colorAndTone(
     // Stage 6: exposure, in linear light (the only place it's meaningful).
     working *= exposureScale;
 
-    // Stage 9: scene-referred -> display-referred.
-    float3 display = toneMapSigmoid(working, contrast, greyPoint);
+    // Stage 9: scene-referred -> display-referred, up to the headroom.
+    float3 display = toneMapSigmoid(working, contrast, greyPoint, headroom);
 
-    // Stage 13: working space -> output space, then encode.
+    // Stage 13: working space -> output space, then encode — or not.
+    // Files want the sRGB curve applied and values clamped to [0,1].
+    // An EDR screen buffer wants linear light, above 1.0 where the scene
+    // was, and the compositor handles the rest.
     float3 outputLinear = workingToOutput * display;
-    float3 encoded = encodeSRGB(outputLinear);
+    float3 result = (encodeOutput != 0) ? encodeSRGB(outputLinear) : max(outputLinear, 0.0);
 
-    output.write(float4(encoded, 1.0), gid);
+    output.write(float4(result, 1.0), gid);
 }

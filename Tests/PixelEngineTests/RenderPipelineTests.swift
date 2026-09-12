@@ -136,6 +136,40 @@ final class RenderPipelineTests: XCTestCase {
         XCTAssertFalse(info.demosaicWasCached, "stale entry must have been evicted")
     }
 
+    /// EDR output must exceed 1.0 where the scene is bright, never exceed
+    /// the headroom, and leave the file path bounded at 1.0.
+    func testEDROutputUsesHeadroom() throws {
+        let path = TestAssets.path("nikon_d750_sample.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
+                           "Drop a D750 NEF at \(path) — see TestAssets/README.md")
+
+        let file = try RawFile(path: path)
+        let gpu = try GPUContext()
+        let session = try ImageSession(file: file, gpu: gpu)
+        let pipeline = RenderPipeline(gpu: gpu)
+        let scale = RenderScale.binned(quads: 4)
+        // Push exposure so the sky definitely clears paper white.
+        var params = EditParameters()
+        params.exposureEV = 2
+
+        func maxComponent(_ output: RenderOutput) throws -> Float {
+            let tex = try pipeline.render(session, scale: scale, parameters: params, output: output)
+            let px = try TextureReadback.float16Pixels(of: tex, gpu: gpu)
+            var m: Float = 0
+            for i in stride(from: 0, to: px.count, by: 4) {
+                m = max(m, Float(px[i]), Float(px[i + 1]), Float(px[i + 2]))
+            }
+            return m
+        }
+
+        let sdr = try maxComponent(.file(.sRGB))
+        XCTAssertLessThanOrEqual(sdr, 1.0)
+
+        let edr = try maxComponent(.edrDisplay(headroom: 2))
+        XCTAssertGreaterThan(edr, 1.0, "bright scene should use the headroom")
+        XCTAssertLessThanOrEqual(edr, 2.0 + 1e-3, "never above the headroom")
+    }
+
     func testSonyCompressedARWRenders() throws {
         let path = TestAssets.path("sony_a7iii_compressed.arw")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path),

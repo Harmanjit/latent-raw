@@ -27,6 +27,12 @@ struct MetalImageView: NSViewRepresentable {
 
     /// Drawable size in device pixels changed.
     let onResize: (CGSize) -> Void
+    /// The screen's EDR headroom changed (view moved to another display,
+    /// or the display's brightness changed what it can show). 1.0 means
+    /// an ordinary SDR screen.
+    let onHeadroomChange: (CGFloat) -> Void
+    /// Grey level for the surround, in the drawable's own encoding.
+    let backgroundLevel: Float
     /// Pinch or option-scroll: multiply zoom by `factor`, keeping the
     /// content under `screenPoint` (device pixels, top-left origin) still.
     let onZoom: (_ factor: CGFloat, _ screenPoint: CGPoint) -> Void
@@ -38,6 +44,7 @@ struct MetalImageView: NSViewRepresentable {
         let view = MetalLayerView()
         view.configure(device: device, presenter: presenter)
         view.onResize = onResize
+        view.onHeadroomChange = onHeadroomChange
         view.onZoom = onZoom
         view.onPan = onPan
         view.onDoubleClick = onDoubleClick
@@ -45,6 +52,7 @@ struct MetalImageView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: MetalLayerView, context: Context) {
+        view.backgroundLevel = backgroundLevel
         view.display(preview: preview, tile: tile, transform: transform)
     }
 }
@@ -57,8 +65,11 @@ final class MetalLayerView: NSView {
     private var currentTile: PresentLayer?
     private var currentTransform = ViewportTransform(zoom: 1, center: .zero)
     private var lastReportedSize: CGSize = .zero
+    private var lastReportedHeadroom: CGFloat = 0
+    var backgroundLevel: Float = 0.12
 
     var onResize: ((CGSize) -> Void)?
+    var onHeadroomChange: ((CGFloat) -> Void)?
     var onZoom: ((CGFloat, CGPoint) -> Void)?
     var onPan: ((CGSize) -> Void)?
     var onDoubleClick: ((CGPoint) -> Void)?
@@ -74,7 +85,14 @@ final class MetalLayerView: NSView {
         wantsLayer = true
         let layer = CAMetalLayer()
         layer.device = device
-        layer.pixelFormat = .bgra8Unorm
+        // EDR surface (DESIGN.md §8.3): half-float pixels in extended
+        // linear Display P3. "Extended" means components may exceed 1.0;
+        // on an HDR-capable screen the compositor shows those as brighter
+        // than paper white instead of clipping. On an SDR screen it just
+        // clips, and nothing else changes.
+        layer.pixelFormat = .rgba16Float
+        layer.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)
+        layer.wantsExtendedDynamicRangeContent = true
         // The present kernel writes to the drawable from a compute shader,
         // which framebufferOnly would forbid.
         layer.framebufferOnly = false
@@ -92,6 +110,23 @@ final class MetalLayerView: NSView {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         updateDrawableSize()
+        reportHeadroom()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        reportHeadroom()
+    }
+
+    /// What the current screen can show above paper white right now.
+    /// This moves with brightness on XDR displays, so it's re-read
+    /// whenever the view's backing properties change.
+    private func reportHeadroom() {
+        guard let screen = window?.screen else { return }
+        let headroom = screen.maximumExtendedDynamicRangeColorComponentValue
+        guard headroom != lastReportedHeadroom else { return }
+        lastReportedHeadroom = headroom
+        DispatchQueue.main.async { [weak self] in self?.onHeadroomChange?(headroom) }
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -135,7 +170,8 @@ final class MetalLayerView: NSView {
               metalLayer.drawableSize.width > 0,
               let drawable = metalLayer.nextDrawable() else { return }
         presenter.present(base: preview, tile: currentTile,
-                          transform: currentTransform, to: drawable)
+                          transform: currentTransform, to: drawable,
+                          backgroundLevel: backgroundLevel)
     }
 
     // MARK: - Gestures

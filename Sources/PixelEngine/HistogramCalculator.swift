@@ -61,7 +61,10 @@ public final class HistogramCalculator {
     /// Computes the histogram of `texture`. Returns nil if the GPU work
     /// fails; a missing histogram is a cosmetic loss, not a render failure,
     /// so callers should treat it as optional rather than an error.
-    public func compute(from texture: MTLTexture) -> Histogram? {
+    /// `inputIsLinear`: pass true for textures rendered with a linear
+    /// (EDR) output; the kernel applies the sRGB curve itself so the
+    /// histogram shape matches an encoded render.
+    public func compute(from texture: MTLTexture, inputIsLinear: Bool = false) -> Histogram? {
         guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer() else { return nil }
 
         // Clear last frame's counts. A blit fill is cheaper than a kernel
@@ -75,6 +78,8 @@ public final class HistogramCalculator {
         encoder.setComputePipelineState(gpu.histogramPSO)
         encoder.setTexture(texture, index: 0)
         encoder.setBuffer(resultBuffer, offset: 0, index: 0)
+        var linear: UInt32 = inputIsLinear ? 1 : 0
+        encoder.setBytes(&linear, length: 4, index: 1)
 
         let pso = gpu.histogramPSO
         let tw = pso.threadExecutionWidth

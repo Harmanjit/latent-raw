@@ -122,6 +122,39 @@ public struct EditParameters: Sendable, Equatable {
     }
 }
 
+/// How the final pixels are encoded — which is about the *destination*,
+/// not the edit, which is why it isn't part of EditParameters.
+public struct RenderOutput: Sendable, Equatable {
+    /// Primaries of the output.
+    public var space: ColorKit.OutputSpace
+    /// Tone-curve ceiling relative to paper white. 1 for SDR and files.
+    public var headroom: Float
+    /// Apply the sRGB curve and clamp to [0,1]? Files yes; an EDR screen
+    /// buffer no — it wants linear light.
+    public var encoded: Bool
+
+    public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true) {
+        self.space = space
+        self.headroom = headroom
+        self.encoded = encoded
+    }
+
+    /// An ordinary file: encoded, no headroom.
+    public static func file(_ space: ColorKit.OutputSpace) -> RenderOutput {
+        RenderOutput(space: space, headroom: 1, encoded: true)
+    }
+
+    /// An EDR CAMetalLayer configured for extended linear Display P3.
+    public static func edrDisplay(headroom: Float) -> RenderOutput {
+        RenderOutput(space: .displayP3, headroom: max(1, headroom), encoded: false)
+    }
+
+    public static func == (a: RenderOutput, b: RenderOutput) -> Bool {
+        String(describing: a.space) == String(describing: b.space)
+            && a.headroom == b.headroom && a.encoded == b.encoded
+    }
+}
+
 /// Describes what a given render actually did.
 public struct RenderInfo: Sendable {
     public let outputWidth: Int
@@ -173,11 +206,16 @@ public final class RenderPipeline {
         self.gpu = gpu
     }
 
+    /// `output` defaults to an encoded file in `parameters.outputSpace`,
+    /// which is what export, the CLI and the tests want. The viewport
+    /// passes `.edrDisplay(headroom:)` instead.
     @discardableResult
     public func render(_ session: ImageSession,
                         scale: RenderScale = .full,
                         parameters: EditParameters = .neutral,
+                        output: RenderOutput? = nil,
                         info: UnsafeMutablePointer<RenderInfo>? = nil) throws -> MTLTexture {
+        let output = output ?? .file(parameters.outputSpace)
         let summary = session.file.summary
         guard case .bayer(let order) = summary.cfaPattern else {
             throw RenderError.unsupportedCFAForV1
@@ -248,7 +286,8 @@ public final class RenderPipeline {
                                            outputRole: displayRole,
                                            cameraToWorking: cameraToWorking,
                                            multipliers: multipliers,
-                                           parameters: parameters)
+                                           parameters: parameters,
+                                           output: output)
 
         cmdBuffer.commit()
         cmdBuffer.waitUntilCompleted()
@@ -311,9 +350,10 @@ public final class RenderPipeline {
                                     outputRole: ImageSession.TextureRole,
                                     cameraToWorking: simd_float3x3,
                                     multipliers: SIMD4<Float>,
-                                    parameters: EditParameters) throws -> MTLTexture {
-        let output = try session.texture(width: input.width, height: input.height,
-                                          pixelFormat: .rgba16Float, role: outputRole)
+                                    parameters: EditParameters,
+                                    output: RenderOutput) throws -> MTLTexture {
+        let outputTexture = try session.texture(width: input.width, height: input.height,
+                                                 pixelFormat: .rgba16Float, role: outputRole)
 
         guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             throw RenderError.commandBufferFailed
@@ -321,10 +361,10 @@ public final class RenderPipeline {
 
         encoder.setComputePipelineState(gpu.colorAndTonePSO)
         encoder.setTexture(input, index: 0)
-        encoder.setTexture(output, index: 1)
+        encoder.setTexture(outputTexture, index: 1)
 
         var camToWorking = cameraToWorking
-        var workingToOut = ColorKit.workingToOutput(parameters.outputSpace)
+        var workingToOut = ColorKit.workingToOutput(output.space)
         var exposureScale = powf(2.0, parameters.exposureEV)
         var contrast = parameters.contrast
         var greyPoint = parameters.greyPoint
@@ -344,10 +384,14 @@ public final class RenderPipeline {
         encoder.setBytes(&clipLevel, length: MemoryLayout<SIMD3<Float>>.size, index: 5)
         encoder.setBytes(&highlightThreshold, length: 4, index: 6)
         encoder.setBytes(&highlightStrength, length: 4, index: 7)
+        var headroom = output.headroom
+        var encode: UInt32 = output.encoded ? 1 : 0
+        encoder.setBytes(&headroom, length: 4, index: 8)
+        encoder.setBytes(&encode, length: 4, index: 9)
 
         dispatch(encoder, pso: gpu.colorAndTonePSO, width: input.width, height: input.height)
         encoder.endEncoding()
-        return output
+        return outputTexture
     }
 
     // MARK: - Full-resolution demosaic

@@ -51,6 +51,8 @@ struct ContentView: View {
                                 presenter: presenter,
                                 device: device,
                                 onResize: { model.viewportDidResize(to: $0) },
+                                onHeadroomChange: { model.displayHeadroomDidChange(to: $0) },
+                                backgroundLevel: model.backgroundLevel,
                                 onZoom: { model.zoom(by: $0, about: $1) },
                                 onPan: { model.pan(by: $0) },
                                 onDoubleClick: { model.toggleZoom(at: $0) })
@@ -118,6 +120,21 @@ struct ContentView: View {
                     sliderRow(title: "Mid Grey",
                                value: $model.parameters.greyPoint,
                                range: 0.05...0.5, format: "%.3f")
+
+                    Toggle(isOn: $model.hdrDisplayEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("HDR display")
+                                .font(.subheadline)
+                            Text(model.displayHasHeadroom
+                                 ? String(format: "this screen: %.1f× above white", model.displayHeadroom)
+                                 : "this screen has no HDR headroom")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(!model.hasImage || !model.displayHasHeadroom)
                 }
 
                 DisclosureGroup {

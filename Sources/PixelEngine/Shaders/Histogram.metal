@@ -18,9 +18,20 @@ using namespace metal;
 constant uint kBinCount = 256;
 constant uint kTotalBins = 768;   // 3 channels x 256
 
+/// sRGB curve, duplicated from ColorPipeline.metal because runtime
+/// compilation concatenates the kernel sources and can't share inline
+/// functions across them without a header. Keep the two in step.
+inline float3 histogramEncodeSRGB(float3 c) {
+    c = clamp(c, 0.0, 1.0);
+    float3 low  = c * 12.92;
+    float3 high = 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+    return select(low, high, c > 0.0031308);
+}
+
 kernel void computeHistogram(
     texture2d<float, access::read> image      [[texture(0)]],
     device atomic_uint *histogram             [[buffer(0)]],
+    constant uint &inputIsLinear              [[buffer(1)]],
     uint2 gid                                 [[thread_position_in_grid]],
     uint tindex                               [[thread_index_in_threadgroup]],
     uint2 threadsPerGroup                     [[threads_per_threadgroup]])
@@ -42,8 +53,14 @@ kernel void computeHistogram(
     if (gid.x < image.get_width() && gid.y < image.get_height()) {
         float3 color = image.read(gid).rgb;
 
-        // The input is display-referred and already encoded, so values are
-        // nominally 0..1 and map straight onto bins.
+        // The histogram always shows the encoded, SDR view of the image —
+        // the shape photographers know. When the texture is linear EDR
+        // (the on-screen preview), encode it here first; anything above
+        // 1.0 clamps into the top bin, which is exactly "would clip in
+        // SDR" and what the clipping readout should report.
+        if (inputIsLinear != 0) {
+            color = histogramEncodeSRGB(color);
+        }
         uint r = uint(clamp(color.r, 0.0, 1.0) * float(kBinCount - 1) + 0.5);
         uint g = uint(clamp(color.g, 0.0, 1.0) * float(kBinCount - 1) + 0.5);
         uint b = uint(clamp(color.b, 0.0, 1.0) * float(kBinCount - 1) + 0.5);

@@ -60,6 +60,33 @@ final class EditorModel: ObservableObject {
     /// showing the user where the camera set things.
     @Published private(set) var asShotWhiteBalance = ColorKit.WhiteBalance()
 
+    /// Show highlights above paper white using the display's EDR range.
+    /// Off means the on-screen image matches what an SDR export will look
+    /// like, which is useful for judging a file before exporting it.
+    @Published var hdrDisplayEnabled = true {
+        didSet { if hdrDisplayEnabled != oldValue { rerender() } }
+    }
+    /// What the screen reports it can show above 1.0. Exactly 1.0 on an
+    /// SDR display, in which case the toggle has nothing to do.
+    @Published private(set) var displayHeadroom: CGFloat = 1
+
+    /// The ceiling the tone curve actually gets. Capped: a display that
+    /// reports 16x headroom would otherwise render every clipped cloud as
+    /// a searchlight. 4x is already very bright.
+    private static let maximumHeadroom: CGFloat = 4
+    var effectiveHeadroom: Float {
+        hdrDisplayEnabled ? Float(min(displayHeadroom, Self.maximumHeadroom)) : 1
+    }
+    var displayHasHeadroom: Bool { displayHeadroom > 1.001 }
+
+    /// What the pipeline renders for the screen: linear Display P3, so
+    /// the presenter can hand it to the EDR layer untouched.
+    private var displayOutput: RenderOutput { .edrDisplay(headroom: effectiveHeadroom) }
+
+    /// The surround grey, in the drawable's linear encoding. 0.12 in sRGB
+    /// terms — Lightroom's mid-dark grey — is about 0.0137 linear.
+    let backgroundLevel: Float = 0.0137
+
     /// Non-nil when Metal setup failed, in which case nothing else works.
     let setupError: String?
 
@@ -215,6 +242,12 @@ final class EditorModel: ObservableObject {
 
     /// The Metal view's drawable size changed (window resize, or the view
     /// appearing for the first time).
+    func displayHeadroomDidChange(to headroom: CGFloat) {
+        guard headroom != displayHeadroom else { return }
+        displayHeadroom = headroom
+        if hasImage { rerender() }
+    }
+
     func viewportDidResize(to size: CGSize) {
         guard size != drawableSize else { return }
         drawableSize = size
@@ -413,12 +446,15 @@ final class EditorModel: ObservableObject {
         let quads = wantedPreviewQuads
         var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: false)
         let rendered = try pipeline.render(session, scale: .binned(quads: quads),
-                                            parameters: parameters, info: &info)
+                                            parameters: parameters, output: displayOutput,
+                                            info: &info)
         preview = PresentLayer(texture: rendered, coverage: info.sensorRect)
         previewQuads = quads
         // The histogram always describes the whole image, whatever's on
-        // screen — so it comes from the preview, never from a tile.
-        histogram = histogramCalculator?.compute(from: rendered)
+        // screen — so it comes from the preview, never from a tile. The
+        // preview is linear EDR; the kernel encodes it so the shape is the
+        // familiar one and anything above 1.0 counts as SDR clipping.
+        histogram = histogramCalculator?.compute(from: rendered, inputIsLinear: true)
         return "preview \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
 
@@ -429,7 +465,7 @@ final class EditorModel: ObservableObject {
         let rendered = try pipeline.render(
             session,
             scale: .region(x: region.x, y: region.y, width: region.width, height: region.height),
-            parameters: parameters, info: &info)
+            parameters: parameters, output: displayOutput, info: &info)
         tile = PresentLayer(texture: rendered, coverage: info.sensorRect, inset: Self.tileInset)
         return "tile \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
