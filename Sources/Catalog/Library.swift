@@ -27,6 +27,9 @@ public final class Library: ObservableObject {
     @Published public private(set) var undecidedSubfolders: [String] = []
     /// Bumped whenever thumbnails land, so a grid knows to refresh cells.
     @Published public private(set) var thumbnailVersion = 0
+    /// Images that have a stored edit, so the grid can badge them.
+    @Published public private(set) var editedImageIDs: Set<Int64> = []
+
     @Published public var selectedImageID: Int64? {
         didSet { if selectedImageID != oldValue { Task { await reloadSelectedKeywords() } } }
     }
@@ -81,6 +84,7 @@ public final class Library: ObservableObject {
         let report = try await catalog.reconcile()
         undecidedSubfolders = report.undecidedSubfolders
         images = try await catalog.allImages()
+        editedImageIDs = try await catalog.editedImageIDs()
         if let selected = selectedImageID, !images.contains(where: { $0.id == selected }) {
             selectedImageID = nil
         }
@@ -193,6 +197,25 @@ public final class Library: ObservableObject {
         guard let current = selectedImage else { return }
         let next = current.userRotation + quarterTurns
         try await changeSelected { try await $0.setUserRotation(next, forImageID: $1) }
+    }
+
+    // MARK: - Edits
+
+    /// The stored edit stack for an image, or nil if it's unedited.
+    public func editStack(for record: ImageRecord) async -> String? {
+        guard let id = record.id, let catalog else { return nil }
+        return try? await catalog.editStack(forImageID: id)
+    }
+
+    /// Persists an edit stack (nil = back to defaults) for an image by id,
+    /// which need not be the selection — the editor may still be saving
+    /// the previous image after the user moved on.
+    public func saveEditStack(_ json: String?, schemaVersion: Int, processVersion: String,
+                              forImageID id: Int64) async throws {
+        guard let catalog else { return }
+        try await catalog.setEditStack(json, schemaVersion: schemaVersion,
+                                       processVersion: processVersion, forImageID: id)
+        if json == nil { editedImageIDs.remove(id) } else { editedImageIDs.insert(id) }
     }
 
     // MARK: - Navigation

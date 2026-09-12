@@ -34,7 +34,50 @@ import PixelEngine
 @MainActor
 final class EditorModel: ObservableObject {
     @Published var parameters = EditParameters() {
-        didSet { if parameters != oldValue { rerender() } }
+        didSet {
+            if parameters != oldValue {
+                rerender()
+                scheduleSave()
+            }
+        }
+    }
+
+    /// The catalog id of the open image, when it came from a catalog.
+    /// Captured into each pending save, so a save that fires after the
+    /// user has moved on still lands on the right image.
+    private(set) var catalogImageID: Int64?
+    /// The fresh parameters for this image (as-shot white balance and so
+    /// on). A stack equal to these is "no edit" and isn't stored.
+    private var defaultParameters = EditParameters()
+    private var pendingSave: Task<Void, Never>?
+
+    /// Called with the edit to persist, or nil when the image is back to
+    /// defaults. The library owns the actual write. Set by ContentView.
+    var onEditSettled: ((_ imageID: Int64, _ editStackJSON: String?) -> Void)?
+
+    /// Persists ~1s after the last change (DESIGN.md §5.3: nothing is
+    /// written while a slider is being dragged).
+    private func scheduleSave() {
+        guard catalogImageID != nil else { return }
+        pendingSave?.cancel()
+        pendingSave = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.flushPendingSave()
+        }
+    }
+
+    /// Saves now if anything is pending. Called before switching images
+    /// so an edit made a moment before pressing → isn't lost.
+    func flushPendingSave() {
+        guard let id = catalogImageID, let pendingSave else { return }
+        pendingSave.cancel()
+        self.pendingSave = nil
+        if EditStack.isDefault(parameters, relativeTo: defaultParameters) {
+            onEditSettled?(id, nil)
+        } else {
+            onEditSettled?(id, try? EditStack(parameters: parameters).encodeJSON())
+        }
     }
     /// The whole image at preview resolution. Always drawn, so the view is
     /// never empty however far the user pans or zooms mid-gesture.
@@ -235,10 +278,14 @@ final class EditorModel: ObservableObject {
         open(url: url)
     }
 
-    /// `userRotation` is the catalog's stored manual rotation for this
-    /// image, if it came from a catalog.
-    func open(url: URL, userRotation: Int = 0) {
+    /// `userRotation` and `editStackJSON` are the catalog's stored state
+    /// for this image, if it came from one; `catalogImageID` lets edits
+    /// made here be saved back.
+    func open(url: URL, userRotation: Int = 0, catalogImageID: Int64? = nil,
+              editStackJSON: String? = nil) {
         guard let gpu = gpuContext else { return }
+        flushPendingSave()
+        self.catalogImageID = catalogImageID
         status = "Opening \(url.lastPathComponent)…"
         do {
             let file = try RawFile(path: url.path)
@@ -260,10 +307,21 @@ final class EditorModel: ObservableObject {
 
             // Start from the camera's own white balance, expressed as
             // temperature and tint so the sliders show something meaningful
-            // rather than a default the photo was never shot under.
+            // rather than a default the photo was never shot under. Then
+            // lay the stored edit, if any, over that.
             var fresh = EditParameters()
             fresh.whiteBalance = newSession.asShotWhiteBalance
-            parameters = fresh   // triggers rerender via didSet
+            defaultParameters = fresh
+            var restored = fresh
+            if let editStackJSON, let stack = try? EditStack.decode(json: editStackJSON) {
+                restored = stack.parameters(defaults: fresh)
+                if restored.whiteBalance.isAsShot { restored.whiteBalance = fresh.whiteBalance }
+            }
+            pendingSave?.cancel()   // the assignment below must not save
+            pendingSave = nil
+            parameters = restored   // triggers rerender via didSet
+            pendingSave?.cancel()
+            pendingSave = nil
 
             if newSession.profile == nil {
                 status = "No colour profile for \(file.summary.cameraModel) — cannot render"
@@ -600,8 +658,6 @@ final class EditorModel: ObservableObject {
     }
 
     func resetAdjustments() {
-        var fresh = EditParameters()
-        fresh.whiteBalance = asShotWhiteBalance
-        parameters = fresh
+        parameters = defaultParameters
     }
 }

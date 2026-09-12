@@ -40,6 +40,7 @@ struct ContentView: View {
                 switch mode {
                 case .library:
                     ThumbnailGridView(library: library, onOpen: openInEditor)
+                .onDisappear { model.flushPendingSave() }
                 case .develop:
                     imageArea
                     Divider()
@@ -52,6 +53,7 @@ struct ContentView: View {
         }
         .background(navigationShortcuts)
         .onAppear {
+            wireEditSaving()
             // Developer convenience: `swift run rawhead-app <folder-or-file>`
             // opens it straight away, skipping the dialogs.
             if let path = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") }) {
@@ -90,8 +92,23 @@ struct ContentView: View {
     private func openInEditor(_ record: ImageRecord) {
         guard let url = library.fileURL(for: record) else { return }
         library.selectedImageID = record.id
-        model.open(url: url, userRotation: record.userRotation)
         mode = .develop
+        Task {
+            let stack = await library.editStack(for: record)
+            model.open(url: url, userRotation: record.userRotation,
+                       catalogImageID: record.id, editStackJSON: stack)
+        }
+    }
+
+    /// Edits settle in the editor and land in the catalog here.
+    private func wireEditSaving() {
+        model.onEditSettled = { imageID, json in
+            Task {
+                try? await library.saveEditStack(json, schemaVersion: EditStack.schemaVersion,
+                                                  processVersion: EditStack.processVersion,
+                                                  forImageID: imageID)
+            }
+        }
     }
 
     // MARK: - Metadata shortcuts (both modes)

@@ -53,6 +53,7 @@ struct ThumbnailGridView: NSViewRepresentable {
 
         private var images: [ImageRecord] = []
         private var thumbnailVersion = -1
+        private var editedIDs: Set<Int64> = []
         private var selectedID: Int64?
 
         init(library: Library, onOpen: @escaping (ImageRecord) -> Void) {
@@ -68,10 +69,12 @@ struct ThumbnailGridView: NSViewRepresentable {
             if library.images != images {
                 images = library.images
                 collectionView.reloadData()
-            } else if library.thumbnailVersion != thumbnailVersion {
+            } else if library.thumbnailVersion != thumbnailVersion
+                        || library.editedImageIDs != editedIDs {
                 collectionView.reloadItems(at: collectionView.indexPathsForVisibleItems())
             }
             thumbnailVersion = library.thumbnailVersion
+            editedIDs = library.editedImageIDs
 
             if library.selectedImageID != selectedID {
                 selectedID = library.selectedImageID
@@ -96,7 +99,8 @@ struct ThumbnailGridView: NSViewRepresentable {
             let item = collectionView.makeItem(withIdentifier: ThumbnailItem.identifier, for: indexPath)
             guard let cell = item as? ThumbnailItem else { return item }
             let record = images[indexPath.item]
-            cell.configure(record: record, thumbnail: library.cachedThumbnail(for: record))
+            cell.configure(record: record, thumbnail: library.cachedThumbnail(for: record),
+                           isEdited: record.id.map { library.editedImageIDs.contains($0) } ?? false)
             cell.onDoubleClick = { [weak self] in self?.onOpen(record) }
 
             if cell.thumbnail == nil {
@@ -193,11 +197,12 @@ final class ThumbnailItem: NSCollectionViewItem {
         ])
     }
 
-    func configure(record: ImageRecord, thumbnail: CGImage?) {
+    func configure(record: ImageRecord, thumbnail: CGImage?, isEdited: Bool) {
         representedID = record.id
         userRotation = record.userRotation
         nameLabel.stringValue = record.fileName
         var badges: [String] = []
+        if isEdited { badges.append("✎") }
         if record.flag > 0 { badges.append("✓") }
         if record.flag < 0 { badges.append("✗") }
         if record.rating > 0 { badges.append(String(repeating: "★", count: record.rating)) }

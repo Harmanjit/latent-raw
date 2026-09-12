@@ -66,6 +66,42 @@ final class MetadataTests: XCTestCase {
         XCTAssertEqual(keywords, ["mountains", "sunset"])
     }
 
+    func testEditStackRoundTripsThroughSidecar() async throws {
+        var catalog = try Catalog.open(at: folder)
+        _ = try await catalog.reconcile()
+        let firstImage = try await catalog.allImages().first
+        let id = try XCTUnwrap(firstImage?.id)
+
+        let json = #"{"schema":1,"process":"1.0","modules":{"exposure":{"ev":0.5}}}"#
+        try await catalog.setEditStack(json, forImageID: id)
+        let stored = try await catalog.editStack(forImageID: id)
+        XCTAssertEqual(stored, json)
+        let edited = try await catalog.editedImageIDs()
+        XCTAssertEqual(edited, [id])
+
+        let sidecar = await catalog.sidecarURL(forRelPath: "A.NEF")
+        XCTAssertEqual(try XMPSidecar.read(from: sidecar).editStackJSON, json)
+
+        // Rebuild from the sidecar alone.
+        let db = await catalog.containerPath.appendingPathComponent("catalog.sqlite")
+        catalog = try Catalog.open(at: URL(fileURLWithPath: "/tmp"))
+        for suffix in ["", "-wal", "-shm"] {
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: db.path + suffix))
+        }
+        catalog = try Catalog.open(at: folder)
+        _ = try await catalog.reconcile()
+        let rebuiltImage = try await catalog.image(forRelPath: "A.NEF")
+        let rebuiltID = try XCTUnwrap(rebuiltImage?.id)
+        let rebuiltJSON = try await catalog.editStack(forImageID: rebuiltID)
+        XCTAssertEqual(rebuiltJSON, json)
+
+        // Clearing removes the row and the sidecar's stack.
+        try await catalog.setEditStack(nil, forImageID: rebuiltID)
+        let cleared = try await catalog.editStack(forImageID: rebuiltID)
+        XCTAssertNil(cleared)
+        XCTAssertEqual(try XMPSidecar.read(from: sidecar).editStackJSON, "")
+    }
+
     @MainActor
     func testLibraryAppliesToSelection() async throws {
         let library = Library()

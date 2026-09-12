@@ -34,6 +34,43 @@ extension Catalog {
         try writeSidecar(forImageID: id)
     }
 
+    /// Stores the edit stack for an image and writes the sidecar. `nil`
+    /// removes it (the image is back to defaults). The catalog doesn't
+    /// interpret the JSON — that's PixelEngine's business — it only keeps
+    /// it and its versions.
+    public func setEditStack(_ json: String?, schemaVersion: Int = 1,
+                             processVersion: String = "1.0",
+                             forImageID id: Int64) throws {
+        try dbQueue.write { db in
+            if let json {
+                try db.execute(sql: """
+                    INSERT OR REPLACE INTO edits
+                      (image_id, schema_version, process_version, params_json, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, arguments: [id, schemaVersion, processVersion, json,
+                                     ImageRecord.milliseconds(Date())])
+            } else {
+                try db.execute(sql: "DELETE FROM edits WHERE image_id = ?", arguments: [id])
+            }
+        }
+        try writeSidecar(forImageID: id)
+    }
+
+    /// The stored edit stack JSON, if the image has one.
+    public func editStack(forImageID id: Int64) throws -> String? {
+        try dbQueue.read { db in
+            try String.fetchOne(db, sql: "SELECT params_json FROM edits WHERE image_id = ?",
+                                arguments: [id])
+        }
+    }
+
+    /// IDs of every image with a stored edit, for badges in the grid.
+    public func editedImageIDs() throws -> Set<Int64> {
+        Set(try dbQueue.read { db in
+            try Int64.fetchAll(db, sql: "SELECT image_id FROM edits")
+        })
+    }
+
     private func updateRow(_ id: Int64, _ mutate: (inout ImageRecord) -> Void) throws {
         try dbQueue.write { db in
             guard var row = try ImageRecord.fetchOne(db, key: id) else { return }
