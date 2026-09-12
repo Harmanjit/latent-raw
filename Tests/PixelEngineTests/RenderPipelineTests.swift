@@ -15,13 +15,35 @@ final class RenderPipelineTests: XCTestCase {
 
         let file = try RawFile(path: path)
         let gpu = try GPUContext()
+        // An ImageSession uploads the sensor plane once and owns the pooled
+        // textures; RenderPipeline renders *sessions*, not bare files.
+        let session = try ImageSession(file: file, gpu: gpu)
         let pipeline = RenderPipeline(gpu: gpu)
-        let texture = try pipeline.render(file)
+        let texture = try pipeline.render(session)
 
         XCTAssertEqual(texture.width, file.summary.rawWidth)
         XCTAssertEqual(texture.height, file.summary.rawHeight)
         // TODO once a reference render exists: compare against it within a
         // tolerance (DESIGN.md §12 "golden images"), not just shape-check.
+    }
+
+    func testViewportRenderIsSmallerThanSensor() throws {
+        let path = TestAssets.path("nikon_d750_sample.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
+                           "Drop a D750 NEF at \(path) — see TestAssets/README.md")
+
+        let file = try RawFile(path: path)
+        let gpu = try GPUContext()
+        let session = try ImageSession(file: file, gpu: gpu)
+        let pipeline = RenderPipeline(gpu: gpu)
+
+        var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: true)
+        let texture = try pipeline.render(session, scale: .fitting(maxDimension: 2560),
+                                          parameters: .neutral, info: &info)
+
+        XCTAssertFalse(info.isFullResolution)
+        XCTAssertLessThanOrEqual(max(texture.width, texture.height), 3016)
+        XCTAssertGreaterThan(texture.width, 0)
     }
 
     func testSonyCompressedARWRenders() throws {
