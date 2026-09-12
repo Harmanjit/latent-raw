@@ -46,7 +46,7 @@ let package = Package(
         ),
         .target(
             name: "Catalog",
-            dependencies: [.product(name: "GRDB", package: "GRDB.swift")],
+            dependencies: [.product(name: "GRDB", package: "GRDB.swift"), "RawCore"],
             path: "Sources/Catalog"
         ),
         .target(
@@ -66,7 +66,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CatalogTests",
-            dependencies: ["Catalog"],
+            dependencies: ["Catalog", "RawCore"],
             path: "Tests/CatalogTests"
         ),
         .binaryTarget(

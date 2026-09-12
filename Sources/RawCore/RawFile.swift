@@ -36,6 +36,9 @@ public struct RawSummary: Sendable {
     public let aperture: Double
     public let focalLength: Double
     public let captureTime: Date
+    /// LibRaw's `flip`: 0 upright, 3 rotated 180°, 5 rotated 90° CCW,
+    /// 6 rotated 90° CW. What the camera recorded, not yet applied.
+    public let orientation: Int
 }
 
 /// Which demosaic family a file needs. Only `.bayer` gets the full v1
@@ -64,6 +67,8 @@ public final class RawFile {
     private let mappedBytes: UnsafeMutableRawPointer
     private let mappedLength: Int
     public let summary: RawSummary
+    /// True when opened with `metadataOnly`: no sensor plane is available.
+    public let isMetadataOnly: Bool
 
     /// The camera's XYZ -> camera-RGB characterization matrix, row-major
     /// 3x3 (LibRaw's 4th row is dropped; it only matters for four-colour
@@ -73,7 +78,12 @@ public final class RawFile {
     /// composes it to build the camera -> working-space transform.
     public let cameraToXYZMatrixRaw: [Float]?
 
-    public init(path: String) throws {
+    /// `metadataOnly` skips decoding the sensor data — EXIF, the colour
+    /// matrix and the embedded preview are still available, at roughly a
+    /// hundredth of the cost. The catalog uses this; rendering needs the
+    /// full open.
+    public init(path: String, metadataOnly: Bool = false) throws {
+        self.isMetadataOnly = metadataOnly
         guard FileManager.default.fileExists(atPath: path) else {
             throw RawFileError.fileNotFound(path: path)
         }
@@ -93,7 +103,9 @@ public final class RawFile {
         self.mappedBytes = mapped
         self.mappedLength = length
 
-        guard let h = clibraw_open_buffer(mapped, length) else {
+        let opened = metadataOnly ? clibraw_open_buffer_metadata(mapped, length)
+                                  : clibraw_open_buffer(mapped, length)
+        guard let h = opened else {
             munmap(mapped, length)
             throw RawFileError.libRawOpenFailed
         }
@@ -119,7 +131,8 @@ public final class RawFile {
             },
             iso: cSummary.iso, shutter: cSummary.shutter,
             aperture: cSummary.aperture, focalLength: cSummary.focal_length,
-            captureTime: Date(timeIntervalSince1970: TimeInterval(cSummary.timestamp))
+            captureTime: Date(timeIntervalSince1970: TimeInterval(cSummary.timestamp)),
+            orientation: Int(cSummary.orientation)
         )
 
         var matrix12 = [Float](repeating: 0, count: 12)
@@ -132,7 +145,7 @@ public final class RawFile {
     /// The unpacked sensor plane straight from LibRaw's own allocation.
     /// `PixelEngine` is the only module that should call this.
     public func rawSensorPlane() -> UnsafeBufferPointer<UInt16>? {
-        guard let h = handle else { return nil }
+        guard let h = handle, !isMetadataOnly else { return nil }
         var length: Int = 0
         guard let ptr = clibraw_get_raw_plane(h, &length), length > 0 else { return nil }
         return UnsafeBufferPointer(start: ptr, count: length / MemoryLayout<UInt16>.size)

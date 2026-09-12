@@ -12,7 +12,9 @@ public enum CatalogError: Error {
 public actor Catalog {
     public let rootPath: URL          // the photo folder itself, not _rawhead/
     public let containerPath: URL     // .../_rawhead
-    private let dbQueue: DatabaseQueue
+    let dbQueue: DatabaseQueue
+
+    public static let containerName = "_rawhead"
 
     private init(rootPath: URL, containerPath: URL, dbQueue: DatabaseQueue) {
         self.rootPath = rootPath
@@ -24,7 +26,8 @@ public actor Catalog {
     /// per DESIGN.md §5.3: WAL on local/external volumes, rollback journal
     /// on network shares, because WAL is unreliable over SMB/NFS.
     public static func open(at folder: URL) throws -> Catalog {
-        let container = folder.appendingPathComponent("_rawhead", isDirectory: true)
+        let folder = folder.standardizedFileURL
+        let container = folder.appendingPathComponent(containerName, isDirectory: true)
         let fm = FileManager.default
 
         var isDir: ObjCBool = false
@@ -62,13 +65,101 @@ public actor Catalog {
         return !(values.volumeIsLocal ?? true)
     }
 
-    /// Reconciliation entry point (DESIGN.md §5.3): compares the directory
-    /// listing and each sidecar's mtime against what's recorded, re-parsing
-    /// only what changed. Not implemented yet — Phase 2.
-    public func reconcile() async throws {
-        // TODO(Phase 2): list `rootPath` (respecting subfolder modes),
-        // diff against `images` by rel_path/size/mtime, diff sidecars by
-        // sidecar_mtime, re-parse only what's stale, handle the renamed-file
-        // case via xxhash lookup (DESIGN.md §5.3).
+    // MARK: - Paths
+
+    public var xmpDirectory: URL { containerPath.appendingPathComponent("xmp", isDirectory: true) }
+    public var thumbnailDirectory: URL { containerPath.appendingPathComponent("thumbnails", isDirectory: true) }
+
+    /// Absolute path of an image from its catalog-relative path.
+    public func fileURL(forRelPath relPath: String) -> URL {
+        rootPath.appendingPathComponent(relPath)
+    }
+
+    /// Sidecars mirror the image's subpath and keep the full filename
+    /// (DESIGN.md §5.1): `xmp/Day 2/DSC_0107.NEF.xmp`.
+    public func sidecarURL(forRelPath relPath: String) -> URL {
+        xmpDirectory.appendingPathComponent(relPath + ".xmp")
+    }
+
+    public func thumbnailURL(forRelPath relPath: String) -> URL {
+        thumbnailDirectory.appendingPathComponent(relPath + ".heic")
+    }
+
+    // MARK: - Queries
+
+    /// Every image, newest capture first, then by path for stability.
+    public func allImages() throws -> [ImageRecord] {
+        try dbQueue.read { db in
+            try ImageRecord
+                .order(Column("capture_time").desc, Column("rel_path"))
+                .fetchAll(db)
+        }
+    }
+
+    public func image(forRelPath relPath: String) throws -> ImageRecord? {
+        try dbQueue.read { db in
+            try ImageRecord.filter(Column("rel_path") == relPath).fetchOne(db)
+        }
+    }
+
+    public func imageCount() throws -> Int {
+        try dbQueue.read { db in try ImageRecord.fetchCount(db) }
+    }
+
+    /// Keywords attached to an image, alphabetical.
+    public func keywords(forImageID id: Int64) throws -> [String] {
+        try dbQueue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT k.name FROM keywords k
+                JOIN image_keywords ik ON ik.keyword_id = k.id
+                WHERE ik.image_id = ? ORDER BY k.name
+                """, arguments: [id])
+        }
+    }
+
+    // MARK: - Settings and subfolder modes
+
+    public func setting(_ key: String) throws -> String? {
+        try dbQueue.read { db in
+            try String.fetchOne(db, sql: "SELECT value FROM settings WHERE key = ?", arguments: [key])
+        }
+    }
+
+    public func setSetting(_ key: String, to value: String?) throws {
+        try dbQueue.write { db in
+            if let value {
+                try db.execute(sql: "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                               arguments: [key, value])
+            } else {
+                try db.execute(sql: "DELETE FROM settings WHERE key = ?", arguments: [key])
+            }
+        }
+    }
+
+    static let defaultSubfolderModeKey = "default_subfolder_mode"
+
+    /// What to do with a subfolder rawhead hasn't seen before. `ask` by
+    /// default: silently swallowing a subfolder into a catalog, or
+    /// silently ignoring one, are both surprising.
+    public func defaultSubfolderMode() throws -> SubfolderMode {
+        try setting(Self.defaultSubfolderModeKey).flatMap(SubfolderMode.init(rawValue:)) ?? .ask
+    }
+
+    public func setDefaultSubfolderMode(_ mode: SubfolderMode) throws {
+        try setSetting(Self.defaultSubfolderModeKey, to: mode.rawValue)
+    }
+
+    public func subfolderMode(forRelPath relPath: String) throws -> SubfolderMode? {
+        try dbQueue.read { db in
+            try String.fetchOne(db, sql: "SELECT mode FROM subfolders WHERE rel_path = ?",
+                                arguments: [relPath])
+        }.flatMap(SubfolderMode.init(rawValue:))
+    }
+
+    public func setSubfolderMode(_ mode: SubfolderMode, forRelPath relPath: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "INSERT OR REPLACE INTO subfolders (rel_path, mode) VALUES (?, ?)",
+                           arguments: [relPath, mode.rawValue])
+        }
     }
 }

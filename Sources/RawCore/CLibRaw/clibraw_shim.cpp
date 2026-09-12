@@ -14,14 +14,22 @@ struct CLibRawHandle {
     LibRaw processor;
 };
 
-extern "C" CLibRawHandle *clibraw_open_buffer(const void *bytes, size_t length) {
+extern "C" CLibRawHandle *clibraw_open_buffer_metadata(const void *bytes, size_t length) {
     auto *handle = new CLibRawHandle();
 
-    // open_buffer reads the header only; it does not copy the whole file.
+    // open_buffer reads the header and runs identify(): it does not copy
+    // or decode the sensor data.
     if (handle->processor.open_buffer(const_cast<void *>(bytes), length) != LIBRAW_SUCCESS) {
         delete handle;
         return nullptr;
     }
+    return handle;
+}
+
+extern "C" CLibRawHandle *clibraw_open_buffer(const void *bytes, size_t length) {
+    CLibRawHandle *handle = clibraw_open_buffer_metadata(bytes, length);
+    if (!handle) return nullptr;
+
     // unpack() decodes the sensor data into imgdata.rawdata. This is the
     // expensive step (~190ms for a 24MP 14-bit lossless NEF).
     if (handle->processor.unpack() != LIBRAW_SUCCESS) {
@@ -61,6 +69,7 @@ extern "C" int clibraw_get_summary(CLibRawHandle *handle, CLibRawSummary *out) {
     out->aperture      = d.other.aperture;
     out->focal_length  = d.other.focal_len;
     out->timestamp     = static_cast<int64_t>(d.other.timestamp);
+    out->orientation   = d.sizes.flip;
 
     return 0;
 }

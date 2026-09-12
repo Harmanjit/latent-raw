@@ -30,12 +30,18 @@ typedef struct {
     double   aperture;
     double   focal_length;
     int64_t  timestamp; // unix epoch seconds
+    int32_t  orientation; // LibRaw `flip`: 0 none, 3 = 180°, 5 = 90° CCW, 6 = 90° CW
 } CLibRawSummary;
 
 // Opens and unpacks a raw file from an already-mapped read-only buffer
 // (the caller mmap()s the file; LibRaw never needs its own file handle).
 // Returns NULL on failure.
 CLibRawHandle *clibraw_open_buffer(const void *bytes, size_t length);
+
+// Same, but stops after LibRaw's identify step: metadata, colour matrix
+// and the embedded preview are available, the sensor plane is not.
+// ~100x cheaper than a full open — this is what the catalog uses.
+CLibRawHandle *clibraw_open_buffer_metadata(const void *bytes, size_t length);
 
 // Fills `out` with the fields needed for the catalog and the pipeline's
 // early stages. Cheap — no demosaic, no color conversion.

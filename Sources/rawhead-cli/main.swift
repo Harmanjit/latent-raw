@@ -4,6 +4,7 @@ import simd
 import RawCore
 import ColorKit
 import PixelEngine
+import Catalog
 
 // Phase-1 harness:
 //   rawhead-cli render <raw-file> [options]
@@ -18,10 +19,58 @@ import PixelEngine
 // Only the last governs whether editing feels responsive.
 
 let args = CommandLine.arguments
+
+// `catalog` subcommand: open (or create) the catalog for a folder,
+// reconcile it, and list what it holds. The command-line way to watch
+// Phase 2 work before there's a grid to look at.
+if args.count >= 3, args[1] == "catalog" {
+    let folder = URL(fileURLWithPath: args[2])
+    let includeSubfolders = args.contains("--include-subfolders")
+    do {
+        let catalog = try Catalog.open(at: folder)
+        if includeSubfolders { try await catalog.setDefaultSubfolderMode(.included) }
+        let report = try await catalog.reconcile()
+        print("Reconciled \(folder.path): \(report)")
+        for undecided in report.undecidedSubfolders {
+            print("  subfolder '\(undecided)' needs a decision (included / independent); " +
+                  "pass --include-subfolders to include all")
+        }
+        for failure in report.failures {
+            print("  FAILED \(failure.relPath): \(failure.reason)")
+        }
+        let images = try await catalog.allImages()
+        print("\(images.count) images:")
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+        for image in images {
+            let when = image.captureTime.map {
+                dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval($0)))
+            } ?? "no date"
+            let stars = String(repeating: "★", count: image.rating)
+                      + String(repeating: "☆", count: 5 - image.rating)
+            let keywords = try await catalog.keywords(forImageID: image.id ?? -1)
+            print(String(format: "  %@  %@  %@  %dx%d  ISO %@ %@ f/%@ %@mm  %@%@",
+                         stars, when, image.camera ?? "?",
+                         image.width ?? 0, image.height ?? 0,
+                         image.iso.map(String.init) ?? "?",
+                         image.shutter.map { $0 >= 1 ? String(format: "%.0fs", $0) : "1/\(Int((1 / $0).rounded()))" } ?? "?",
+                         image.aperture.map { String(format: "%.1f", $0) } ?? "?",
+                         image.focal.map { String(format: "%.0f", $0) } ?? "?",
+                         image.relPath,
+                         keywords.isEmpty ? "" : "  [" + keywords.joined(separator: ", ") + "]"))
+        }
+    } catch {
+        print("Failed: \(error)")
+        exit(1)
+    }
+    exit(0)
+}
+
 guard args.count >= 3, args[1] == "render" else {
     print("""
     Usage:
       rawhead-cli render <path-to-raw-file> [options]
+      rawhead-cli catalog <folder> [--include-subfolders]
 
     Options:
       --out <path.png>       write the result as a PNG

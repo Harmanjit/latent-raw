@@ -55,7 +55,7 @@ Every design decision is checked against these rules.
 | Camera profiles | LibRaw matrices + Adobe DNG SDK | Users can load their own DCP profiles |
 | Metadata and XMP | Exiv2 (GPL) | Full XMP read/write support, including camera MakerNotes |
 | Catalog database | SQLite via GRDB.swift | One database per catalog folder |
-| Checksums | xxHash3 | Computed while copying, at essentially no extra cost |
+| Checksums | xxHash (XXH64) | Computed while copying, at essentially no extra cost |
 | Machine learning | Core ML on the ANE, the Vision framework, and Metal 4 in-shader inference where available (Tahoe only; Core ML otherwise) | Masking, and later ML denoising |
 | Export | ImageIO (JPEG, HEIC, TIFF, PNG), libjxl (optional), DNG SDK | HEIC encoding uses the hardware HEVC encoder |
 | Updates | Sparkle | Signed and notarized builds |
@@ -149,7 +149,7 @@ Each catalog also has a default mode that applies to newly discovered subfolders
 
 **Reconciliation when a folder opens.** rawhead lists the directory and compares each file's name, size and modification time against the database. It then compares each sidecar's modification time against the value recorded in the database, and re-parses only the sidecars that changed. An unchanged folder opens without decoding a single image.
 
-**Renamed files.** If a file appears under a new name with no sidecar, rawhead looks up its xxHash3 checksum in the database and reattaches the existing sidecar.
+**Renamed files.** If a file appears under a new name with no sidecar, rawhead looks up its xxHash (XXH64) checksum in the database and reattaches the existing sidecar.
 
 **No live watching.** rawhead does not use FSEvents or any other file watching on external volumes. Reconciliation runs only when a folder is opened or when the user clicks Refresh.
 
@@ -209,7 +209,7 @@ To search across catalogs, rawhead uses SQLite's `ATTACH` to query several catal
     xmpMM:PreservedFileName="DSC_0001.NEF"
     rawhead:SchemaVersion="1"
     rawhead:ProcessVersion="1.0"
-    rawhead:SourceHash="xxh3:9f2c4b...">
+    rawhead:SourceHash="xxh64:9f2c4b...">
    <dc:subject><rdf:Bag><rdf:li>Yosemite</rdf:li></rdf:Bag></dc:subject>
    <rawhead:EditStack><![CDATA[ { ...edit JSON... } ]]></rawhead:EditStack>
    <rawhead:History><![CDATA[ [ ... ] ]]></rawhead:History>
@@ -258,7 +258,7 @@ Every import copies files into **one destination folder** that the user chooses,
 Import is designed as a single streaming pass, so each source file is read exactly once. That one pass performs four jobs at the same time:
 
 - It writes the copy to the destination folder.
-- It computes the file's xxHash3 checksum.
+- It computes the file's xxHash (XXH64) checksum.
 - It parses the EXIF data needed for the catalog.
 - It extracts the camera's embedded JPEG preview, which becomes the initial thumbnail.
 
