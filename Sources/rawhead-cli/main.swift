@@ -27,6 +27,8 @@ guard args.count >= 3, args[1] == "render" else {
       --out <path.png>       write the result as a PNG
       --repeat <N>           render N times, report the average (default 1)
       --viewport <N>         render for an N-pixel long edge (default: full res)
+      --region x,y,w,h       full-res render of just that sensor rectangle
+                             (the 100%-zoom tile path; overrides --viewport)
       --demosaic <method>    bilinear | rcd (default rcd; full-res only)
       --ev <stops>           exposure adjustment, e.g. -1.5 or 0.7 (default 0)
       --contrast <x>         tone curve contrast (default 1.5)
@@ -54,7 +56,14 @@ func floatArg(_ name: String, _ fallback: Float) -> Float {
 let outputPath = stringArg("--out")
 let repeatCount = max(1, Int(stringArg("--repeat") ?? "1") ?? 1)
 let viewportDimension = Int(stringArg("--viewport") ?? "")
-let scale: RenderScale = viewportDimension.map { .fitting(maxDimension: $0) } ?? .full
+let regionValues = stringArg("--region")?.split(separator: ",").compactMap { Int($0) } ?? []
+let scale: RenderScale
+if regionValues.count == 4 {
+    scale = .region(x: regionValues[0], y: regionValues[1],
+                    width: regionValues[2], height: regionValues[3])
+} else {
+    scale = viewportDimension.map { .fitting(maxDimension: $0) } ?? .full
+}
 
 let demosaic = DemosaicMethod(rawValue: (stringArg("--demosaic") ?? "rcd").lowercased()) ?? .rcd
 let outputSpace: ColorKit.OutputSpace =
@@ -133,6 +142,9 @@ do {
         print(String(format: "  path: full resolution, %dx%d (%.1f MP), demosaic: %@",
                       info.outputWidth, info.outputHeight, outputMP,
                       info.demosaicUsed?.rawValue ?? "?"))
+        print(String(format: "  covers sensor rect x=%.0f y=%.0f w=%.0f h=%.0f",
+                      info.sensorRect.origin.x, info.sensorRect.origin.y,
+                      info.sensorRect.width, info.sensorRect.height))
     } else {
         print(String(format: "  path: binned %dx%d quads -> %dx%d (%.1f MP of %.1f MP sensor, %.0f%%)",
                       info.binQuads, info.binQuads,

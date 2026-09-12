@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import Metal
 import simd
 import RawCore
@@ -26,11 +27,23 @@ public enum RenderError: Error, CustomStringConvertible {
 
 /// How much of the sensor's resolution to actually process (DESIGN.md §8.2).
 public enum RenderScale: Sendable {
-    /// Process every photosite. For export, and for 100% zoom.
+    /// Process every photosite of the whole image. For export.
     case full
     /// Process only as much as needed to fill `maxDimension` pixels on the
-    /// long edge.
+    /// long edge. Picks a binning factor, or full resolution if the sensor
+    /// is already small enough.
     case fitting(maxDimension: Int)
+    /// Collapse `quads` x `quads` Bayer quads into each output pixel,
+    /// covering the whole image. The viewport uses this whenever it's
+    /// zoomed out far enough that full detail would be wasted.
+    case binned(quads: Int)
+    /// Full resolution, but only the given sensor rectangle. This is the
+    /// "render only the visible tiles" path for 100% zoom: a 24 MP file on
+    /// a 4 MP display needs 4 MP of demosaicing, not 24. The origin is
+    /// snapped to even coordinates (see WhiteBalance.metal) and the rect is
+    /// clamped to the sensor; `RenderInfo.sensorRect` reports what was
+    /// actually rendered.
+    case region(x: Int, y: Int, width: Int, height: Int)
 }
 
 /// Which demosaic algorithm to use for full-resolution renders.
@@ -117,16 +130,30 @@ public struct RenderInfo: Sendable {
     public let isFullResolution: Bool
     /// nil when the binned path ran, since it doesn't demosaic at all.
     public let demosaicUsed: DemosaicMethod?
+    /// The sensor-space rectangle the output texture covers. The whole
+    /// sensor for full and binned renders (binned may fall a few pixels
+    /// short on the right/bottom when the size isn't a multiple of the
+    /// bin span); the clamped, snapped rectangle for region renders.
+    /// The presenter uses this to place the texture on screen.
+    public let sensorRect: CGRect
     public var usedBinnedPath: Bool { !isFullResolution }
 
     public init(outputWidth: Int, outputHeight: Int, binQuads: Int,
-                isFullResolution: Bool, demosaicUsed: DemosaicMethod? = nil) {
+                isFullResolution: Bool, demosaicUsed: DemosaicMethod? = nil,
+                sensorRect: CGRect = .zero) {
         self.outputWidth = outputWidth
         self.outputHeight = outputHeight
         self.binQuads = binQuads
         self.isFullResolution = isFullResolution
         self.demosaicUsed = demosaicUsed
+        self.sensorRect = sensorRect
     }
+}
+
+/// A resolved render plan: which path runs, and over what.
+enum RenderPlan {
+    case fullResolution(origin: (x: Int, y: Int), size: (width: Int, height: Int))
+    case binned(quads: Int)
 }
 
 /// The render pipeline: raw sensor data to a display-ready image.
@@ -158,25 +185,33 @@ public final class RenderPipeline {
         let multipliers = session.multipliers(for: parameters.whiteBalance)
         let rawW = summary.rawWidth
         let rawH = summary.rawHeight
-        let binQuads = Self.binQuads(rawWidth: rawW, rawHeight: rawH, scale: scale)
+        let plan = Self.plan(rawWidth: rawW, rawHeight: rawH, scale: scale)
 
         let cameraRGB: MTLTexture
         let renderInfo: RenderInfo
-        if binQuads <= 0 {
+        switch plan {
+        case .fullResolution(let origin, let size):
             cameraRGB = try renderFullResolution(session: session, order: order,
                                                   multipliers: multipliers,
-                                                  method: parameters.demosaic)
+                                                  method: parameters.demosaic,
+                                                  origin: origin, size: size)
             renderInfo = RenderInfo(outputWidth: cameraRGB.width,
                                      outputHeight: cameraRGB.height,
                                      binQuads: 1, isFullResolution: true,
-                                     demosaicUsed: parameters.demosaic)
-        } else {
+                                     demosaicUsed: parameters.demosaic,
+                                     sensorRect: CGRect(x: origin.x, y: origin.y,
+                                                        width: size.width, height: size.height))
+        case .binned(let quads):
             cameraRGB = try renderBinned(session: session, order: order,
-                                          binQuads: binQuads, multipliers: multipliers)
+                                          binQuads: quads, multipliers: multipliers)
+            let span = quads * 2
             renderInfo = RenderInfo(outputWidth: cameraRGB.width,
                                      outputHeight: cameraRGB.height,
-                                     binQuads: binQuads, isFullResolution: false,
-                                     demosaicUsed: nil)
+                                     binQuads: quads, isFullResolution: false,
+                                     demosaicUsed: nil,
+                                     sensorRect: CGRect(x: 0, y: 0,
+                                                        width: cameraRGB.width * span,
+                                                        height: cameraRGB.height * span))
         }
 
         let final = try applyColorAndTone(session: session,
@@ -188,17 +223,32 @@ public final class RenderPipeline {
         return final
     }
 
-    /// Chooses how many 2x2 Bayer quads to collapse per output pixel.
-    /// Returns 0 to mean "use the full-resolution path".
-    static func binQuads(rawWidth: Int, rawHeight: Int, scale: RenderScale) -> Int {
+    /// Turns the requested scale into a concrete plan.
+    static func plan(rawWidth: Int, rawHeight: Int, scale: RenderScale) -> RenderPlan {
+        let whole = RenderPlan.fullResolution(origin: (0, 0), size: (rawWidth, rawHeight))
         switch scale {
         case .full:
-            return 0
+            return whole
+
         case .fitting(let maxDimension):
-            guard maxDimension > 0 else { return 0 }
+            guard maxDimension > 0 else { return whole }
             let longEdge = max(rawWidth, rawHeight)
-            guard longEdge > maxDimension else { return 0 }
-            return max(0, (longEdge / maxDimension) / 2)
+            guard longEdge > maxDimension else { return whole }
+            let quads = (longEdge / maxDimension) / 2
+            return quads >= 1 ? .binned(quads: quads) : whole
+
+        case .binned(let quads):
+            return .binned(quads: max(1, quads))
+
+        case .region(let x, let y, let width, let height):
+            // Even origin keeps the Bayer parity (see WhiteBalance.metal).
+            // Clamp so the rectangle stays inside the sensor; shrink only
+            // if the sensor itself is smaller than what was asked for.
+            let w = max(2, min(width, rawWidth))
+            let h = max(2, min(height, rawHeight))
+            let ox = min(max(x, 0), rawWidth - w) & ~1
+            let oy = min(max(y, 0), rawHeight - h) & ~1
+            return .fullResolution(origin: (ox, oy), size: (w, h))
         }
     }
 
@@ -256,8 +306,11 @@ public final class RenderPipeline {
 
     private func renderFullResolution(session: ImageSession, order: UInt8,
                                        multipliers: SIMD4<Float>,
-                                       method: DemosaicMethod) throws -> MTLTexture {
-        let cfaTex = try prepareCFA(session: session, multipliers: multipliers, order: order)
+                                       method: DemosaicMethod,
+                                       origin: (x: Int, y: Int),
+                                       size: (width: Int, height: Int)) throws -> MTLTexture {
+        let cfaTex = try prepareCFA(session: session, multipliers: multipliers, order: order,
+                                    origin: origin, size: size)
         switch method {
         case .bilinear:
             return try demosaicBilinear(session: session, cfa: cfaTex, order: order)
@@ -274,9 +327,11 @@ public final class RenderPipeline {
     /// relative error on those differences is enough to flip a directional
     /// decision and produce visible artifacts.
     private func prepareCFA(session: ImageSession, multipliers: SIMD4<Float>,
-                             order: UInt8) throws -> MTLTexture {
+                             order: UInt8,
+                             origin: (x: Int, y: Int),
+                             size: (width: Int, height: Int)) throws -> MTLTexture {
         let summary = session.file.summary
-        let w = summary.rawWidth, h = summary.rawHeight
+        let w = size.width, h = size.height
         let cfaTex = try session.texture(width: w, height: h, pixelFormat: .r32Float, role: .cfa)
 
         guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
@@ -285,16 +340,20 @@ public final class RenderPipeline {
         }
         encoder.setComputePipelineState(gpu.whiteBalanceBlackLevelPSO)
         encoder.setBuffer(session.sensorBuffer, offset: 0, index: 0)
-        var rawWidth = UInt32(w)
+        // The sensor buffer's row stride is always the full raw width,
+        // even when only a sub-rectangle is being rendered.
+        var rawWidth = UInt32(summary.rawWidth)
         var black = summary.blackLevel
         var white = summary.whiteLevel
         var mul = multipliers
         var order_ = order
+        var originXY = SIMD2<UInt32>(UInt32(origin.x), UInt32(origin.y))
         encoder.setBytes(&rawWidth, length: 4, index: 1)
         encoder.setBytes(&black, length: 4, index: 2)
         encoder.setBytes(&white, length: 4, index: 3)
         encoder.setBytes(&mul, length: 16, index: 4)
         encoder.setBytes(&order_, length: 1, index: 5)
+        encoder.setBytes(&originXY, length: 8, index: 6)
         encoder.setTexture(cfaTex, index: 0)
         dispatch(encoder, pso: gpu.whiteBalanceBlackLevelPSO, width: w, height: h)
         encoder.endEncoding()

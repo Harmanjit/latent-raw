@@ -131,42 +131,8 @@ public final class Exporter {
 
     // MARK: - Readback
 
-    /// Copies a private-storage texture into shared storage and returns its
-    /// half-float pixels.
-    ///
-    /// Pipeline textures are private (DESIGN.md §7.2) so the GPU can apply
-    /// lossless compression to them, and private storage isn't CPU-readable
-    /// at all — reading one directly faults inside the driver rather than
-    /// returning an error.
     private func readBack(_ texture: MTLTexture) throws -> [Float16] {
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: texture.pixelFormat, width: texture.width,
-            height: texture.height, mipmapped: false)
-        descriptor.storageMode = .shared
-        descriptor.usage = [.shaderRead]
-
-        guard let readable = gpu.device.makeTexture(descriptor: descriptor),
-              let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
-              let blit = cmdBuffer.makeBlitCommandEncoder() else {
-            throw ExportError.readbackFailed
-        }
-
-        blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0,
-                   sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                   sourceSize: MTLSize(width: texture.width, height: texture.height, depth: 1),
-                   to: readable, destinationSlice: 0, destinationLevel: 0,
-                   destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
-        blit.endEncoding()
-        cmdBuffer.commit()
-        cmdBuffer.waitUntilCompleted()
-        guard cmdBuffer.status != .error else { throw ExportError.readbackFailed }
-
-        var pixels = [Float16](repeating: 0, count: texture.width * texture.height * 4)
-        readable.getBytes(&pixels,
-                           bytesPerRow: texture.width * 4 * MemoryLayout<Float16>.size,
-                           from: MTLRegionMake2D(0, 0, texture.width, texture.height),
-                           mipmapLevel: 0)
-        return pixels
+        try TextureReadback.float16Pixels(of: texture, gpu: gpu)
     }
 
     // MARK: - Quantization
