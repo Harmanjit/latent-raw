@@ -1,9 +1,9 @@
 version: 2
+# Swift is deliberately absent: Dependabot's Swift updater resolves the
+# package itself and fails on the binary LibRaw target that isn't
+# committed. The one Swift dependency (GRDB) is pinned exactly in
+# Package.swift and bumped by hand.
 updates:
-  - package-ecosystem: "swift"
-    directory: "/"
-    schedule:
-      interval: "weekly"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
