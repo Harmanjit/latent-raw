@@ -253,6 +253,30 @@ public final class Library: ObservableObject {
         startThumbnailGeneration()
     }
 
+    /// Applies `transform` to the stored edit JSON of each selected image
+    /// (nil in = no edit yet). Used for batch paste and presets; the
+    /// caller supplies the merge since the catalog doesn't know the
+    /// stack's contents. Returns how many were changed.
+    @discardableResult
+    public func transformSelectedEdits(schemaVersion: Int, processVersion: String,
+                                       _ transform: (String?) -> String?) async throws -> Int {
+        guard let catalog else { return 0 }
+        var changed = 0
+        for record in selectedImages {
+            guard let id = record.id else { continue }
+            let existing = try? await catalog.editStack(forImageID: id)
+            let next = transform(existing)
+            if next != existing {
+                try await catalog.setEditStack(next, schemaVersion: schemaVersion,
+                                               processVersion: processVersion, forImageID: id)
+                if next == nil { editedImageIDs.remove(id) } else { editedImageIDs.insert(id) }
+                changed += 1
+            }
+        }
+        if changed > 0 { startThumbnailGeneration() }
+        return changed
+    }
+
     // MARK: - Navigation
 
     /// Moves the selection by `offset`, clamped to the list. Returns the

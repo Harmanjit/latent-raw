@@ -40,7 +40,10 @@ struct ContentView: View {
                 LibraryPanel(library: library, exportQueue: exportQueue,
                              onOpenFolder: showOpenFolderPanel,
                              onRate: rate, onFlag: flag,
-                             onExport: { showingExportSheet = true })
+                             onExport: { showingExportSheet = true },
+                             presets: model.presets,
+                             onApplyPreset: { applyPresetToSelection($0) },
+                             onPaste: { pasteSettings() })
                 Divider()
                 switch mode {
                 case .library:
@@ -178,9 +181,70 @@ struct ContentView: View {
             Button("") { flag(.none) }.keyboardShortcut("u", modifiers: [])
             Button("") { rotate(by: -1) }.keyboardShortcut("[", modifiers: .command)
             Button("") { rotate(by: 1) }.keyboardShortcut("]", modifiers: .command)
+
+            // Settings clipboard: copy from the editor, paste to the editor
+            // or to the whole Library selection.
+            Button("") { copySettings() }.keyboardShortcut("c", modifiers: [.command, .shift])
+            Button("") { pasteSettings() }.keyboardShortcut("v", modifiers: [.command, .shift])
+            Button("") { if model.hasImage { model.showingBefore.toggle() } }
+                .keyboardShortcut("\\", modifiers: [])
         }
         .opacity(0)
         .frame(width: 0, height: 0)
+    }
+
+    // MARK: - Settings clipboard and presets, in either mode
+
+    private func copySettings() {
+        if mode == .develop || library.selectedImageIDs.count <= 1, model.hasImage {
+            model.copySettings()
+        } else if let first = library.selectedImage {
+            // In the grid with nothing open: copy the primary selection's stored edit.
+            Task {
+                guard let json = await library.editStack(for: first),
+                      let stack = try? EditStack.decode(json: json) else { return }
+                let restricted = stack.restricted(to: model.pasteGroups)
+                if let text = try? restricted.encodeJSON() {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: EditorModel.pasteboardType)
+                    NSPasteboard.general.setString(text, forType: .string)
+                    model.reportError("Copied settings from \(first.fileName)")
+                }
+            }
+        }
+    }
+
+    private func pasteSettings() {
+        guard let stack = EditorModel.clipboardStack() else { model.reportError("Nothing to paste"); return }
+        applyToSelectionOrEditor(stack, groups: model.pasteGroups, what: "Pasted")
+    }
+
+    /// Develop: apply to the open image. Library with several selected:
+    /// apply to each stored edit, regenerating thumbnails.
+    private func applyToSelectionOrEditor(_ stack: EditStack, groups: Set<EditGroup>, what: String) {
+        if mode == .develop && model.hasImage {
+            model.apply(stack, groups: groups)
+            return
+        }
+        Task {
+            let n = try? await library.transformSelectedEdits(
+                schemaVersion: EditStack.schemaVersion, processVersion: EditStack.processVersion
+            ) { existing in
+                let current = existing.flatMap { try? EditStack.decode(json: $0) } ?? EditStack()
+                let merged = current.merged(with: stack, groups: groups)
+                return merged == EditStack() ? nil : (try? merged.encodeJSON())
+            }
+            model.reportError("\(what) settings to \(n ?? 0) image\((n ?? 0) == 1 ? "" : "s")")
+            // If the open image was among them, reload its sliders.
+            if let selected = library.selectedImage, model.imageTitle == selected.fileName,
+               library.selectedImageIDs.contains(selected.id ?? -1) {
+                model.apply(stack, groups: groups)
+            }
+        }
+    }
+
+    private func applyPresetToSelection(_ preset: Preset) {
+        applyToSelectionOrEditor(preset.stack, groups: preset.groups, what: "Applied “\(preset.name)” —")
     }
 
     private func step(_ offset: Int) {
@@ -316,6 +380,13 @@ struct ContentView: View {
                     .padding(.top, 8)
                 } label: {
                     disclosureLabel("Highlight Reconstruction")
+                }
+
+                DisclosureGroup {
+                    PresetsPanel(model: model, onApply: { applyPresetToSelection($0) })
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Presets & Clipboard")
                 }
 
                 DisclosureGroup {

@@ -1,5 +1,6 @@
 import SwiftUI
 import Catalog
+import PixelEngine
 
 /// The left-hand panel: which folder is open and how the scan is going.
 /// Collections, presets and the navigator arrive here in later phases.
@@ -10,6 +11,9 @@ struct LibraryPanel: View {
     let onRate: (Int) -> Void
     let onFlag: (ImageFlag) -> Void
     let onExport: () -> Void
+    let presets: [Preset]
+    let onApplyPreset: (Preset) -> Void
+    let onPaste: () -> Void
 
     @State private var keywordText = ""
 
@@ -76,8 +80,20 @@ struct LibraryPanel: View {
     /// Export the selection, and how the current batch is going.
     private var exportSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionLabel("Export")
+            sectionLabel("Selection")
             let n = library.selectedImageIDs.count
+            HStack {
+                Menu("Apply preset") {
+                    ForEach(presets) { preset in
+                        Button(preset.name) { onApplyPreset(preset) }
+                    }
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                Button("Paste settings", action: onPaste)
+                    .help("Paste the copied settings onto every selected image (⌘⇧V)")
+            }
+            .controlSize(.small)
+            .disabled(n == 0)
             Button(n <= 1 ? "Export…" : "Export \(n) images…", action: onExport)
                 .controlSize(.small)
                 .keyboardShortcut("e", modifiers: [.command, .shift])

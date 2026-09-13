@@ -945,12 +945,16 @@ final class EditorModel: ObservableObject {
     }
 
     /// Returns a short description of what ran, for the status bar.
+    /// What actually renders: the edit, or the defaults while "before"
+    /// is held.
+    private var renderParameters: EditParameters { showingBefore ? defaultParameters : parameters }
+
     @discardableResult
     private func renderPreview(session: ImageSession, pipeline: RenderPipeline) throws -> String {
         let quads = wantedPreviewQuads
         var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: false)
         let rendered = try pipeline.render(session, scale: .binned(quads: quads),
-                                            parameters: parameters, output: displayOutput,
+                                            parameters: renderParameters, output: displayOutput,
                                             info: &info)
         preview = PresentLayer(texture: rendered, coverage: info.sensorRect)
         previewQuads = quads
@@ -963,7 +967,7 @@ final class EditorModel: ObservableObject {
         // large; a tiny preview is already an analysis-sized image.
         let analysisQuads = max(quads, 4)
         analysisTexture = try pipeline.render(session, scale: .binned(quads: analysisQuads),
-                                              parameters: parameters, output: displayOutput)
+                                              parameters: renderParameters, output: displayOutput)
         updateScopes()
         return "preview \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
@@ -990,7 +994,7 @@ final class EditorModel: ObservableObject {
         let rendered = try pipeline.render(
             session,
             scale: .region(x: region.x, y: region.y, width: region.width, height: region.height),
-            parameters: parameters, output: displayOutput, info: &info)
+            parameters: renderParameters, output: displayOutput, info: &info)
         tile = PresentLayer(texture: rendered, coverage: info.sensorRect, inset: Self.tileInset)
         return "tile \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
@@ -1054,6 +1058,92 @@ final class EditorModel: ObservableObject {
 
     func resetAdjustments() {
         parameters = defaultParameters
+    }
+
+    // MARK: - Copy / paste / presets
+
+    /// The clipboard is a partial edit stack, kept as JSON on the system
+    /// pasteboard so it also crosses app instances. Custom type plus a
+    /// plain-text copy for humans.
+    static let pasteboardType = NSPasteboard.PasteboardType("com.rawhead.editstack+json")
+
+    /// Groups to carry on the next paste. Persisted so the checklist
+    /// remembers what the user usually wants.
+    @Published var pasteGroups: Set<EditGroup> = {
+        if let raw = UserDefaults.standard.array(forKey: "rawhead.pasteGroups") as? [String] {
+            return Set(raw.compactMap(EditGroup.init(rawValue:)))
+        }
+        return EditGroup.lookGroups
+    }() {
+        didSet { UserDefaults.standard.set(pasteGroups.map(\.rawValue), forKey: "rawhead.pasteGroups") }
+    }
+
+    /// Copies the current edit (restricted to `pasteGroups`).
+    func copySettings() {
+        guard hasImage else { return }
+        let stack = EditStack(parameters: parameters).restricted(to: pasteGroups)
+        guard let json = try? stack.encodeJSON() else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(json, forType: Self.pasteboardType)
+        pb.setString(json, forType: .string)
+        status = "Copied \(pasteGroups.count) group\(pasteGroups.count == 1 ? "" : "s") of settings"
+    }
+
+    /// The stack on the pasteboard, if any.
+    static func clipboardStack() -> EditStack? {
+        let pb = NSPasteboard.general
+        guard let json = pb.string(forType: pasteboardType) ?? pb.string(forType: .string),
+              let stack = try? EditStack.decode(json: json) else { return nil }
+        return stack
+    }
+
+    /// Applies a partial stack to the open image.
+    func apply(_ stack: EditStack, groups: Set<EditGroup>) {
+        guard hasImage else { return }
+        let current = EditStack(parameters: parameters)
+        var next = current.merged(with: stack, groups: groups).parameters(defaults: defaultParameters)
+        if next.whiteBalance.isAsShot { next.whiteBalance = defaultParameters.whiteBalance }
+        parameters = next
+    }
+
+    func pasteSettings() {
+        guard let stack = Self.clipboardStack() else { status = "Nothing to paste"; return }
+        apply(stack, groups: pasteGroups.intersection(stack.presentGroups).union(pasteGroups.subtracting(stack.presentGroups)))
+        status = "Pasted settings"
+    }
+
+    @Published var presets: [Preset] = PresetStore.load()
+
+    func applyPreset(_ preset: Preset) {
+        apply(preset.stack, groups: preset.groups)
+        status = "Applied preset “\(preset.name)”"
+    }
+
+    func savePreset(named name: String, groups: Set<EditGroup>) {
+        guard hasImage, !name.isEmpty else { return }
+        let preset = Preset(name: name, groups: groups, stack: EditStack(parameters: parameters))
+        do {
+            try PresetStore.save(preset)
+            presets = PresetStore.load()
+            status = "Saved preset “\(name)”"
+        } catch {
+            status = "Could not save preset: \(error)"
+        }
+    }
+
+    func deletePreset(_ preset: Preset) {
+        guard !preset.isBuiltIn else { return }
+        try? PresetStore.delete(named: preset.name)
+        presets = PresetStore.load()
+    }
+
+    // MARK: - Before / after
+
+    /// While held, the image renders with its defaults so the edit can be
+    /// judged against the starting point. Display state, never saved.
+    @Published var showingBefore = false {
+        didSet { if showingBefore != oldValue { rerender() } }
     }
 
     /// Computes a starting point from the image and applies it. Exposure,
