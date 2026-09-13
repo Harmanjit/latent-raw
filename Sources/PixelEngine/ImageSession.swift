@@ -65,6 +65,11 @@ public final class ImageSession {
         case rcdDiagonal    // packed P/Q diagonal high-pass statistics
         case rcdPQDir       // diagonal directional discrimination
         case rcdScratch     // ping-pong partner for the RGB passes
+        case denoised       // camera RGB after noise reduction
+        case blurA          // sharpening: horizontal blur of luminance
+        case blurB          // sharpening: full blur of luminance
+        case sharpened      // final output when sharpening ran (tile)
+        case sharpenedPreview
     }
 
     private struct TextureKey: Hashable {

@@ -309,6 +309,23 @@ struct ContentView: View {
                         Text("Only affects full-resolution renders — export and 100% zoom. The fit-to-window preview bins Bayer quads and never interpolates.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+
+                        disclosureLabel("Sharpening")
+                        sliderRow(title: "Amount", value: $model.parameters.sharpenAmount,
+                                  range: 0...2, format: "%.2f")
+                        sliderRow(title: "Radius", value: $model.parameters.sharpenRadius,
+                                  range: 0.5...3, format: "%.1f px")
+                        sliderRow(title: "Threshold", value: $model.parameters.sharpenThreshold,
+                                  range: 0...0.1, format: "%.3f")
+
+                        disclosureLabel("Noise Reduction")
+                        sliderRow(title: "Luminance", value: $model.parameters.denoiseLuminance,
+                                  range: 0...1, format: "%.2f")
+                        sliderRow(title: "Colour", value: $model.parameters.denoiseColor,
+                                  range: 0...1, format: "%.2f")
+                        Text("Judge both at 100% zoom; the fit-to-window preview is scaled to match but hides fine grain.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.top, 8)
                 } label: {

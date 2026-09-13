@@ -90,6 +90,15 @@ public struct EditParameters: Sendable, Equatable {
     public var demosaic: DemosaicMethod
     /// Colour space the render is encoded into.
     public var outputSpace: ColorKit.OutputSpace
+    /// Noise reduction strengths, 0 (off) to 1.
+    public var denoiseLuminance: Float
+    public var denoiseColor: Float
+    /// Unsharp-mask sharpening: amount 0 (off) to 2, radius in sensor
+    /// pixels (Gaussian sigma), threshold in perceptual luminance units
+    /// below which detail is left untouched.
+    public var sharpenAmount: Float
+    public var sharpenRadius: Float
+    public var sharpenThreshold: Float
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -98,7 +107,12 @@ public struct EditParameters: Sendable, Equatable {
                 highlightRecovery: Float = 1.0,
                 highlightThreshold: Float = 0.85,
                 demosaic: DemosaicMethod = .rcd,
-                outputSpace: ColorKit.OutputSpace = .sRGB) {
+                outputSpace: ColorKit.OutputSpace = .sRGB,
+                denoiseLuminance: Float = 0,
+                denoiseColor: Float = 0,
+                sharpenAmount: Float = 0,
+                sharpenRadius: Float = 1.0,
+                sharpenThreshold: Float = 0.01) {
         self.whiteBalance = whiteBalance
         self.exposureEV = exposureEV
         self.contrast = contrast
@@ -107,6 +121,11 @@ public struct EditParameters: Sendable, Equatable {
         self.highlightThreshold = highlightThreshold
         self.demosaic = demosaic
         self.outputSpace = outputSpace
+        self.denoiseLuminance = denoiseLuminance
+        self.denoiseColor = denoiseColor
+        self.sharpenAmount = sharpenAmount
+        self.sharpenRadius = sharpenRadius
+        self.sharpenThreshold = sharpenThreshold
     }
 
     public static let neutral = EditParameters()
@@ -119,6 +138,9 @@ public struct EditParameters: Sendable, Equatable {
             && a.highlightThreshold == b.highlightThreshold
             && a.demosaic == b.demosaic
             && String(describing: a.outputSpace) == String(describing: b.outputSpace)
+            && a.denoiseLuminance == b.denoiseLuminance && a.denoiseColor == b.denoiseColor
+            && a.sharpenAmount == b.sharpenAmount && a.sharpenRadius == b.sharpenRadius
+            && a.sharpenThreshold == b.sharpenThreshold
     }
 }
 
@@ -322,13 +344,32 @@ public final class RenderPipeline {
             return cameraRGB
         }
 
-        let final = try applyColorAndTone(session: session, cmdBuffer: cmdBuffer,
-                                           input: cameraRGB,
-                                           outputRole: displayRole,
-                                           cameraToWorking: cameraToWorking,
-                                           multipliers: multipliers,
-                                           parameters: parameters,
-                                           output: output)
+        // How many sensor pixels each output pixel spans, for scaling the
+        // detail stages so the preview predicts the full-size result.
+        let binSpan: Float = renderInfo.isFullResolution ? 1 : Float(renderInfo.binQuads * 2)
+
+        // Stage 8: noise reduction, in camera space, before the matrix.
+        var colourInput = cameraRGB
+        if parameters.denoiseLuminance > 0 || parameters.denoiseColor > 0 {
+            colourInput = try applyDenoise(session: session, cmdBuffer: cmdBuffer,
+                                           input: cameraRGB, parameters: parameters,
+                                           binSpan: binSpan)
+        }
+
+        var final = try applyColorAndTone(session: session, cmdBuffer: cmdBuffer,
+                                          input: colourInput,
+                                          outputRole: displayRole,
+                                          cameraToWorking: cameraToWorking,
+                                          multipliers: multipliers,
+                                          parameters: parameters,
+                                          output: output)
+
+        // Stage 12: sharpening, on the display-referred result.
+        if parameters.sharpenAmount > 0 {
+            final = try applySharpen(session: session, cmdBuffer: cmdBuffer, input: final,
+                                     outputRole: displayRole == .display ? .sharpened : .sharpenedPreview,
+                                     parameters: parameters, output: output, binSpan: binSpan)
+        }
 
         cmdBuffer.commit()
         cmdBuffer.waitUntilCompleted()
@@ -336,6 +377,85 @@ public final class RenderPipeline {
 
         info?.pointee = renderInfo
         return final
+    }
+
+    // MARK: - Detail stages
+
+    private func applyDenoise(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                              input: MTLTexture, parameters: EditParameters,
+                              binSpan: Float) throws -> MTLTexture {
+        let output = try session.texture(width: input.width, height: input.height,
+                                         pixelFormat: .rgba16Float, role: .denoised)
+        guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+            throw RenderError.commandBufferFailed
+        }
+        encoder.setComputePipelineState(gpu.denoisePSO)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(output, index: 1)
+        var luma = parameters.denoiseLuminance
+        var chroma = parameters.denoiseColor
+        // Binning averages 2N x 2N photosites, cutting noise by 2N.
+        var noiseScale = 1 / binSpan
+        encoder.setBytes(&luma, length: 4, index: 0)
+        encoder.setBytes(&chroma, length: 4, index: 1)
+        encoder.setBytes(&noiseScale, length: 4, index: 2)
+        dispatch(encoder, pso: gpu.denoisePSO, width: input.width, height: input.height)
+        encoder.endEncoding()
+        return output
+    }
+
+    /// Gaussian taps for `sigma`, normalized. Capped at 33 taps (sigma
+    /// up to ~5); beyond that the mask stops meaning "sharpening" anyway.
+    static func gaussianWeights(sigma: Float) -> [Float] {
+        let s = max(sigma, 0.3)
+        let half = min(Int((3 * s).rounded(.up)), 16)
+        var weights = (-half...half).map { exp(-Float($0 * $0) / (2 * s * s)) }
+        let sum = weights.reduce(0, +)
+        weights = weights.map { $0 / sum }
+        return weights
+    }
+
+    private func applySharpen(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                              input: MTLTexture, outputRole: ImageSession.TextureRole,
+                              parameters: EditParameters, output: RenderOutput,
+                              binSpan: Float) throws -> MTLTexture {
+        let w = input.width, h = input.height
+        let blurA = try session.texture(width: w, height: h, pixelFormat: .r16Float, role: .blurA)
+        let blurB = try session.texture(width: w, height: h, pixelFormat: .r16Float, role: .blurB)
+        let result = try session.texture(width: w, height: h, pixelFormat: .rgba16Float, role: outputRole)
+
+        var weights = Self.gaussianWeights(sigma: parameters.sharpenRadius / binSpan)
+        var taps = Int32(weights.count)
+        var isLinear: UInt32 = output.encoded ? 0 : 1
+        var amount = parameters.sharpenAmount
+        var threshold = parameters.sharpenThreshold
+
+        func pass(_ pso: MTLComputePipelineState, _ textures: [MTLTexture],
+                  _ bind: (MTLComputeCommandEncoder) -> Void) throws {
+            guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+                throw RenderError.commandBufferFailed
+            }
+            encoder.setComputePipelineState(pso)
+            for (i, t) in textures.enumerated() { encoder.setTexture(t, index: i) }
+            bind(encoder)
+            dispatch(encoder, pso: pso, width: w, height: h)
+            encoder.endEncoding()
+        }
+        try pass(gpu.sharpenBlurHPSO, [input, blurA]) { e in
+            e.setBytes(&weights, length: weights.count * 4, index: 0)
+            e.setBytes(&taps, length: 4, index: 1)
+            e.setBytes(&isLinear, length: 4, index: 2)
+        }
+        try pass(gpu.sharpenBlurVPSO, [blurA, blurB]) { e in
+            e.setBytes(&weights, length: weights.count * 4, index: 0)
+            e.setBytes(&taps, length: 4, index: 1)
+        }
+        try pass(gpu.sharpenApplyPSO, [input, blurB, result]) { e in
+            e.setBytes(&amount, length: 4, index: 0)
+            e.setBytes(&threshold, length: 4, index: 1)
+            e.setBytes(&isLinear, length: 4, index: 2)
+        }
+        return result
     }
 
     static func stageKey(plan: RenderPlan, multipliers: SIMD4<Float>,

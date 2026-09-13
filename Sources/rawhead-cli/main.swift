@@ -88,6 +88,8 @@ guard args.count >= 3, args[1] == "render" else {
       --contrast <x>         tone curve contrast (default 1.5)
       --grey <x>             scene-linear value mapped to mid grey (default 0.1845)
       --space <sRGB|p3>      output colour space (default sRGB)
+      --sharpen <amount>     unsharp mask amount 0-2 (default 0 = off)
+      --denoise <strength>   luminance+colour noise reduction 0-1 (default 0)
 
     Examples:
       rawhead-cli render photo.nef --out /tmp/rcd.png --demosaic rcd
@@ -128,7 +130,10 @@ let parameters = EditParameters(
     contrast: floatArg("--contrast", 1.5),
     greyPoint: floatArg("--grey", 0.1845),
     demosaic: demosaic,
-    outputSpace: outputSpace
+    outputSpace: outputSpace,
+    denoiseLuminance: floatArg("--denoise", 0),
+    denoiseColor: floatArg("--denoise", 0),
+    sharpenAmount: floatArg("--sharpen", 0)
 )
 
 func formatBytes(_ bytes: Int) -> String {

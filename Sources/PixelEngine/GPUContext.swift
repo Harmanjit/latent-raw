@@ -48,6 +48,10 @@ public final class GPUContext: @unchecked Sendable {
     let histogramPSO: MTLComputePipelineState
     let waveformPSO: MTLComputePipelineState
     let vectorscopePSO: MTLComputePipelineState
+    let denoisePSO: MTLComputePipelineState
+    let sharpenBlurHPSO: MTLComputePipelineState
+    let sharpenBlurVPSO: MTLComputePipelineState
+    let sharpenApplyPSO: MTLComputePipelineState
 
     // RCD demosaic, six passes (see RCD.metal).
     let rcdDirectionsVHPSO: MTLComputePipelineState
@@ -83,6 +87,10 @@ public final class GPUContext: @unchecked Sendable {
         let histogramPipeline = try makePipeline("computeHistogram")
         let waveformPipeline = try makePipeline("computeWaveform")
         let vectorscopePipeline = try makePipeline("computeVectorscope")
+        let denoisePipeline = try makePipeline("denoiseBilateral")
+        let blurHPipeline = try makePipeline("sharpenBlurH")
+        let blurVPipeline = try makePipeline("sharpenBlurV")
+        let sharpenPipeline = try makePipeline("sharpenApply")
         let vhPipeline = try makePipeline("rcdDirectionsVH")
         let lowPassPipeline = try makePipeline("rcdLowPass")
         let greenPipeline = try makePipeline("rcdGreen")
@@ -102,6 +110,10 @@ public final class GPUContext: @unchecked Sendable {
         self.histogramPSO = histogramPipeline
         self.waveformPSO = waveformPipeline
         self.vectorscopePSO = vectorscopePipeline
+        self.denoisePSO = denoisePipeline
+        self.sharpenBlurHPSO = blurHPipeline
+        self.sharpenBlurVPSO = blurVPipeline
+        self.sharpenApplyPSO = sharpenPipeline
         self.rcdDirectionsVHPSO = vhPipeline
         self.rcdLowPassPSO = lowPassPipeline
         self.rcdGreenPSO = greenPipeline
@@ -135,7 +147,7 @@ public final class GPUContext: @unchecked Sendable {
         // Every kernel source file must be listed here, or its functions
         // won't exist in the runtime-compiled library.
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
-                            "ColorPipeline", "Present", "Histogram", "Scopes", "RCD"]
+                            "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "RCD"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound

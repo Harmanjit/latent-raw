@@ -30,6 +30,18 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var tone: Tone?
         public var highlights: Highlights?
         public var demosaic: Demosaic?
+        public var denoise: Denoise?
+        public var sharpen: Sharpen?
+    }
+
+    public struct Denoise: Codable, Equatable, Sendable {
+        public var luminance: Float
+        public var color: Float
+    }
+    public struct Sharpen: Codable, Equatable, Sendable {
+        public var amount: Float
+        public var radius: Float
+        public var threshold: Float
     }
 
     public struct WhiteBalance: Codable, Equatable, Sendable {
@@ -61,6 +73,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.tone = Tone(method: "sigmoid", contrast: p.contrast, grey: p.greyPoint)
         modules.highlights = Highlights(strength: p.highlightRecovery, threshold: p.highlightThreshold)
         modules.demosaic = Demosaic(method: p.demosaic.rawValue)
+        modules.denoise = Denoise(luminance: p.denoiseLuminance, color: p.denoiseColor)
+        modules.sharpen = Sharpen(amount: p.sharpenAmount, radius: p.sharpenRadius,
+                                  threshold: p.sharpenThreshold)
     }
 
     public init() {}
@@ -85,6 +100,10 @@ public struct EditStack: Codable, Equatable, Sendable {
         }
         if let d = modules.demosaic, let method = DemosaicMethod(rawValue: d.method) {
             p.demosaic = method
+        }
+        if let n = modules.denoise { p.denoiseLuminance = n.luminance; p.denoiseColor = n.color }
+        if let s = modules.sharpen {
+            p.sharpenAmount = s.amount; p.sharpenRadius = s.radius; p.sharpenThreshold = s.threshold
         }
         return p
     }
