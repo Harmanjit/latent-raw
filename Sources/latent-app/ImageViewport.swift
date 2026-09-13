@@ -10,13 +10,14 @@ import PixelEngine
 /// own view mirrors back to this one, so both are always symmetric.
 struct ImageViewport: View {
     @ObservedObject var model: EditorModel
+    @ObservedObject private var prefs = AppPreferences.shared
     var mirror: EditorModel? = nil
     /// Develop only. Viewing modes pass false so a click can never edit.
     var allowsTools: Bool = true
 
     var body: some View {
         ZStack {
-            Color(white: 0.12)
+            prefs.surroundColor
 
             if let device = model.device, let presenter = model.presenter,
                let preview = model.preview {
@@ -28,7 +29,7 @@ struct ImageViewport: View {
                                 device: device,
                                 onResize: { model.viewportDidResize(to: $0) },
                                 onHeadroomChange: { model.displayHeadroomDidChange(to: $0) },
-                                backgroundLevel: model.backgroundLevel,
+                                backgroundLevel: prefs.surroundLinear,
                                 onZoom: { factor, point in
                                     model.zoom(by: factor, about: point)
                                     mirror?.zoom(by: factor, about: point)

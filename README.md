@@ -32,6 +32,14 @@ vendor/           Vendored C/C++ dependencies (LibRaw, etc.) built as XCFramewor
 TestAssets/       Sample RAW files for the CI test matrix (not committed — see below)
 ```
 
+## Preferences (⌘,)
+
+Theme (system/light/dark), accent colour, image surround grey, render
+timings, default export folder, subfolder policy for new catalogs, and
+the Core ML compute choice. Export naming templates, sequence numbers,
+collision policy, date subfolders and saved export presets live in the
+export sheet (⌘⇧E).
+
 ## Building (on macOS, Apple Silicon, Xcode 16+)
 
 ```

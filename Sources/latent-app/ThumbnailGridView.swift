@@ -11,6 +11,7 @@ import Catalog
 /// on a miss, load it asynchronously and fill in when it arrives.
 struct ThumbnailGridView: NSViewRepresentable {
     @ObservedObject var library: Library
+    @ObservedObject private var prefs = AppPreferences.shared
     /// Double-click, or Return: open this image in the editor.
     let onOpen: (ImageRecord) -> Void
 
@@ -28,7 +29,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         collection.isSelectable = true
         collection.allowsEmptySelection = true
         collection.allowsMultipleSelection = true
-        collection.backgroundColors = [NSColor(white: 0.12, alpha: 1)]
+        collection.backgroundColors = [AppPreferences.shared.surroundNSColor]
         collection.register(ThumbnailItem.self, forItemWithIdentifier: ThumbnailItem.identifier)
         collection.dataSource = context.coordinator
         collection.delegate = context.coordinator
@@ -43,6 +44,10 @@ struct ThumbnailGridView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.sync(with: library)
+        if let collection = scrollView.documentView as? NSCollectionView {
+            let colour = prefs.surroundNSColor
+            if collection.backgroundColors.first != colour { collection.backgroundColors = [colour] }
+        }
     }
 
     @MainActor

@@ -12,13 +12,21 @@ import AppKit
 struct LatentApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
+    @ObservedObject private var prefs = AppPreferences.shared
+
     var body: some Scene {
         WindowGroup("Latent, a catalog management and RAW editor for macOS") {
             ContentView()
                 .frame(minWidth: 900, minHeight: 600)
+                .tint(prefs.accent.color)
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1400, height: 900)
+
+        Settings {
+            PreferencesView()
+                .tint(prefs.accent.color)
+        }
     }
 }
 
@@ -29,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // regular app fixes that; unnecessary once bundled properly.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        AppPreferences.shared.applyAppearance()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

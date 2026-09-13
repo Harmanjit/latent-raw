@@ -41,6 +41,7 @@ struct ContentView: View {
     @StateObject private var model = EditorModel()
     @StateObject private var library = Library()
     @StateObject private var exportQueue = ExportQueue()
+    @ObservedObject private var prefs = AppPreferences.shared
     @State private var mode: AppMode = .library
     @State private var showingExportSheet = false
     /// Compare's left pane ("Select"): its own render, created the first
@@ -94,7 +95,9 @@ struct ContentView: View {
         .background(navigationShortcuts)
         .onChange(of: mode) { old, _ in modeDidChange(from: old) }
         .sheet(isPresented: $showingExportSheet) {
-            ExportSheet(count: library.selectedImageIDs.count) { preset, destination in
+            ExportSheet(count: library.selectedImageIDs.count,
+                        sample: library.selectedImages.first ?? library.selectedImage,
+                        catalogName: library.folderURL?.lastPathComponent ?? "") { preset, destination in
                 guard let gpu = model.gpu else { return }
                 // Flush the editor's pending edit so the export sees it.
                 model.flushPendingSave()
@@ -138,8 +141,8 @@ struct ContentView: View {
     private func openFolder(_ url: URL) {
         mode = .library
         Task {
-            do { try await library.open(folder: url) }
-            catch { model.reportError("Could not open folder: \(error)") }
+            do { try await library.open(folder: url, defaultSubfolderMode: prefs.defaultSubfolderMode) }
+            catch { model.reportFailure("Opening \(url.lastPathComponent)", error) }
         }
     }
 
@@ -234,7 +237,7 @@ struct ContentView: View {
                     if let compareModel {
                         ImageViewport(model: compareModel, mirror: model, allowsTools: false)
                     } else {
-                        Color(white: 0.12)
+                        prefs.surroundColor
                     }
                     Divider()
                     ImageCaption(record: compareRecord, title: "Select")
@@ -1008,7 +1011,7 @@ struct ContentView: View {
             .controlSize(.small)
             .disabled(!model.hasImage || !mode.showsImage)
 
-            if !model.renderReport.isEmpty && mode == .develop {
+            if !model.renderReport.isEmpty && mode == .develop && prefs.showRenderTimings {
                 // What the last action rendered and how long it took, on
                 // screen during development: the Phase 1 exit criterion is
                 // under 16ms at fit-to-window, and having it visible while

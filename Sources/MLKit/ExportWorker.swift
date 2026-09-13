@@ -33,14 +33,16 @@ public enum ExportWorker {
         public var maxLongEdge: Int?
         public var keywords: [String]
         public var rating: Int
+        /// False writes pixels only: no camera, date, keywords or rating.
+        public var includeMetadata: Bool
 
         public init(sourceURL: URL, destinationURL: URL, editStackJSON: String?, userRotation: Int,
                     settings: ExportSettings, colorSpace: ColorKit.OutputSpace, maxLongEdge: Int?,
-                    keywords: [String] = [], rating: Int = 0) {
+                    keywords: [String] = [], rating: Int = 0, includeMetadata: Bool = true) {
             self.sourceURL = sourceURL; self.destinationURL = destinationURL
             self.editStackJSON = editStackJSON; self.userRotation = userRotation
             self.settings = settings; self.colorSpace = colorSpace; self.maxLongEdge = maxLongEdge
-            self.keywords = keywords; self.rating = rating
+            self.keywords = keywords; self.rating = rating; self.includeMetadata = includeMetadata
         }
     }
 
@@ -127,7 +129,8 @@ public enum ExportWorker {
         let written = try exporter.write(texture, to: request.destinationURL, settings: request.settings,
                                          colorSpace: request.colorSpace, rotation: rotation,
                                          crop: parameters.crop,
-                                         metadata: metadata, maxLongEdge: request.maxLongEdge)
+                                         metadata: request.includeMetadata ? metadata : nil,
+                                         maxLongEdge: request.maxLongEdge)
         lap("write")
         return Outcome(pixelWidth: written.width, pixelHeight: written.height,
                        seconds: Date().timeIntervalSince(start), masksGenerated: masksGenerated,

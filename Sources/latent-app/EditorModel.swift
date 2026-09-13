@@ -876,7 +876,7 @@ final class EditorModel: ObservableObject {
 
     /// The surround grey, in the drawable's linear encoding. 0.12 in sRGB
     /// terms — Lightroom's mid-dark grey — is about 0.0137 linear.
-    let backgroundLevel: Float = 0.0137
+    var backgroundLevel: Float { AppPreferences.shared.surroundLinear }
 
     /// Non-nil when Metal setup failed, in which case nothing else works.
     let setupError: String?

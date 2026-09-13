@@ -69,13 +69,19 @@ public enum CoreMLStore {
     /// models fast enough (SegFormer ~260 ms, SAM 2 clicks ~40 ms), and
     /// a hang is not a trade worth making for a few tens of milliseconds.
     /// LATENT_ML_COMPUTE=all opts back in for testing on newer systems.
-    nonisolated(unsafe) public static var defaultComputeUnits: MLComputeUnits = {
-        switch ProcessInfo.processInfo.environment["LATENT_ML_COMPUTE"] {
+    public static let computePreferenceKey = "latent.mlCompute"
+
+    /// Environment first (for tests and experiments), then the preference
+    /// the Preferences window writes, then the safe default.
+    public static var defaultComputeUnits: MLComputeUnits {
+        let choice = ProcessInfo.processInfo.environment["LATENT_ML_COMPUTE"]
+            ?? UserDefaults.standard.string(forKey: computePreferenceKey)
+        switch choice {
         case "all": return .all
         case "cpu": return .cpuOnly
         default: return .cpuAndGPU
         }
-    }()
+    }
 
     /// Loads `name`.mlpackage, compiling on first use.
     public static func load(_ name: String,

@@ -145,13 +145,18 @@ public final class Library: ObservableObject {
 
     /// Opens (or creates) the catalog in `folder`, reconciles, shows the
     /// images, then generates thumbnails in the background.
-    public func open(folder: URL) async throws {
+    public func open(folder: URL, defaultSubfolderMode: SubfolderMode? = nil) async throws {
         thumbnailTask?.cancel()
         isBusy = true
         statusText = "Opening \(folder.lastPathComponent)…"
         defer { isBusy = false }
 
         let catalog = try Catalog.open(at: folder)
+        // A catalog that has never recorded a subfolder policy takes the
+        // app's default; one that has keeps its own.
+        if let mode = defaultSubfolderMode, try await catalog.setting(Catalog.defaultSubfolderModeKey) == nil {
+            try await catalog.setDefaultSubfolderMode(mode)
+        }
         self.catalog = catalog
         self.folderURL = await catalog.rootPath
         thumbnailCache.removeAllObjects()
