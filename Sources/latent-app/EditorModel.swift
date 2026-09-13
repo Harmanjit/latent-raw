@@ -783,6 +783,11 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    /// Keyboard version of double-click: fit ↔ 100% about the centre.
+    func toggleZoomAtCenter() {
+        toggleZoom(at: CGPoint(x: drawableSize.width / 2, y: drawableSize.height / 2))
+    }
+
     func zoomToFit() {
         guard hasImage else { return }
         fitMode = true

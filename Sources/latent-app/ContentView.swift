@@ -9,9 +9,18 @@ import UniformTypeIdentifiers
 /// Which half of the app is showing. Same two-mode shape as Lightroom's
 /// Library and Develop modules.
 enum AppMode: String, CaseIterable, Identifiable {
-    case library, develop
+    case library, loupe, compare, develop
     var id: String { rawValue }
-    var title: String { self == .library ? "Library" : "Develop" }
+    var title: String {
+        switch self {
+        case .library: "Library"
+        case .loupe: "Loupe"
+        case .compare: "Compare"
+        case .develop: "Develop"
+        }
+    }
+    /// Modes that show a rendered image and so support zoom controls.
+    var showsImage: Bool { self != .library }
 }
 
 /// Layout follows Lightroom's Develop module, which is what people expect:
@@ -33,6 +42,11 @@ struct ContentView: View {
     @StateObject private var exportQueue = ExportQueue()
     @State private var mode: AppMode = .library
     @State private var showingExportSheet = false
+    /// Compare's left pane ("Select"): its own render, created the first
+    /// time Compare opens. The right pane ("Candidate") is the main model,
+    /// which follows the selection as arrow keys move it.
+    @State private var compareModel: EditorModel?
+    @State private var compareRecord: ImageRecord?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,6 +67,14 @@ struct ContentView: View {
                         ThumbnailGridView(library: library, onOpen: openInEditor)
                     }
                     .onDisappear { model.flushPendingSave() }
+                case .loupe:
+                    VStack(spacing: 0) {
+                        ImageViewport(model: model)
+                        Divider()
+                        ImageCaption(record: library.selectedImage)
+                    }
+                case .compare:
+                    compareArea
                 case .develop:
                     imageArea
                     Divider()
@@ -64,6 +86,7 @@ struct ContentView: View {
             statusBar
         }
         .background(navigationShortcuts)
+        .onChange(of: mode) { old, _ in modeDidChange(from: old) }
         .sheet(isPresented: $showingExportSheet) {
             ExportSheet(count: library.selectedImageIDs.count) { preset, destination in
                 guard let gpu = model.gpu else { return }
@@ -115,9 +138,16 @@ struct ContentView: View {
     }
 
     private func openInEditor(_ record: ImageRecord) {
+        load(record)
+        mode = .develop
+    }
+
+    /// Loads `record` (with its stored edit, history and snapshots) into
+    /// the main editor model and makes it the selection. Used by Develop,
+    /// Loupe and Compare's candidate pane alike.
+    private func load(_ record: ImageRecord) {
         guard let url = library.fileURL(for: record) else { return }
         library.selectedImageID = record.id
-        mode = .develop
         Task {
             let stack = await library.editStack(for: record)
             model.open(url: url, userRotation: record.userRotation,
@@ -128,6 +158,81 @@ struct ContentView: View {
             if model.catalogImageID == record.id {
                 model.loadHistory(steps: steps, snapshots: snaps)
             }
+        }
+    }
+
+    /// Loads a record into Compare's left pane. No catalog id is passed,
+    /// so that model never writes edits; it's a viewer.
+    private func loadCompareSelect(_ record: ImageRecord) {
+        guard let url = library.fileURL(for: record) else { return }
+        if compareModel == nil { compareModel = EditorModel() }
+        compareRecord = record
+        Task {
+            let stack = await library.editStack(for: record)
+            compareModel?.open(url: url, userRotation: record.userRotation,
+                               catalogImageID: nil, editStackJSON: stack)
+        }
+    }
+
+    /// Entering Loupe or Compare from the grid renders the selection;
+    /// leaving Develop flushes edits. Compare's Select pane starts as the
+    /// other selected image if there is one, else the same image, and
+    /// arrow keys then walk the Candidate.
+    private func modeDidChange(from old: AppMode) {
+        if old == .develop { model.flushPendingSave() }
+        guard mode != .library, let selected = library.selectedImage else { return }
+        if model.catalogImageID != selected.id { load(selected) }
+        if mode == .compare {
+            let other = library.selectedImages.first { $0.id != selected.id }
+            loadCompareSelect(other ?? compareRecord ?? selected)
+        }
+    }
+
+    /// Promote the candidate to the Select side, or swap the two.
+    private func compareMakeSelect() {
+        guard let candidate = library.selectedImage else { return }
+        loadCompareSelect(candidate)
+    }
+
+    private func compareSwap() {
+        guard let candidate = library.selectedImage, let select = compareRecord else { return }
+        loadCompareSelect(candidate)
+        load(select)
+    }
+
+    private var compareArea: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 1) {
+                VStack(spacing: 0) {
+                    if let compareModel {
+                        ImageViewport(model: compareModel, mirror: model)
+                    } else {
+                        Color(white: 0.12)
+                    }
+                    Divider()
+                    ImageCaption(record: compareRecord, title: "Select")
+                }
+                VStack(spacing: 0) {
+                    ImageViewport(model: model, mirror: compareModel)
+                    Divider()
+                    ImageCaption(record: library.selectedImage, title: "Candidate")
+                }
+            }
+            Divider()
+            HStack(spacing: 10) {
+                Button("Make Select") { compareMakeSelect() }
+                    .help("Promote the candidate to the left pane (⇧X)")
+                    .keyboardShortcut("x", modifiers: .shift)
+                Button("Swap") { compareSwap() }
+                    .help("Exchange the two panes")
+                Text("← → step the candidate · rating and flag keys act on it · zoom and pan move both")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .controlSize(.small)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
         }
     }
 
@@ -184,8 +289,25 @@ struct ContentView: View {
             }.keyboardShortcut(.return, modifiers: [])
             Button("") { mode = .library }.keyboardShortcut("g", modifiers: [])
             Button("") {
-                if model.hasImage { mode = .develop }
+                if model.hasImage || library.selectedImage != nil { mode = .develop }
             }.keyboardShortcut("d", modifiers: [])
+            // Culling views: E for loupe, C for compare, space toggles
+            // grid ↔ loupe, Z toggles fit ↔ 100% (Lightroom's keys).
+            Button("") {
+                if library.selectedImage != nil { mode = .loupe }
+            }.keyboardShortcut("e", modifiers: [])
+            Button("") {
+                if library.selectedImage != nil { mode = .compare }
+            }.keyboardShortcut("c", modifiers: [])
+            Button("") {
+                if mode == .library, library.selectedImage != nil { mode = .loupe }
+                else if mode == .loupe { mode = .library }
+            }.keyboardShortcut(.space, modifiers: [])
+            Button("") {
+                guard mode.showsImage else { return }
+                model.toggleZoomAtCenter()
+                if mode == .compare { compareModel?.toggleZoomAtCenter() }
+            }.keyboardShortcut("z", modifiers: [])
 
             // Ratings 0-5, flags P/X/U, rotation Cmd-[ / Cmd-] — the same
             // keys Lightroom uses, so muscle memory carries over.
@@ -268,45 +390,12 @@ struct ContentView: View {
 
     private func step(_ offset: Int) {
         guard let record = library.moveSelection(by: offset) else { return }
-        if mode == .develop { openInEditor(record) }
+        if mode.showsImage { load(record) }
     }
 
     private var imageArea: some View {
         ZStack {
-            Color(white: 0.12)
-
-            if let device = model.device, let presenter = model.presenter,
-               let preview = model.preview {
-                MetalImageView(preview: preview,
-                                tile: model.tile,
-                                transform: model.viewport,
-                                rotation: model.rotation,
-                                sensorSize: model.sensorSize,
-                                presenter: presenter,
-                                device: device,
-                                onResize: { model.viewportDidResize(to: $0) },
-                                onHeadroomChange: { model.displayHeadroomDidChange(to: $0) },
-                                backgroundLevel: model.backgroundLevel,
-                                onZoom: { model.zoom(by: $0, about: $1) },
-                                onPan: { model.pan(by: $0) },
-                                onDoubleClick: { model.toggleZoom(at: $0) },
-                                toolActive: model.maskToolActive,
-                                onToolBegan: { point, exclude in
-                                    model.promptModifierExclude = exclude
-                                    model.maskToolBegan(at: point)
-                                },
-                                onToolMoved: { model.maskToolMoved(to: $0) },
-                                onToolEnded: { model.maskToolEnded() })
-            } else {
-                VStack(spacing: 12) {
-                    Text(model.isReady ? "No image open" : "Metal unavailable")
-                        .foregroundStyle(.secondary)
-                    if model.isReady {
-                        Button("Open Raw File…") { model.showOpenPanel() }
-                    }
-                }
-            }
-
+            ImageViewport(model: model)
             if model.isExporting {
                 Color.black.opacity(0.4)
                 ProgressView("Exporting…")
@@ -620,6 +709,9 @@ struct ContentView: View {
         .disabled(!model.hasImage)
     }
 
+    /// In Compare, zoom buttons drive both panes.
+    private var mirrorModel: EditorModel? { mode == .compare ? compareModel : nil }
+
     private var statusBar: some View {
         HStack(spacing: 12) {
             Picker("Mode", selection: $mode) {
@@ -628,7 +720,7 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .controlSize(.small)
-            .frame(width: 150)
+            .frame(width: 280)
 
             Button("Open File…") { model.showOpenPanel(); mode = .develop }
                 .controlSize(.small)
@@ -654,20 +746,20 @@ struct ContentView: View {
             // same things from the image itself; these exist for the
             // keyboard and for people who like buttons.
             HStack(spacing: 6) {
-                Button("−") { model.zoomOut() }
+                Button("−") { model.zoomOut(); mirrorModel?.zoomOut() }
                     .keyboardShortcut("-", modifiers: .command)
                 Text(model.zoomLabel)
                     .font(.system(.caption, design: .monospaced))
                     .frame(minWidth: 40)
-                Button("+") { model.zoomIn() }
+                Button("+") { model.zoomIn(); mirrorModel?.zoomIn() }
                     .keyboardShortcut("=", modifiers: .command)
-                Button("Fit") { model.zoomToFit() }
+                Button("Fit") { model.zoomToFit(); mirrorModel?.zoomToFit() }
                     .keyboardShortcut("0", modifiers: .command)
-                Button("100%") { model.zoomToActualSize() }
+                Button("100%") { model.zoomToActualSize(); mirrorModel?.zoomToActualSize() }
                     .keyboardShortcut("1", modifiers: .command)
             }
             .controlSize(.small)
-            .disabled(!model.hasImage || mode != .develop)
+            .disabled(!model.hasImage || !mode.showsImage)
 
             if !model.renderReport.isEmpty && mode == .develop {
                 // What the last action rendered and how long it took, on
