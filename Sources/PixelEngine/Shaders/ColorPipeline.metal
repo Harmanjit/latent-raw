@@ -157,6 +157,22 @@ inline float3 applyHSL(float3 p, constant float *hsl) {
     return hsvToRGB(hsv);
 }
 
+// Vibrance: saturation that works hardest on muted colours and leaves
+// already-vivid ones (and skin, hues around orange) mostly alone, so a
+// strong setting doesn't turn faces or a red jacket into paint.
+// Negative values desaturate evenly.
+inline float3 applyVibrance(float3 p, float amount) {
+    float3 hsv = rgbToHSV(p);
+    if (amount < 0.0) {
+        hsv.y *= 1.0 + amount;
+    } else {
+        float skin = 1.0 - 0.7 * smoothstep(0.02, 0.06, hsv.x) * (1.0 - smoothstep(0.10, 0.16, hsv.x));
+        float room = 1.0 - hsv.y;
+        hsv.y = clamp(hsv.y + amount * room * hsv.y * 1.5 * skin, 0.0, 1.0);
+    }
+    return hsvToRGB(hsv);
+}
+
 inline float3 applySplitToning(float3 p, float4 tint, float balance) {
     // tint: shadowHue, shadowSat, highlightHue, highlightSat
     float l = dot(p, float3(0.2126, 0.7152, 0.0722));
@@ -303,6 +319,7 @@ kernel void colorAndTone(
     constant float &binSpan                      [[buffer(20)]],
     constant int &maskOverlayIndex               [[buffer(21)]],  // -1 = none
     constant uint &proofMode                     [[buffer(22)]],  // 0 off, 1 proof, 2 proof + warning
+    constant float &vibrance                     [[buffer(23)]],  // −1…1
     texture2d_array<float, access::sample> brushMasks [[texture(2)]],
     texture3d<float, access::sample> proofLUT    [[texture(3)]],
     uint2 gid                                    [[thread_position_in_grid]])
@@ -349,10 +366,11 @@ kernel void colorAndTone(
     // Stage 11: colour grading, in a perceptual domain, on the display-
     // referred image scaled to [0,1] by the headroom so nothing clips in
     // HDR mode. Skipped entirely when every module is neutral.
-    if (any(gradingFlags != uint3(0))) {
+    if (any(gradingFlags != uint3(0)) || vibrance != 0.0) {
         float3 p = pow(max(display / headroom, 0.0), 1.0 / 2.2);
         if (gradingFlags.x != 0) p = applyCurve(p, curveLUT);
         if (gradingFlags.y != 0) p = applyHSL(p, hsl);
+        if (vibrance != 0.0) p = applyVibrance(p, vibrance);
         if (gradingFlags.z != 0) p = applySplitToning(p, splitTint, splitBalance);
         display = pow(max(p, 0.0), 2.2) * headroom;
     }

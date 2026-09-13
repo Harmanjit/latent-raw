@@ -5,7 +5,7 @@ import Foundation
 /// (DESIGN.md §5.6), so choosing "Tone" carries exposure, the curve's
 /// inputs and highlight recovery together, the way a person thinks of it.
 public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
-    case whiteBalance, tone, toneCurve, colour, splitToning, detail, lens, locals, crop, heal
+    case whiteBalance, tone, presence, toneCurve, colour, splitToning, detail, lens, locals, crop, heal
 
     public var id: String { rawValue }
 
@@ -13,13 +13,14 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         switch self {
         case .whiteBalance: return "White Balance"
         case .tone:         return "Tone (exposure, contrast, highlights)"
+        case .presence:     return "Presence (texture, clarity, dehaze)"
         case .toneCurve:    return "Tone Curve"
-        case .colour:       return "HSL / Colour"
+        case .colour:       return "HSL / Colour / Vibrance"
         case .splitToning:  return "Split Toning"
         case .detail:       return "Detail (sharpening, noise)"
-        case .lens:         return "Lens Corrections"
+        case .lens:         return "Lens Corrections & Defringe"
         case .locals:       return "Local Adjustments"
-        case .crop:         return "Crop & Straighten"
+        case .crop:         return "Crop, Straighten & Perspective"
         case .heal:         return "Spot Removal"
         }
     }
@@ -27,7 +28,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     /// What copy/paste and presets take by default: the look, not the
     /// masks (drawn for another frame) and not the lens correction
     /// switches (a property of the lens, already right per image).
-    public static let lookGroups: Set<EditGroup> = [.whiteBalance, .tone, .toneCurve, .colour, .splitToning, .detail]
+    public static let lookGroups: Set<EditGroup> = [.whiteBalance, .tone, .presence, .toneCurve, .colour, .splitToning, .detail]
 }
 
 extension EditStack {
@@ -45,10 +46,13 @@ extension EditStack {
                 result.modules.exposure = other.modules.exposure
                 result.modules.tone = other.modules.tone
                 result.modules.highlights = other.modules.highlights
+            case .presence:
+                result.modules.presence = other.modules.presence
             case .toneCurve:
                 result.modules.curve = other.modules.curve
             case .colour:
                 result.modules.hsl = other.modules.hsl
+                result.modules.vibrance = other.modules.vibrance
             case .splitToning:
                 result.modules.splittoning = other.modules.splittoning
             case .detail:
@@ -57,10 +61,12 @@ extension EditStack {
                 result.modules.demosaic = other.modules.demosaic
             case .lens:
                 result.modules.lens = other.modules.lens
+                result.modules.defringe = other.modules.defringe
             case .locals:
                 result.modules.locals = other.modules.locals
             case .crop:
                 result.modules.crop = other.modules.crop
+                result.modules.perspective = other.modules.perspective
             case .heal:
                 result.modules.heal = other.modules.heal
             }
@@ -81,13 +87,14 @@ extension EditStack {
         let m = modules
         if m.whitebalance != nil { g.insert(.whiteBalance) }
         if m.exposure != nil || m.tone != nil || m.highlights != nil { g.insert(.tone) }
+        if m.presence != nil { g.insert(.presence) }
         if m.curve != nil { g.insert(.toneCurve) }
-        if m.hsl != nil { g.insert(.colour) }
+        if m.hsl != nil || m.vibrance != nil { g.insert(.colour) }
         if m.splittoning != nil { g.insert(.splitToning) }
         if m.denoise != nil || m.sharpen != nil || m.demosaic != nil { g.insert(.detail) }
-        if m.lens != nil { g.insert(.lens) }
+        if m.lens != nil || m.defringe != nil { g.insert(.lens) }
         if m.locals != nil { g.insert(.locals) }
-        if m.crop != nil { g.insert(.crop) }
+        if m.crop != nil || m.perspective != nil { g.insert(.crop) }
         if m.heal != nil { g.insert(.heal) }
         return g
     }

@@ -78,6 +78,9 @@ public final class ImageSession {
         case blurB          // sharpening: full blur of luminance
         case sharpened      // final output when sharpening ran (tile)
         case sharpenedPreview
+        case presencePair, presenceScratch, presenceSmall, presenceMedium, presenceLarge
+        case presenceDownA, presenceDownB, presenceDownC
+        case presence, presencePreview   // output of the presence stage
     }
 
     private struct TextureKey: Hashable {

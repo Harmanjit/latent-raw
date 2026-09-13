@@ -49,6 +49,7 @@ struct ContentView: View {
     @State private var whiteBalanceExpanded = true
     @State private var toneExpanded = true
     @State private var cropExpanded = false
+    @State private var presenceExpanded = true
     @State private var healExpanded = false
     @State private var compareRecord: ImageRecord?
 
@@ -453,6 +454,12 @@ struct ContentView: View {
                     disclosureLabel("Tone")
                 }
 
+                DisclosureGroup(isExpanded: $presenceExpanded) {
+                    presenceSection.padding(.top, 8)
+                } label: {
+                    disclosureLabel("Presence")
+                }
+
                 DisclosureGroup(isExpanded: $cropExpanded) {
                     cropSection.padding(.top, 8)
                 } label: {
@@ -545,6 +552,11 @@ struct ContentView: View {
                                   range: -0.1...0.1, format: "%+.3f")
                         sliderRow(title: "Vignetting", value: $model.parameters.manualVignetting,
                                   range: -1...1, format: "%+.2f")
+                        disclosureLabel("Defringe")
+                        sliderRow(title: "Purple", value: $model.parameters.defringePurple,
+                                  range: 0...1, format: "%.2f")
+                        sliderRow(title: "Green", value: $model.parameters.defringeGreen,
+                                  range: 0...1, format: "%.2f")
                     }
                     .toggleStyle(.switch)
                     .controlSize(.small)
@@ -748,6 +760,17 @@ struct ContentView: View {
         }
     }
 
+    /// Texture, clarity, dehaze and vibrance: the controls people reach
+    /// for on most images, so this group starts open.
+    private var presenceSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sliderRow(title: "Texture", value: $model.parameters.texture, range: -1...1, format: "%+.2f")
+            sliderRow(title: "Clarity", value: $model.parameters.clarity, range: -1...1, format: "%+.2f")
+            sliderRow(title: "Dehaze", value: $model.parameters.dehaze, range: -1...1, format: "%+.2f")
+            sliderRow(title: "Vibrance", value: $model.parameters.vibrance, range: -1...1, format: "%+.2f")
+        }
+    }
+
     /// Marks a group whose tool is armed on the image.
     private var activeToolBadge: some View {
         Text("ON")
@@ -777,7 +800,7 @@ struct ContentView: View {
                 .frame(width: 96)
                 Spacer()
                 Button("Reset") { model.resetCrop() }
-                    .disabled(model.parameters.crop == .none)
+                    .disabled(model.parameters.crop == .none && model.parameters.perspective.isIdentity)
             }
             .controlSize(.small)
             .disabled(!model.hasImage)
@@ -786,6 +809,11 @@ struct ContentView: View {
                       value: Binding(get: { model.parameters.crop.angle },
                                      set: { model.setStraighten($0) }),
                       range: -45...45, format: "%.2f°")
+            disclosureLabel("Perspective")
+            sliderRow(title: "Vertical", value: $model.parameters.perspective.vertical,
+                      range: -1...1, format: "%+.2f")
+            sliderRow(title: "Horizontal", value: $model.parameters.perspective.horizontal,
+                      range: -1...1, format: "%+.2f")
 
             if model.hasImage {
                 let s = model.croppedPixelSize

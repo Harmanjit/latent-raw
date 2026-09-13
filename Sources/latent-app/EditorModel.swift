@@ -269,6 +269,7 @@ final class EditorModel: ObservableObject {
         guard hasImage else { return }
         straightenBase = nil
         parameters.crop = .none
+        parameters.perspective = .none
     }
 
     /// The canvas changed size or shape (crop, tool, rotation): re-fit if
@@ -1105,6 +1106,12 @@ final class EditorModel: ObservableObject {
 
     private func wantedTileRegion() -> (x: Int, y: Int, width: Int, height: Int) {
         var visible = visibleSensorRect.insetBy(dx: -Self.tileMargin, dy: -Self.tileMargin)
+        // Keystone reads pixels from elsewhere in the frame; widen the tile
+        // to the source region so the corrected view is complete.
+        if !parameters.perspective.isIdentity {
+            visible = parameters.perspective.sourceRect(forSensorRect: visible, sensorSize: sensorSize)
+                .insetBy(dx: -4, dy: -4)
+        }
         // A patch on screen must be able to read its source, which may lie
         // outside the visible area: widen the tile to include it.
         for p in parameters.heals where p.targetBounds(sensorSize: sensorSize).intersects(visible) {

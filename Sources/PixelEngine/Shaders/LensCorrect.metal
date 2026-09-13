@@ -44,6 +44,7 @@ kernel void lensCorrect(
     constant int    &vignettingEnabled       [[buffer(11)]],
     constant float3 &vignettingTerms         [[buffer(12)]],  // k1, k2, k3
     constant float  &manualVignetting        [[buffer(13)]],  // + brightens corners
+    constant float3x3 &perspectiveInverse    [[buffer(14)]],  // keystone, output -> source, normalized
     uint2 gid                                [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
@@ -56,6 +57,13 @@ kernel void lensCorrect(
     // Output pixel -> centred sensor coordinates of the corrected frame.
     float2 sensor = tileOrigin + (float2(gid) + 0.5) * binSpan;
     float2 cu = (sensor - sensorSize * 0.5) * autoScale;
+
+    // Perspective: a homography in the undistorted frame, normalized by
+    // half the short side so the slider means the same at every size.
+    {
+        float3 q = perspectiveInverse * float3(cu / halfShort, 1.0);
+        cu = q.xy / max(q.z, 1e-4) * halfShort;
+    }
 
     // Distortion: where the undistorted point sits in the source.
     float ru = length(cu) / halfShort * cropRatio;

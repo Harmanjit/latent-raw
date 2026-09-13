@@ -56,6 +56,11 @@ public final class GPUContext: @unchecked Sendable {
     let packForExportPSO: MTLComputePipelineState
     let healStatsPSO: MTLComputePipelineState
     let healApplyPSO: MTLComputePipelineState
+    let lcPreparePSO: MTLComputePipelineState
+    let lcDownsamplePSO: MTLComputePipelineState
+    let lcBlurHPSO: MTLComputePipelineState
+    let lcBlurVPSO: MTLComputePipelineState
+    let lcApplyPSO: MTLComputePipelineState
 
     // RCD demosaic, six passes (see RCD.metal).
     let rcdDirectionsVHPSO: MTLComputePipelineState
@@ -99,6 +104,11 @@ public final class GPUContext: @unchecked Sendable {
         let packPipeline = try makePipeline("packForExport")
         let healStatsPipeline = try makePipeline("healStats")
         let healApplyPipeline = try makePipeline("healApply")
+        let lcPrepare = try makePipeline("lcPrepare")
+        let lcDownsample = try makePipeline("lcDownsample")
+        let lcBlurH = try makePipeline("lcBlurH")
+        let lcBlurV = try makePipeline("lcBlurV")
+        let lcApply = try makePipeline("lcApply")
         let vhPipeline = try makePipeline("rcdDirectionsVH")
         let lowPassPipeline = try makePipeline("rcdLowPass")
         let greenPipeline = try makePipeline("rcdGreen")
@@ -126,6 +136,11 @@ public final class GPUContext: @unchecked Sendable {
         self.packForExportPSO = packPipeline
         self.healStatsPSO = healStatsPipeline
         self.healApplyPSO = healApplyPipeline
+        self.lcPreparePSO = lcPrepare
+        self.lcDownsamplePSO = lcDownsample
+        self.lcBlurHPSO = lcBlurH
+        self.lcBlurVPSO = lcBlurV
+        self.lcApplyPSO = lcApply
         self.rcdDirectionsVHPSO = vhPipeline
         self.rcdLowPassPSO = lowPassPipeline
         self.rcdGreenPSO = greenPipeline
@@ -159,7 +174,7 @@ public final class GPUContext: @unchecked Sendable {
         // Every kernel source file must be listed here, or its functions
         // won't exist in the runtime-compiled library.
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
-                            "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal"]
+                            "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound

@@ -120,6 +120,17 @@ public struct EditParameters: Sendable, Equatable {
     public var crop: CropParameters
     /// Spot removal patches, applied in order in camera space.
     public var heals: [HealPatch]
+    /// Presence: local contrast at two scales and haze removal, −1…1.
+    public var texture: Float
+    public var clarity: Float
+    public var dehaze: Float
+    /// Saturation that favours muted colours and spares skin, −1…1.
+    public var vibrance: Float
+    /// Manual chromatic-aberration cleanup, 0…1 each.
+    public var defringePurple: Float
+    public var defringeGreen: Float
+    /// Keystone correction, applied with the lens corrections.
+    public var perspective: PerspectiveCorrection
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -144,7 +155,11 @@ public struct EditParameters: Sendable, Equatable {
                 splitToning: SplitToning = .neutral,
                 locals: [LocalAdjustment] = [],
                 crop: CropParameters = .none,
-                heals: [HealPatch] = []) {
+                heals: [HealPatch] = [],
+                texture: Float = 0, clarity: Float = 0, dehaze: Float = 0,
+                vibrance: Float = 0,
+                defringePurple: Float = 0, defringeGreen: Float = 0,
+                perspective: PerspectiveCorrection = .none) {
         self.whiteBalance = whiteBalance
         self.exposureEV = exposureEV
         self.contrast = contrast
@@ -169,6 +184,15 @@ public struct EditParameters: Sendable, Equatable {
         self.locals = locals
         self.crop = crop
         self.heals = heals
+        self.texture = texture; self.clarity = clarity; self.dehaze = dehaze
+        self.vibrance = vibrance
+        self.defringePurple = defringePurple; self.defringeGreen = defringeGreen
+        self.perspective = perspective
+    }
+
+    /// Whether the presence stage has anything to do.
+    public var wantsLocalContrast: Bool {
+        texture != 0 || clarity != 0 || dehaze != 0 || defringePurple > 0 || defringeGreen > 0
     }
 
     public static let neutral = EditParameters()
@@ -189,6 +213,10 @@ public struct EditParameters: Sendable, Equatable {
             && a.manualDistortion == b.manualDistortion && a.manualVignetting == b.manualVignetting
             && a.toneCurve == b.toneCurve && a.hsl == b.hsl && a.splitToning == b.splitToning
             && a.locals == b.locals && a.crop == b.crop && a.heals == b.heals
+            && a.texture == b.texture && a.clarity == b.clarity && a.dehaze == b.dehaze
+            && a.vibrance == b.vibrance
+            && a.defringePurple == b.defringePurple && a.defringeGreen == b.defringeGreen
+            && a.perspective == b.perspective
     }
 }
 
@@ -458,6 +486,15 @@ public final class RenderPipeline {
                                           output: output,
                                           renderInfo: renderInfo, binSpan: binSpan)
 
+        // Presence (texture, clarity, dehaze, defringe), display-referred,
+        // before sharpening so the sharpener sees the final tonality.
+        if parameters.wantsLocalContrast {
+            final = try applyLocalContrast(session: session, cmdBuffer: cmdBuffer, input: final,
+                                           outputRole: displayRole == .display ? .presence : .presencePreview,
+                                           parameters: parameters, output: output,
+                                           renderInfo: renderInfo, binSpan: binSpan)
+        }
+
         // Stage 12: sharpening, on the display-referred result.
         if parameters.sharpenAmount > 0 {
             final = try applySharpen(session: session, cmdBuffer: cmdBuffer, input: final,
@@ -478,7 +515,7 @@ public final class RenderPipeline {
     // MARK: - Lens corrections
 
     static func wantsLensCorrection(session: ImageSession, parameters p: EditParameters) -> Bool {
-        if p.manualDistortion != 0 || p.manualVignetting != 0 { return true }
+        if p.manualDistortion != 0 || p.manualVignetting != 0 || !p.perspective.isIdentity { return true }
         guard let c = session.lensCorrection else { return false }
         return (p.lensDistortion && c.distortion != nil)
             || (p.lensTCA && c.tca != nil)
@@ -533,9 +570,106 @@ public final class RenderPipeline {
         encoder.setBytes(&vigOn, length: 4, index: 11)
         encoder.setBytes(&vig, length: 16, index: 12)
         encoder.setBytes(&manualVig, length: 4, index: 13)
+        var perspective = p.perspective.inverseMatrix
+        encoder.setBytes(&perspective, length: MemoryLayout<simd_float3x3>.size, index: 14)
         dispatch(encoder, pso: gpu.lensCorrectPSO, width: input.width, height: input.height)
         encoder.endEncoding()
         return output
+    }
+
+    // MARK: - Presence (texture, clarity, dehaze, defringe)
+
+    /// Gaussian taps up to 65 wide (sigma ≤ ~10). Larger blurs run on a
+    /// downsampled copy instead of a wider kernel.
+    static func wideGaussianWeights(sigma: Float) -> [Float] {
+        let s = max(sigma, 0.3)
+        let half = min(Int((3 * s).rounded(.up)), 32)
+        var weights = (-half...half).map { exp(-Float($0 * $0) / (2 * s * s)) }
+        let sum = weights.reduce(0, +)
+        weights = weights.map { $0 / sum }
+        return weights
+    }
+
+    private func applyLocalContrast(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                                    input: MTLTexture, outputRole: ImageSession.TextureRole,
+                                    parameters p: EditParameters, output: RenderOutput,
+                                    renderInfo: RenderInfo, binSpan: Float) throws -> MTLTexture {
+        let w = input.width, h = input.height
+        let summary = session.file.summary
+        let shortSide = Float(min(summary.rawWidth, summary.rawHeight))
+
+        func pass(_ pso: MTLComputePipelineState, _ textures: [MTLTexture], width: Int, height: Int,
+                  _ bind: (MTLComputeCommandEncoder) -> Void) throws {
+            guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+                throw RenderError.commandBufferFailed
+            }
+            encoder.setComputePipelineState(pso)
+            for (i, t) in textures.enumerated() { encoder.setTexture(t, index: i) }
+            bind(encoder)
+            dispatch(encoder, pso: pso, width: width, height: height)
+            encoder.endEncoding()
+        }
+
+        // 1. Luma + dark channel.
+        let pair = try session.texture(width: w, height: h, pixelFormat: .rg16Float, role: .presencePair)
+        var isLinear: UInt32 = output.encoded ? 0 : 1
+        var headroom = output.headroom
+        try pass(gpu.lcPreparePSO, [input, pair], width: w, height: h) { e in
+            e.setBytes(&isLinear, length: 4, index: 0)
+            e.setBytes(&headroom, length: 4, index: 1)
+        }
+
+        // 2. Blur at a given sigma (in output pixels), downsampling first
+        //    when the kernel would be too wide.
+        func blurred(sigma: Float, role: ImageSession.TextureRole,
+                     scratch: ImageSession.TextureRole) throws -> MTLTexture {
+            var factor = 1
+            while sigma / Float(factor) > 10, factor < 16 { factor *= 2 }
+            var source = pair
+            var bw = w, bh = h
+            if factor > 1 {
+                bw = max(1, w / factor); bh = max(1, h / factor)
+                let small = try session.texture(width: bw, height: bh, pixelFormat: .rg16Float, role: scratch)
+                var f = Int32(factor)
+                try pass(gpu.lcDownsamplePSO, [pair, small], width: bw, height: bh) { e in
+                    e.setBytes(&f, length: 4, index: 0)
+                }
+                source = small
+            }
+            var weights = Self.wideGaussianWeights(sigma: sigma / Float(factor))
+            var taps = Int32(weights.count)
+            let tmp = try session.texture(width: bw, height: bh, pixelFormat: .rg16Float, role: .presenceScratch)
+            let out = try session.texture(width: bw, height: bh, pixelFormat: .rg16Float, role: role)
+            try pass(gpu.lcBlurHPSO, [source, tmp], width: bw, height: bh) { e in
+                e.setBytes(&weights, length: weights.count * 4, index: 0)
+                e.setBytes(&taps, length: 4, index: 1)
+            }
+            try pass(gpu.lcBlurVPSO, [tmp, out], width: bw, height: bh) { e in
+                e.setBytes(&weights, length: weights.count * 4, index: 0)
+                e.setBytes(&taps, length: 4, index: 1)
+            }
+            return out
+        }
+
+        // Scales in sensor pixels, converted to this render's pixels.
+        let small = try blurred(sigma: 1.0 / binSpan, role: .presenceSmall, scratch: .presenceDownA)
+        let medium = try blurred(sigma: 4.0 / binSpan, role: .presenceMedium, scratch: .presenceDownB)
+        let large = try blurred(sigma: 0.012 * shortSide / binSpan, role: .presenceLarge, scratch: .presenceDownC)
+
+        // 3. Apply.
+        let result = try session.texture(width: w, height: h, pixelFormat: .rgba16Float, role: outputRole)
+        var texture = p.texture, clarity = p.clarity, dehaze = p.dehaze
+        var purple = p.defringePurple, green = p.defringeGreen
+        try pass(gpu.lcApplyPSO, [input, pair, small, medium, large, result], width: w, height: h) { e in
+            e.setBytes(&texture, length: 4, index: 0)
+            e.setBytes(&clarity, length: 4, index: 1)
+            e.setBytes(&dehaze, length: 4, index: 2)
+            e.setBytes(&purple, length: 4, index: 3)
+            e.setBytes(&green, length: 4, index: 4)
+            e.setBytes(&isLinear, length: 4, index: 5)
+            e.setBytes(&headroom, length: 4, index: 6)
+        }
+        return result
     }
 
     // MARK: - Spot removal
@@ -800,6 +934,8 @@ public final class RenderPipeline {
 
         var proofMode: UInt32 = output.proof == nil ? 0 : (output.gamutWarning ? 2 : 1)
         encoder.setBytes(&proofMode, length: 4, index: 22)
+        var vibrance = parameters.vibrance
+        encoder.setBytes(&vibrance, length: 4, index: 23)
         encoder.setTexture(proofTexture(for: output.proof), index: 3)
 
         dispatch(encoder, pso: gpu.colorAndTonePSO, width: input.width, height: input.height)

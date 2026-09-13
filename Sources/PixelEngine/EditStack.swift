@@ -39,7 +39,18 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var locals: [LocalAdjustment]?
         public var crop: Crop?
         public var heal: [HealPatch]?
+        public var presence: Presence?
+        public var vibrance: Vibrance?
+        public var defringe: Defringe?
+        public var perspective: Perspective?
     }
+
+    public struct Presence: Codable, Equatable, Sendable {
+        public var texture: Float, clarity: Float, dehaze: Float
+    }
+    public struct Vibrance: Codable, Equatable, Sendable { public var amount: Float }
+    public struct Defringe: Codable, Equatable, Sendable { public var purple: Float, green: Float }
+    public struct Perspective: Codable, Equatable, Sendable { public var vertical: Float, horizontal: Float }
 
     /// Normalized sensor coordinates; see `CropParameters`.
     public struct Crop: Codable, Equatable, Sendable {
@@ -137,6 +148,13 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.splittoning = p.splitToning
         modules.locals = p.locals.isEmpty ? nil : p.locals
         modules.heal = p.heals.isEmpty ? nil : p.heals
+        modules.presence = (p.texture == 0 && p.clarity == 0 && p.dehaze == 0) ? nil
+            : Presence(texture: p.texture, clarity: p.clarity, dehaze: p.dehaze)
+        modules.vibrance = p.vibrance == 0 ? nil : Vibrance(amount: p.vibrance)
+        modules.defringe = (p.defringePurple == 0 && p.defringeGreen == 0) ? nil
+            : Defringe(purple: p.defringePurple, green: p.defringeGreen)
+        modules.perspective = p.perspective.isIdentity ? nil
+            : Perspective(vertical: p.perspective.vertical, horizontal: p.perspective.horizontal)
         modules.crop = (p.crop.isIdentity && p.crop.aspect == nil) ? nil
             : Crop(cx: p.crop.centre.x, cy: p.crop.centre.y, w: p.crop.size.x, h: p.crop.size.y,
                    angle: p.crop.angle, aspect: p.crop.aspect)
@@ -190,6 +208,16 @@ public struct EditStack: Codable, Equatable, Sendable {
         if let st = modules.splittoning { p.splitToning = st }
         p.locals = modules.locals ?? []
         p.heals = modules.heal ?? []
+        if let pr = modules.presence { p.texture = pr.texture; p.clarity = pr.clarity; p.dehaze = pr.dehaze }
+        else { p.texture = 0; p.clarity = 0; p.dehaze = 0 }
+        p.vibrance = modules.vibrance?.amount ?? 0
+        if let d = modules.defringe { p.defringePurple = d.purple; p.defringeGreen = d.green }
+        else { p.defringePurple = 0; p.defringeGreen = 0 }
+        if let ps = modules.perspective {
+            p.perspective = PerspectiveCorrection(vertical: ps.vertical, horizontal: ps.horizontal)
+        } else {
+            p.perspective = .none
+        }
         if let c = modules.crop, c.w > 0, c.h > 0 {
             p.crop = CropParameters(centre: [c.cx, c.cy], size: [c.w, c.h], angle: c.angle, aspect: c.aspect)
         } else {
