@@ -131,6 +131,9 @@ public struct EditParameters: Sendable, Equatable {
     public var defringeGreen: Float
     /// Keystone correction, applied with the lens corrections.
     public var perspective: PerspectiveCorrection
+    /// Neural noise reduction strength, 0 (off) … 1. The model's output
+    /// is computed once per image (MLKit) and blended in at this weight.
+    public var aiDenoise: Float
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -159,7 +162,8 @@ public struct EditParameters: Sendable, Equatable {
                 texture: Float = 0, clarity: Float = 0, dehaze: Float = 0,
                 vibrance: Float = 0,
                 defringePurple: Float = 0, defringeGreen: Float = 0,
-                perspective: PerspectiveCorrection = .none) {
+                perspective: PerspectiveCorrection = .none,
+                aiDenoise: Float = 0) {
         self.whiteBalance = whiteBalance
         self.exposureEV = exposureEV
         self.contrast = contrast
@@ -188,6 +192,7 @@ public struct EditParameters: Sendable, Equatable {
         self.vibrance = vibrance
         self.defringePurple = defringePurple; self.defringeGreen = defringeGreen
         self.perspective = perspective
+        self.aiDenoise = aiDenoise
     }
 
     /// Whether the presence stage has anything to do.
@@ -216,7 +221,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.texture == b.texture && a.clarity == b.clarity && a.dehaze == b.dehaze
             && a.vibrance == b.vibrance
             && a.defringePurple == b.defringePurple && a.defringeGreen == b.defringeGreen
-            && a.perspective == b.perspective
+            && a.perspective == b.perspective && a.aiDenoise == b.aiDenoise
     }
 }
 
@@ -453,8 +458,18 @@ public final class RenderPipeline {
         // detail stages so the preview predicts the full-size result.
         let binSpan: Float = renderInfo.isFullResolution ? 1 : Float(renderInfo.binQuads * 2)
 
-        // Stage 8: noise reduction, in camera space, before the matrix.
         var colourInput = cameraRGB
+
+        // Neural denoise: blend the session's cached full-frame result in,
+        // re-binned and re-white-balanced to match this render.
+        if parameters.aiDenoise > 0, let denoised = session.aiDenoisedCameraRGB {
+            colourInput = try applyAIDenoise(session: session, cmdBuffer: cmdBuffer, input: cameraRGB,
+                                             denoised: denoised, strength: parameters.aiDenoise,
+                                             multipliers: multipliers, renderInfo: renderInfo,
+                                             outputRole: displayRole == .display ? .aiDenoised : .aiDenoisedPreview)
+        }
+
+        // Stage 8: noise reduction, in camera space, before the matrix.
         if parameters.denoiseLuminance > 0 || parameters.denoiseColor > 0 {
             colourInput = try applyDenoise(session: session, cmdBuffer: cmdBuffer,
                                            input: cameraRGB, parameters: parameters,
@@ -670,6 +685,37 @@ public final class RenderPipeline {
             e.setBytes(&headroom, length: 4, index: 6)
         }
         return result
+    }
+
+    // MARK: - Neural denoise
+
+    private func applyAIDenoise(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                                input: MTLTexture, denoised: MTLTexture, strength: Float,
+                                multipliers: SIMD4<Float>, renderInfo: RenderInfo,
+                                outputRole: ImageSession.TextureRole) throws -> MTLTexture {
+        let output = try session.texture(width: input.width, height: input.height,
+                                         pixelFormat: .rgba16Float, role: outputRole)
+        guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+            throw RenderError.commandBufferFailed
+        }
+        encoder.setComputePipelineState(gpu.aiDenoiseBlendPSO)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(denoised, index: 1)
+        encoder.setTexture(output, index: 2)
+        var s = max(0, min(1, strength))
+        let asShot = session.asShotMultipliers
+        var ratio = SIMD4<Float>(multipliers.x / max(asShot.x, 1e-6), multipliers.y / max(asShot.y, 1e-6),
+                                 multipliers.z / max(asShot.z, 1e-6), 1)
+        var origin = SIMD2<UInt32>(UInt32(max(0, renderInfo.sensorRect.origin.x)),
+                                   UInt32(max(0, renderInfo.sensorRect.origin.y)))
+        var span = UInt32(renderInfo.isFullResolution ? 1 : renderInfo.binQuads * 2)
+        encoder.setBytes(&s, length: 4, index: 0)
+        encoder.setBytes(&ratio, length: 16, index: 1)
+        encoder.setBytes(&origin, length: 8, index: 2)
+        encoder.setBytes(&span, length: 4, index: 3)
+        dispatch(encoder, pso: gpu.aiDenoiseBlendPSO, width: input.width, height: input.height)
+        encoder.endEncoding()
+        return output
     }
 
     // MARK: - Spot removal

@@ -76,6 +76,13 @@ public enum ExportWorker {
         let masksGenerated = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
         lap("masks")
 
+        // Neural denoise is computed, not stored: run it for the export.
+        if parameters.aiDenoise > 0, AIDenoiser.isAvailable {
+            let denoiser = try await AIDenoiser.load()
+            try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
+            lap("denoise")
+        }
+
         // Scale: bin as far as the target allows (cheaper and a correct
         // box filter), never below it; full resolution otherwise.
         let sensorLong = max(file.summary.rawWidth, file.summary.rawHeight)

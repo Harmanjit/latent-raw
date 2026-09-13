@@ -45,6 +45,72 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    // MARK: - Neural denoise
+
+    @Published private(set) var aiDenoiseStatus = ""
+    @Published private(set) var aiDenoiseRunning = false
+    private var aiDenoiseTask: Task<Void, Never>?
+    private static var sharedDenoiser: AIDenoiser?
+    var aiDenoiseAvailable: Bool { AIDenoiser.isAvailable }
+    var hasAIDenoiseResult: Bool { session?.aiDenoisedCameraRGB != nil }
+
+    /// Runs the network over the open image (once; the result lives with
+    /// the session) and re-renders. ~12 s for 24 MP on the GPU.
+    func runAIDenoise() {
+        guard let session, let pipeline, let gpu = gpuContext, !aiDenoiseRunning else { return }
+        guard AIDenoiser.isAvailable else {
+            aiDenoiseStatus = "NAFNet model not bundled — see Sources/MLKit/Resources/Models/README.md"
+            return
+        }
+        aiDenoiseRunning = true
+        aiDenoiseStatus = "Loading model…"
+        let imageID = catalogImageID
+        aiDenoiseTask = Task { [weak self] in
+            do {
+                let denoiser: AIDenoiser
+                if let d = Self.sharedDenoiser { denoiser = d } else {
+                    denoiser = try await AIDenoiser.load()
+                    Self.sharedDenoiser = denoiser
+                }
+                let seconds = try await AIDenoiseWorker.run(
+                    session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser
+                ) { [weak self] done, total in
+                    Task { @MainActor in
+                        self?.aiDenoiseStatus = "Denoising… \(done) of \(total) tiles"
+                    }
+                }
+                guard let model = self, model.catalogImageID == imageID || model.session === session else { return }
+                model.aiDenoiseStatus = String(format: "Denoised in %.1f s", seconds)
+                model.aiDenoiseRunning = false
+                if model.parameters.aiDenoise == 0 { model.parameters.aiDenoise = 1 } else { model.rerender() }
+            } catch is CancellationError {
+                self?.aiDenoiseRunning = false
+                self?.aiDenoiseStatus = ""
+            } catch {
+                self?.aiDenoiseRunning = false
+                self?.aiDenoiseStatus = "Denoise failed: \(error)"
+            }
+        }
+    }
+
+    func cancelAIDenoise() {
+        aiDenoiseTask?.cancel()
+    }
+
+    /// A stored edit with denoise on needs the result recomputed on open.
+    private func regenerateAIDenoiseIfNeeded() {
+        if parameters.aiDenoise > 0, !hasAIDenoiseResult, !aiDenoiseRunning { runAIDenoise() }
+    }
+
+    /// Slider binding: moving it off zero with no result yet starts the run.
+    var aiDenoiseStrength: Float {
+        get { parameters.aiDenoise }
+        set {
+            parameters.aiDenoise = newValue
+            if newValue > 0 { regenerateAIDenoiseIfNeeded() }
+        }
+    }
+
     // MARK: - Spot removal tool
 
     /// Click a spot to heal it (the source is picked beside it); drag from
@@ -967,8 +1033,12 @@ final class EditorModel: ObservableObject {
             sam2Status = ""
             history = EditHistory(initial: EditStack(parameters: parameters))
             snapshots = []
+            aiDenoiseTask?.cancel()
+            aiDenoiseRunning = false
+            aiDenoiseStatus = ""
             rerender()
             regenerateMissingAIMasks()
+            regenerateAIDenoiseIfNeeded()
         } catch {
             session = nil
             sourceURL = nil

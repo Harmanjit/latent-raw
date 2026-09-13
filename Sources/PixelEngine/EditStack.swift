@@ -43,7 +43,15 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var vibrance: Vibrance?
         public var defringe: Defringe?
         public var perspective: Perspective?
+        public var aidenoise: AIDenoise?
     }
+
+    public struct AIDenoise: Codable, Equatable, Sendable {
+        public var strength: Float
+        /// Which network produced the result the strength refers to.
+        public var model: String
+    }
+    public static let aiDenoiseModelName = "nafnet-sidd-w32"
 
     public struct Presence: Codable, Equatable, Sendable {
         public var texture: Float, clarity: Float, dehaze: Float
@@ -153,6 +161,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.vibrance = p.vibrance == 0 ? nil : Vibrance(amount: p.vibrance)
         modules.defringe = (p.defringePurple == 0 && p.defringeGreen == 0) ? nil
             : Defringe(purple: p.defringePurple, green: p.defringeGreen)
+        modules.aidenoise = p.aiDenoise == 0 ? nil : AIDenoise(strength: p.aiDenoise, model: Self.aiDenoiseModelName)
         modules.perspective = p.perspective.isIdentity ? nil
             : Perspective(vertical: p.perspective.vertical, horizontal: p.perspective.horizontal)
         modules.crop = (p.crop.isIdentity && p.crop.aspect == nil) ? nil
@@ -213,6 +222,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         p.vibrance = modules.vibrance?.amount ?? 0
         if let d = modules.defringe { p.defringePurple = d.purple; p.defringeGreen = d.green }
         else { p.defringePurple = 0; p.defringeGreen = 0 }
+        p.aiDenoise = modules.aidenoise?.strength ?? 0
         if let ps = modules.perspective {
             p.perspective = PerspectiveCorrection(vertical: ps.vertical, horizontal: ps.horizontal)
         } else {

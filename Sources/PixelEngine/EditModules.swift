@@ -17,7 +17,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .toneCurve:    return "Tone Curve"
         case .colour:       return "HSL / Colour / Vibrance"
         case .splitToning:  return "Split Toning"
-        case .detail:       return "Detail (sharpening, noise)"
+        case .detail:       return "Detail (sharpening, noise, AI denoise)"
         case .lens:         return "Lens Corrections & Defringe"
         case .locals:       return "Local Adjustments"
         case .crop:         return "Crop, Straighten & Perspective"
@@ -57,6 +57,7 @@ extension EditStack {
                 result.modules.splittoning = other.modules.splittoning
             case .detail:
                 result.modules.denoise = other.modules.denoise
+                result.modules.aidenoise = other.modules.aidenoise
                 result.modules.sharpen = other.modules.sharpen
                 result.modules.demosaic = other.modules.demosaic
             case .lens:
@@ -91,7 +92,7 @@ extension EditStack {
         if m.curve != nil { g.insert(.toneCurve) }
         if m.hsl != nil || m.vibrance != nil { g.insert(.colour) }
         if m.splittoning != nil { g.insert(.splitToning) }
-        if m.denoise != nil || m.sharpen != nil || m.demosaic != nil { g.insert(.detail) }
+        if m.denoise != nil || m.sharpen != nil || m.demosaic != nil || m.aidenoise != nil { g.insert(.detail) }
         if m.lens != nil || m.defringe != nil { g.insert(.lens) }
         if m.locals != nil { g.insert(.locals) }
         if m.crop != nil || m.perspective != nil { g.insert(.crop) }

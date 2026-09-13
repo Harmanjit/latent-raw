@@ -10,9 +10,9 @@ import Metal
 /// first, then read that.
 ///
 /// Used by the exporter and by tests that compare renders numerically.
-enum TextureReadback {
+public enum TextureReadback {
     /// The pixels of an `rgba16Float` texture, row-major, four halfs each.
-    static func float16Pixels(of texture: MTLTexture, gpu: GPUContext) throws -> [Float16] {
+    public static func float16Pixels(of texture: MTLTexture, gpu: GPUContext) throws -> [Float16] {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: texture.pixelFormat, width: texture.width,
             height: texture.height, mipmapped: false)

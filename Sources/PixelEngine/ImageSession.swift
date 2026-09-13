@@ -81,6 +81,7 @@ public final class ImageSession {
         case presencePair, presenceScratch, presenceSmall, presenceMedium, presenceLarge
         case presenceDownA, presenceDownB, presenceDownC
         case presence, presencePreview   // output of the presence stage
+        case aiDenoised, aiDenoisedPreview // camera RGB after the neural denoiser is blended in
     }
 
     private struct TextureKey: Hashable {
@@ -101,6 +102,19 @@ public final class ImageSession {
     /// Pixels for AI-generated masks, keyed by local id. Set by the app
     /// after MLKit produces them; the session only stores and uploads.
     private var aiMasks: [UUID: MaskBitmap] = [:]
+
+    /// The neural denoiser's output for the whole frame: camera RGB at
+    /// as-shot white balance, full resolution. Produced on demand by
+    /// MLKit (about 12 s for 24 MP) and kept for the life of the session;
+    /// the pipeline blends it in per render. `aiDenoiseModel` names what
+    /// produced it, so a different model invalidates it.
+    public private(set) var aiDenoisedCameraRGB: MTLTexture?
+    public private(set) var aiDenoiseModel: String?
+
+    public func setAIDenoised(_ texture: MTLTexture?, model: String?) {
+        aiDenoisedCameraRGB = texture
+        aiDenoiseModel = texture == nil ? nil : model
+    }
 
     public func setAIMask(_ bitmap: MaskBitmap?, forLocal id: UUID) {
         aiMasks[id] = bitmap

@@ -596,6 +596,12 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
+                    aiDenoiseSection.padding(.top, 8)
+                } label: {
+                    disclosureLabel("AI Noise Reduction")
+                }
+
+                DisclosureGroup {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle("Soft proof", isOn: $model.proofEnabled)
                             .toggleStyle(.switch).controlSize(.small)
@@ -738,6 +744,34 @@ struct ContentView: View {
             sliderRow(title: "Clarity", value: $model.parameters.clarity, range: -1...1, format: "%+.2f")
             sliderRow(title: "Dehaze", value: $model.parameters.dehaze, range: -1...1, format: "%+.2f")
             sliderRow(title: "Vibrance", value: $model.parameters.vibrance, range: -1...1, format: "%+.2f")
+        }
+    }
+
+    /// Neural denoise: one run per image (cached with the session), then
+    /// the strength blends it in instantly.
+    private var aiDenoiseSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sliderRow(title: "Strength",
+                      value: Binding(get: { model.aiDenoiseStrength }, set: { model.aiDenoiseStrength = $0 }),
+                      range: 0...1, format: "%.2f")
+            HStack {
+                if model.aiDenoiseRunning {
+                    ProgressView().controlSize(.small)
+                    Button("Cancel") { model.cancelAIDenoise() }
+                } else {
+                    Button(model.hasAIDenoiseResult ? "Run again" : "Denoise") { model.runAIDenoise() }
+                        .disabled(!model.hasImage || !model.aiDenoiseAvailable)
+                }
+                Spacer()
+            }
+            .controlSize(.small)
+            if !model.aiDenoiseStatus.isEmpty {
+                Text(model.aiDenoiseStatus).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("NAFNet (SIDD) on the GPU, in camera space before colour. About 12 s per 24 MP frame; the result is kept while the image is open and recomputed on export.")
+                .font(.caption2).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
