@@ -688,7 +688,7 @@ public final class RenderPipeline {
         encoder.setBytes(&balance, length: 4, index: 15)
 
         // Local adjustments.
-        var packed = locals.map { LocalAdjustGPU($0, brushSlice: slices[$0.id] ?? 0) }
+        var packed = locals.map { LocalAdjustGPU($0, brushSlice: slices[$0.id] ?? -1) }
         if packed.isEmpty { packed = [LocalAdjustGPU(LocalAdjustment(name: "", shape: .whole), brushSlice: 0)] }
         var localCount = Int32(locals.count)
         var sensorSize = SIMD2<Float>(Float(session.file.summary.rawWidth),

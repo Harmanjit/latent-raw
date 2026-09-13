@@ -61,6 +61,11 @@ let package = Package(
             dependencies: ["PixelEngine"],
             path: "Sources/MLKit"
         ),
+        .testTarget(
+            name: "MLKitTests",
+            dependencies: ["MLKit", "PixelEngine", "RawCore"],
+            path: "Tests/MLKitTests"
+        ),
         .executableTarget(
             name: "rawhead-cli",
             dependencies: ["RawCore", "PixelEngine", "Catalog", "ColorKit"],
@@ -91,7 +96,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "rawhead-app",
-            dependencies: ["RawCore", "PixelEngine", "ColorKit", "Catalog", "LensKit"],
+            dependencies: ["RawCore", "PixelEngine", "ColorKit", "Catalog", "LensKit", "MLKit"],
             path: "Sources/rawhead-app"
         ),
     ]

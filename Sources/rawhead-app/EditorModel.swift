@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 import RawCore
 import ColorKit
 import PixelEngine
+import MLKit
 
 /// The editor's state: which image is open, what the adjustments are, how
 /// the viewport is zoomed and panned, and the most recent rendered result.
@@ -188,6 +189,84 @@ final class EditorModel: ObservableObject {
         parameters.locals.append(local)
         selectedLocalIndex = parameters.locals.count - 1
         maskTool = kind == .none ? .none : (kind == .erase ? .brush : kind)
+    }
+
+    /// Names of AI locals whose masks are being generated right now.
+    @Published private(set) var generatingMasks: Set<UUID> = []
+
+    /// Adds a model-generated mask and starts generating its pixels. The
+    /// model runs off the main thread on a small sRGB copy of the image
+    /// rendered *unrotated*, so the mask lands in sensor coordinates like
+    /// every other mask.
+    func addAIMask(_ kind: AIMaskKind) {
+        guard hasImage, parameters.locals.count < LocalAdjustment.maximumCount else { return }
+        let local = LocalAdjustment(name: kind.displayName,
+                                    shape: .ai(kind: kind.rawValue, modelVersion: kind.modelVersion))
+        parameters.locals.append(local)
+        selectedLocalIndex = parameters.locals.count - 1
+        showMaskOverlay = true
+        generateAIMask(for: local)
+    }
+
+    /// Regenerates masks for AI locals that have no pixels yet — after
+    /// opening an image whose edit contains them.
+    private func regenerateMissingAIMasks() {
+        guard let session else { return }
+        for local in parameters.locals {
+            if case .ai = local.shape, !session.hasAIMask(forLocal: local.id),
+               !generatingMasks.contains(local.id) {
+                generateAIMask(for: local)
+            }
+        }
+    }
+
+    private func generateAIMask(for local: LocalAdjustment) {
+        guard let session, let pipeline, let gpu = gpuContext,
+              case .ai(let kindName, _) = local.shape,
+              let kind = AIMaskKind(rawValue: kindName) else { return }
+        generatingMasks.insert(local.id)
+        status = "Generating \(kind.displayName.lowercased()) mask…"
+
+        // The model input: ~1000px on the long edge, encoded sRGB. Rendered
+        // here on the main thread (a few ms), then everything else is off it.
+        let longEdge = max(session.file.summary.rawWidth, session.file.summary.rawHeight)
+        let quads = max(1, Int((Double(longEdge) / 2048.0).rounded(.up)))
+        var neutral = defaultParameters
+        neutral.locals = []
+        let image: CGImage
+        do {
+            let tex = try pipeline.render(session, scale: .binned(quads: quads), parameters: neutral,
+                                          output: .file(.sRGB))
+            image = try Exporter(gpu: gpu).cgImage(from: tex, colorSpace: .sRGB)
+        } catch {
+            generatingMasks.remove(local.id)
+            status = "Mask failed: \(error)"
+            return
+        }
+        let input = SendableImage(cgImage: image)
+        let localID = local.id
+        // Swift 6 concurrency shape: only Sendable values (the image
+        // wrapper and the kind) cross into the detached task; the result
+        // comes back as a value, and the main-actor task below is the only
+        // place that touches the model or the session.
+        Task { @MainActor [weak self] in
+            let outcome = await Task.detached(priority: .userInitiated) {
+                Result { try AIMaskGenerator.generate(kind, from: input.cgImage) }
+            }.value
+            guard let self else { return }
+            self.generatingMasks.remove(localID)
+            switch outcome {
+            case .success(let result):
+                // The user may have moved to another image while the model ran.
+                guard self.session === session else { return }
+                session.setAIMask(result.mask, forLocal: localID)
+                self.status = String(format: "%@ mask: %.0f ms on device, %.0f%% of the frame",
+                                     kind.displayName, result.seconds * 1000, result.mask.coverage * 100)
+                self.rerender()
+            case .failure(let error):
+                self.status = "\(kind.displayName) mask failed: \(error)"
+            }
+        }
     }
 
     func removeSelectedLocal() {
@@ -490,6 +569,7 @@ final class EditorModel: ObservableObject {
                          "\(file.summary.rawWidth)×\(file.summary.rawHeight)"
             }
             rerender()
+            regenerateMissingAIMasks()
         } catch {
             session = nil
             sourceURL = nil
@@ -838,3 +918,7 @@ final class EditorModel: ObservableObject {
         }
     }
 }
+
+
+/// CGImage is immutable but not marked Sendable; this vouches for it.
+private struct SendableImage: @unchecked Sendable { let cgImage: CGImage }

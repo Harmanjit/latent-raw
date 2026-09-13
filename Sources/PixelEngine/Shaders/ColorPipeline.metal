@@ -224,7 +224,8 @@ inline float localMask(constant LocalAdjust &l, float2 pNorm, float2 sensorSize,
             m = 1.0 - smoothstep(inner, 1.0, e);
             break;
         }
-        case 3:     // brush: sample the rasterized slice
+        case 3:     // brush or AI: sample the mask slice (none yet -> 0)
+            if (l.info.y < 0) return 0.0;
             m = brushes.sample(ms, pNorm, uint(l.info.y)).r;
             break;
         case 4:     // whole image

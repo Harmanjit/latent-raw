@@ -94,17 +94,27 @@ public final class ImageSession {
     /// requires every declared texture slot to be bound.
     private var placeholderMasks: MTLTexture?
 
-    /// Keeps brush mask slices in step with `locals`; returns the texture
-    /// to bind and each brush local's slice.
+    /// Pixels for AI-generated masks, keyed by local id. Set by the app
+    /// after MLKit produces them; the session only stores and uploads.
+    private var aiMasks: [UUID: MaskBitmap] = [:]
+
+    public func setAIMask(_ bitmap: MaskBitmap?, forLocal id: UUID) {
+        aiMasks[id] = bitmap
+    }
+
+    public func hasAIMask(forLocal id: UUID) -> Bool { aiMasks[id] != nil }
+
+    /// Keeps brush and AI mask slices in step with `locals`; returns the
+    /// texture to bind and each such local's slice.
     func brushMaskTexture(for locals: [LocalAdjustment]) -> (MTLTexture?, [UUID: Int32]) {
-        let hasBrush = locals.contains { if case .brush = $0.shape { return true } else { return false } }
-        if hasBrush {
+        let needsSlices = locals.contains { $0.shape.usesMaskSlice }
+        if needsSlices {
             if brushMasks == nil {
                 brushMasks = BrushMaskSet(device: gpu.device, sensorWidth: file.summary.rawWidth,
                                           sensorHeight: file.summary.rawHeight)
             }
             guard let set = brushMasks else { return (nil, [:]) }
-            return (set.texture, set.sync(locals: locals))
+            return (set.texture, set.sync(locals: locals, aiMasks: aiMasks))
         }
         if placeholderMasks == nil {
             let d = MTLTextureDescriptor()

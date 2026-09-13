@@ -1,5 +1,6 @@
 import SwiftUI
 import PixelEngine
+import MLKit
 
 /// The Local Adjustments panel: a list of masks, and for the selected
 /// one, its tool, its sliders and its range refinements.
@@ -14,6 +15,10 @@ struct LocalAdjustmentsPanel: View {
                     Button("Radial") { model.addLocal(.radial) }
                     Button("Brush") { model.addLocal(.brush) }
                     Button("Whole Image (range only)") { model.addLocal(.none) }
+                    Divider()
+                    Button("Select Subject") { model.addAIMask(.subject) }
+                    Button("Select People") { model.addAIMask(.person) }
+                    Button("Select Sky") { model.addAIMask(.sky) }
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -64,6 +69,7 @@ struct LocalAdjustmentsPanel: View {
         case .radial: return "circle.dashed"
         case .brush:  return "paintbrush.pointed"
         case .whole:  return "square"
+        case .ai:     return "sparkles"
         }
     }
 
@@ -120,6 +126,15 @@ struct LocalAdjustmentsPanel: View {
         case .whole:
             Text("Whole image — use the ranges below to limit it.")
                 .font(.caption2).foregroundStyle(.secondary)
+        case .ai(let kind, let version):
+            HStack(spacing: 6) {
+                if model.generatingMasks.contains(model.parameters.locals[i].id) {
+                    ProgressView().controlSize(.mini)
+                    Text("Generating \(kind) mask…").font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    Text("\(kind.capitalized) mask · \(version)").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
