@@ -166,6 +166,15 @@ do {
 
     let pipeline = RenderPipeline(gpu: gpu)
 
+    if args.contains("--auto") {
+        var current = parameters
+        current.whiteBalance = session.asShotWhiteBalance
+        let s = try AutoAdjust.suggest(for: session, pipeline: pipeline, gpu: gpu, current: current)
+        print(String(format: "Auto suggests: %+.2f EV, contrast %.2f, WB %@",
+                     s.exposureEV, s.contrast,
+                     s.whiteBalance.map { String(format: "%.0fK %+.0f", $0.temperature, $0.tint) } ?? "unchanged"))
+    }
+
     var texture: MTLTexture? = nil
     var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: true)
 

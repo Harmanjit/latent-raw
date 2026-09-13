@@ -45,11 +45,15 @@ public enum ColorKit {
     public enum OutputSpace: Sendable {
         case sRGB
         case displayP3
+        /// The working space itself — for analysis renders that want the
+        /// pipeline's own linear values, untransformed.
+        case rec2020
 
         var toXYZ: simd_float3x3 {
             switch self {
             case .sRGB:      return ColorKit.sRGBToXYZ
             case .displayP3: return ColorKit.displayP3ToXYZ
+            case .rec2020:   return ColorKit.rec2020ToXYZ
             }
         }
     }

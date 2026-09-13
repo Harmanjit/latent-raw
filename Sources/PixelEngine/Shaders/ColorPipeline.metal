@@ -97,6 +97,7 @@ kernel void colorAndTone(
     constant float &highlightStrength            [[buffer(7)]],
     constant float &headroom                     [[buffer(8)]],
     constant uint  &encodeOutput                 [[buffer(9)]],
+    constant uint  &applyToneMap                 [[buffer(10)]],
     uint2 gid                                    [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
@@ -117,7 +118,10 @@ kernel void colorAndTone(
     working *= exposureScale;
 
     // Stage 9: scene-referred -> display-referred, up to the headroom.
-    float3 display = toneMapSigmoid(working, contrast, greyPoint, headroom);
+    // Analysis renders skip this to get scene-linear numbers out.
+    float3 display = (applyToneMap != 0)
+        ? toneMapSigmoid(working, contrast, greyPoint, headroom)
+        : working;
 
     // Stage 13: working space -> output space, then encode — or not.
     // Files want the sRGB curve applied and values clamped to [0,1].

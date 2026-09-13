@@ -241,6 +241,14 @@ struct ContentView: View {
                 }
 
                 section("Tone") {
+                    HStack {
+                        Button("Auto") { model.autoAdjust() }
+                            .controlSize(.small)
+                            .keyboardShortcut("u", modifiers: .command)
+                            .disabled(!model.hasImage)
+                            .help("Estimate exposure, contrast and white balance from the image (⌘U)")
+                        Spacer()
+                    }
                     sliderRow(title: "Exposure",
                                value: $model.parameters.exposureEV,
                                range: -5...5, format: "%+.2f EV")

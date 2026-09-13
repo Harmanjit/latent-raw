@@ -178,6 +178,7 @@ public final class Exporter {
         switch colorSpace {
         case .sRGB:      cgColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
         case .displayP3: cgColorSpace = CGColorSpace(name: CGColorSpace.displayP3)
+        case .rec2020:   cgColorSpace = CGColorSpace(name: CGColorSpace.itur_2020)
         }
         guard let cgColorSpace else { throw ExportError.imageCreationFailed }
 

@@ -660,4 +660,21 @@ final class EditorModel: ObservableObject {
     func resetAdjustments() {
         parameters = defaultParameters
     }
+
+    /// Computes a starting point from the image and applies it. Exposure,
+    /// contrast and white balance change; everything else stays.
+    func autoAdjust() {
+        guard let session, let pipeline, let gpuContext else { return }
+        do {
+            let suggestion = try AutoAdjust.suggest(for: session, pipeline: pipeline,
+                                                    gpu: gpuContext, current: parameters)
+            var next = parameters
+            next.exposureEV = suggestion.exposureEV
+            next.contrast = suggestion.contrast
+            if let wb = suggestion.whiteBalance { next.whiteBalance = wb }
+            parameters = next
+        } catch {
+            status = "Auto failed: \(error)"
+        }
+    }
 }

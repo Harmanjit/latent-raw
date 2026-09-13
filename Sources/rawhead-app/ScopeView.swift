@@ -117,6 +117,8 @@ struct VectorscopeView: View {
     let vectorscope: Vectorscope?
 
     var body: some View {
+        // Square, like the data: the plot fills its box exactly, with no
+        // letterboxed background showing around it.
         ZStack {
             RoundedRectangle(cornerRadius: 4).fill(Color(white: 0.08))
             if let vectorscope, vectorscope.peak > 0, let image = bitmap(vectorscope) {
@@ -140,7 +142,7 @@ struct VectorscopeView: View {
                 Text("—").font(.caption2).foregroundStyle(.tertiary)
             }
         }
-        .frame(height: 140)
+        .aspectRatio(1, contentMode: .fit)
     }
 
     /// Each cell is tinted with the hue it represents (from its Cb/Cr

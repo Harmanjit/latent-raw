@@ -132,12 +132,23 @@ public struct RenderOutput: Sendable, Equatable {
     /// Apply the sRGB curve and clamp to [0,1]? Files yes; an EDR screen
     /// buffer no — it wants linear light.
     public var encoded: Bool
+    /// Run the tone curve? Off for analysis renders that want scene-linear
+    /// values (exposure applied, nothing else).
+    public var toneMapped: Bool
 
-    public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true) {
+    public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
+                toneMapped: Bool = true) {
         self.space = space
         self.headroom = headroom
         self.encoded = encoded
+        self.toneMapped = toneMapped
     }
+
+    /// Scene-linear working-space values: camera matrix and exposure
+    /// applied, no tone curve, no encoding. What Auto adjustments and
+    /// other analysis read.
+    public static let sceneLinear = RenderOutput(space: .rec2020, headroom: 1,
+                                                 encoded: false, toneMapped: false)
 
     /// An ordinary file: encoded, no headroom.
     public static func file(_ space: ColorKit.OutputSpace) -> RenderOutput {
@@ -152,6 +163,7 @@ public struct RenderOutput: Sendable, Equatable {
     public static func == (a: RenderOutput, b: RenderOutput) -> Bool {
         String(describing: a.space) == String(describing: b.space)
             && a.headroom == b.headroom && a.encoded == b.encoded
+            && a.toneMapped == b.toneMapped
     }
 }
 
@@ -215,7 +227,28 @@ public final class RenderPipeline {
                         parameters: EditParameters = .neutral,
                         output: RenderOutput? = nil,
                         info: UnsafeMutablePointer<RenderInfo>? = nil) throws -> MTLTexture {
-        let output = output ?? .file(parameters.outputSpace)
+        try renderStages(session, scale: scale, parameters: parameters,
+                         output: output ?? .file(parameters.outputSpace),
+                         cameraRGBOnly: false, info: info)
+    }
+
+    /// The demosaiced, white-balanced camera-space image — the pipeline
+    /// stopped before the colour matrix. Linear, camera primaries. Used by
+    /// analysis that needs to reason in the sensor's own colour space,
+    /// such as grey-world white balance.
+    public func renderCameraRGB(_ session: ImageSession,
+                                 scale: RenderScale,
+                                 parameters: EditParameters) throws -> MTLTexture {
+        try renderStages(session, scale: scale, parameters: parameters,
+                         output: .sceneLinear, cameraRGBOnly: true, info: nil)
+    }
+
+    private func renderStages(_ session: ImageSession,
+                              scale: RenderScale,
+                              parameters: EditParameters,
+                              output: RenderOutput,
+                              cameraRGBOnly: Bool,
+                              info: UnsafeMutablePointer<RenderInfo>?) throws -> MTLTexture {
         let summary = session.file.summary
         guard case .bayer(let order) = summary.cfaPattern else {
             throw RenderError.unsupportedCFAForV1
@@ -279,6 +312,14 @@ public final class RenderPipeline {
         }
         if cached == nil {
             session.storeCameraRGB(cameraRGB, for: stageKey)
+        }
+
+        if cameraRGBOnly {
+            cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
+            info?.pointee = renderInfo
+            return cameraRGB
         }
 
         let final = try applyColorAndTone(session: session, cmdBuffer: cmdBuffer,
@@ -386,8 +427,10 @@ public final class RenderPipeline {
         encoder.setBytes(&highlightStrength, length: 4, index: 7)
         var headroom = output.headroom
         var encode: UInt32 = output.encoded ? 1 : 0
+        var toneMap: UInt32 = output.toneMapped ? 1 : 0
         encoder.setBytes(&headroom, length: 4, index: 8)
         encoder.setBytes(&encode, length: 4, index: 9)
+        encoder.setBytes(&toneMap, length: 4, index: 10)
 
         dispatch(encoder, pso: gpu.colorAndTonePSO, width: input.width, height: input.height)
         encoder.endEncoding()
