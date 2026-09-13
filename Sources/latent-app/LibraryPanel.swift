@@ -64,6 +64,7 @@ struct LibraryPanel: View {
 
             if let selected = library.selectedImage {
                 selectionSection(selected)
+                metadataSection(selected)
             }
 
             exportSection
@@ -168,6 +169,37 @@ struct LibraryPanel: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// EXIF summary of the selected image, straight from the catalog row:
+    /// no file is touched when the selection changes. Rows with no value
+    /// are omitted by `metadataRows`, so the section shrinks rather than
+    /// showing dashes for files with sparse metadata.
+    private func metadataSection(_ image: ImageRecord) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Metadata")
+            let exposure = image.exposureLine
+            if !exposure.isEmpty {
+                Text(exposure)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 4) {
+                ForEach(image.metadataRows, id: \.label) { row in
+                    GridRow {
+                        Text(row.label)
+                            .foregroundStyle(.secondary)
+                            .gridColumnAlignment(.trailing)
+                        Text(row.value)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .font(.caption2)
         }
     }
 
