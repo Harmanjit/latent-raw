@@ -4,15 +4,25 @@ import CoreVideo
 import Vision
 import PixelEngine
 
-/// The kinds of mask a model can produce (DESIGN.md §8.4).
+/// The kinds of automatic mask (DESIGN.md §8.4). Click-to-select masks
+/// are a separate shape (`MaskShape.prompted`) driven by SAM 2.
 public enum AIMaskKind: String, CaseIterable, Sendable {
-    case subject, person, sky
+    /// Apple's Vision "lift subject": automatic, no clicks, no control.
+    case subject
+    /// Semantic classes from SegFormer (ADE20K).
+    case sky, people, vegetation, water, buildings, ground, mountains, animals, vehicles
 
     public var displayName: String {
         switch self {
-        case .subject: return "Subject"
-        case .person:  return "People"
-        case .sky:     return "Sky"
+        case .subject: return "Subject (auto)"
+        default: return segmentClass!.displayName
+        }
+    }
+
+    public var segmentClass: SegmentClass? {
+        switch self {
+        case .subject: return nil
+        default: return SegmentClass(rawValue: rawValue)
         }
     }
 
@@ -20,19 +30,27 @@ public enum AIMaskKind: String, CaseIterable, Sendable {
     public var modelVersion: String {
         switch self {
         case .subject: return "vision.foregroundInstance.1"
-        case .person:  return "vision.personSegmentation.accurate.1"
-        case .sky:     return "rawhead.skyHeuristic.1"
+        case .sky where !SegmentationModel.isAvailable: return "rawhead.skyHeuristic.1"
+        default: return SegmentationModel.modelVersion
         }
+    }
+
+    /// Legacy names from earlier sidecars.
+    public init?(storedName: String) {
+        if storedName == "person" { self = .people; return }
+        self.init(rawValue: storedName)
     }
 }
 
 public enum AIMaskError: Error, CustomStringConvertible {
     case noResult
     case unsupportedPixelFormat
+    case modelUnavailable(String)
     public var description: String {
         switch self {
         case .noResult: return "the model returned no mask"
         case .unsupportedPixelFormat: return "unexpected mask pixel format"
+        case .modelUnavailable(let n): return "model '\(n)' is not bundled"
         }
     }
 }
@@ -63,16 +81,32 @@ public enum AIMaskGenerator {
         public let seconds: TimeInterval
     }
 
-    public static func generate(_ kind: AIMaskKind, from image: CGImage) throws -> Result {
+    /// Semantic classes go through SegFormer when it's bundled. Without
+    /// it, sky falls back to the heuristic and people to Vision; the other
+    /// classes have no fallback and throw.
+    public static func generate(_ kind: AIMaskKind, from image: CGImage) async throws -> Result {
         let start = Date()
         let mask: MaskBitmap
         switch kind {
-        case .subject: mask = try subjectMask(image)
-        case .person:  mask = try personMask(image)
-        case .sky:     mask = SkyEstimator.estimate(image)
+        case .subject:
+            mask = try subjectMask(image)
+        default:
+            if let model = await SegmentationModel.shared.value, let cls = kind.segmentClass {
+                let map = try model.classify(image)
+                mask = map.mask(classIndices: model.indices(forLabels: cls.labels))
+            } else if kind == .sky {
+                mask = SkyEstimator.estimate(image)
+            } else if kind == .people {
+                mask = try personMask(image)
+            } else {
+                throw AIMaskError.modelUnavailable(SegmentationModel.packageName)
+            }
         }
         return Result(mask: mask, seconds: Date().timeIntervalSince(start))
     }
+
+    /// Whether `generate` for this kind uses a bundled neural model.
+    public static var segmentationAvailable: Bool { SegmentationModel.isAvailable }
 
     // MARK: - Vision
 

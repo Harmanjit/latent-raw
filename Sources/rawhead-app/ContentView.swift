@@ -195,7 +195,10 @@ struct ContentView: View {
                                 onPan: { model.pan(by: $0) },
                                 onDoubleClick: { model.toggleZoom(at: $0) },
                                 toolActive: model.maskToolActive,
-                                onToolBegan: { model.maskToolBegan(at: $0) },
+                                onToolBegan: { point, exclude in
+                                    model.promptModifierExclude = exclude
+                                    model.maskToolBegan(at: point)
+                                },
                                 onToolMoved: { model.maskToolMoved(to: $0) },
                                 onToolEnded: { model.maskToolEnded() })
             } else {

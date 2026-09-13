@@ -16,9 +16,14 @@ struct LocalAdjustmentsPanel: View {
                     Button("Brush") { model.addLocal(.brush) }
                     Button("Whole Image (range only)") { model.addLocal(.none) }
                     Divider()
-                    Button("Select Subject") { model.addAIMask(.subject) }
-                    Button("Select People") { model.addAIMask(.person) }
-                    Button("Select Sky") { model.addAIMask(.sky) }
+                    Button("Click to Select (Segment Anything)") { model.addPromptedMask() }
+                        .disabled(!model.sam2Available)
+                    Menu("Select by Class") {
+                        ForEach(AIMaskKind.allCases.filter { $0 != .subject }, id: \.self) { kind in
+                            Button(kind.displayName) { model.addAIMask(kind) }
+                        }
+                    }
+                    Button("Subject (auto, Vision)") { model.addAIMask(.subject) }
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -70,6 +75,7 @@ struct LocalAdjustmentsPanel: View {
         case .brush:  return "paintbrush.pointed"
         case .whole:  return "square"
         case .ai:     return "sparkles"
+        case .prompted: return "cursorarrow.click"
         }
     }
 
@@ -134,6 +140,23 @@ struct LocalAdjustmentsPanel: View {
                 } else {
                     Text("\(kind.capitalized) mask · \(version)").font(.caption2).foregroundStyle(.secondary)
                 }
+            }
+        case .prompted(let points, _):
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Button(model.maskTool == .prompt ? "Clicking…" : "Click to select") { model.maskTool = .prompt }
+                        .controlSize(.small).disabled(model.maskTool == .prompt)
+                    Button("Clear points") { model.clearPromptPoints() }
+                        .controlSize(.small).disabled(points.isEmpty)
+                    if model.generatingMasks.contains(model.parameters.locals[i].id) {
+                        ProgressView().controlSize(.mini)
+                    }
+                }
+                Text(points.isEmpty
+                     ? "Click the thing you want. Option-click to exclude something. \(model.sam2Status)"
+                     : "\(points.count) point\(points.count == 1 ? "" : "s") · \(model.sam2Status)")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

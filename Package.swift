@@ -59,7 +59,8 @@ let package = Package(
         .target(
             name: "MLKit",
             dependencies: ["PixelEngine"],
-            path: "Sources/MLKit"
+            path: "Sources/MLKit",
+            resources: [.copy("Resources/Models")]
         ),
         .testTarget(
             name: "MLKitTests",

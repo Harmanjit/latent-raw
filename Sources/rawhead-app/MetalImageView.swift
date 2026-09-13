@@ -43,7 +43,8 @@ struct MetalImageView: NSViewRepresentable {
     let onDoubleClick: (CGPoint) -> Void
     /// When true, drags shape a mask instead of panning.
     let toolActive: Bool
-    let onToolBegan: (CGPoint) -> Void
+    /// Second argument: whether Option was held (exclude for prompts).
+    let onToolBegan: (CGPoint, Bool) -> Void
     let onToolMoved: (CGPoint) -> Void
     let onToolEnded: () -> Void
 
@@ -88,7 +89,7 @@ final class MetalLayerView: NSView {
     var onPan: ((CGSize) -> Void)?
     var onDoubleClick: ((CGPoint) -> Void)?
     var toolActive = false
-    var onToolBegan: ((CGPoint) -> Void)?
+    var onToolBegan: ((CGPoint, Bool) -> Void)?
     var onToolMoved: ((CGPoint) -> Void)?
     var onToolEnded: (() -> Void)?
 
@@ -229,7 +230,7 @@ final class MetalLayerView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         if toolActive {
-            onToolBegan?(screenPoint(for: event))
+            onToolBegan?(screenPoint(for: event), event.modifierFlags.contains(.option))
             return
         }
         if event.clickCount == 2 {

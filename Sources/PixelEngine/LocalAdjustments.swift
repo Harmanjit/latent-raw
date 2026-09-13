@@ -58,6 +58,9 @@ public enum MaskShape: Equatable, Sendable, Codable {
     /// on demand and cached in memory (DESIGN.md §8.4). `modelVersion`
     /// records what produced it so a future model change is visible.
     case ai(kind: String, modelVersion: String)
+    /// Click-to-select (Segment Anything): the clicks are the parameters;
+    /// the pixels are decoded from them and cached like `.ai`.
+    case prompted(points: [MaskPromptPoint], modelVersion: String)
 
     var typeCode: Int32 {
         switch self {
@@ -65,17 +68,33 @@ public enum MaskShape: Equatable, Sendable, Codable {
         case .radial: return 2
         case .brush:  return 3
         case .whole:  return 4
-        case .ai:     return 3   // sampled from a mask slice, like a brush
+        case .ai, .prompted: return 3   // sampled from a mask slice, like a brush
         }
     }
 
     /// Whether this shape's pixels live in a mask texture slice.
     var usesMaskSlice: Bool {
         switch self {
-        case .brush, .ai: return true
+        case .brush, .ai, .prompted: return true
         default: return false
         }
     }
+
+    /// Whether the pixels come from a model (and may need generating).
+    public var isModelGenerated: Bool {
+        switch self {
+        case .ai, .prompted: return true
+        default: return false
+        }
+    }
+}
+
+/// A click for a prompted mask, in normalized sensor coordinates.
+public struct MaskPromptPoint: Equatable, Sendable, Codable {
+    public var x: Float
+    public var y: Float
+    public var foreground: Bool
+    public init(x: Float, y: Float, foreground: Bool) { self.x = x; self.y = y; self.foreground = foreground }
 }
 
 /// A greyscale mask as pixels, 0...255, row-major.
@@ -174,7 +193,7 @@ struct LocalAdjustGPU {
         case .radial(let c, let r, let feather):
             geometry0 = SIMD4(c.x, c.y, r.x, r.y)
             geometry1 = SIMD4(feather, 0, 0, 0)
-        case .brush, .whole, .ai:
+        case .brush, .whole, .ai, .prompted:
             break
         }
         adjust = SIMD4(local.exposureEV, local.contrast, local.saturation, local.warmth)
@@ -362,7 +381,7 @@ final class BrushMaskSet {
                 }
                 assignment[local.id] = Int32(entry.slice)
 
-            case .ai:
+            case .ai, .prompted:
                 guard let bitmap = aiMasks[local.id] else { continue }
                 if let existing = uploadedAI[local.id], existing.bitmap == bitmap {
                     assignment[local.id] = Int32(existing.slice)
