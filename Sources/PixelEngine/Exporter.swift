@@ -152,26 +152,23 @@ public final class Exporter {
         self.gpu = gpu
     }
 
+    /// Writes `texture` as a file. Rotation and an optional final resize
+    /// to `maxLongEdge` happen on the GPU together with the conversion to
+    /// the file's bit depth; the CPU never loops over pixels. Returns the
+    /// written pixel size.
+    @discardableResult
     public func write(_ texture: MTLTexture,
                        to url: URL,
                        settings: ExportSettings,
                        colorSpace: ColorKit.OutputSpace,
                        rotation: ImageRotation = .none,
-                       metadata: ExportMetadata? = nil) throws {
-        var pixels = try readBack(texture)
-        var width = texture.width, height = texture.height
-        if rotation != .none {
-            // The pipeline renders the sensor as recorded; the file gets
-            // real rotated pixels rather than an orientation tag, because
-            // not every viewer honours the tag.
-            pixels = Self.rotate(pixels, width: width, height: height, rotation: rotation)
-            if rotation.swapsAxes { swap(&width, &height) }
-        }
-        let cgImage = try makeImage(from: pixels,
-                                     width: width, height: height,
-                                     settings: settings, colorSpace: colorSpace)
-
+                       metadata: ExportMetadata? = nil,
+                       maxLongEdge: Int? = nil) throws -> (width: Int, height: Int) {
+        let cgImage = try cgImage(from: texture, colorSpace: colorSpace, rotation: rotation,
+                                  bitsPerComponent: settings.format.bitsPerComponent,
+                                  maxLongEdge: maxLongEdge)
         try Self.write(cgImage: cgImage, to: url, settings: settings, metadata: metadata)
+        return (cgImage.width, cgImage.height)
     }
 
     /// Writes an already-built CGImage. The image's own colour space tag
@@ -209,114 +206,90 @@ public final class Exporter {
         return ctx.makeImage() ?? image
     }
 
-    /// An 8-bit CGImage of a rendered (already display-encoded) texture,
-    /// rotated as asked. For thumbnails and previews that stay in memory.
+    /// Output size after rotation and resize.
+    static func outputSize(width: Int, height: Int, rotation: ImageRotation, maxLongEdge: Int?) -> (Int, Int) {
+        var w = width, h = height
+        if rotation.swapsAxes { swap(&w, &h) }
+        if let target = maxLongEdge, target > 0, max(w, h) > target {
+            let scale = Double(target) / Double(max(w, h))
+            w = max(1, Int((Double(w) * scale).rounded()))
+            h = max(1, Int((Double(h) * scale).rounded()))
+        }
+        return (w, h)
+    }
+
+    /// One GPU pass: sample the rendered texture (rotated, resized) into
+    /// a shared-storage 8- or 16-bit texture the CPU can read directly.
+    func packedTexture(from texture: MTLTexture, rotation: ImageRotation,
+                       bitsPerComponent: Int, maxLongEdge: Int?) throws -> MTLTexture {
+        let (w, h) = Self.outputSize(width: texture.width, height: texture.height,
+                                     rotation: rotation, maxLongEdge: maxLongEdge)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: bitsPerComponent == 16 ? .rgba16Unorm : .rgba8Unorm,
+            width: w, height: h, mipmapped: false)
+        descriptor.storageMode = .shared     // read by the CPU straight after
+        descriptor.usage = [.shaderWrite]
+        guard let dest = gpu.device.makeTexture(descriptor: descriptor),
+              let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
+              let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+            throw ExportError.readbackFailed
+        }
+        encoder.setComputePipelineState(gpu.packForExportPSO)
+        encoder.setTexture(texture, index: 0)
+        encoder.setTexture(dest, index: 1)
+        var turns = UInt32(rotation.rawValue)
+        encoder.setBytes(&turns, length: 4, index: 0)
+        let pso = gpu.packForExportPSO
+        let tw = pso.threadExecutionWidth, th = max(1, pso.maxTotalThreadsPerThreadgroup / tw)
+        encoder.dispatchThreadgroups(MTLSize(width: (w + tw - 1) / tw, height: (h + th - 1) / th, depth: 1),
+                                     threadsPerThreadgroup: MTLSize(width: tw, height: th, depth: 1))
+        encoder.endEncoding()
+        cmdBuffer.commit()
+        cmdBuffer.waitUntilCompleted()
+        guard cmdBuffer.status != .error else { throw ExportError.readbackFailed }
+        return dest
+    }
+
+    /// A CGImage of a rendered (already display-encoded) texture, rotated
+    /// and resized as asked, at 8 or 16 bits per channel. The pixels are
+    /// packed on the GPU and copied out once (RGBX, alpha ignored).
     public func cgImage(from texture: MTLTexture,
                         colorSpace: ColorKit.OutputSpace,
-                        rotation: ImageRotation = .none) throws -> CGImage {
-        var pixels = try readBack(texture)
-        var width = texture.width, height = texture.height
-        if rotation != .none {
-            pixels = Self.rotate(pixels, width: width, height: height, rotation: rotation)
-            if rotation.swapsAxes { swap(&width, &height) }
+                        rotation: ImageRotation = .none,
+                        bitsPerComponent: Int = 8,
+                        maxLongEdge: Int? = nil) throws -> CGImage {
+        let packed = try packedTexture(from: texture, rotation: rotation,
+                                       bitsPerComponent: bitsPerComponent, maxLongEdge: maxLongEdge)
+        let w = packed.width, h = packed.height
+        let bytesPerPixel = bitsPerComponent / 8 * 4
+        let bytesPerRow = w * bytesPerPixel
+        var data = Data(count: bytesPerRow * h)
+        data.withUnsafeMutableBytes { bytes in
+            packed.getBytes(bytes.baseAddress!, bytesPerRow: bytesPerRow,
+                            from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
         }
-        return try makeImage(from: pixels, width: width, height: height,
-                             settings: ExportSettings(format: .png), colorSpace: colorSpace)
-    }
 
-    // MARK: - Rotation
-
-    /// Rotates an RGBA half-float buffer by quarter turns clockwise.
-    static func rotate(_ src: [Float16], width w: Int, height h: Int,
-                       rotation: ImageRotation) -> [Float16] {
-        let outW = rotation.swapsAxes ? h : w
-        let outH = rotation.swapsAxes ? w : h
-        var dst = [Float16](repeating: 0, count: outW * outH * 4)
-        let size = CGSize(width: w, height: h)
-        for y in 0..<h {
-            for x in 0..<w {
-                // Map the *centre* of the source pixel so the result lands
-                // on integer coordinates for every rotation.
-                let p = rotation.imagePoint(fromSensorPoint: CGPoint(x: Double(x) + 0.5,
-                                                                     y: Double(y) + 0.5),
-                                            sensorSize: size)
-                let ox = Int(p.x), oy = Int(p.y)
-                let s = (y * w + x) * 4, d = (oy * outW + ox) * 4
-                dst[d] = src[s]; dst[d + 1] = src[s + 1]
-                dst[d + 2] = src[s + 2]; dst[d + 3] = src[s + 3]
-            }
-        }
-        return dst
-    }
-
-    // MARK: - Readback
-
-    private func readBack(_ texture: MTLTexture) throws -> [Float16] {
-        try TextureReadback.float16Pixels(of: texture, gpu: gpu)
-    }
-
-    // MARK: - Quantization
-
-    private func makeImage(from pixels: [Float16], width: Int, height: Int,
-                            settings: ExportSettings,
-                            colorSpace: ColorKit.OutputSpace) throws -> CGImage {
         let cgColorSpace: CGColorSpace?
         switch colorSpace {
         case .sRGB:      cgColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
         case .displayP3: cgColorSpace = CGColorSpace(name: CGColorSpace.displayP3)
         case .rec2020:   cgColorSpace = CGColorSpace(name: CGColorSpace.itur_2020)
         }
-        guard let cgColorSpace else { throw ExportError.imageCreationFailed }
-
-        let pixelCount = width * height
-        let bitsPerComponent = settings.format.bitsPerComponent
-        let bytesPerPixel = (bitsPerComponent / 8) * 3   // no alpha in exports
-        let bytesPerRow = width * bytesPerPixel
-
-        var data: Data
-        if bitsPerComponent == 8 {
-            var bytes = [UInt8](repeating: 0, count: pixelCount * 3)
-            for i in 0..<pixelCount {
-                for c in 0..<3 {
-                    let v = max(0, min(1, Float(pixels[i * 4 + c])))
-                    bytes[i * 3 + c] = UInt8(v * 255 + 0.5)
-                }
-            }
-            data = Data(bytes)
-        } else {
-            var values = [UInt16](repeating: 0, count: pixelCount * 3)
-            for i in 0..<pixelCount {
-                for c in 0..<3 {
-                    let v = max(0, min(1, Float(pixels[i * 4 + c])))
-                    values[i * 3 + c] = UInt16(v * 65535 + 0.5)
-                }
-            }
-            data = values.withUnsafeBufferPointer { Data(buffer: $0) }
-        }
-
-        guard let provider = CGDataProvider(data: data as CFData) else {
-            throw ExportError.imageCreationFailed
-        }
-
-        // 16-bit samples are little-endian on Apple Silicon; CoreGraphics
-        // needs telling, or the bytes are read the wrong way round and the
-        // image comes out as noise.
-        var bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
+        var bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)
         if bitsPerComponent == 16 {
-            bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue
+            bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue
                                        | CGBitmapInfo.byteOrder16Little.rawValue)
         }
-
-        guard let image = CGImage(width: width, height: height,
-                                   bitsPerComponent: bitsPerComponent,
-                                   bitsPerPixel: bitsPerComponent * 3,
-                                   bytesPerRow: bytesPerRow,
-                                   space: cgColorSpace,
-                                   bitmapInfo: bitmapInfo,
-                                   provider: provider, decode: nil,
-                                   shouldInterpolate: false, intent: .defaultIntent) else {
+        guard let cgColorSpace,
+              let provider = CGDataProvider(data: data as CFData),
+              let image = CGImage(width: w, height: h, bitsPerComponent: bitsPerComponent,
+                                  bitsPerPixel: bitsPerComponent * 4, bytesPerRow: bytesPerRow,
+                                  space: cgColorSpace, bitmapInfo: bitmapInfo,
+                                  provider: provider, decode: nil, shouldInterpolate: false,
+                                  intent: .defaultIntent) else {
             throw ExportError.imageCreationFailed
         }
         return image
     }
+
 }

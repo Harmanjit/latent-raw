@@ -265,8 +265,14 @@ do {
     }
 
     if let outputPath {
-        try writePNG(texture: finalTexture, to: outputPath)
-        print("Wrote \(outputPath)")
+        let w0 = Date()
+        let ext = (outputPath as NSString).pathExtension.lowercased()
+        let format: ExportSettings.Format = ext == "jpg" || ext == "jpeg" ? .jpeg
+            : ext == "heic" ? .heic : ext == "tif" || ext == "tiff" ? .tiff : .png
+        try Exporter(gpu: gpu).write(finalTexture, to: URL(fileURLWithPath: outputPath),
+                                     settings: ExportSettings(format: format), colorSpace: outputSpace)
+        print(String(format: "Wrote %@ in %.0fms (GPU pack + %@ encode)", outputPath,
+                     Date().timeIntervalSince(w0) * 1000, format.rawValue))
     }
 
     print("Total: \(Int((t5.timeIntervalSince(t0)) * 1000))ms")

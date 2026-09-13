@@ -35,18 +35,31 @@ public enum ExportWorker {
         }
     }
 
-    public struct Outcome: Sendable {
+    public struct Outcome: Sendable, CustomStringConvertible {
         public let pixelWidth: Int
         public let pixelHeight: Int
         public let seconds: TimeInterval
         public let masksGenerated: Int
+        /// Where the time went, in seconds: "unpack", "masks", "render", "write".
+        public let phases: [(String, TimeInterval)]
+
+        public var description: String {
+            let parts = phases.map { String(format: "%@ %.0f ms", $0.0, $0.1 * 1000) }
+            return String(format: "%dx%d in %.0f ms (%@)", pixelWidth, pixelHeight, seconds * 1000,
+                          parts.joined(separator: ", "))
+        }
     }
 
     public static func export(_ request: Request, gpu: GPUContext) async throws -> Outcome {
         let start = Date()
+        var phases: [(String, TimeInterval)] = []
+        var mark = Date()
+        func lap(_ name: String) { phases.append((name, Date().timeIntervalSince(mark))); mark = Date() }
+
         let file = try RawFile(path: request.sourceURL.path)
         let session = try ImageSession(file: file, gpu: gpu)
         let pipeline = RenderPipeline(gpu: gpu)
+        lap("unpack")
 
         // The edit, over this image's defaults — exactly as the editor
         // would reconstruct it.
@@ -61,6 +74,7 @@ public enum ExportWorker {
 
         // Model-generated masks are not stored; make them again.
         let masksGenerated = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
+        lap("masks")
 
         // Scale: bin as far as the target allows (cheaper and a correct
         // box filter), never below it; full resolution otherwise.
@@ -73,6 +87,7 @@ public enum ExportWorker {
         let texture = try pipeline.render(session, scale: scale, parameters: parameters,
                                           output: .file(request.colorSpace))
         let rotation = ImageRotation(libRawFlip: file.summary.orientation).rotated(by: request.userRotation)
+        lap("render")
 
         let s = file.summary
         var metadata = ExportMetadata()
@@ -87,25 +102,17 @@ public enum ExportWorker {
         metadata.keywords = request.keywords
         metadata.rating = request.rating
 
+        // Rotation, the final resize and the quantisation to 8 or 16 bits
+        // all happen in one GPU pass inside the exporter; the CPU only
+        // hands the bytes to the encoder.
         let exporter = Exporter(gpu: gpu)
-        let width: Int, height: Int
-        if let target = request.maxLongEdge, target > 0 {
-            // Resize path: 8-bit CGImage, resampled to the exact size.
-            let image = Exporter.resized(try exporter.cgImage(from: texture, colorSpace: request.colorSpace,
-                                                              rotation: rotation), maxLongEdge: target)
-            try Exporter.write(cgImage: image, to: request.destinationURL, settings: request.settings,
-                               metadata: metadata)
-            width = image.width; height = image.height
-        } else {
-            // Full size keeps the 16-bit path for TIFF.
-            try exporter.write(texture, to: request.destinationURL, settings: request.settings,
-                               colorSpace: request.colorSpace, rotation: rotation, metadata: metadata)
-            let swap = rotation.swapsAxes
-            width = swap ? texture.height : texture.width
-            height = swap ? texture.width : texture.height
-        }
-        return Outcome(pixelWidth: width, pixelHeight: height,
-                       seconds: Date().timeIntervalSince(start), masksGenerated: masksGenerated)
+        let written = try exporter.write(texture, to: request.destinationURL, settings: request.settings,
+                                         colorSpace: request.colorSpace, rotation: rotation,
+                                         metadata: metadata, maxLongEdge: request.maxLongEdge)
+        lap("write")
+        return Outcome(pixelWidth: written.width, pixelHeight: written.height,
+                       seconds: Date().timeIntervalSince(start), masksGenerated: masksGenerated,
+                       phases: phases)
     }
 
     /// Generates pixels for every AI and prompted local, the same way the

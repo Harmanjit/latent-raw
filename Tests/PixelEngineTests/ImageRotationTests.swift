@@ -1,4 +1,5 @@
 import XCTest
+import Metal
 import simd
 @testable import PixelEngine
 
@@ -69,13 +70,25 @@ final class ImageRotationTests: XCTestCase {
         XCTAssertEqual(uv(400, 600).y, 0, accuracy: 1e-5)
     }
 
-    func testExporterRotationSwapsDimensions() {
-        // 2x1 image: pixels A then B. Turn it 90° clockwise and the left
-        // edge becomes the top edge, so it's 1 wide, 2 tall with A on top.
-        let a: [Float16] = [1, 0, 0, 1], b: [Float16] = [0, 1, 0, 1]
-        let out = Exporter.rotate(a + b, width: 2, height: 1, rotation: .cw90)
-        XCTAssertEqual(out.count, 8)
-        XCTAssertEqual(Array(out[0..<4]), a, "A (left) becomes top")
-        XCTAssertEqual(Array(out[4..<8]), b, "B (right) becomes bottom")
+    /// The GPU export pack: a 2x1 texture, red then green, turned 90° CW
+    /// must come out 1 wide, 2 tall, red on top (the left edge becomes
+    /// the top edge).
+    func testExporterRotationSwapsDimensions() throws {
+        let gpu = try GPUContext()
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: 2, height: 1, mipmapped: false)
+        d.storageMode = .shared; d.usage = [.shaderRead]
+        let tex = try XCTUnwrap(gpu.device.makeTexture(descriptor: d))
+        let px: [Float16] = [1, 0, 0, 1,  0, 1, 0, 1]
+        px.withUnsafeBytes { tex.replace(region: MTLRegionMake2D(0, 0, 2, 1), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: 16) }
+
+        let image = try Exporter(gpu: gpu).cgImage(from: tex, colorSpace: .sRGB, rotation: .cw90)
+        XCTAssertEqual(image.width, 1); XCTAssertEqual(image.height, 2)
+        var bytes = [UInt8](repeating: 0, count: 8)
+        let ctx = try XCTUnwrap(CGContext(data: &bytes, width: 1, height: 2, bitsPerComponent: 8, bytesPerRow: 4,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 2))
+        // A bitmap context stores its first row at the top of the image.
+        XCTAssertGreaterThan(bytes[0], 200, "top pixel red"); XCTAssertLessThan(bytes[1], 50)
+        XCTAssertGreaterThan(bytes[5], 200, "bottom pixel green"); XCTAssertLessThan(bytes[4], 50)
     }
 }

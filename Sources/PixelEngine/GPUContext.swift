@@ -53,6 +53,7 @@ public final class GPUContext: @unchecked Sendable {
     let sharpenBlurVPSO: MTLComputePipelineState
     let sharpenApplyPSO: MTLComputePipelineState
     let lensCorrectPSO: MTLComputePipelineState
+    let packForExportPSO: MTLComputePipelineState
 
     // RCD demosaic, six passes (see RCD.metal).
     let rcdDirectionsVHPSO: MTLComputePipelineState
@@ -93,6 +94,7 @@ public final class GPUContext: @unchecked Sendable {
         let blurVPipeline = try makePipeline("sharpenBlurV")
         let sharpenPipeline = try makePipeline("sharpenApply")
         let lensPipeline = try makePipeline("lensCorrect")
+        let packPipeline = try makePipeline("packForExport")
         let vhPipeline = try makePipeline("rcdDirectionsVH")
         let lowPassPipeline = try makePipeline("rcdLowPass")
         let greenPipeline = try makePipeline("rcdGreen")
@@ -117,6 +119,7 @@ public final class GPUContext: @unchecked Sendable {
         self.sharpenBlurVPSO = blurVPipeline
         self.sharpenApplyPSO = sharpenPipeline
         self.lensCorrectPSO = lensPipeline
+        self.packForExportPSO = packPipeline
         self.rcdDirectionsVHPSO = vhPipeline
         self.rcdLowPassPSO = lowPassPipeline
         self.rcdGreenPSO = greenPipeline
@@ -150,7 +153,7 @@ public final class GPUContext: @unchecked Sendable {
         // Every kernel source file must be listed here, or its functions
         // won't exist in the runtime-compiled library.
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
-                            "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "RCD"]
+                            "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound
