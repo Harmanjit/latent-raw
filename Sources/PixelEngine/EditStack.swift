@@ -33,6 +33,14 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var denoise: Denoise?
         public var sharpen: Sharpen?
         public var lens: Lens?
+        public var curve: Curve?
+        public var hsl: HSLAdjustments?
+        public var splittoning: SplitToning?
+    }
+
+    public struct Curve: Codable, Equatable, Sendable {
+        /// [[x, y], ...]
+        public var points: [[Float]]
     }
 
     /// DESIGN.md §5.6: which corrections are on, and which profile and
@@ -114,6 +122,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.lens = Lens(distortion: p.lensDistortion, tca: p.lensTCA, vignetting: p.lensVignetting,
                             manualDistortion: p.manualDistortion, manualVignetting: p.manualVignetting,
                             profile: nil, lensfunDb: nil)
+        modules.curve = Curve(points: p.toneCurve.points.map { [$0.x, $0.y] })
+        modules.hsl = p.hsl
+        modules.splittoning = p.splitToning
     }
 
     /// Records which profile produced this edit. Not part of equality
@@ -154,6 +165,14 @@ public struct EditStack: Codable, Equatable, Sendable {
             p.lensDistortion = l.distortion; p.lensTCA = l.tca; p.lensVignetting = l.vignetting
             p.manualDistortion = l.manualDistortion; p.manualVignetting = l.manualVignetting
         }
+        if let c = modules.curve {
+            let pts = c.points.compactMap { $0.count == 2 ? SIMD2<Float>($0[0], $0[1]) : nil }
+            if pts.count >= 2 { p.toneCurve = ToneCurve(points: pts) }
+        }
+        if let h = modules.hsl, h.hue.count == 8, h.saturation.count == 8, h.luminance.count == 8 {
+            p.hsl = h
+        }
+        if let st = modules.splittoning { p.splitToning = st }
         return p
     }
 

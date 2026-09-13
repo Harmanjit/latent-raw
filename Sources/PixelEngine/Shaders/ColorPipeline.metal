@@ -84,6 +84,105 @@ inline float3 encodeSRGB(float3 c) {
     return select(low, high, c > 0.0031308);
 }
 
+// ---------------------------------------------------------------------
+// Colour grading (stage 11): tone curve, HSL per hue band, split toning.
+// All in a perceptual (gamma 2.2) domain so equal slider moves look equal
+// in shadows and highlights, then back to linear for the output matrix.
+// ---------------------------------------------------------------------
+
+inline float3 rgbToHSV(float3 c) {
+    float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
+    float d = mx - mn;
+    float h = 0.0;
+    if (d > 1e-6) {
+        if (mx == c.r)      h = fmod((c.g - c.b) / d, 6.0);
+        else if (mx == c.g) h = (c.b - c.r) / d + 2.0;
+        else                h = (c.r - c.g) / d + 4.0;
+        h *= 60.0;
+        if (h < 0.0) h += 360.0;
+    }
+    return float3(h, mx > 1e-6 ? d / mx : 0.0, mx);
+}
+
+inline float3 hsvToRGB(float3 hsv) {
+    float h = fmod(hsv.x + 360.0, 360.0) / 60.0, s = hsv.y, v = hsv.z;
+    float c = v * s, x = c * (1.0 - abs(fmod(h, 2.0) - 1.0)), m = v - c;
+    float3 rgb;
+    if (h < 1.0) rgb = float3(c, x, 0); else if (h < 2.0) rgb = float3(x, c, 0);
+    else if (h < 3.0) rgb = float3(0, c, x); else if (h < 4.0) rgb = float3(0, x, c);
+    else if (h < 5.0) rgb = float3(x, 0, c); else rgb = float3(c, 0, x);
+    return rgb + m;
+}
+
+constant float kHSLCentres[8] = {0.0, 30.0, 60.0, 120.0, 180.0, 240.0, 270.0, 300.0};
+
+/// Blends the two bands either side of `hue` (piecewise linear in hue),
+/// writing the weight of each into `w`.
+inline void hslBandWeights(float hue, thread float *w) {
+    for (int i = 0; i < 8; i++) w[i] = 0.0;
+    int lo = 7, hi = 0;
+    float span = 360.0 - kHSLCentres[7];   // magenta -> red wraps
+    float t = (hue >= kHSLCentres[7]) ? (hue - kHSLCentres[7]) / span : 0.0;
+    for (int i = 0; i < 7; i++) {
+        if (hue >= kHSLCentres[i] && hue < kHSLCentres[i + 1]) {
+            lo = i; hi = i + 1;
+            t = (hue - kHSLCentres[i]) / (kHSLCentres[i + 1] - kHSLCentres[i]);
+            break;
+        }
+    }
+    w[lo] += 1.0 - t;
+    w[hi] += t;
+}
+
+inline float3 applyHSL(float3 p, constant float *hsl) {
+    float3 hsv = rgbToHSV(p);
+    float w[8];
+    hslBandWeights(hsv.x, w);
+    float hueShift = 0.0, satAdj = 0.0, lumAdj = 0.0;
+    for (int i = 0; i < 8; i++) {
+        hueShift += w[i] * hsl[i];
+        satAdj   += w[i] * hsl[8 + i];
+        lumAdj   += w[i] * hsl[16 + i];
+    }
+    // Greys have no hue to speak of; fade hue shifts, brightening and
+    // saturation *boosts* in with chroma so noise in neutral areas doesn't
+    // get tinted. Saturation reductions apply fully — desaturating a
+    // near-grey pixel is exactly what the slider promises, and it's how
+    // "all bands to -100" gives a true black and white.
+    float chroma = smoothstep(0.0, 0.15, hsv.y);
+    hsv.x += hueShift * 30.0 * chroma;
+    float satScale = satAdj < 0.0 ? (1.0 + satAdj) : (1.0 + satAdj * chroma);
+    hsv.y = clamp(hsv.y * satScale, 0.0, 1.0);
+    hsv.z = max(hsv.z * (1.0 + lumAdj * 0.5 * chroma), 0.0);
+    return hsvToRGB(hsv);
+}
+
+inline float3 applySplitToning(float3 p, float4 tint, float balance) {
+    // tint: shadowHue, shadowSat, highlightHue, highlightSat
+    float l = dot(p, float3(0.2126, 0.7152, 0.0722));
+    // Balance skews where "shadow" becomes "highlight".
+    float lb = pow(clamp(l, 0.0, 1.0), exp(-balance));
+    float wH = smoothstep(0.0, 1.0, lb), wS = 1.0 - wH;
+    float3 shadowRGB = hsvToRGB(float3(tint.x, 1.0, 1.0));
+    float3 highRGB   = hsvToRGB(float3(tint.z, 1.0, 1.0));
+    // Chroma only (mean removed), so luminance is preserved.
+    float3 shadowChroma = shadowRGB - dot(shadowRGB, float3(1.0 / 3.0));
+    float3 highChroma   = highRGB   - dot(highRGB,   float3(1.0 / 3.0));
+    float3 shift = shadowChroma * (tint.y * wS) + highChroma * (tint.w * wH);
+    return max(p + shift * 0.25, 0.0);
+}
+
+inline float3 applyCurve(float3 p, constant float *lut) {
+    float3 idx = clamp(p, 0.0, 1.0) * 255.0;
+    float3 out;
+    for (int c = 0; c < 3; c++) {
+        int i = int(idx[c]);
+        float f = idx[c] - float(i);
+        out[c] = mix(lut[i], lut[min(i + 1, 255)], f);
+    }
+    return out;
+}
+
 kernel void colorAndTone(
     texture2d<float, access::read>  input        [[texture(0)]],
     texture2d<float, access::write> output       [[texture(1)]],
@@ -98,6 +197,11 @@ kernel void colorAndTone(
     constant float &headroom                     [[buffer(8)]],
     constant uint  &encodeOutput                 [[buffer(9)]],
     constant uint  &applyToneMap                 [[buffer(10)]],
+    constant uint3 &gradingFlags                 [[buffer(11)]],  // curve, hsl, split
+    constant float *curveLUT                     [[buffer(12)]],  // 256 entries
+    constant float *hsl                          [[buffer(13)]],  // 8 hue, 8 sat, 8 lum
+    constant float4 &splitTint                   [[buffer(14)]],
+    constant float &splitBalance                 [[buffer(15)]],
     uint2 gid                                    [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
@@ -122,6 +226,17 @@ kernel void colorAndTone(
     float3 display = (applyToneMap != 0)
         ? toneMapSigmoid(working, contrast, greyPoint, headroom)
         : working;
+
+    // Stage 11: colour grading, in a perceptual domain, on the display-
+    // referred image scaled to [0,1] by the headroom so nothing clips in
+    // HDR mode. Skipped entirely when every module is neutral.
+    if (any(gradingFlags != uint3(0))) {
+        float3 p = pow(max(display / headroom, 0.0), 1.0 / 2.2);
+        if (gradingFlags.x != 0) p = applyCurve(p, curveLUT);
+        if (gradingFlags.y != 0) p = applyHSL(p, hsl);
+        if (gradingFlags.z != 0) p = applySplitToning(p, splitTint, splitBalance);
+        display = pow(max(p, 0.0), 2.2) * headroom;
+    }
 
     // Stage 13: working space -> output space, then encode — or not.
     // Files want the sRGB curve applied and values clamped to [0,1].

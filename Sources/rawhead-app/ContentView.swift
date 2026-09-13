@@ -299,6 +299,30 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
+                    CurveEditor(curve: $model.parameters.toneCurve)
+                        .disabled(!model.hasImage)
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Tone Curve")
+                }
+
+                DisclosureGroup {
+                    HSLPanel(hsl: $model.parameters.hsl)
+                        .disabled(!model.hasImage)
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("HSL / Colour")
+                }
+
+                DisclosureGroup {
+                    SplitToningPanel(toning: $model.parameters.splitToning)
+                        .disabled(!model.hasImage)
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Split Toning")
+                }
+
+                DisclosureGroup {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(model.lensProfileDescription)
                             .font(.caption2)

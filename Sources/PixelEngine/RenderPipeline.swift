@@ -109,6 +109,10 @@ public struct EditParameters: Sendable, Equatable {
     /// a corner brightening amount.
     public var manualDistortion: Float
     public var manualVignetting: Float
+    /// Colour grading.
+    public var toneCurve: ToneCurve
+    public var hsl: HSLAdjustments
+    public var splitToning: SplitToning
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -127,7 +131,10 @@ public struct EditParameters: Sendable, Equatable {
                 lensTCA: Bool = true,
                 lensVignetting: Bool = true,
                 manualDistortion: Float = 0,
-                manualVignetting: Float = 0) {
+                manualVignetting: Float = 0,
+                toneCurve: ToneCurve = .identity,
+                hsl: HSLAdjustments = .neutral,
+                splitToning: SplitToning = .neutral) {
         self.whiteBalance = whiteBalance
         self.exposureEV = exposureEV
         self.contrast = contrast
@@ -146,6 +153,9 @@ public struct EditParameters: Sendable, Equatable {
         self.lensVignetting = lensVignetting
         self.manualDistortion = manualDistortion
         self.manualVignetting = manualVignetting
+        self.toneCurve = toneCurve
+        self.hsl = hsl
+        self.splitToning = splitToning
     }
 
     public static let neutral = EditParameters()
@@ -164,6 +174,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.lensDistortion == b.lensDistortion && a.lensTCA == b.lensTCA
             && a.lensVignetting == b.lensVignetting
             && a.manualDistortion == b.manualDistortion && a.manualVignetting == b.manualVignetting
+            && a.toneCurve == b.toneCurve && a.hsl == b.hsl && a.splitToning == b.splitToning
     }
 }
 
@@ -409,6 +420,8 @@ public final class RenderPipeline {
         return final
     }
 
+    private static let identityLUT: [Float] = ToneCurve.identity.lookupTable()
+
     // MARK: - Lens corrections
 
     static func wantsLensCorrection(session: ImageSession, parameters p: EditParameters) -> Bool {
@@ -644,6 +657,22 @@ public final class RenderPipeline {
         encoder.setBytes(&headroom, length: 4, index: 8)
         encoder.setBytes(&encode, length: 4, index: 9)
         encoder.setBytes(&toneMap, length: 4, index: 10)
+
+        // Grading. The LUT is 1 KB and the HSL table 96 bytes, both well
+        // under setBytes' 4 KB limit, so no buffers to manage.
+        var flags = SIMD3<UInt32>(parameters.toneCurve.isIdentity ? 0 : 1,
+                                  parameters.hsl.isNeutral ? 0 : 1,
+                                  parameters.splitToning.isNeutral ? 0 : 1)
+        var lut = parameters.toneCurve.isIdentity ? Self.identityLUT : parameters.toneCurve.lookupTable()
+        var hslTable = parameters.hsl.packed
+        let st = parameters.splitToning
+        var tint = SIMD4<Float>(st.shadowHue, st.shadowSaturation, st.highlightHue, st.highlightSaturation)
+        var balance = st.balance
+        encoder.setBytes(&flags, length: MemoryLayout<SIMD3<UInt32>>.size, index: 11)
+        encoder.setBytes(&lut, length: lut.count * 4, index: 12)
+        encoder.setBytes(&hslTable, length: hslTable.count * 4, index: 13)
+        encoder.setBytes(&tint, length: 16, index: 14)
+        encoder.setBytes(&balance, length: 4, index: 15)
 
         dispatch(encoder, pso: gpu.colorAndTonePSO, width: input.width, height: input.height)
         encoder.endEncoding()
