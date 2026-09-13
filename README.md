@@ -5,7 +5,7 @@ A native, Apple Silicon–first RAW photo manager and non-destructive editor for
 - **Platform:** macOS 15 (Sequoia) and 26 (Tahoe), Apple Silicon M3 or newer.
   Metal 3 is the baseline; Metal 4 only for optional fast paths on Tahoe.
 - **License:** GPLv3. See `LICENSE`.
-- **Status:** Phase 1 (core pipeline). Nothing here is stable.
+- **Status:** beta (Phase 7). Editing, catalog, AI masks, export and soft-proofing work; expect rough edges.
 
 See `DESIGN.md` for the full architecture: storage layout, pipeline design,
 efficiency rules and the roadmap. See `PHASE0.md` for exactly what this
@@ -37,8 +37,28 @@ swift run rawhead-app TestAssets/photo.nef    # the editor, opening a file strai
 swift run rawhead-cli render photo.nef --out /tmp/out.png   # headless render + timings
 ```
 
-The app is a plain SwiftPM executable for now — no `.xcodeproj`, no app
-bundle. That's deliberate while the pipeline is moving fast.
+For a proper `.app` (Dock icon, window memory, signed for this Mac):
+
+```
+scripts/make_app.sh 0.1.0        # builds release and assembles build/rawhead.app
+open build/rawhead.app
+```
+
+## Keyboard reference
+
+| Keys | Action |
+|---|---|
+| G / D | Library / Develop |
+| ← → | previous / next image (loads it in Develop) |
+| Return | open the selection in Develop |
+| 0–5, P / X / U | rating, pick / reject / unflag |
+| ⌘[ ⌘] | rotate |
+| ⌘0 ⌘1 ⌘= ⌘- | fit, 100%, zoom in/out |
+| \ | before / after |
+| ⌘Z ⌘⇧Z | undo / redo |
+| ⌘⇧C ⌘⇧V | copy / paste settings (to the Library selection when several are selected) |
+| ⌘U | Auto adjust |
+| ⌘⇧O ⌘⇧E | open folder, export selection |
 
 `RawCore` depends on LibRaw as a vendored C library. See `vendor/README.md`
 for how it's fetched and built as an XCFramework — this step needs to run

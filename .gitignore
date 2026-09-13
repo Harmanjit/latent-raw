@@ -19,3 +19,4 @@ vendor/*.xcframework/
 # Rendered outputs from the CLI during development
 /out/
 *.png
+/build/
