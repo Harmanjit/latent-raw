@@ -221,7 +221,7 @@ struct ExportSheet: View {
     var sample: ImageRecord?
     var catalogName: String = ""
     @State var preset = ExportPreset.load()
-    @State private var destination: URL? = UserDefaults.standard.url(forKey: "latent.exportDestination")
+    @State private var destination: URL? = BookmarkStore.resolve(key: BookmarkStore.exportDestination)
         ?? AppPreferences.shared.defaultExportFolder
     @State private var savedPresets = ExportPresetStore.load()
     @State private var newPresetName = ""
@@ -324,7 +324,7 @@ struct ExportSheet: View {
                     panel.message = "Folder to export into"
                     if panel.runModal() == .OK, let url = panel.url {
                         destination = url
-                        UserDefaults.standard.set(url, forKey: "latent.exportDestination")
+                        BookmarkStore.save(url, key: BookmarkStore.exportDestination)
                     }
                 }
             }

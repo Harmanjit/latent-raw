@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- App Sandbox: the app sees only what the user hands it through an
+       open panel, plus its own container. A decoder exploit lands in a
+       process that can reach nothing else. -->
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <!-- Folders and files chosen in open/save panels, read and write:
+       the photo folder (catalog, sidecars, thumbnails go inside it) and
+       the export destination. -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+  <!-- Security-scoped bookmarks, so the last folder and the export
+       destination can be reopened on the next launch without asking. -->
+  <key>com.apple.security.files.bookmarks.app-scope</key>
+  <true/>
+  <!-- Deliberately absent: com.apple.security.network.client. The app
+       has no network code in use, and without this key it cannot
+       open a socket at all. Add it back only with the model download. -->
+</dict>
+</plist>

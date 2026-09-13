@@ -122,6 +122,11 @@ struct ContentView: View {
                     model.open(url: URL(fileURLWithPath: path))
                     mode = .develop
                 }
+            } else if let last = BookmarkStore.resolve(key: BookmarkStore.lastFolder),
+                      FileManager.default.fileExists(atPath: last.path) {
+                // Reopen where the user left off; the bookmark carries the
+                // sandbox permission the open panel granted last time.
+                openFolder(last)
             }
         }
     }
@@ -141,8 +146,12 @@ struct ContentView: View {
     private func openFolder(_ url: URL) {
         mode = .library
         Task {
-            do { try await library.open(folder: url, defaultSubfolderMode: prefs.defaultSubfolderMode) }
-            catch { model.reportFailure("Opening \(url.lastPathComponent)", error) }
+            do {
+                try await library.open(folder: url, defaultSubfolderMode: prefs.defaultSubfolderMode)
+                BookmarkStore.save(url, key: BookmarkStore.lastFolder)
+            } catch {
+                model.reportFailure("Opening \(url.lastPathComponent)", error)
+            }
         }
     }
 

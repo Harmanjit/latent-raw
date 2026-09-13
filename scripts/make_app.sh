@@ -57,6 +57,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$APP" 2>/dev/null && echo "Signed (ad hoc)"
+# Ad-hoc signature carrying the App Sandbox entitlements and the hardened
+# runtime. No developer account is involved: the sandbox and the runtime
+# hardening are enforced from the signature on this machine regardless.
+# What ad-hoc cannot give is notarisation, so on another Mac Gatekeeper
+# shows "cannot verify the developer" until the user right-clicks > Open
+# once (or removes the quarantine attribute). See README.
+ENTITLEMENTS="$(dirname "$0")/Latent.entitlements"
+codesign --force --deep --options runtime --entitlements "$ENTITLEMENTS" --sign - "$APP" \
+  && echo "Signed (ad hoc, sandboxed, hardened runtime)"
+codesign -d --entitlements - "$APP" 2>/dev/null | grep -q app-sandbox && echo "Sandbox entitlement present"
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"
 echo "Run: open $APP     — or drag it to /Applications"

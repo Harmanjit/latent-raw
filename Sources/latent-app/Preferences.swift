@@ -83,7 +83,12 @@ final class AppPreferences: ObservableObject {
     @Published var surround: Surround { didSet { defaults.set(surround.rawValue, forKey: "latent.surround") } }
     @Published var showRenderTimings: Bool { didSet { defaults.set(showRenderTimings, forKey: "latent.showRenderTimings") } }
     @Published var defaultSubfolderMode: SubfolderMode { didSet { defaults.set(defaultSubfolderMode.rawValue, forKey: "latent.defaultSubfolderMode") } }
-    @Published var defaultExportFolder: URL? { didSet { defaults.set(defaultExportFolder, forKey: "latent.defaultExportFolder") } }
+    @Published var defaultExportFolder: URL? {
+        didSet {
+            if let url = defaultExportFolder { BookmarkStore.save(url, key: BookmarkStore.defaultExportFolder) }
+            else { BookmarkStore.clear(key: BookmarkStore.defaultExportFolder) }
+        }
+    }
     @Published var mlCompute: MLCompute { didSet { defaults.set(mlCompute.rawValue, forKey: CoreMLStore.computePreferenceKey) } }
 
     private init() {
@@ -92,7 +97,7 @@ final class AppPreferences: ObservableObject {
         surround = Surround(rawValue: defaults.string(forKey: "latent.surround") ?? "") ?? .dark
         showRenderTimings = defaults.object(forKey: "latent.showRenderTimings") as? Bool ?? true
         defaultSubfolderMode = SubfolderMode(rawValue: defaults.string(forKey: "latent.defaultSubfolderMode") ?? "") ?? .ask
-        defaultExportFolder = defaults.url(forKey: "latent.defaultExportFolder")
+        defaultExportFolder = BookmarkStore.resolve(key: BookmarkStore.defaultExportFolder)
         mlCompute = MLCompute(rawValue: defaults.string(forKey: CoreMLStore.computePreferenceKey) ?? "") ?? .gpu
     }
 

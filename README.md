@@ -32,6 +32,28 @@ vendor/           Vendored C/C++ dependencies (LibRaw, etc.) built as XCFramewor
 TestAssets/       Sample RAW files for the CI test matrix (not committed — see below)
 ```
 
+## Sandbox, signing and Gatekeeper
+
+`scripts/make_app.sh` signs the bundle ad hoc with the App Sandbox and
+the hardened runtime (`scripts/Latent.entitlements`). No developer
+account is involved, and none is needed for either to be enforced: the
+app can reach only the folders you choose in an open panel (remembered
+between launches by security-scoped bookmark), its own container under
+`~/Library/Containers/com.latent.app`, and nothing on the network, since
+the network entitlement is deliberately absent.
+
+What an account would add is notarisation. Without it, another Mac shows
+"cannot verify the developer" on first launch. Right-click the app and
+choose Open once, or run:
+
+```
+xattr -dr com.apple.quarantine /Applications/Latent.app
+```
+
+Development builds (`swift run`) are unsigned and therefore not
+sandboxed, which is why `swift run latent-app <folder>` can open a path
+from the command line and the bundle cannot.
+
 ## Privacy
 
 Latent makes no network requests. There is no telemetry, no analytics,

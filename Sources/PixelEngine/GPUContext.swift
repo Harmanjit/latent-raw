@@ -161,7 +161,7 @@ public final class GPUContext: @unchecked Sendable {
     /// separate source strings, so the fallback inlines Common.h once and
     /// strips the include lines from each kernel file.
     private static func loadShaderLibrary(device: MTLDevice) throws -> MTLLibrary {
-        if let precompiled = try? device.makeDefaultLibrary(bundle: .module) {
+        if let precompiled = try? device.makeDefaultLibrary(bundle: .latentResources) {
             return precompiled
         }
 
