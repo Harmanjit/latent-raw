@@ -3,6 +3,7 @@ import Metal
 import PixelEngine
 import ColorKit
 import Catalog
+import LensKit
 import UniformTypeIdentifiers
 
 /// Which half of the app is showing. Same two-mode shape as Lightroom's
@@ -53,6 +54,7 @@ struct ContentView: View {
         }
         .background(navigationShortcuts)
         .onAppear {
+            LensfunDatabase.warmUp()
             wireEditSaving()
             if let gpu = model.gpu {
                 library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu)
@@ -294,6 +296,29 @@ struct ContentView: View {
                     .padding(.top, 8)
                 } label: {
                     disclosureLabel("Highlight Reconstruction")
+                }
+
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(model.lensProfileDescription)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Toggle("Distortion", isOn: $model.parameters.lensDistortion)
+                        Toggle("Chromatic aberration", isOn: $model.parameters.lensTCA)
+                        Toggle("Vignetting", isOn: $model.parameters.lensVignetting)
+                        disclosureLabel("Manual")
+                        sliderRow(title: "Distortion", value: $model.parameters.manualDistortion,
+                                  range: -0.1...0.1, format: "%+.3f")
+                        sliderRow(title: "Vignetting", value: $model.parameters.manualVignetting,
+                                  range: -1...1, format: "%+.2f")
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(!model.hasImage)
+                    .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Lens Corrections")
                 }
 
                 DisclosureGroup {

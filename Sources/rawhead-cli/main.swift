@@ -89,6 +89,7 @@ guard args.count >= 3, args[1] == "render" else {
       --grey <x>             scene-linear value mapped to mid grey (default 0.1845)
       --space <sRGB|p3>      output colour space (default sRGB)
       --sharpen <amount>     unsharp mask amount 0-2 (default 0 = off)
+      --no-lens              disable profile lens corrections
       --denoise <strength>   luminance+colour noise reduction 0-1 (default 0)
 
     Examples:
@@ -133,7 +134,10 @@ let parameters = EditParameters(
     outputSpace: outputSpace,
     denoiseLuminance: floatArg("--denoise", 0),
     denoiseColor: floatArg("--denoise", 0),
-    sharpenAmount: floatArg("--sharpen", 0)
+    sharpenAmount: floatArg("--sharpen", 0),
+    lensDistortion: !args.contains("--no-lens"),
+    lensTCA: !args.contains("--no-lens"),
+    lensVignetting: !args.contains("--no-lens")
 )
 
 func formatBytes(_ bytes: Int) -> String {
@@ -175,6 +179,14 @@ do {
     print(String(format: "  as-shot WB: %.0fK %+.0f",
                   session.asShotWhiteBalance.temperature,
                   session.asShotWhiteBalance.tint))
+    if let lens = session.lensCorrection {
+        print("  lens profile: \(lens.profileName) (lensfun \(lens.databaseVersion)), " +
+              "distortion \(lens.distortion != nil ? "yes" : "no"), CA \(lens.tca != nil ? "yes" : "no"), " +
+              "vignetting \(lens.vignetting != nil ? "yes" : "no")" +
+              String(format: ", autoscale %.4f, crop ratio %.3f", lens.autoScale, lens.cropRatio))
+    } else {
+        print("  lens profile: none")
+    }
 
     let pipeline = RenderPipeline(gpu: gpu)
 

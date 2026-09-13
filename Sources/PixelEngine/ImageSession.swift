@@ -3,6 +3,7 @@ import Metal
 import simd
 import RawCore
 import ColorKit
+import LensKit
 
 /// One image, loaded and ready to render repeatedly.
 ///
@@ -39,6 +40,11 @@ public final class ImageSession {
     /// Camera RGB -> linear Rec.2020.
     public var cameraToWorkingMatrix: simd_float3x3? { profile?.cameraToWorking }
 
+    /// The lens profile for this shot, resolved at its focal length and
+    /// aperture (DESIGN.md §9.2). nil when the database has nothing for
+    /// this camera and lens; manual corrections still work then.
+    public let lensCorrection: LensCorrection?
+
     /// What a pooled texture is for.
     ///
     /// Role is part of the pool key because several stages want textures of
@@ -66,6 +72,7 @@ public final class ImageSession {
         case rcdPQDir       // diagonal directional discrimination
         case rcdScratch     // ping-pong partner for the RGB passes
         case denoised       // camera RGB after noise reduction
+        case lensCorrected  // camera RGB after lens corrections
         case blurA          // sharpening: horizontal blur of luminance
         case blurB          // sharpening: full blur of luminance
         case sharpened      // final output when sharpening ran (tile)
@@ -128,6 +135,19 @@ public final class ImageSession {
         self.profile = cameraProfile
         self.asShotWhiteBalance = cameraProfile?.whiteBalance(fromMultipliers: asShot)
             ?? ColorKit.WhiteBalance()
+
+        let summary = file.summary
+        let db = LensfunDatabase.shared
+        if let match = LensMatcher.match(cameraMake: summary.cameraMake, cameraModel: summary.cameraModel,
+                                         lensName: summary.lensModel, identity: summary.lens,
+                                         focal: summary.focalLength, in: db) {
+            self.lensCorrection = LensCorrection.resolve(
+                match, focal: Float(summary.focalLength), aperture: Float(summary.aperture),
+                imageWidth: summary.rawWidth, imageHeight: summary.rawHeight,
+                databaseVersion: db.version)
+        } else {
+            self.lensCorrection = nil
+        }
     }
 
     /// The multipliers to render with, for a given white balance setting.

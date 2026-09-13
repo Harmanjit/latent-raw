@@ -76,7 +76,11 @@ final class EditorModel: ObservableObject {
         if EditStack.isDefault(parameters, relativeTo: defaultParameters) {
             onEditSettled?(id, nil)
         } else {
-            onEditSettled?(id, try? EditStack(parameters: parameters).encodeJSON())
+            var stack = EditStack(parameters: parameters)
+            if let lens = session?.lensCorrection {
+                stack.setLensProvenance(profile: lens.profileName, databaseVersion: lens.databaseVersion)
+            }
+            onEditSettled?(id, try? stack.encodeJSON())
         }
     }
     /// The whole image at preview resolution. Always drawn, so the view is
@@ -199,6 +203,25 @@ final class EditorModel: ObservableObject {
 
     var isReady: Bool { gpuContext != nil }
     var gpu: GPUContext? { gpuContext }
+
+    /// What the lens panel says about the open image.
+    var lensProfileDescription: String {
+        guard hasImage else { return "" }
+        guard let c = session?.lensCorrection else {
+            let lens = session?.file.summary.lens
+            let spec = lens.map { l -> String in
+                l.minFocal > 0 ? String(format: "%.0f-%.0fmm f/%.1f", l.minFocal, l.maxFocal,
+                                        l.maxApertureAtMinFocal) : "unknown lens"
+            } ?? "unknown lens"
+            return "No profile found (\(spec)). Manual sliders still work."
+        }
+        var parts: [String] = []
+        if c.distortion != nil { parts.append("distortion") }
+        if c.tca != nil { parts.append("CA") }
+        if c.vignetting != nil { parts.append("vignetting") }
+        return "\(c.profileName) · \(parts.joined(separator: ", ")) · lensfun \(c.databaseVersion)"
+    }
+    var hasLensProfile: Bool { session?.lensCorrection != nil }
     var device: MTLDevice? { gpuContext?.device }
     var presenter: Presenter? { presenterInstance }
     var hasImage: Bool { session != nil }

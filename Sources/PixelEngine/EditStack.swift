@@ -32,6 +32,41 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var demosaic: Demosaic?
         public var denoise: Denoise?
         public var sharpen: Sharpen?
+        public var lens: Lens?
+    }
+
+    /// DESIGN.md §5.6: which corrections are on, and which profile and
+    /// database version supplied them, frozen so a later database update
+    /// can't silently change an edited photo.
+    public struct Lens: Codable, Equatable, Sendable {
+        public var distortion: Bool = true
+        public var tca: Bool = true
+        public var vignetting: Bool = true
+        public var manualDistortion: Float = 0
+        public var manualVignetting: Float = 0
+        public var profile: String?
+        public var lensfunDb: String?
+
+        public init(distortion: Bool, tca: Bool, vignetting: Bool,
+                    manualDistortion: Float, manualVignetting: Float,
+                    profile: String?, lensfunDb: String?) {
+            self.distortion = distortion; self.tca = tca; self.vignetting = vignetting
+            self.manualDistortion = manualDistortion; self.manualVignetting = manualVignetting
+            self.profile = profile; self.lensfunDb = lensfunDb
+        }
+
+        /// Lenient: any missing key keeps its default, so a sidecar from
+        /// another build (or another app's idea of a lens block) loads.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            distortion = try c.decodeIfPresent(Bool.self, forKey: .distortion) ?? true
+            tca = try c.decodeIfPresent(Bool.self, forKey: .tca) ?? true
+            vignetting = try c.decodeIfPresent(Bool.self, forKey: .vignetting) ?? true
+            manualDistortion = try c.decodeIfPresent(Float.self, forKey: .manualDistortion) ?? 0
+            manualVignetting = try c.decodeIfPresent(Float.self, forKey: .manualVignetting) ?? 0
+            profile = try c.decodeIfPresent(String.self, forKey: .profile)
+            lensfunDb = try c.decodeIfPresent(String.self, forKey: .lensfunDb)
+        }
     }
 
     public struct Denoise: Codable, Equatable, Sendable {
@@ -76,6 +111,16 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.denoise = Denoise(luminance: p.denoiseLuminance, color: p.denoiseColor)
         modules.sharpen = Sharpen(amount: p.sharpenAmount, radius: p.sharpenRadius,
                                   threshold: p.sharpenThreshold)
+        modules.lens = Lens(distortion: p.lensDistortion, tca: p.lensTCA, vignetting: p.lensVignetting,
+                            manualDistortion: p.manualDistortion, manualVignetting: p.manualVignetting,
+                            profile: nil, lensfunDb: nil)
+    }
+
+    /// Records which profile produced this edit. Not part of equality
+    /// for `isDefault`, which compares parameters only.
+    public mutating func setLensProvenance(profile: String?, databaseVersion: String?) {
+        modules.lens?.profile = profile
+        modules.lens?.lensfunDb = databaseVersion
     }
 
     public init() {}
@@ -105,6 +150,10 @@ public struct EditStack: Codable, Equatable, Sendable {
         if let s = modules.sharpen {
             p.sharpenAmount = s.amount; p.sharpenRadius = s.radius; p.sharpenThreshold = s.threshold
         }
+        if let l = modules.lens {
+            p.lensDistortion = l.distortion; p.lensTCA = l.tca; p.lensVignetting = l.vignetting
+            p.manualDistortion = l.manualDistortion; p.manualVignetting = l.manualVignetting
+        }
         return p
     }
 
@@ -123,6 +172,9 @@ public struct EditStack: Codable, Equatable, Sendable {
     /// True when the stack changes nothing about the default rendering, in
     /// which case there's no point storing it.
     public static func isDefault(_ p: EditParameters, relativeTo defaults: EditParameters) -> Bool {
-        EditStack(parameters: p) == EditStack(parameters: defaults)
+        var a = EditStack(parameters: p), b = EditStack(parameters: defaults)
+        a.setLensProvenance(profile: nil, databaseVersion: nil)
+        b.setLensProvenance(profile: nil, databaseVersion: nil)
+        return a == b
     }
 }

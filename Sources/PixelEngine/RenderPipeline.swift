@@ -4,6 +4,7 @@ import Metal
 import simd
 import RawCore
 import ColorKit
+import LensKit
 
 public enum RenderError: Error, CustomStringConvertible {
     case unsupportedCFAForV1
@@ -99,6 +100,15 @@ public struct EditParameters: Sendable, Equatable {
     public var sharpenAmount: Float
     public var sharpenRadius: Float
     public var sharpenThreshold: Float
+    /// Lens corrections from the matched profile, each switchable.
+    public var lensDistortion: Bool
+    public var lensTCA: Bool
+    public var lensVignetting: Bool
+    /// Manual corrections, applied on top of (or instead of) the profile:
+    /// distortion as a poly3 k1 (negative = bulge inward), vignetting as
+    /// a corner brightening amount.
+    public var manualDistortion: Float
+    public var manualVignetting: Float
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -112,7 +122,12 @@ public struct EditParameters: Sendable, Equatable {
                 denoiseColor: Float = 0,
                 sharpenAmount: Float = 0,
                 sharpenRadius: Float = 1.0,
-                sharpenThreshold: Float = 0.01) {
+                sharpenThreshold: Float = 0.01,
+                lensDistortion: Bool = true,
+                lensTCA: Bool = true,
+                lensVignetting: Bool = true,
+                manualDistortion: Float = 0,
+                manualVignetting: Float = 0) {
         self.whiteBalance = whiteBalance
         self.exposureEV = exposureEV
         self.contrast = contrast
@@ -126,6 +141,11 @@ public struct EditParameters: Sendable, Equatable {
         self.sharpenAmount = sharpenAmount
         self.sharpenRadius = sharpenRadius
         self.sharpenThreshold = sharpenThreshold
+        self.lensDistortion = lensDistortion
+        self.lensTCA = lensTCA
+        self.lensVignetting = lensVignetting
+        self.manualDistortion = manualDistortion
+        self.manualVignetting = manualVignetting
     }
 
     public static let neutral = EditParameters()
@@ -141,6 +161,9 @@ public struct EditParameters: Sendable, Equatable {
             && a.denoiseLuminance == b.denoiseLuminance && a.denoiseColor == b.denoiseColor
             && a.sharpenAmount == b.sharpenAmount && a.sharpenRadius == b.sharpenRadius
             && a.sharpenThreshold == b.sharpenThreshold
+            && a.lensDistortion == b.lensDistortion && a.lensTCA == b.lensTCA
+            && a.lensVignetting == b.lensVignetting
+            && a.manualDistortion == b.manualDistortion && a.manualVignetting == b.manualVignetting
     }
 }
 
@@ -356,6 +379,13 @@ public final class RenderPipeline {
                                            binSpan: binSpan)
         }
 
+        // Stage 7: lens corrections, still in camera space.
+        if Self.wantsLensCorrection(session: session, parameters: parameters) {
+            colourInput = try applyLensCorrection(session: session, cmdBuffer: cmdBuffer,
+                                                  input: colourInput, parameters: parameters,
+                                                  renderInfo: renderInfo, binSpan: binSpan)
+        }
+
         var final = try applyColorAndTone(session: session, cmdBuffer: cmdBuffer,
                                           input: colourInput,
                                           outputRole: displayRole,
@@ -377,6 +407,69 @@ public final class RenderPipeline {
 
         info?.pointee = renderInfo
         return final
+    }
+
+    // MARK: - Lens corrections
+
+    static func wantsLensCorrection(session: ImageSession, parameters p: EditParameters) -> Bool {
+        if p.manualDistortion != 0 || p.manualVignetting != 0 { return true }
+        guard let c = session.lensCorrection else { return false }
+        return (p.lensDistortion && c.distortion != nil)
+            || (p.lensTCA && c.tca != nil)
+            || (p.lensVignetting && c.vignetting != nil)
+    }
+
+    private func applyLensCorrection(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                                     input: MTLTexture, parameters p: EditParameters,
+                                     renderInfo: RenderInfo, binSpan: Float) throws -> MTLTexture {
+        let output = try session.texture(width: input.width, height: input.height,
+                                         pixelFormat: .rgba16Float, role: .lensCorrected)
+        guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+            throw RenderError.commandBufferFailed
+        }
+        let c = session.lensCorrection
+        let summary = session.file.summary
+
+        var sensorSize = SIMD2<Float>(Float(summary.rawWidth), Float(summary.rawHeight))
+        var tileOrigin = SIMD2<Float>(Float(renderInfo.sensorRect.origin.x),
+                                      Float(renderInfo.sensorRect.origin.y))
+        var span = binSpan
+        var cropRatio = c?.cropRatio ?? 1
+        let useDistortion = p.lensDistortion && c?.distortion != nil
+        var autoScale = useDistortion ? (c?.autoScale ?? 1) : 1
+        var distType: Int32 = 0
+        var distTerms = SIMD3<Float>(0, 0, 0)
+        if useDistortion, let d = c?.distortion {
+            (distType, distTerms) = d.packed
+        }
+        var manualDist = p.manualDistortion
+        var tcaOn: Int32 = (p.lensTCA && c?.tca != nil) ? 1 : 0
+        var tcaRed = c?.tca?.red ?? SIMD3(0, 0, 1)
+        var tcaBlue = c?.tca?.blue ?? SIMD3(0, 0, 1)
+        var vigOn: Int32 = (p.lensVignetting && c?.vignetting != nil) ? 1 : 0
+        var vig = c?.vignetting.map { SIMD3<Float>($0.k1, $0.k2, $0.k3) } ?? SIMD3(0, 0, 0)
+        var manualVig = p.manualVignetting
+
+        encoder.setComputePipelineState(gpu.lensCorrectPSO)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(output, index: 1)
+        encoder.setBytes(&sensorSize, length: 8, index: 0)
+        encoder.setBytes(&tileOrigin, length: 8, index: 1)
+        encoder.setBytes(&span, length: 4, index: 2)
+        encoder.setBytes(&cropRatio, length: 4, index: 3)
+        encoder.setBytes(&autoScale, length: 4, index: 4)
+        encoder.setBytes(&distType, length: 4, index: 5)
+        encoder.setBytes(&distTerms, length: 16, index: 6)
+        encoder.setBytes(&manualDist, length: 4, index: 7)
+        encoder.setBytes(&tcaOn, length: 4, index: 8)
+        encoder.setBytes(&tcaRed, length: 16, index: 9)
+        encoder.setBytes(&tcaBlue, length: 16, index: 10)
+        encoder.setBytes(&vigOn, length: 4, index: 11)
+        encoder.setBytes(&vig, length: 16, index: 12)
+        encoder.setBytes(&manualVig, length: 4, index: 13)
+        dispatch(encoder, pso: gpu.lensCorrectPSO, width: input.width, height: input.height)
+        encoder.endEncoding()
+        return output
     }
 
     // MARK: - Detail stages
