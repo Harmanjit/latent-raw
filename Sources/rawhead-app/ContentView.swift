@@ -54,6 +54,9 @@ struct ContentView: View {
         .background(navigationShortcuts)
         .onAppear {
             wireEditSaving()
+            if let gpu = model.gpu {
+                library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu)
+            }
             // Developer convenience: `swift run rawhead-app <folder-or-file>`
             // opens it straight away, skipping the dialogs.
             if let path = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") }) {

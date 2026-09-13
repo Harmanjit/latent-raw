@@ -61,7 +61,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PixelEngineTests",
-            dependencies: ["PixelEngine", "RawCore"],
+            dependencies: ["PixelEngine", "RawCore", "Catalog"],
             path: "Tests/PixelEngineTests"
         ),
         .testTarget(

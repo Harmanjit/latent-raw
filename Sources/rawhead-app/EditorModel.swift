@@ -198,6 +198,7 @@ final class EditorModel: ObservableObject {
     }
 
     var isReady: Bool { gpuContext != nil }
+    var gpu: GPUContext? { gpuContext }
     var device: MTLDevice? { gpuContext?.device }
     var presenter: Presenter? { presenterInstance }
     var hasImage: Bool { session != nil }

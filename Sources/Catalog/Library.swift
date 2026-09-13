@@ -37,6 +37,10 @@ public final class Library: ObservableObject {
     public private(set) var catalog: Catalog?
 
     private let thumbnailCache = NSCache<NSNumber, CGImage>()
+
+    /// Renders thumbnails for edited images. Set by the app (it needs the
+    /// GPU pipeline, which the catalog doesn't know about).
+    public var thumbnailRenderer: (any EditedThumbnailRenderer)?
     private var thumbnailTask: Task<Void, Never>?
 
     public init() {
@@ -115,7 +119,10 @@ public final class Library: ObservableObject {
                 let needed = try await catalog.imagesNeedingThumbnails().count
                 await MainActor.run { self?.thumbnailsTotal = needed }
                 guard needed > 0 else { return }
-                let report = try await catalog.generateMissingThumbnails { done, total in
+                let renderer = await self?.thumbnailRenderer
+                let report = try await catalog.generateMissingThumbnails(
+                    editedRenderer: renderer
+                ) { done, total in
                     Task { @MainActor in
                         self?.thumbnailsDone = done
                         self?.thumbnailsTotal = total
@@ -125,7 +132,15 @@ public final class Library: ObservableObject {
                     }
                 }
                 await MainActor.run {
-                    if let self, !report.failures.isEmpty {
+                    guard let self else { return }
+                    // Regenerated files replace what the cache holds.
+                    for relPath in report.regeneratedRelPaths {
+                        if let id = self.images.first(where: { $0.relPath == relPath })?.id {
+                            self.thumbnailCache.removeObject(forKey: NSNumber(value: id))
+                        }
+                    }
+                    if !report.regeneratedRelPaths.isEmpty { self.thumbnailVersion += 1 }
+                    if !report.failures.isEmpty {
                         self.statusText += " · \(report.failures.count) thumbnails failed"
                     }
                 }
@@ -216,6 +231,10 @@ public final class Library: ObservableObject {
         try await catalog.setEditStack(json, schemaVersion: schemaVersion,
                                        processVersion: processVersion, forImageID: id)
         if json == nil { editedImageIDs.remove(id) } else { editedImageIDs.insert(id) }
+        // The thumbnail no longer matches the edit; regenerate in the
+        // background (DESIGN.md §10: after the edit is saved, never while
+        // a slider is being dragged).
+        startThumbnailGeneration()
     }
 
     // MARK: - Navigation

@@ -32,9 +32,25 @@ public enum Thumbnailer {
     public static let size = 512
 
     /// The `thumb_key` recorded for a thumbnail made from the embedded
-    /// preview. Edited images will record a hash of their edit instead,
-    /// so a stale thumbnail is detected by a key mismatch.
+    /// preview. Edited images record a hash of their edit instead, so a
+    /// stale thumbnail is detected by a key mismatch (DESIGN.md §10).
     public static let embeddedPreviewKey = Data("embedded:v1".utf8)
+
+    /// The key for a thumbnail rendered from `editStackJSON`.
+    public static func key(forEditStack editStackJSON: String) -> Data {
+        Data("edit:".utf8) + ImageRecord.hashData(FileHash.xxh64(Data(editStackJSON.utf8)))
+    }
+
+    /// What an image's thumbnail *should* be keyed by right now.
+    public static func expectedKey(editStackJSON: String?) -> Data {
+        editStackJSON.map(key(forEditStack:)) ?? embeddedPreviewKey
+    }
+
+    /// Writes an already-rendered, camera-oriented image as a thumbnail.
+    /// Used for edited images, whose pixels come from the pipeline.
+    public static func write(_ image: CGImage, to destination: URL) throws {
+        try writeHEIC(image, to: destination)
+    }
 
     /// Extracts, downscales, orients and writes. Pure: a file in, a file
     /// out, no database. Safe to call from any thread.

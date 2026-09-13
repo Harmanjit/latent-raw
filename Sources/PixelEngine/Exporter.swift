@@ -138,6 +138,21 @@ public final class Exporter {
         }
     }
 
+    /// An 8-bit CGImage of a rendered (already display-encoded) texture,
+    /// rotated as asked. For thumbnails and previews that stay in memory.
+    public func cgImage(from texture: MTLTexture,
+                        colorSpace: ColorKit.OutputSpace,
+                        rotation: ImageRotation = .none) throws -> CGImage {
+        var pixels = try readBack(texture)
+        var width = texture.width, height = texture.height
+        if rotation != .none {
+            pixels = Self.rotate(pixels, width: width, height: height, rotation: rotation)
+            if rotation.swapsAxes { swap(&width, &height) }
+        }
+        return try makeImage(from: pixels, width: width, height: height,
+                             settings: ExportSettings(format: .png), colorSpace: colorSpace)
+    }
+
     // MARK: - Rotation
 
     /// Rotates an RGBA half-float buffer by quarter turns clockwise.
