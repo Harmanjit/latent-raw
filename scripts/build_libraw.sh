@@ -19,7 +19,7 @@ set -euo pipefail
 LIBRAW_TAG="${LIBRAW_TAG:-0.22.2}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENDOR="$ROOT/vendor"
-SRC="$VENDOR/libraw-src"
+SRC="${SRC:-$VENDOR/libraw-src}"
 OUT="${OUT:-$VENDOR/LibRaw.xcframework}"
 STAMP="$OUT/.libraw-tag"
 
