@@ -42,7 +42,18 @@ jobs:
         run: swift --version
 
       - name: Build
-        run: swift build
+        run: |
+          set -o pipefail
+          if ! swift build 2>&1 | tee build.log; then
+            echo "::error title=swift build failed::$(grep -E 'error:|error\b' build.log | head -20 | tr '\n' ' ' | cut -c1-1500)"
+            exit 1
+          fi
 
       - name: Test
-        run: swift test 2>&1 | tail -40
+        run: |
+          set -o pipefail
+          if ! swift test 2>&1 | tee test.log; then
+            echo "::error title=swift test failed::$(grep -E 'error:|failed' test.log | head -20 | tr '\n' ' ' | cut -c1-1500)"
+            exit 1
+          fi
+          grep -E 'Executed [0-9]+ tests' test.log | tail -1
