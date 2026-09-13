@@ -102,6 +102,39 @@ final class MetadataTests: XCTestCase {
         XCTAssertEqual(try XMPSidecar.read(from: sidecar).editStackJSON, "")
     }
 
+    func testSnapshotsAndHistorySurviveSidecarRebuild() async throws {
+        var catalog = try Catalog.open(at: folder)
+        _ = try await catalog.reconcile()
+        let firstImage = try await catalog.allImages().first
+        let id = try XCTUnwrap(firstImage?.id)
+
+        let s1 = #"{"schema":1,"modules":{"exposure":{"ev":0.5}}}"#
+        let s2 = #"{"schema":1,"modules":{"exposure":{"ev":-0.5}}}"#
+        try await catalog.setSnapshots([("Bright", s1), ("Dark", s2)], forImageID: id)
+        try await catalog.setHistory([(s1, 100), (s2, 200)], forImageID: id)
+
+        let sidecar = await catalog.sidecarURL(forRelPath: "A.NEF")
+        let fields = try XMPSidecar.read(from: sidecar)
+        XCTAssertTrue(fields.snapshotsJSON.contains("\"Bright\""))
+        XCTAssertTrue(fields.historyJSON.contains("\"t\":200"))
+
+        let db = await catalog.containerPath.appendingPathComponent("catalog.sqlite")
+        catalog = try Catalog.open(at: URL(fileURLWithPath: "/tmp"))
+        for suffix in ["", "-wal", "-shm"] {
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: db.path + suffix))
+        }
+        catalog = try Catalog.open(at: folder)
+        _ = try await catalog.reconcile()
+        let rebuiltImage = try await catalog.image(forRelPath: "A.NEF")
+        let rid = try XCTUnwrap(rebuiltImage?.id)
+        let snaps = try await catalog.snapshots(forImageID: rid)
+        XCTAssertEqual(snaps.map(\.name), ["Bright", "Dark"])
+        XCTAssertTrue(snaps[0].stackJSON.contains("0.5"))
+        let hist = try await catalog.history(forImageID: rid)
+        XCTAssertEqual(hist.count, 2)
+        XCTAssertEqual(hist[1].createdAt, 200)
+    }
+
     @MainActor
     func testLibraryAppliesToSelection() async throws {
         let library = Library()

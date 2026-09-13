@@ -28,12 +28,18 @@ public enum XMPSidecar {
         /// Pre-serialized JSON, see DESIGN.md §5.6. Empty when the image
         /// has no edits yet.
         public var editStackJSON: String
+        /// JSON array of named snapshots, or empty (rawhead:Snapshots).
+        public var snapshotsJSON: String = ""
+        /// JSON of the edit history, or empty (rawhead:History).
+        public var historyJSON: String = ""
 
         public init(rating: Int = 0, label: String? = nil, flag: Int = 0, rotation: Int = 0,
                     keywords: [String] = [],
                     preservedFileName: String? = nil, sourceHash: String,
                     schemaVersion: Int = 1, processVersion: String = "1.0",
-                    editStackJSON: String = "") {
+                    editStackJSON: String = "", snapshotsJSON: String = "", historyJSON: String = "") {
+            self.snapshotsJSON = snapshotsJSON
+            self.historyJSON = historyJSON
             self.rating = rating
             self.label = label
             self.flag = flag
@@ -94,6 +100,8 @@ public enum XMPSidecar {
         \(keywordItems)
            </rdf:Bag></dc:subject>
            <rawhead:EditStack><![CDATA[\(f.editStackJSON)]]></rawhead:EditStack>
+        \(f.snapshotsJSON.isEmpty ? "" : "   <rawhead:Snapshots><![CDATA[\(f.snapshotsJSON)]]></rawhead:Snapshots>")
+        \(f.historyJSON.isEmpty ? "" : "   <rawhead:History><![CDATA[\(f.historyJSON)]]></rawhead:History>")
           </rdf:Description>
          </rdf:RDF>
         </x:xmpmeta>
@@ -154,6 +162,8 @@ public enum XMPSidecar {
 
         let editStack = childText("EditStack")?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let snapshots = childText("Snapshots")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let history = childText("History")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         return Fields(
             rating: Int(property("xmp:Rating", local: "Rating") ?? "") ?? 0,
@@ -165,6 +175,8 @@ public enum XMPSidecar {
             sourceHash: property("rawhead:SourceHash", local: "SourceHash") ?? "",
             schemaVersion: Int(property("rawhead:SchemaVersion", local: "SchemaVersion") ?? "") ?? 1,
             processVersion: property("rawhead:ProcessVersion", local: "ProcessVersion") ?? "1.0",
-            editStackJSON: editStack)
+            editStackJSON: editStack,
+            snapshotsJSON: snapshots,
+            historyJSON: history)
     }
 }

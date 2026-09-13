@@ -277,6 +277,26 @@ public final class Library: ObservableObject {
         return changed
     }
 
+    // MARK: - Snapshots and history (per image, stored with the catalog)
+
+    public func snapshots(for record: ImageRecord) async -> [(name: String, stackJSON: String)] {
+        guard let id = record.id, let catalog else { return [] }
+        return (try? await catalog.snapshots(forImageID: id)) ?? []
+    }
+
+    public func setSnapshots(_ snapshots: [(name: String, stackJSON: String)], forImageID id: Int64) async throws {
+        try await catalog?.setSnapshots(snapshots, forImageID: id)
+    }
+
+    public func history(for record: ImageRecord) async -> [(stackJSON: String, createdAt: Int64)] {
+        guard let id = record.id, let catalog else { return [] }
+        return (try? await catalog.history(forImageID: id)) ?? []
+    }
+
+    public func setHistory(_ steps: [(stackJSON: String, createdAt: Int64)], forImageID id: Int64) async throws {
+        try await catalog?.setHistory(steps, forImageID: id)
+    }
+
     // MARK: - Navigation
 
     /// Moves the selection by `offset`, clamped to the list. Returns the

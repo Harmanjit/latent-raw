@@ -323,6 +323,18 @@ extension Catalog {
                 } else {
                     try db.execute(sql: "DELETE FROM edits WHERE image_id = ?", arguments: [id])
                 }
+
+                // Snapshots and history come back from the sidecar too.
+                try db.execute(sql: "DELETE FROM snapshots WHERE image_id = ?", arguments: [id])
+                for snap in Self.parseSnapshots(fields?.snapshotsJSON ?? "") {
+                    try db.execute(sql: "INSERT INTO snapshots (image_id, name, params_json) VALUES (?, ?, ?)",
+                                   arguments: [id, snap.name, snap.stackJSON])
+                }
+                try db.execute(sql: "DELETE FROM history WHERE image_id = ?", arguments: [id])
+                for (i, step) in Self.parseHistory(fields?.historyJSON ?? "").enumerated() {
+                    try db.execute(sql: "INSERT INTO history (image_id, step, params_json, created_at) VALUES (?, ?, ?, ?)",
+                                   arguments: [id, i, step.stackJSON, step.createdAt])
+                }
             }
         }
         return applied.count

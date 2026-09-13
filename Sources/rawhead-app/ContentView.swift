@@ -118,10 +118,17 @@ struct ContentView: View {
             let stack = await library.editStack(for: record)
             model.open(url: url, userRotation: record.userRotation,
                        catalogImageID: record.id, editStackJSON: stack)
+            // History and snapshots follow, from the catalog.
+            let steps = await library.history(for: record)
+            let snaps = await library.snapshots(for: record)
+            if model.catalogImageID == record.id {
+                model.loadHistory(steps: steps, snapshots: snaps)
+            }
         }
     }
 
-    /// Edits settle in the editor and land in the catalog here.
+    /// Edits settle in the editor and land in the catalog here; so do
+    /// history steps and snapshots.
     private func wireEditSaving() {
         model.onEditSettled = { imageID, json in
             Task {
@@ -129,6 +136,12 @@ struct ContentView: View {
                                                   processVersion: EditStack.processVersion,
                                                   forImageID: imageID)
             }
+        }
+        model.onHistoryChanged = { imageID, steps in
+            Task { try? await library.setHistory(steps, forImageID: imageID) }
+        }
+        model.onSnapshotsChanged = { imageID, snapshots in
+            Task { try? await library.setSnapshots(snapshots, forImageID: imageID) }
         }
     }
 
@@ -188,6 +201,8 @@ struct ContentView: View {
             Button("") { pasteSettings() }.keyboardShortcut("v", modifiers: [.command, .shift])
             Button("") { if model.hasImage { model.showingBefore.toggle() } }
                 .keyboardShortcut("\\", modifiers: [])
+            Button("") { model.undo() }.keyboardShortcut("z", modifiers: .command)
+            Button("") { model.redo() }.keyboardShortcut("z", modifiers: [.command, .shift])
         }
         .opacity(0)
         .frame(width: 0, height: 0)
@@ -380,6 +395,13 @@ struct ContentView: View {
                     .padding(.top, 8)
                 } label: {
                     disclosureLabel("Highlight Reconstruction")
+                }
+
+                DisclosureGroup {
+                    HistoryPanel(model: model)
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("History & Snapshots")
                 }
 
                 DisclosureGroup {

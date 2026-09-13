@@ -56,6 +56,89 @@ extension Catalog {
         try writeSidecar(forImageID: id)
     }
 
+    // MARK: Snapshots and history
+
+    /// Snapshots as stored: name and the stack JSON, in name order.
+    public func snapshots(forImageID id: Int64) throws -> [(name: String, stackJSON: String)] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT name, params_json FROM snapshots WHERE image_id = ? ORDER BY name",
+                             arguments: [id]).map { ($0["name"] as String, $0["params_json"] as String) }
+        }
+    }
+
+    /// Replaces the image's snapshots and writes the sidecar.
+    public func setSnapshots(_ snapshots: [(name: String, stackJSON: String)], forImageID id: Int64) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM snapshots WHERE image_id = ?", arguments: [id])
+            for s in snapshots {
+                try db.execute(sql: "INSERT INTO snapshots (image_id, name, params_json) VALUES (?, ?, ?)",
+                               arguments: [id, s.name, s.stackJSON])
+            }
+        }
+        try writeSidecar(forImageID: id)
+    }
+
+    /// History steps in order; `params_json` holds each step's stack.
+    public func history(forImageID id: Int64) throws -> [(stackJSON: String, createdAt: Int64)] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT params_json, created_at FROM history WHERE image_id = ? ORDER BY step",
+                             arguments: [id]).map { ($0["params_json"] as String, $0["created_at"] as Int64? ?? 0) }
+        }
+    }
+
+    /// Replaces the image's history (capped by the caller) and writes the
+    /// sidecar. Steps are numbered from 0 in order.
+    public func setHistory(_ steps: [(stackJSON: String, createdAt: Int64)], forImageID id: Int64) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM history WHERE image_id = ?", arguments: [id])
+            for (i, s) in steps.enumerated() {
+                try db.execute(sql: "INSERT INTO history (image_id, step, params_json, created_at) VALUES (?, ?, ?, ?)",
+                               arguments: [id, i, s.stackJSON, s.createdAt])
+            }
+        }
+        try writeSidecar(forImageID: id)
+    }
+
+    /// Sidecar encodings: JSON arrays whose "stack" members are the
+    /// stored JSON objects themselves, not strings, so the sidecar stays
+    /// readable by a person.
+    static func snapshotsJSON(_ snapshots: [(name: String, stackJSON: String)]) -> String {
+        let items: [[String: Any]] = snapshots.compactMap { s in
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(s.stackJSON.utf8)) else { return nil }
+            return ["name": s.name, "stack": obj]
+        }
+        guard !items.isEmpty, let data = try? JSONSerialization.data(withJSONObject: items, options: [.sortedKeys]) else { return "" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    static func historyJSON(_ steps: [(stackJSON: String, createdAt: Int64)]) -> String {
+        let items: [[String: Any]] = steps.compactMap { s in
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(s.stackJSON.utf8)) else { return nil }
+            return ["t": s.createdAt, "stack": obj]
+        }
+        guard !items.isEmpty, let data = try? JSONSerialization.data(withJSONObject: items, options: [.sortedKeys]) else { return "" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    static func parseSnapshots(_ json: String) -> [(name: String, stackJSON: String)] {
+        guard !json.isEmpty, let items = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let name = item["name"] as? String, let stack = item["stack"],
+                  let data = try? JSONSerialization.data(withJSONObject: stack, options: [.sortedKeys]) else { return nil }
+            return (name, String(decoding: data, as: UTF8.self))
+        }
+    }
+
+    static func parseHistory(_ json: String) -> [(stackJSON: String, createdAt: Int64)] {
+        guard !json.isEmpty, let items = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let stack = item["stack"],
+                  let data = try? JSONSerialization.data(withJSONObject: stack, options: [.sortedKeys]) else { return nil }
+            let t = (item["t"] as? NSNumber)?.int64Value ?? 0
+            return (String(decoding: data, as: UTF8.self), t)
+        }
+    }
+
     /// The stored edit stack JSON, if the image has one.
     public func editStack(forImageID id: Int64) throws -> String? {
         try dbQueue.read { db in
@@ -93,13 +176,19 @@ extension Catalog {
             let edit = try Row.fetchOne(db, sql: """
                 SELECT schema_version, process_version, params_json FROM edits WHERE image_id = ?
                 """, arguments: [id])
+            let snapshots = try Row.fetchAll(db, sql: "SELECT name, params_json FROM snapshots WHERE image_id = ? ORDER BY name",
+                                             arguments: [id]).map { ($0["name"] as String, $0["params_json"] as String) }
+            let history = try Row.fetchAll(db, sql: "SELECT params_json, created_at FROM history WHERE image_id = ? ORDER BY step",
+                                           arguments: [id]).map { ($0["params_json"] as String, $0["created_at"] as Int64? ?? 0) }
             return XMPSidecar.Fields(
                 rating: row.rating, label: row.label, flag: row.flag,
                 rotation: row.userRotation, keywords: keywords,
                 preservedFileName: row.preservedName, sourceHash: row.hashString,
                 schemaVersion: edit?["schema_version"] ?? 1,
                 processVersion: edit?["process_version"] ?? "1.0",
-                editStackJSON: edit?["params_json"] ?? "")
+                editStackJSON: edit?["params_json"] ?? "",
+                snapshotsJSON: Self.snapshotsJSON(snapshots),
+                historyJSON: Self.historyJSON(history))
         }
     }
 
