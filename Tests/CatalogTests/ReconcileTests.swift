@@ -16,7 +16,7 @@ final class ReconcileTests: XCTestCase {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: Self.sampleNEF),
                           "Drop a D750 NEF in TestAssets/")
         folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("rawhead-reconcile-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("latent-reconcile-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try FileManager.default.copyItem(atPath: Self.sampleNEF,
                                          toPath: folder.appendingPathComponent("A.NEF").path)
@@ -46,7 +46,7 @@ final class ReconcileTests: XCTestCase {
         XCTAssertEqual(report.unchanged, 1)
         XCTAssertEqual(report.added + report.modified + report.renamed + report.removed, 0)
 
-        // A sidecar appears (as if written by rawhead or another app).
+        // A sidecar appears (as if written by Latent or another app).
         let sidecar = await catalog.sidecarURL(forRelPath: "A.NEF")
         try XMPSidecar.write(.init(rating: 4, label: "Green", keywords: ["test", "d750"],
                                    sourceHash: images[0].hashString), to: sidecar)
@@ -107,7 +107,7 @@ final class ReconcileTests: XCTestCase {
         XCTAssertEqual(paths, ["A.NEF", "Day 2/C.NEF"])
 
         // A subfolder with its own container is never entered.
-        let own = sub.appendingPathComponent("_rawhead", isDirectory: true)
+        let own = sub.appendingPathComponent("_latent", isDirectory: true)
         try FileManager.default.createDirectory(at: own, withIntermediateDirectories: true)
         report = try await catalog.reconcile()
         XCTAssertEqual(report.removed, 1, "Day 2 became independent, its image leaves this catalog")

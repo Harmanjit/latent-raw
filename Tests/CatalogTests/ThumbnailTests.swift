@@ -9,7 +9,7 @@ final class ThumbnailTests: XCTestCase {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
                           "Drop a D750 NEF in TestAssets/")
         folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("rawhead-thumbs-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("latent-thumbs-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("sub"),
                                                 withIntermediateDirectories: true)
         try FileManager.default.copyItem(atPath: ReconcileTests.sampleNEF,

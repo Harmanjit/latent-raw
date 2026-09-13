@@ -25,7 +25,7 @@ public enum GPUContextError: Error, CustomStringConvertible {
 /// Owns the Metal device, command queue and pipeline states. One instance
 /// lives for the app's lifetime; there is no per-image device setup.
 ///
-/// Deployment target: rawhead must run on both macOS 15 (Sequoia) and
+/// Deployment target: Latent must run on both macOS 15 (Sequoia) and
 /// macOS 26 (Tahoe). Metal 4 exists only on Tahoe, so this class targets
 /// **Metal 3** as its baseline. Metal-4-only capabilities are optional fast
 /// paths only, gated with `if #available(macOS 26, *)` at the call site.

@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// rawhead's application target.
+/// Latent's application target.
 ///
 /// Runs as a SwiftPM executable rather than an Xcode project, so `swift run`
 /// keeps working and there's no .xcodeproj to maintain alongside
@@ -9,11 +9,11 @@ import AppKit
 /// no Dock persistence, limited menu bar. Worth adding a real bundle before
 /// any release, but it would only slow development down now.
 @main
-struct RawheadApp: App {
+struct LatentApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {
-        WindowGroup("rawhead") {
+        WindowGroup("Latent") {
             ContentView()
                 .frame(minWidth: 900, minHeight: 600)
         }

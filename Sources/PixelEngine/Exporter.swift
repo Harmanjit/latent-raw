@@ -102,7 +102,7 @@ public struct ExportMetadata: Sendable, Equatable {
     public var captureDate: Date?
     public var keywords: [String] = []
     public var rating: Int = 0
-    public var software: String = "rawhead"
+    public var software: String = "Latent"
 
     public init() {}
 

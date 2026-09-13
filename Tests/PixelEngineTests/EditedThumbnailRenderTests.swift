@@ -51,7 +51,7 @@ final class EditedThumbnailRenderTests: XCTestCase {
 
         // And it round-trips through the HEIC writer.
         let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("rawhead-\(UUID().uuidString).heic")
+            .appendingPathComponent("latent-\(UUID().uuidString).heic")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try Thumbnailer.write(brightImage, to: tmp)
         XCTAssertEqual(Thumbnailer.load(from: tmp)?.width, brightImage.width)

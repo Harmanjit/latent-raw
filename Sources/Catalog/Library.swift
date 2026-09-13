@@ -23,7 +23,7 @@ public final class Library: ObservableObject {
     @Published public private(set) var statusText = "No folder open"
     @Published public private(set) var thumbnailsDone = 0
     @Published public private(set) var thumbnailsTotal = 0
-    /// Subfolders rawhead found but has no decision for (DESIGN.md §5.2).
+    /// Subfolders Latent found but has no decision for (DESIGN.md §5.2).
     @Published public private(set) var undecidedSubfolders: [String] = []
     /// Bumped whenever thumbnails land, so a grid knows to refresh cells.
     @Published public private(set) var thumbnailVersion = 0

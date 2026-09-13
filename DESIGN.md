@@ -1,4 +1,4 @@
-# rawhead — Design Document
+# Latent — Design Document
 
 **Status:** Planning, v0.1. No code has been written yet.
 **License:** GPLv3 (FOSS).
@@ -8,11 +8,11 @@
 
 ## 1. Overview
 
-rawhead is a native macOS RAW photo manager and non-destructive editor, in the same family as Adobe Lightroom, darktable and RawTherapee. It is designed from the ground up for Apple Silicon's system-on-chip (SoC) architecture. The CPU, GPU, Neural Engine (ANE) and media engines share one pool of unified memory, and rawhead is built so that image data is allocated once and processed in place by whichever processor suits each task. Nothing is copied between separate device memories.
+Latent is a native macOS RAW photo manager and non-destructive editor, in the same family as Adobe Lightroom, darktable and RawTherapee. It is designed from the ground up for Apple Silicon's system-on-chip (SoC) architecture. The CPU, GPU, Neural Engine (ANE) and media engines share one pool of unified memory, and Latent is built so that image data is allocated once and processed in place by whichever processor suits each task. Nothing is copied between separate device memories.
 
 ### Goals
 
-rawhead aims to be fast and energy-efficient: every step should use the minimum compute it needs. Editing is strictly non-destructive, and original files are never modified. Catalogs are portable and live inside each photo folder, so there is no master catalog. Color quality should match or exceed that of the established FOSS editors.
+Latent aims to be fast and energy-efficient: every step should use the minimum compute it needs. Editing is strictly non-destructive, and original files are never modified. Catalogs are portable and live inside each photo folder, so there is no master catalog. Color quality should match or exceed that of the established FOSS editors.
 
 ### Non-goals
 
@@ -48,7 +48,7 @@ Every design decision is checked against these rules.
 | Application shell and inspector panels | Swift 6 + SwiftUI | Strict concurrency from day one |
 | Heavy views (thumbnail grid, image viewport) | AppKit (`NSCollectionView`, a custom `NSView` hosting a `CAMetalLayer`) | Precise control over scrolling and cell reuse at scale |
 | Pixel processing | Metal 3 compute kernels written in Metal Shading Language (MSL), with select Metal 4 fast paths on Tahoe | FP32 for scene-linear stages, FP16 for display-referred stages |
-| RAW unpacking and metadata | LibRaw (LGPL/CDDL) | Unpacks sensor data only; demosaicing is done by rawhead on the GPU |
+| RAW unpacking and metadata | LibRaw (LGPL/CDDL) | Unpacks sensor data only; demosaicing is done by Latent on the GPU |
 | Algorithm references | darktable and RawTherapee (both GPLv3) | Source for porting the RCD, AMaZE and Markesteijn demosaicers, highlight reconstruction and sigmoid tone mapping |
 | Lens corrections | Lensfun (LGPL) | Supplemented by the lens-correction data Sony embeds in ARW files |
 | Color management | LittleCMS 2 + ColorSync | ICC transforms, soft-proofing and display profiles |
@@ -75,7 +75,7 @@ C and C++ code is confined to thin wrappers around LibRaw, Lensfun, LittleCMS, E
 | `Catalog` | Folder catalogs, GRDB schema and migrations, XMP read/write, import, reconciliation | GRDB, Exiv2 |
 | `MLKit` | Vision requests, Core ML models, in-shader ML kernels | Core ML, Vision |
 | `AppUI` | SwiftUI and AppKit views, the viewport, the grid | All of the above |
-| `rawhead-cli` | Headless rendering, golden-image tests, benchmarks | `PixelEngine`, `RawCore` |
+| `latent-cli` | Headless rendering, golden-image tests, benchmarks | `PixelEngine`, `RawCore` |
 
 ---
 
@@ -83,7 +83,7 @@ C and C++ code is confined to thin wrappers around LibRaw, Lensfun, LittleCMS, E
 
 ### 5.1 Folder catalogs
 
-Every photo folder is its own catalog. A visible `_rawhead/` container inside the folder holds that catalog's data.
+Every photo folder is its own catalog. A visible `_latent/` container inside the folder holds that catalog's data.
 
 ```
 Yosemite 2026/
@@ -93,12 +93,12 @@ Yosemite 2026/
 │   └── DSC_0107.NEF
 ├── Astro/                        ← "independent" subfolder (has its own catalog)
 │   ├── DSC_0300.NEF
-│   └── _rawhead/
+│   └── _latent/
 │       ├── catalog.sqlite
 │       ├── .metadata_never_index
 │       ├── xmp/
 │       └── thumbnails/
-└── _rawhead/
+└── _latent/
     ├── catalog.sqlite
     ├── .metadata_never_index      ← stops Spotlight indexing the container
     ├── xmp/
@@ -117,7 +117,7 @@ The rules are as follows:
 
 - **Paths.** The database stores only paths relative to the catalog root, never absolute ones. A catalog folder can therefore be moved, renamed, copied or backed up freely.
 - **Sidecar naming.** Sidecars and thumbnails are named with the full original filename, for example `DSC_0001.NEF.xmp`. This keeps RAW+JPEG pairs that share a base name from colliding.
-- **The container is a boundary.** A catalog never reaches into a subfolder that has its own `_rawhead/` container. The same logic applies to nested git repositories.
+- **The container is a boundary.** A catalog never reaches into a subfolder that has its own `_latent/` container. The same logic applies to nested git repositories.
 - **Backups and indexing.** `thumbnails/` is marked with `isExcludedFromBackup` because thumbnails can be regenerated. `xmp/` and `catalog.sqlite` are always backed up. Spotlight never indexes the container, but photos and sidecars outside it are indexed normally.
 - **Optional interoperability.** A setting, off by default, also writes a minimal XMP file next to each image, containing only the rating, label and keywords. Lightroom and darktable look for sidecars in that location.
 
@@ -128,8 +128,8 @@ Each catalog records a mode for each of its subfolders, set per folder by the us
 | Mode | Behavior |
 |---|---|
 | `included` | The subfolder's images belong to the parent catalog. Their sidecars and thumbnails are stored under mirrored subpaths inside the parent's `xmp/` and `thumbnails/` folders. |
-| `independent` | The subfolder has its own `_rawhead/` container and is a separate catalog. |
-| `ask` | The user is prompted the first time rawhead finds the subfolder. |
+| `independent` | The subfolder has its own `_latent/` container and is a separate catalog. |
+| `ask` | The user is prompted the first time Latent finds the subfolder. |
 
 Each catalog also has a default mode that applies to newly discovered subfolders. Converting a subfolder between `included` and `independent` is a single transactional operation: sidecars and thumbnails are moved with same-volume renames (no data is copied), the matching database rows are moved, and the old rows are deleted in one transaction. If the operation fails midway, the sidecars remain intact and the database can be rebuilt from them.
 
@@ -147,13 +147,13 @@ Each catalog also has a default mode that applies to newly discovered subfolders
 
 **Debouncing.** No writes happen while a slider is being dragged. An edit is persisted when the slider is released or after about one second of inactivity.
 
-**Reconciliation when a folder opens.** rawhead lists the directory and compares each file's name, size and modification time against the database. It then compares each sidecar's modification time against the value recorded in the database, and re-parses only the sidecars that changed. An unchanged folder opens without decoding a single image.
+**Reconciliation when a folder opens.** Latent lists the directory and compares each file's name, size and modification time against the database. It then compares each sidecar's modification time against the value recorded in the database, and re-parses only the sidecars that changed. An unchanged folder opens without decoding a single image.
 
-**Renamed files.** If a file appears under a new name with no sidecar, rawhead looks up its xxHash (XXH64) checksum in the database and reattaches the existing sidecar.
+**Renamed files.** If a file appears under a new name with no sidecar, Latent looks up its xxHash (XXH64) checksum in the database and reattaches the existing sidecar.
 
-**No live watching.** rawhead does not use FSEvents or any other file watching on external volumes. Reconciliation runs only when a folder is opened or when the user clicks Refresh.
+**No live watching.** Latent does not use FSEvents or any other file watching on external volumes. Reconciliation runs only when a folder is opened or when the user clicks Refresh.
 
-**Network volumes.** SQLite's write-ahead log (WAL) journal mode does not work reliably on SMB or NFS shares. rawhead detects the volume type and uses WAL on local and external drives, and the rollback journal on network shares.
+**Network volumes.** SQLite's write-ahead log (WAL) journal mode does not work reliably on SMB or NFS shares. Latent detects the volume type and uses WAL on local and external drives, and the rollback journal on network shares.
 
 ### 5.4 Database schema (initial)
 
@@ -192,7 +192,7 @@ CREATE TABLE settings   (key TEXT PRIMARY KEY, value TEXT);
 
 No pixel data and no absolute paths are ever stored in the database.
 
-To search across catalogs, rawhead uses SQLite's `ATTACH` to query several catalog databases at once; it opens them in batches when there are many. The app itself stores only a list of recently opened folders in its preferences; that list is not a catalog.
+To search across catalogs, Latent uses SQLite's `ATTACH` to query several catalog databases at once; it opens them in batches when there are many. The app itself stores only a list of recently opened folders in its preferences; that list is not a catalog.
 
 ### 5.5 XMP format
 
@@ -203,16 +203,16 @@ To search across catalogs, rawhead uses SQLite's `ATTACH` to query several catal
     xmlns:xmp="http://ns.adobe.com/xap/1.0/"
     xmlns:dc="http://purl.org/dc/elements/1.1/"
     xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"
-    xmlns:rawhead="https://github.com/OWNER/rawhead/ns/1.0/"
+    xmlns:latent="https://github.com/OWNER/latent/ns/1.0/"
     xmp:Rating="4"
     xmp:Label="Green"
     xmpMM:PreservedFileName="DSC_0001.NEF"
-    rawhead:SchemaVersion="1"
-    rawhead:ProcessVersion="1.0"
-    rawhead:SourceHash="xxh64:9f2c4b...">
+    latent:SchemaVersion="1"
+    latent:ProcessVersion="1.0"
+    latent:SourceHash="xxh64:9f2c4b...">
    <dc:subject><rdf:Bag><rdf:li>Yosemite</rdf:li></rdf:Bag></dc:subject>
-   <rawhead:EditStack><![CDATA[ { ...edit JSON... } ]]></rawhead:EditStack>
-   <rawhead:History><![CDATA[ [ ... ] ]]></rawhead:History>
+   <latent:EditStack><![CDATA[ { ...edit JSON... } ]]></latent:EditStack>
+   <latent:History><![CDATA[ [ ... ] ]]></latent:History>
   </rdf:Description>
  </rdf:RDF>
 </x:xmpmeta>
@@ -253,9 +253,9 @@ The namespace URI never needs to resolve to a real page, but once released it mu
 
 ## 6. Import
 
-> **Status: not planned.** This section describes the card-import flow as originally designed. It was dropped in September 2026: rawhead's user copies files into a folder by other means and opens the folder, which creates the catalog in place (§5). Reconciliation (§5.3) handles duplicates-by-hash and renames well enough for that workflow. Kept for reference in case import is wanted later.
+> **Status: not planned.** This section describes the card-import flow as originally designed. It was dropped in September 2026: Latent's user copies files into a folder by other means and opens the folder, which creates the catalog in place (§5). Reconciliation (§5.3) handles duplicates-by-hash and renames well enough for that workflow. Kept for reference in case import is wanted later.
 
-Every import copies files into **one destination folder** that the user chooses, with the last-used folder offered as the default. If that folder already has a `_rawhead/` container, the imported images join the existing catalog; otherwise a new catalog is created.
+Every import copies files into **one destination folder** that the user chooses, with the last-used folder offered as the default. If that folder already has a `_latent/` container, the imported images join the existing catalog; otherwise a new catalog is created.
 
 Import is designed as a single streaming pass, so each source file is read exactly once. That one pass performs four jobs at the same time:
 
@@ -264,9 +264,9 @@ Import is designed as a single streaming pass, so each source file is read exact
 - It parses the EXIF data needed for the catalog.
 - It extracts the camera's embedded JPEG preview, which becomes the initial thumbnail.
 
-After the copy finishes, rawhead reads the destination file back and checks its checksum to confirm the copy is intact. An optional second destination receives a backup copy during the same pass; that costs an extra write, but no extra read.
+After the copy finishes, Latent reads the destination file back and checks its checksum to confirm the copy is intact. An optional second destination receives a backup copy during the same pass; that costs an extra write, but no extra read.
 
-**Sources are never modified.** rawhead never deletes or alters files on the source, and memory cards should be formatted in the camera.
+**Sources are never modified.** Latent never deletes or alters files on the source, and memory cards should be formatted in the camera.
 
 **Handling duplicate filenames:**
 
@@ -278,7 +278,7 @@ After the copy finishes, rawhead reads the destination file back and checks its 
 
 Filename collisions are a real risk here, because each camera's file counter eventually wraps back to 0001.
 
-**Read-only sources** such as memory cards and locked folders are always handled through import. rawhead never tries to create a catalog in place on them.
+**Read-only sources** such as memory cards and locked folders are always handled through import. Latent never tries to create a catalog in place on them.
 
 ---
 
@@ -286,7 +286,7 @@ Filename collisions are a real risk here, because each camera's file counter eve
 
 ### 7.1 From file to GPU
 
-1. rawhead memory-maps the raw file read-only and passes it to LibRaw with `open_buffer`. The kernel loads only the pages that are actually read.
+1. Latent memory-maps the raw file read-only and passes it to LibRaw with `open_buffer`. The kernel loads only the pages that are actually read.
 2. LibRaw unpacks the sensor data. The goal is for it to unpack directly into a page-aligned, shared-storage `MTLBuffer`. How to achieve this is decided in Phase 0 (see §13).
 3. The GPU kernels read that buffer directly. No upload or staging copy is needed.
 
@@ -374,7 +374,7 @@ The histogram, waveform and vectorscope are computed on the GPU using per-thread
 
 ### 9.2 Lens correction sources
 
-rawhead picks a correction source separately for each correction type (distortion, chromatic aberration, vignetting), in this order:
+Latent picks a correction source separately for each correction type (distortion, chromatic aberration, vignetting), in this order:
 
 1. A **Lensfun** profile for that correction type.
 2. Correction data **embedded by the camera** in the raw file (Sony ARW).
@@ -404,7 +404,7 @@ Coverage of the current lenses in the Lensfun database, checked in September 202
 
 **Unedited images.** The thumbnail is the camera's embedded JPEG preview, downscaled. No raw decoding is involved.
 
-**Edited images.** rawhead decodes the raw file in LibRaw's half-size mode, which reads each 2×2 Bayer block as one pixel so no demosaicing is needed, and runs the edit pipeline at thumbnail resolution. This runs at `.background` QoS after the edit is saved, never while a slider is being dragged.
+**Edited images.** Latent decodes the raw file in LibRaw's half-size mode, which reads each 2×2 Bayer block as one pixel so no demosaicing is needed, and runs the edit pipeline at thumbnail resolution. This runs at `.background` QoS after the edit is saved, never while a slider is being dragged.
 
 **Staleness.** The `thumb_key` column stores the hash of the edit that produced each thumbnail. A thumbnail is regenerated only when its key no longer matches the current edit.
 
@@ -428,7 +428,7 @@ The pipeline uses Swift structured concurrency throughout. Each catalog is an ac
 
 ## 12. Testing
 
-**Golden images.** Every kernel has a golden-image test. `rawhead-cli` renders a file with a given edit JSON and compares the result against a stored reference image, within a small numeric tolerance.
+**Golden images.** Every kernel has a golden-image test. `latent-cli` renders a file with a given edit JSON and compares the result against a stored reference image, within a small numeric tolerance.
 
 **Camera sample files.** The test matrix includes, at minimum:
 
@@ -451,10 +451,10 @@ These come from raw.pixls.us and from the user's own photos.
 
 ### Tasks
 
-1. **Repository setup.** Create the GPLv3 repository with Swift packages as laid out in §4. Build LibRaw from source as an arm64-only XCFramework, compiled with OpenMP disabled; rawhead handles parallelism itself.
+1. **Repository setup.** Create the GPLv3 repository with Swift packages as laid out in §4. Build LibRaw from source as an arm64-only XCFramework, compiled with OpenMP disabled; Latent handles parallelism itself.
 2. **Zero-copy ingest.** Memory-map the file, call `open_buffer`, and unpack. Evaluate three ways to get LibRaw's output into GPU-visible memory:
    - **(a)** Wrap LibRaw's own allocation with `makeBuffer(bytesNoCopy:)`. This works if the allocation happens to be page-aligned with a length that is a multiple of the page size.
-   - **(b)** Maintain a small LibRaw patch that makes it allocate its raw buffer through rawhead's page-aligned allocator.
+   - **(b)** Maintain a small LibRaw patch that makes it allocate its raw buffer through Latent's page-aligned allocator.
    - **(c)** Accept a single copy. At unified-memory bandwidth, copying roughly 48 MB takes a few milliseconds.
 
    Measure all three. Choose (c) unless the copy measurably matters, since it avoids carrying a patch on LibRaw.
@@ -490,7 +490,7 @@ Phase 0 is complete when all of the following hold:
 | 0. Spike | See §13 | See §13 |
 | 1. Core pipeline | Highlight reconstruction, sigmoid tone mapping, stage cache, viewport-resolution rendering, tiled zoom, GPU scopes | Slider-to-screen latency under 16 ms at fit-to-window |
 | 2. Catalogs | Folder catalogs, schema, XMP read/write, reconciliation, subfolder modes, grid view, ratings, flags and keywords | Scrolling a 20,000-image folder stays smooth; the catalog rebuilds from sidecars alone |
-| 3. Import | **Dropped (September 2026).** Users copy files into a folder themselves; opening that folder in rawhead creates its catalog in place. §6 is kept for reference only. | — |
+| 3. Import | **Dropped (September 2026).** Users copy files into a folder themselves; opening that folder in Latent creates its catalog in place. §6 is kept for reference only. | — |
 | 4. Pro pipeline | Lens corrections (Lensfun, embedded data, manual), denoise, sharpening, color grading, process versions | All current lenses are corrected automatically |
 | 5. Local edits | Parametric masks; AI masks from Vision and Core ML | AI mask generated in under 1 second |
 | 6. Output | Export queue, ICC soft-proofing, HDR gain-map export, DNG export | Batch export keeps the GPU busy without stalling the UI |
@@ -514,6 +514,6 @@ Phase 0 is complete when all of the following hold:
 
 ## 16. Open Items
 
-- **Namespace owner.** Decide the GitHub owner used in the `rawhead:` namespace URI. It must be fixed before the first public release.
-- **Name availability.** Confirm "rawhead" is available as a GitHub name and isn't used by an existing photo app.
+- **Namespace owner.** Decide the GitHub owner used in the `latent:` namespace URI. It must be fixed before the first public release.
+- **Name availability.** Confirm "Latent" is available as a GitHub name and isn't used by an existing photo app.
 - **Tokina vignetting.** Validate the borrowed Canon EF vignetting profile against real shots from the Nikon F version.

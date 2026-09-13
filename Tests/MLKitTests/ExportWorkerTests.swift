@@ -10,7 +10,7 @@ final class ExportWorkerTests: XCTestCase {
         let path = AIMaskTests.assetPath("HSB_2615.NEF")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
         let gpu = try GPUContext()
-        let out = FileManager.default.temporaryDirectory.appendingPathComponent("rawhead-export-\(UUID().uuidString).heic")
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("latent-export-\(UUID().uuidString).heic")
         defer { try? FileManager.default.removeItem(at: out) }
 
         var p = EditParameters(); p.exposureEV = 1
@@ -48,7 +48,7 @@ final class ExportWorkerTests: XCTestCase {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
         try XCTSkipUnless(SegmentationModel.isAvailable)
         let gpu = try GPUContext()
-        let out = FileManager.default.temporaryDirectory.appendingPathComponent("rawhead-export-\(UUID().uuidString).tif")
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("latent-export-\(UUID().uuidString).tif")
         defer { try? FileManager.default.removeItem(at: out) }
 
         var p = EditParameters()

@@ -19,7 +19,7 @@ final class XMPSidecarTests: XCTestCase {
         XCTAssertEqual(back, original)
     }
 
-    /// A Lightroom-style sidecar with no rawhead fields still yields the
+    /// A Lightroom-style sidecar with no Latent fields still yields the
     /// standard ones, and an empty edit stack.
     func testForeignSidecarYieldsStandardFields() throws {
         let xml = """

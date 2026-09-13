@@ -9,7 +9,7 @@ final class LibraryTests: XCTestCase {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
                           "Drop a D750 NEF in TestAssets/")
         folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("rawhead-library-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("latent-library-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("Day 2"),
                                                 withIntermediateDirectories: true)
         for name in ["A.NEF", "B.NEF", "Day 2/C.NEF"] {

@@ -6,18 +6,18 @@ import Foundation
 /// sidecar, so a crash mid-write can never leave a half-written file
 /// (DESIGN.md §5.3). Reads use Foundation's XMLDocument. Exiv2 (per
 /// DESIGN.md §3) may replace the read side later for MakerNotes and
-/// arbitrary foreign XMP; for rawhead's own sidecars this is enough.
+/// arbitrary foreign XMP; for Latent's own sidecars this is enough.
 public enum XMPSidecar {
     /// The namespace URI is fixed once released — see DESIGN.md §5.5 / §16.
     /// TODO: fill in the real GitHub owner path before first public commit.
-    static let namespaceURI = "https://github.com/OWNER/rawhead/ns/1.0/"
+    static let namespaceURI = "https://github.com/OWNER/latent/ns/1.0/"
 
     public struct Fields: Equatable {
         public var rating: Int
         public var label: String?
-        /// -1 rejected, 0 none, 1 picked (rawhead:Flag).
+        /// -1 rejected, 0 none, 1 picked (latent:Flag).
         public var flag: Int
-        /// Manual quarter turns clockwise (rawhead:Rotation).
+        /// Manual quarter turns clockwise (latent:Rotation).
         public var rotation: Int
         public var keywords: [String]
         public var preservedFileName: String?
@@ -28,9 +28,9 @@ public enum XMPSidecar {
         /// Pre-serialized JSON, see DESIGN.md §5.6. Empty when the image
         /// has no edits yet.
         public var editStackJSON: String
-        /// JSON array of named snapshots, or empty (rawhead:Snapshots).
+        /// JSON array of named snapshots, or empty (latent:Snapshots).
         public var snapshotsJSON: String = ""
-        /// JSON of the edit history, or empty (rawhead:History).
+        /// JSON of the edit history, or empty (latent:History).
         public var historyJSON: String = ""
 
         public init(rating: Int = 0, label: String? = nil, flag: Int = 0, rotation: Int = 0,
@@ -89,19 +89,19 @@ public enum XMPSidecar {
             xmlns:xmp="http://ns.adobe.com/xap/1.0/"
             xmlns:dc="http://purl.org/dc/elements/1.1/"
             xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"
-            xmlns:rawhead="\(namespaceURI)"
+            xmlns:latent="\(namespaceURI)"
             xmp:Rating="\(f.rating)"\(labelAttr)\(preservedAttr)
-            rawhead:SchemaVersion="\(f.schemaVersion)"
-            rawhead:ProcessVersion="\(escape(f.processVersion))"
-            rawhead:SourceHash="\(escape(f.sourceHash))"
-            rawhead:Flag="\(f.flag)"
-            rawhead:Rotation="\(f.rotation)">
+            latent:SchemaVersion="\(f.schemaVersion)"
+            latent:ProcessVersion="\(escape(f.processVersion))"
+            latent:SourceHash="\(escape(f.sourceHash))"
+            latent:Flag="\(f.flag)"
+            latent:Rotation="\(f.rotation)">
            <dc:subject><rdf:Bag>
         \(keywordItems)
            </rdf:Bag></dc:subject>
-           <rawhead:EditStack><![CDATA[\(f.editStackJSON)]]></rawhead:EditStack>
-        \(f.snapshotsJSON.isEmpty ? "" : "   <rawhead:Snapshots><![CDATA[\(f.snapshotsJSON)]]></rawhead:Snapshots>")
-        \(f.historyJSON.isEmpty ? "" : "   <rawhead:History><![CDATA[\(f.historyJSON)]]></rawhead:History>")
+           <latent:EditStack><![CDATA[\(f.editStackJSON)]]></latent:EditStack>
+        \(f.snapshotsJSON.isEmpty ? "" : "   <latent:Snapshots><![CDATA[\(f.snapshotsJSON)]]></latent:Snapshots>")
+        \(f.historyJSON.isEmpty ? "" : "   <latent:History><![CDATA[\(f.historyJSON)]]></latent:History>")
           </rdf:Description>
          </rdf:RDF>
         </x:xmpmeta>
@@ -168,13 +168,13 @@ public enum XMPSidecar {
         return Fields(
             rating: Int(property("xmp:Rating", local: "Rating") ?? "") ?? 0,
             label: property("xmp:Label", local: "Label").flatMap { $0.isEmpty ? nil : $0 },
-            flag: Int(property("rawhead:Flag", local: "Flag") ?? "") ?? 0,
-            rotation: Int(property("rawhead:Rotation", local: "Rotation") ?? "") ?? 0,
+            flag: Int(property("latent:Flag", local: "Flag") ?? "") ?? 0,
+            rotation: Int(property("latent:Rotation", local: "Rotation") ?? "") ?? 0,
             keywords: keywords,
             preservedFileName: property("xmpMM:PreservedFileName", local: "PreservedFileName"),
-            sourceHash: property("rawhead:SourceHash", local: "SourceHash") ?? "",
-            schemaVersion: Int(property("rawhead:SchemaVersion", local: "SchemaVersion") ?? "") ?? 1,
-            processVersion: property("rawhead:ProcessVersion", local: "ProcessVersion") ?? "1.0",
+            sourceHash: property("latent:SourceHash", local: "SourceHash") ?? "",
+            schemaVersion: Int(property("latent:SchemaVersion", local: "SchemaVersion") ?? "") ?? 1,
+            processVersion: property("latent:ProcessVersion", local: "ProcessVersion") ?? "1.0",
             editStackJSON: editStack,
             snapshotsJSON: snapshots,
             historyJSON: history)

@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """
 Convert a SegFormer semantic-segmentation model (ADE20K, 150 classes) from
-Hugging Face into a Core ML package for rawhead's MLKit.
+Hugging Face into a Core ML package for Latent's MLKit.
 
-    source ~/rawhead-ml/bin/activate
+    source ~/latent-ml/bin/activate
     python scripts/convert_segformer.py --model nvidia/segformer-b2-finetuned-ade-512-512 \
         --size 512 --out Sources/MLKit/Resources/Models
 
@@ -73,7 +73,7 @@ mlmodel = ct.convert(
     minimum_deployment_target=ct.target.macOS15,
 )
 mlmodel.short_description = f"SegFormer ({args.model}) semantic segmentation, ADE20K 150 classes"
-mlmodel.author = "Converted for rawhead from Hugging Face weights"
+mlmodel.author = "Converted for Latent from Hugging Face weights"
 mlmodel.license = "Model weights: see the Hugging Face model card (NVIDIA license for SegFormer)"
 mlmodel.user_defined_metadata["source"] = args.model
 mlmodel.user_defined_metadata["input_size"] = str(args.size)

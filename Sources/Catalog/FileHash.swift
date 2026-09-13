@@ -2,7 +2,7 @@ import Foundation
 
 /// Content hashing for catalog identity (DESIGN.md §5.3, §6).
 ///
-/// The hash is how rawhead recognises a file after it's been renamed, and
+/// The hash is how Latent recognises a file after it's been renamed, and
 /// how import spots duplicates. Which algorithm doesn't matter much as
 /// long as it's fast and, once released, never changes — every sidecar
 /// records the hash of the file it belongs to.

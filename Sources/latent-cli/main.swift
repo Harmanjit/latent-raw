@@ -7,7 +7,7 @@ import PixelEngine
 import Catalog
 
 // Phase-1 harness:
-//   rawhead-cli render <raw-file> [options]
+//   latent-cli render <raw-file> [options]
 //
 // Timing separates three costs that behave very differently in a real
 // editing session:
@@ -74,8 +74,8 @@ if args.count >= 3, args[1] == "catalog" {
 guard args.count >= 3, args[1] == "render" else {
     print("""
     Usage:
-      rawhead-cli render <path-to-raw-file> [options]
-      rawhead-cli catalog <folder> [--include-subfolders]
+      latent-cli render <path-to-raw-file> [options]
+      latent-cli catalog <folder> [--include-subfolders]
 
     Options:
       --out <path.png>       write the result as a PNG
@@ -93,9 +93,9 @@ guard args.count >= 3, args[1] == "render" else {
       --denoise <strength>   luminance+colour noise reduction 0-1 (default 0)
 
     Examples:
-      rawhead-cli render photo.nef --out /tmp/rcd.png --demosaic rcd
-      rawhead-cli render photo.nef --out /tmp/bilinear.png --demosaic bilinear
-      rawhead-cli render photo.nef --viewport 2560 --repeat 200
+      latent-cli render photo.nef --out /tmp/rcd.png --demosaic rcd
+      latent-cli render photo.nef --out /tmp/bilinear.png --demosaic bilinear
+      latent-cli render photo.nef --viewport 2560 --repeat 200
     """)
     exit(1)
 }

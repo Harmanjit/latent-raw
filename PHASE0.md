@@ -41,7 +41,7 @@ notes say why.
 
 ## 4. Correctness
 - [x] Drop sample files into `TestAssets/` per `TestAssets/README.md`
-- [x] `swift run rawhead-cli render TestAssets/nikon_d750_sample.nef --out /tmp/out.png`
+- [x] `swift run latent-cli render TestAssets/nikon_d750_sample.nef --out /tmp/out.png`
       produces a recognizable (if rough — it's bilinear) image
 - [ ] Repeat for the A7 III sample — deferred until an ARW is dropped in
 - [ ] Render the same files in RawTherapee with a neutral profile, compare
@@ -52,7 +52,7 @@ notes say why.
 ## 5. Instruments verification
 - [ ] Metal System Trace: not done; the code follows the §7.2 policy by
       construction (see `GPUContext`) and there's one copy, by decision
-- [x] Timings, measured with `rawhead-cli --repeat` (M4, warm GPU):
+- [x] Timings, measured with `latent-cli --repeat` (M4, warm GPU):
       - Full 24MP RCD + colour: ~46ms — over the 30ms target; but the
         viewport never renders the full frame any more (tiles: ~9ms for
         a 5MP tile; half-size preview: ~3ms), so this only matters for export

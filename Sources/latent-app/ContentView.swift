@@ -75,7 +75,7 @@ struct ContentView: View {
             if let gpu = model.gpu {
                 library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu)
             }
-            // Developer convenience: `swift run rawhead-app <folder-or-file>`
+            // Developer convenience: `swift run latent-app <folder-or-file>`
             // opens it straight away, skipping the dialogs.
             if let path = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") }) {
                 var isDir: ObjCBool = false

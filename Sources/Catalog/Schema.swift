@@ -1,7 +1,7 @@
 import GRDB
 
 /// The per-folder catalog schema (DESIGN.md §5.4). One `DatabaseQueue` per
-/// `_rawhead/catalog.sqlite`, one `Catalog` actor per open folder.
+/// `_latent/catalog.sqlite`, one `Catalog` actor per open folder.
 ///
 /// Journal mode is NOT set here — that's volume-dependent (WAL on local/
 /// external drives, rollback journal on network shares, DESIGN.md §5.3) and

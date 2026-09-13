@@ -6,7 +6,7 @@
 | `SegFormer_segformer_b2_finetuned_ade_512_512.mlpackage` + `.labels.json` | SegFormer-B2 semantic segmentation, ADE20K 150 classes (sky, person, tree, water, …) | https://huggingface.co/nvidia/segformer-b2-finetuned-ade-512-512, converted by `scripts/convert_segformer.py` | ~55 MB |
 
 The packages are compiled to `.mlmodelc` on first use and cached in
-`~/Library/Application Support/rawhead/mlmodels/`, so the first mask of a
+`~/Library/Application Support/latent/mlmodels/`, so the first mask of a
 session takes a couple of seconds longer than the rest.
 
 Every mask records the model version string that produced it in the edit

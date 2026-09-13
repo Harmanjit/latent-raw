@@ -6,7 +6,7 @@ using namespace metal;
 //
 // Ported to Metal from RawTherapee's rtengine/rcd_demosaic.cc.
 // Original algorithm (c) 2017-2020 Luis Sanz Rodriguez; tiled C++
-// implementation by Ingo Weyrich. Both RawTherapee and rawhead are GPLv3,
+// implementation by Ingo Weyrich. Both RawTherapee and Latent are GPLv3,
 // which is what makes this port possible.
 //
 // Why RCD over the bilinear placeholder: bilinear averages its neighbours

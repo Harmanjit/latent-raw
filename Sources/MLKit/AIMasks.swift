@@ -30,7 +30,7 @@ public enum AIMaskKind: String, CaseIterable, Sendable {
     public var modelVersion: String {
         switch self {
         case .subject: return "vision.foregroundInstance.1"
-        case .sky where !SegmentationModel.isAvailable: return "rawhead.skyHeuristic.1"
+        case .sky where !SegmentationModel.isAvailable: return "latent.skyHeuristic.1"
         default: return SegmentationModel.modelVersion
         }
     }

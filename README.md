@@ -1,4 +1,4 @@
-# rawhead
+# Latent
 
 A native, Apple Silicon–first RAW photo manager and non-destructive editor for macOS.
 
@@ -6,6 +6,9 @@ A native, Apple Silicon–first RAW photo manager and non-destructive editor for
   Metal 3 is the baseline; Metal 4 only for optional fast paths on Tahoe.
 - **License:** GPLv3. See `LICENSE`.
 - **Status:** beta (Phase 7). Editing, catalog, AI masks, export and soft-proofing work; expect rough edges.
+- **Name:** the project was called *rawhead* until September 2026. Folders
+  catalogued by those builds have a `_rawhead/` container; opening them in
+  Latent renames it to `_latent/` in place, keeping every edit and sidecar.
 
 See `DESIGN.md` for the full architecture: storage layout, pipeline design,
 efficiency rules and the roadmap. See `PHASE0.md` for exactly what this
@@ -21,8 +24,8 @@ Sources/
   LensKit/        Lensfun + embedded lens-correction lookup
   Catalog/        Per-folder catalogs: GRDB schema, XMP read/write, import
   MLKit/          Vision + Core ML masking
-  rawhead-cli/    Headless renderer for golden-image tests and benchmarks
-  rawhead-app/    The SwiftUI/AppKit editor (viewport, adjustments, export)
+  latent-cli/    Headless renderer for golden-image tests and benchmarks
+  latent-app/    The SwiftUI/AppKit editor (viewport, adjustments, export)
 Tests/            Unit and golden-image tests
 vendor/           Vendored C/C++ dependencies (LibRaw, etc.) built as XCFrameworks
 TestAssets/       Sample RAW files for the CI test matrix (not committed — see below)
@@ -33,15 +36,15 @@ TestAssets/       Sample RAW files for the CI test matrix (not committed — see
 ```
 swift build                                   # everything, debug
 swift test                                    # unit + golden tests (GPU tests skip without TestAssets)
-swift run rawhead-app TestAssets/photo.nef    # the editor, opening a file straight away
-swift run rawhead-cli render photo.nef --out /tmp/out.png   # headless render + timings
+swift run latent-app TestAssets/photo.nef    # the editor, opening a file straight away
+swift run latent-cli render photo.nef --out /tmp/out.png   # headless render + timings
 ```
 
 For a proper `.app` (Dock icon, window memory, signed for this Mac):
 
 ```
-scripts/make_app.sh 0.1.0        # builds release and assembles build/rawhead.app
-open build/rawhead.app
+scripts/make_app.sh 0.1.0        # builds release and assembles build/Latent.app
+open build/Latent.app
 ```
 
 ## Keyboard reference

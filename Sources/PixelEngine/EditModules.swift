@@ -141,8 +141,19 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
 /// they're shared by every catalog and survive reinstalling the app.
 public enum PresetStore {
     public static var directory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("rawhead/presets", isDirectory: true)
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = base.appendingPathComponent("latent/presets", isDirectory: true)
+        adoptLegacyDirectory(base.appendingPathComponent("rawhead/presets", isDirectory: true), into: dir)
+        return dir
+    }
+
+    /// One-time move of the pre-rename app's folder, if the new one
+    /// doesn't exist yet. Failure is harmless: the user just starts fresh.
+    static func adoptLegacyDirectory(_ old: URL, into new: URL) {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: new.path), fm.fileExists(atPath: old.path) else { return }
+        try? fm.createDirectory(at: new.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? fm.moveItem(at: old, to: new)
     }
 
     public static func load() -> [Preset] {

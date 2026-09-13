@@ -5,16 +5,20 @@ public enum CatalogError: Error {
     case volumeDetectionFailed
 }
 
-/// One catalog = one `_rawhead/` folder next to a set of photos. An actor
+/// One catalog = one `_latent/` folder next to a set of photos. An actor
 /// because each catalog owns a single DatabaseQueue and all access to it
 /// should be serialized through here (DESIGN.md §11: "each catalog is an
 /// actor that owns its database connection").
 public actor Catalog {
-    public let rootPath: URL          // the photo folder itself, not _rawhead/
-    public let containerPath: URL     // .../_rawhead
+    public let rootPath: URL          // the photo folder itself, not _latent/
+    public let containerPath: URL     // .../_latent
     let dbQueue: DatabaseQueue
 
-    public static let containerName = "_rawhead"
+    public static let containerName = "_latent"
+    /// The container name before the app was renamed (September 2026).
+    /// `open(at:)` renames it in place, so folders catalogued by the old
+    /// build keep their database, sidecars and thumbnails.
+    public static let legacyContainerName = "_rawhead"
 
     private init(rootPath: URL, containerPath: URL, dbQueue: DatabaseQueue) {
         self.rootPath = rootPath
@@ -31,6 +35,12 @@ public actor Catalog {
         let fm = FileManager.default
 
         var isDir: ObjCBool = false
+        if !fm.fileExists(atPath: container.path, isDirectory: &isDir) {
+            let legacy = folder.appendingPathComponent(legacyContainerName, isDirectory: true)
+            if fm.fileExists(atPath: legacy.path, isDirectory: &isDir), isDir.boolValue {
+                try fm.moveItem(at: legacy, to: container)
+            }
+        }
         if !fm.fileExists(atPath: container.path, isDirectory: &isDir) {
             try fm.createDirectory(at: container, withIntermediateDirectories: true)
             try fm.createDirectory(at: container.appendingPathComponent("xmp"),
@@ -138,7 +148,7 @@ public actor Catalog {
 
     static let defaultSubfolderModeKey = "default_subfolder_mode"
 
-    /// What to do with a subfolder rawhead hasn't seen before. `ask` by
+    /// What to do with a subfolder Latent hasn't seen before. `ask` by
     /// default: silently swallowing a subfolder into a catalog, or
     /// silently ignoring one, are both surprising.
     public func defaultSubfolderMode() throws -> SubfolderMode {

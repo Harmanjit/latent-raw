@@ -11,7 +11,7 @@ final class MetadataTests: XCTestCase {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
                           "Drop a D750 NEF in TestAssets/")
         folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("rawhead-meta-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("latent-meta-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try FileManager.default.copyItem(atPath: ReconcileTests.sampleNEF,
                                          toPath: folder.appendingPathComponent("A.NEF").path)

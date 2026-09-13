@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "rawhead",
+    name: "latent",
     platforms: [
         .macOS(.v15)
     ],
@@ -13,8 +13,8 @@ let package = Package(
         .library(name: "LensKit", targets: ["LensKit"]),
         .library(name: "Catalog", targets: ["Catalog"]),
         .library(name: "MLKit", targets: ["MLKit"]),
-        .executable(name: "rawhead-cli", targets: ["rawhead-cli"]),
-        .executable(name: "rawhead-app", targets: ["rawhead-app"]),
+        .executable(name: "latent-cli", targets: ["latent-cli"]),
+        .executable(name: "latent-app", targets: ["latent-app"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.29.0"),
@@ -68,9 +68,9 @@ let package = Package(
             path: "Tests/MLKitTests"
         ),
         .executableTarget(
-            name: "rawhead-cli",
+            name: "latent-cli",
             dependencies: ["RawCore", "PixelEngine", "Catalog", "ColorKit"],
-            path: "Sources/rawhead-cli"
+            path: "Sources/latent-cli"
         ),
         .testTarget(
             name: "PixelEngineTests",
@@ -96,9 +96,9 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "rawhead-app",
+            name: "latent-app",
             dependencies: ["RawCore", "PixelEngine", "ColorKit", "Catalog", "LensKit", "MLKit"],
-            path: "Sources/rawhead-app"
+            path: "Sources/latent-app"
         ),
     ]
 )

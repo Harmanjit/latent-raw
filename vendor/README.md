@@ -2,7 +2,7 @@
 
 LibRaw (and later Lensfun) are built as XCFrameworks here rather than pulled
 in as SwiftPM package dependencies, for two reasons: we need arm64-only,
-Metal-adjacent build flags (no OpenMP — rawhead does its own parallelism),
+Metal-adjacent build flags (no OpenMP — Latent does its own parallelism),
 and we want a pinned, reproducible binary checked into CI rather than a
 source build that could pick up an unexpected LibRaw version.
 
@@ -64,7 +64,7 @@ of this repo is reproducible.
 
 ## macOS version target
 
-rawhead's minimum deployment target is **macOS 15 (Sequoia)**, and it must
+Latent's minimum deployment target is **macOS 15 (Sequoia)**, and it must
 also run correctly on macOS 26 (Tahoe). This matters for the build flags
 above (`-mmacosx-version-min=15.0`) and for anything in `PixelEngine` that
 reaches for a Metal 4-only API — see the note in `GPUContext.swift`.
@@ -73,7 +73,7 @@ reaches for a Metal 4-only API — see the note in `GPUContext.swift`.
 
 LibRaw's own multi-threading (via OpenMP) would compete with Swift's
 structured concurrency and GCD's QoS scheduling for the same performance
-cores, with no coordination between the two. rawhead disables it and does
+cores, with no coordination between the two. Latent disables it and does
 all its own parallel dispatch, per the efficiency rules in DESIGN.md.
 
 ## Lensfun

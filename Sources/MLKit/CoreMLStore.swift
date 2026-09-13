@@ -28,7 +28,15 @@ public enum CoreMLStore {
 
     static var cacheDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return base.appendingPathComponent("rawhead/mlmodels", isDirectory: true)
+        let dir = base.appendingPathComponent("latent/mlmodels", isDirectory: true)
+        // Reuse the pre-rename app's compiled models rather than recompiling.
+        let old = base.appendingPathComponent("rawhead/mlmodels", isDirectory: true)
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: dir.path), fm.fileExists(atPath: old.path) {
+            try? fm.createDirectory(at: dir.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? fm.moveItem(at: old, to: dir)
+        }
+        return dir
     }
 
     /// Which processors Core ML may use.
@@ -42,9 +50,9 @@ public enum CoreMLStore {
     /// `.cpuAndGPU` for, presumably, the same reason. The GPU runs these
     /// models fast enough (SegFormer ~260 ms, SAM 2 clicks ~40 ms), and
     /// a hang is not a trade worth making for a few tens of milliseconds.
-    /// RAWHEAD_ML_COMPUTE=all opts back in for testing on newer systems.
+    /// LATENT_ML_COMPUTE=all opts back in for testing on newer systems.
     nonisolated(unsafe) public static var defaultComputeUnits: MLComputeUnits = {
-        switch ProcessInfo.processInfo.environment["RAWHEAD_ML_COMPUTE"] {
+        switch ProcessInfo.processInfo.environment["LATENT_ML_COMPUTE"] {
         case "all": return .all
         case "cpu": return .cpuOnly
         default: return .cpuAndGPU

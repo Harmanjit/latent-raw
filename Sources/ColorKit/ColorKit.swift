@@ -1,7 +1,7 @@
 import Foundation
 import simd
 
-/// Colour management for rawhead (DESIGN.md §8.1, stages 3, 5 and 13).
+/// Colour management for Latent (DESIGN.md §8.1, stages 3, 5 and 13).
 ///
 /// Everything here runs on the CPU, once per image or per parameter change,
 /// and produces small matrices and vectors the GPU kernels apply per pixel.
@@ -18,7 +18,7 @@ public enum ColorKit {
 
     /// Linear Rec.2020 RGB -> CIE XYZ (D65). Rows are X, Y, Z.
     ///
-    /// Rec.2020 is rawhead's working space: wide enough to hold essentially
+    /// Rec.2020 is Latent's working space: wide enough to hold essentially
     /// any camera's gamut without clipping, which matters because clipping
     /// in the working space is unrecoverable later in the pipeline.
     public static let rec2020ToXYZ = matrix(rows: [
@@ -76,7 +76,7 @@ public enum ColorKit {
     ///
     /// `tint` shifts perpendicular to the temperature axis, correcting the
     /// green-magenta cast that fluorescent and mixed lighting produce.
-    /// Negative is greener, positive is more magenta. Units are rawhead's
+    /// Negative is greener, positive is more magenta. Units are Latent's
     /// own and are not numerically comparable to Lightroom's tint scale.
     public struct WhiteBalance: Sendable, Equatable {
         public var temperature: Float
@@ -203,7 +203,7 @@ public enum ColorKit {
         return SIMD2<Float>(3 * uv.x / denominator, 2 * uv.y / denominator)
     }
 
-    /// Scales rawhead's tint units into uv-space offsets. Chosen so the
+    /// Scales Latent's tint units into uv-space offsets. Chosen so the
     /// ±100 slider range covers roughly the useful correction range for
     /// fluorescent and mixed lighting.
     private static let tintToUV: Float = 0.0008

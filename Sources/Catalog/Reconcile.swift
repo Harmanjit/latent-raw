@@ -27,7 +27,7 @@ public struct ReconcileReport: Sendable, CustomStringConvertible {
 }
 
 extension Catalog {
-    /// File extensions rawhead indexes. Raw formats only for now: the
+    /// File extensions Latent indexes. Raw formats only for now: the
     /// pipeline can't yet render a JPEG or TIFF, and indexing what can't
     /// be opened would just be a row with a broken thumbnail.
     public static let indexedExtensions: Set<String> = [
@@ -175,7 +175,7 @@ extension Catalog {
 
     /// Lists indexable files under the root, descending into subfolders
     /// according to their mode (DESIGN.md §5.2). A subfolder with its own
-    /// `_rawhead/` is always a separate catalog and never entered.
+    /// `_latent/` is always a separate catalog and never entered.
     private func scanFiles(report: inout ReconcileReport) throws -> [DiskFile] {
         var files: [DiskFile] = []
         let defaultMode = try defaultSubfolderMode()
@@ -197,7 +197,7 @@ extension Catalog {
             let relPath = relPrefix.isEmpty ? name : relPrefix + "/" + name
 
             if values.isDirectory == true {
-                if name == Self.containerName { continue }
+                if name == Self.containerName || name == Self.legacyContainerName { continue }
                 let hasOwnContainer = fm.fileExists(
                     atPath: entry.appendingPathComponent(Self.containerName).path)
                 if hasOwnContainer { continue }   // independent by existence

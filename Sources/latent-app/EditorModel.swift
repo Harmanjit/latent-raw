@@ -1068,17 +1068,17 @@ final class EditorModel: ObservableObject {
     /// The clipboard is a partial edit stack, kept as JSON on the system
     /// pasteboard so it also crosses app instances. Custom type plus a
     /// plain-text copy for humans.
-    static let pasteboardType = NSPasteboard.PasteboardType("com.rawhead.editstack+json")
+    static let pasteboardType = NSPasteboard.PasteboardType("com.latent.editstack+json")
 
     /// Groups to carry on the next paste. Persisted so the checklist
     /// remembers what the user usually wants.
     @Published var pasteGroups: Set<EditGroup> = {
-        if let raw = UserDefaults.standard.array(forKey: "rawhead.pasteGroups") as? [String] {
+        if let raw = UserDefaults.standard.array(forKey: "latent.pasteGroups") as? [String] {
             return Set(raw.compactMap(EditGroup.init(rawValue:)))
         }
         return EditGroup.lookGroups
     }() {
-        didSet { UserDefaults.standard.set(pasteGroups.map(\.rawValue), forKey: "rawhead.pasteGroups") }
+        didSet { UserDefaults.standard.set(pasteGroups.map(\.rawValue), forKey: "latent.pasteGroups") }
     }
 
     /// Copies the current edit (restricted to `pasteGroups`).

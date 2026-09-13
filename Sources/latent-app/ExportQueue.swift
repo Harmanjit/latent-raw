@@ -18,7 +18,7 @@ struct ExportPreset: Codable, Equatable {
     var settings: ExportSettings { ExportSettings(format: format, quality: quality) }
     var colorSpace: ColorKit.OutputSpace { colorSpaceIsP3 ? .displayP3 : .sRGB }
 
-    static let defaultsKey = "rawhead.exportPreset"
+    static let defaultsKey = "latent.exportPreset"
     static func load() -> ExportPreset {
         guard let data = UserDefaults.standard.data(forKey: defaultsKey),
               let p = try? JSONDecoder().decode(ExportPreset.self, from: data) else { return ExportPreset() }
@@ -110,7 +110,7 @@ final class ExportQueue: ObservableObject {
 struct ExportSheet: View {
     let count: Int
     @State var preset = ExportPreset.load()
-    @State private var destination: URL? = UserDefaults.standard.url(forKey: "rawhead.exportDestination")
+    @State private var destination: URL? = UserDefaults.standard.url(forKey: "latent.exportDestination")
     let onExport: (ExportPreset, URL) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -160,7 +160,7 @@ struct ExportSheet: View {
                     panel.message = "Folder to export into"
                     if panel.runModal() == .OK, let url = panel.url {
                         destination = url
-                        UserDefaults.standard.set(url, forKey: "rawhead.exportDestination")
+                        UserDefaults.standard.set(url, forKey: "latent.exportDestination")
                     }
                 }
             }
