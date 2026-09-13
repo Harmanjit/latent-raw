@@ -649,9 +649,8 @@ struct ContentView: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
-            Slider(value: model.temperatureSliderBinding,
-                    in: model.temperatureSliderRange)
-                .resetsOnDoubleClick { model.resetWhiteBalance() }
+            ResettableSlider(value: model.temperatureSliderBinding,
+                             in: model.temperatureSliderRange) { model.resetWhiteBalance() }
                 .help("Double-click for the camera's white balance")
         }
         .disabled(!model.hasImage)
@@ -862,8 +861,7 @@ struct ContentView: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
-            Slider(value: value, in: range)
-                .resetsOnDoubleClick { value.wrappedValue = defaultValue }
+            ResettableSlider(value: value, in: range) { value.wrappedValue = defaultValue }
                 .help("Double-click to reset")
         }
         .disabled(!model.hasImage)

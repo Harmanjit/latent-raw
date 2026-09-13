@@ -119,8 +119,9 @@ struct LibraryPanel: View {
             if model.exportSettings.format.supportsQuality {
                 HStack {
                     Text("Quality").font(.caption)
-                    Slider(value: $model.exportSettings.quality, in: 0.3...1.0)
-                        .resetsOnDoubleClick { model.exportSettings.quality = 0.92 }
+                    ResettableSlider(value: $model.exportSettings.quality, in: 0.3...1.0) {
+                        model.exportSettings.quality = 0.92
+                    }
                     Text(String(format: "%.2f", model.exportSettings.quality))
                         .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
                 }

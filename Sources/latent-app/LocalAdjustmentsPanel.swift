@@ -210,8 +210,7 @@ struct LocalAdjustmentsPanel: View {
                 Text(String(format: format, value.wrappedValue))
                     .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
             }
-            Slider(value: value, in: range)
-                .resetsOnDoubleClick { value.wrappedValue = 0 }
+            ResettableSlider(value: value, in: range) { value.wrappedValue = 0 }
         }
     }
 }
