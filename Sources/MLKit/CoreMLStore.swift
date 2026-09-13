@@ -18,7 +18,7 @@ public enum CoreMLStore {
     }
 
     static var modelsDirectory: URL? {
-        Bundle.module.url(forResource: "Models", withExtension: nil)
+        Bundle.latentResources.url(forResource: "Models", withExtension: nil)
     }
 
     public static func isAvailable(_ name: String) -> Bool {
@@ -142,4 +142,22 @@ extension MLMultiArray {
         }
         return out
     }
+}
+
+extension Bundle {
+    /// The resource bundle for this module, found the way a shipped app
+    /// needs it. SwiftPM's generated `Bundle.module` looks only in the app
+    /// bundle's root and in a hard-coded `.build/` path, so an app built by
+    /// scripts/make_app.sh (resources in Contents/Resources, per macOS
+    /// convention) crashed at launch once the build directory was gone.
+    /// Check Contents/Resources first; `Bundle.module` still serves
+    /// `swift run` and `swift test`.
+    static let latentResources: Bundle = {
+        let name = "latent_MLKit.bundle"
+        if let url = Bundle.main.resourceURL?.appendingPathComponent(name),
+           let bundle = Bundle(url: url) {
+            return bundle
+        }
+        return Bundle.module
+    }()
 }

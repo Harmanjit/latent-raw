@@ -141,7 +141,7 @@ public final class GPUContext: @unchecked Sendable {
             return precompiled
         }
 
-        let bundle = Bundle.module
+        let bundle = Bundle.latentResources
         func resourceURL(_ name: String, _ ext: String) -> URL? {
             bundle.url(forResource: name, withExtension: ext)
                 ?? bundle.url(forResource: name, withExtension: ext, subdirectory: "Shaders")
@@ -199,4 +199,22 @@ public final class GPUContext: @unchecked Sendable {
         descriptor.usage = [.shaderRead, .shaderWrite]
         return device.makeTexture(descriptor: descriptor)
     }
+}
+
+extension Bundle {
+    /// The resource bundle for this module, found the way a shipped app
+    /// needs it. SwiftPM's generated `Bundle.module` looks only in the app
+    /// bundle's root and in a hard-coded `.build/` path, so an app built by
+    /// scripts/make_app.sh (resources in Contents/Resources, per macOS
+    /// convention) crashed at launch once the build directory was gone.
+    /// Check Contents/Resources first; `Bundle.module` still serves
+    /// `swift run` and `swift test`.
+    static let latentResources: Bundle = {
+        let name = "latent_PixelEngine.bundle"
+        if let url = Bundle.main.resourceURL?.appendingPathComponent(name),
+           let bundle = Bundle(url: url) {
+            return bundle
+        }
+        return Bundle.module
+    }()
 }

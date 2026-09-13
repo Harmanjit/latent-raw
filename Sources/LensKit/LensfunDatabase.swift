@@ -37,7 +37,7 @@ public final class LensfunDatabase: Sendable {
     }
 
     convenience init(bundled: Void) throws {
-        guard let directory = Bundle.module.url(forResource: "lensfun-db", withExtension: nil) else {
+        guard let directory = Bundle.latentResources.url(forResource: "lensfun-db", withExtension: nil) else {
             throw LensfunError.databaseMissing
         }
         try self.init(directory: directory)
@@ -207,4 +207,22 @@ final class LensfunXMLParser: NSObject, XMLParserDelegate {
         text = ""
         path.removeLast()
     }
+}
+
+extension Bundle {
+    /// The resource bundle for this module, found the way a shipped app
+    /// needs it. SwiftPM's generated `Bundle.module` looks only in the app
+    /// bundle's root and in a hard-coded `.build/` path, so an app built by
+    /// scripts/make_app.sh (resources in Contents/Resources, per macOS
+    /// convention) crashed at launch once the build directory was gone.
+    /// Check Contents/Resources first; `Bundle.module` still serves
+    /// `swift run` and `swift test`.
+    static let latentResources: Bundle = {
+        let name = "latent_LensKit.bundle"
+        if let url = Bundle.main.resourceURL?.appendingPathComponent(name),
+           let bundle = Bundle(url: url) {
+            return bundle
+        }
+        return Bundle.module
+    }()
 }
