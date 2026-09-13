@@ -56,7 +56,7 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                LibraryPanel(library: library, exportQueue: exportQueue,
+                LibraryPanel(library: library, exportQueue: exportQueue, model: model,
                              onOpenFolder: showOpenFolderPanel,
                              onRate: rate, onFlag: flag,
                              onExport: { showingExportSheet = true },
@@ -483,21 +483,14 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         sliderRow(title: "Recovery",
                                    value: $model.parameters.highlightRecovery,
-                                   range: 0...1, format: "%.2f")
+                                   range: 0...1, format: "%.2f", defaultValue: 1.0)
                         sliderRow(title: "Threshold",
                                    value: $model.parameters.highlightThreshold,
-                                   range: 0.5...1.0, format: "%.2f")
+                                   range: 0.5...1.0, format: "%.2f", defaultValue: 0.85)
                     }
                     .padding(.top, 8)
                 } label: {
                     disclosureLabel("Highlight Reconstruction")
-                }
-
-                DisclosureGroup {
-                    HistoryPanel(model: model)
-                        .padding(.top, 8)
-                } label: {
-                    disclosureLabel("History & Snapshots")
                 }
 
                 DisclosureGroup {
@@ -584,9 +577,9 @@ struct ContentView: View {
                         sliderRow(title: "Amount", value: $model.parameters.sharpenAmount,
                                   range: 0...2, format: "%.2f")
                         sliderRow(title: "Radius", value: $model.parameters.sharpenRadius,
-                                  range: 0.5...3, format: "%.1f px")
+                                  range: 0.5...3, format: "%.1f px", defaultValue: 1.0)
                         sliderRow(title: "Threshold", value: $model.parameters.sharpenThreshold,
-                                  range: 0...0.1, format: "%.3f")
+                                  range: 0...0.1, format: "%.3f", defaultValue: 0.01)
 
                         disclosureLabel("Noise Reduction")
                         sliderRow(title: "Luminance", value: $model.parameters.denoiseLuminance,
@@ -635,30 +628,6 @@ struct ContentView: View {
                     disclosureLabel("Soft Proof")
                 }
 
-                DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Picker("Format", selection: $model.exportSettings.format) {
-                            ForEach(ExportSettings.Format.allCases, id: \.self) { format in
-                                Text(format.displayName).tag(format)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-
-                        if model.exportSettings.format.supportsQuality {
-                            sliderRow(title: "Quality",
-                                       value: $model.exportSettings.quality,
-                                       range: 0.3...1.0, format: "%.2f")
-                        }
-
-                        Button("Export…") { model.showExportPanel() }
-                            .disabled(!model.hasImage || model.isExporting)
-                    }
-                    .padding(.top, 8)
-                } label: {
-                    disclosureLabel("Export")
-                }
-
                 Button("Reset All") { model.resetAdjustments() }
                     .disabled(!model.hasImage)
 
@@ -682,6 +651,8 @@ struct ContentView: View {
             }
             Slider(value: model.temperatureSliderBinding,
                     in: model.temperatureSliderRange)
+                .resetsOnDoubleClick { model.resetWhiteBalance() }
+                .help("Double-click for the camera's white balance")
         }
         .disabled(!model.hasImage)
     }
@@ -701,7 +672,7 @@ struct ContentView: View {
                     sliderRow(title: "Tint",
                                value: $model.parameters.whiteBalance.tint,
                                range: ColorKit.WhiteBalance.tintRange,
-                               format: "%+.0f")
+                               format: "%+.0f", defaultValue: model.asShotWhiteBalance.tint)
                     HStack {
                         Button("As Shot") { model.resetWhiteBalance() }
                             .controlSize(.small)
@@ -733,10 +704,10 @@ struct ContentView: View {
                                range: -5...5, format: "%+.2f EV")
                     sliderRow(title: "Contrast",
                                value: $model.parameters.contrast,
-                               range: 0.5...3.0, format: "%.2f")
+                               range: 0.5...3.0, format: "%.2f", defaultValue: 1.5)
                     sliderRow(title: "Mid Grey",
                                value: $model.parameters.greyPoint,
-                               range: 0.05...0.5, format: "%.3f")
+                               range: 0.05...0.5, format: "%.3f", defaultValue: 0.1845)
 
                     // Only offered on screens that can actually show more
                     // than paper white; on an SDR display it would be a
@@ -856,7 +827,7 @@ struct ContentView: View {
             sliderRow(title: "Feather",
                       value: Binding(get: { model.activeHealFeather },
                                      set: { model.activeHealFeather = $0 }),
-                      range: 0...1, format: "%.2f")
+                      range: 0...1, format: "%.2f", defaultValue: 0.35)
 
             HStack {
                 let n = model.parameters.heals.count
@@ -881,7 +852,8 @@ struct ContentView: View {
     }
 
     private func sliderRow(title: String, value: Binding<Float>,
-                            range: ClosedRange<Float>, format: String) -> some View {
+                            range: ClosedRange<Float>, format: String,
+                            defaultValue: Float = 0) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title).font(.subheadline)
@@ -891,6 +863,8 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: value, in: range)
+                .resetsOnDoubleClick { value.wrappedValue = defaultValue }
+                .help("Double-click to reset")
         }
         .disabled(!model.hasImage)
     }

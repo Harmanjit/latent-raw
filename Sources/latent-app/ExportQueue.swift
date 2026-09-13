@@ -125,6 +125,7 @@ struct ExportSheet: View {
                 HStack {
                     Text("Quality")
                     Slider(value: $preset.quality, in: 0.3...1)
+                        .resetsOnDoubleClick { preset.quality = 0.92 }
                     Text(String(format: "%.0f", preset.quality * 100)).monospacedDigit().frame(width: 30)
                 }
             }

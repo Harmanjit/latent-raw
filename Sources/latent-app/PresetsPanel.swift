@@ -10,24 +10,35 @@ struct PresetsPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Presets
-            ForEach(model.presets) { preset in
-                HStack {
-                    Button(preset.name) { onApply(preset) }
-                        .buttonStyle(.plain)
-                    Spacer()
-                    Text(preset.groups.count == 1 ? "1 group" : "\(preset.groups.count) groups")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                    if !preset.isBuiltIn {
-                        Button { model.deletePreset(preset) } label: { Image(systemName: "trash") }
-                            .buttonStyle(.plain).foregroundStyle(.secondary)
+            // Presets: a menu, so the list can grow without eating the panel.
+            HStack {
+                Menu("Apply preset") {
+                    let builtIns = model.presets.filter(\.isBuiltIn)
+                    let user = model.presets.filter { !$0.isBuiltIn }
+                    ForEach(builtIns) { preset in
+                        Button(preset.name) { onApply(preset) }
+                    }
+                    if !user.isEmpty {
+                        Divider()
+                        ForEach(user) { preset in
+                            Button(preset.name) { onApply(preset) }
+                        }
+                        Divider()
+                        Menu("Delete preset") {
+                            ForEach(user) { preset in
+                                Button(preset.name, role: .destructive) { model.deletePreset(preset) }
+                            }
+                        }
                     }
                 }
-                .font(.caption)
-            }
-            Button("Save current as preset…") { showingSave = true }
-                .controlSize(.small)
+                .fixedSize()
                 .disabled(!model.hasImage)
+                Spacer()
+                Button("Save…") { showingSave = true }
+                    .help("Save the current settings as a preset")
+                    .disabled(!model.hasImage)
+            }
+            .controlSize(.small)
 
             Divider()
 

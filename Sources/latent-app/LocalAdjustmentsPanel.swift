@@ -211,6 +211,7 @@ struct LocalAdjustmentsPanel: View {
                     .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
             }
             Slider(value: value, in: range)
+                .resetsOnDoubleClick { value.wrappedValue = 0 }
         }
     }
 }

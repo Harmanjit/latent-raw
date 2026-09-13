@@ -7,6 +7,10 @@ import PixelEngine
 struct LibraryPanel: View {
     @ObservedObject var library: Library
     @ObservedObject var exportQueue: ExportQueue
+    @ObservedObject var model: EditorModel
+    @State private var metadataExpanded = true
+    @State private var historyExpanded = false
+    @State private var exportExpanded = true
     let onOpenFolder: () -> Void
     let onRate: (Int) -> Void
     let onFlag: (ImageFlag) -> Void
@@ -18,6 +22,7 @@ struct LibraryPanel: View {
     @State private var keywordText = ""
 
     var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
         VStack(alignment: .leading, spacing: 14) {
             sectionLabel("Folder")
             if let url = library.folderURL {
@@ -64,14 +69,29 @@ struct LibraryPanel: View {
 
             if let selected = library.selectedImage {
                 selectionSection(selected)
-                metadataSection(selected)
+                DisclosureGroup(isExpanded: $metadataExpanded) {
+                    metadataSection(selected).padding(.top, 6)
+                } label: {
+                    sectionLabel("Metadata")
+                }
             }
 
-            exportSection
+            DisclosureGroup(isExpanded: $historyExpanded) {
+                HistoryPanel(model: model).padding(.top, 6)
+            } label: {
+                sectionLabel("History & Snapshots")
+            }
 
-            Spacer()
+            DisclosureGroup(isExpanded: $exportExpanded) {
+                exportSection.padding(.top, 6)
+            } label: {
+                sectionLabel("Export")
+            }
+
+            Spacer(minLength: 0)
         }
         .padding(14)
+        }
         .frame(width: 220, alignment: .leading)
         .onChange(of: library.selectedKeywords, initial: true) { _, keywords in
             keywordText = keywords.joined(separator: ", ")
@@ -81,24 +101,34 @@ struct LibraryPanel: View {
     /// Export the selection, and how the current batch is going.
     private var exportSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionLabel("Selection")
             let n = library.selectedImageIDs.count
-            HStack {
-                Menu("Apply preset") {
-                    ForEach(presets) { preset in
-                        Button(preset.name) { onApplyPreset(preset) }
-                    }
-                }
-                .menuStyle(.borderlessButton).fixedSize()
-                Button("Paste settings", action: onPaste)
-                    .help("Paste the copied settings onto every selected image (⌘⇧V)")
-            }
-            .controlSize(.small)
-            .disabled(n == 0)
-            Button(n <= 1 ? "Export…" : "Export \(n) images…", action: onExport)
+            Button(n <= 1 ? "Export selection…" : "Export \(n) images…", action: onExport)
                 .controlSize(.small)
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(n == 0 || exportQueue.isRunning)
+
+            // The open image, straight from the editor's render.
+            Picker("Format", selection: $model.exportSettings.format) {
+                ForEach(ExportSettings.Format.allCases, id: \.self) { format in
+                    Text(format.displayName).tag(format)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .controlSize(.small)
+            if model.exportSettings.format.supportsQuality {
+                HStack {
+                    Text("Quality").font(.caption)
+                    Slider(value: $model.exportSettings.quality, in: 0.3...1.0)
+                        .resetsOnDoubleClick { model.exportSettings.quality = 0.92 }
+                    Text(String(format: "%.2f", model.exportSettings.quality))
+                        .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+                }
+                .controlSize(.small)
+            }
+            Button("Export open image…") { model.showExportPanel() }
+                .controlSize(.small)
+                .disabled(!model.hasImage || model.isExporting)
             if exportQueue.isRunning {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
@@ -169,6 +199,19 @@ struct LibraryPanel: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+
+            // Presets and pasted settings apply to the whole selection.
+            HStack {
+                Menu("Apply preset") {
+                    ForEach(presets) { preset in
+                        Button(preset.name) { onApplyPreset(preset) }
+                    }
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                Button("Paste settings", action: onPaste)
+                    .help("Paste the copied settings onto every selected image (⌘⇧V)")
+            }
+            .controlSize(.small)
         }
     }
 
@@ -178,7 +221,6 @@ struct LibraryPanel: View {
     /// showing dashes for files with sparse metadata.
     private func metadataSection(_ image: ImageRecord) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Metadata")
             let exposure = image.exposureLine
             if !exposure.isEmpty {
                 Text(exposure)

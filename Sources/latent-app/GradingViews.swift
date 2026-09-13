@@ -145,6 +145,7 @@ struct HSLPanel: View {
                     Circle().fill(Self.swatches[band]).frame(width: 8, height: 8)
                     Text(HSLAdjustments.bandNames[band]).font(.caption).frame(width: 52, alignment: .leading)
                     Slider(value: binding(band), in: -1...1)
+                        .resetsOnDoubleClick { binding(band).wrappedValue = 0 }
                     Text(String(format: "%+.0f", binding(band).wrappedValue * 100))
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -184,6 +185,7 @@ struct SplitToningPanel: View {
                         .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
                 }
                 Slider(value: $toning.balance, in: -1...1)
+                    .resetsOnDoubleClick { toning.balance = 0 }
             }
             group("Shadows", hue: $toning.shadowHue, saturation: $toning.shadowSaturation)
             HStack {
@@ -213,6 +215,7 @@ struct SplitToningPanel: View {
             HStack {
                 Text("Saturation").font(.caption).frame(width: 60, alignment: .leading)
                 Slider(value: saturation, in: 0...1)
+                    .resetsOnDoubleClick { saturation.wrappedValue = 0 }
                 Text(String(format: "%.0f", saturation.wrappedValue * 100))
                     .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
                     .frame(width: 34, alignment: .trailing)
