@@ -10,7 +10,7 @@ import Foundation
 public enum XMPSidecar {
     /// The namespace URI is fixed once released — see DESIGN.md §5.5 / §16.
     /// TODO: fill in the real GitHub owner path before first public commit.
-    static let namespaceURI = "https://github.com/Harmanjit/latent/ns/1.0/"
+    static let namespaceURI = "https://github.com/Harmanjit/latent-raw/ns/1.0/"
 
     public struct Fields: Equatable {
         public var rating: Int

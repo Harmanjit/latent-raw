@@ -13,7 +13,7 @@ struct LatentApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {
-        WindowGroup("Latent") {
+        WindowGroup("Latent, a catalog management and RAW editor for macOS") {
             ContentView()
                 .frame(minWidth: 900, minHeight: 600)
         }

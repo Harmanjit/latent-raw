@@ -1,6 +1,7 @@
-# Latent
+# Latent, a catalog management and RAW editor for macOS
 
 A native, Apple Silicon–first RAW photo manager and non-destructive editor for macOS.
+Repository: `Harmanjit/latent-raw`.
 
 - **Platform:** macOS 15 (Sequoia) and 26 (Tahoe), Apple Silicon M3 or newer.
   Metal 3 is the baseline; Metal 4 only for optional fast paths on Tahoe.
