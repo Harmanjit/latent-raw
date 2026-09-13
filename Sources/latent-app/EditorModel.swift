@@ -164,6 +164,15 @@ final class EditorModel: ObservableObject {
 
     func healToolEnded() { healDrag = nil }
 
+    /// Turns off every on-image tool. Called when the viewport is about
+    /// to be used for viewing only (Loupe, Compare) and by Escape.
+    func disarmTools() {
+        healToolActive = false
+        cropToolActive = false
+        maskTool = .none
+        healDrag = nil
+    }
+
     // MARK: - Image tools (dispatch)
 
     /// Whether drags on the image belong to a tool rather than panning.

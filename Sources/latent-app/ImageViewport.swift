@@ -11,6 +11,8 @@ import PixelEngine
 struct ImageViewport: View {
     @ObservedObject var model: EditorModel
     var mirror: EditorModel? = nil
+    /// Develop only. Viewing modes pass false so a click can never edit.
+    var allowsTools: Bool = true
 
     var body: some View {
         ZStack {
@@ -39,14 +41,14 @@ struct ImageViewport: View {
                                     model.toggleZoom(at: point)
                                     mirror?.toggleZoom(at: point)
                                 },
-                                toolActive: model.imageToolActive,
+                                toolActive: allowsTools && model.imageToolActive,
                                 onToolBegan: { model.imageToolBegan(at: $0, exclude: $1) },
                                 onToolMoved: { model.imageToolMoved(to: $0) },
                                 onToolEnded: { model.imageToolEnded() })
-                if model.cropToolActive {
+                if allowsTools && model.cropToolActive {
                     CropOverlay(model: model)
                 }
-                if model.healToolActive {
+                if allowsTools && model.healToolActive {
                     HealOverlay(model: model)
                 }
             } else {

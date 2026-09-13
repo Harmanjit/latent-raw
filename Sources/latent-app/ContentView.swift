@@ -46,6 +46,10 @@ struct ContentView: View {
     /// time Compare opens. The right pane ("Candidate") is the main model,
     /// which follows the selection as arrow keys move it.
     @State private var compareModel: EditorModel?
+    @State private var whiteBalanceExpanded = true
+    @State private var toneExpanded = true
+    @State private var cropExpanded = false
+    @State private var healExpanded = false
     @State private var compareRecord: ImageRecord?
 
     var body: some View {
@@ -69,7 +73,7 @@ struct ContentView: View {
                     .onDisappear { model.flushPendingSave() }
                 case .loupe:
                     VStack(spacing: 0) {
-                        ImageViewport(model: model)
+                        ImageViewport(model: model, allowsTools: false)
                         Divider()
                         ImageCaption(record: library.selectedImage)
                     }
@@ -179,7 +183,12 @@ struct ContentView: View {
     /// other selected image if there is one, else the same image, and
     /// arrow keys then walk the Candidate.
     private func modeDidChange(from old: AppMode) {
-        if old == .develop { model.flushPendingSave() }
+        if old == .develop {
+            model.flushPendingSave()
+            // Loupe and Compare share the viewport; a click there must
+            // never place a patch or move a crop.
+            model.disarmTools()
+        }
         guard mode != .library, let selected = library.selectedImage else { return }
         if model.catalogImageID != selected.id { load(selected) }
         if mode == .compare {
@@ -205,7 +214,7 @@ struct ContentView: View {
             HStack(spacing: 1) {
                 VStack(spacing: 0) {
                     if let compareModel {
-                        ImageViewport(model: compareModel, mirror: model)
+                        ImageViewport(model: compareModel, mirror: model, allowsTools: false)
                     } else {
                         Color(white: 0.12)
                     }
@@ -213,7 +222,7 @@ struct ContentView: View {
                     ImageCaption(record: compareRecord, title: "Select")
                 }
                 VStack(spacing: 0) {
-                    ImageViewport(model: model, mirror: compareModel)
+                    ImageViewport(model: model, mirror: compareModel, allowsTools: false)
                     Divider()
                     ImageCaption(record: library.selectedImage, title: "Candidate")
                 }
@@ -328,18 +337,19 @@ struct ContentView: View {
             Button("") { if model.hasImage { model.showingBefore.toggle() } }
                 .keyboardShortcut("\\", modifiers: [])
             Button("") {
-                if mode == .develop, model.hasImage { model.cropToolActive.toggle() }
+                guard mode == .develop, model.hasImage else { return }
+                model.cropToolActive.toggle()
+                if model.cropToolActive { cropExpanded = true }
             }.keyboardShortcut("r", modifiers: [])
             Button("") {
-                if mode == .develop, model.hasImage { model.healToolActive.toggle() }
+                guard mode == .develop, model.hasImage else { return }
+                model.healToolActive.toggle()
+                if model.healToolActive { healExpanded = true }
             }.keyboardShortcut("h", modifiers: [])
             Button("") {
                 if model.healToolActive { model.deleteSelectedHeal() }
             }.keyboardShortcut(.delete, modifiers: [])
-            Button("") {
-                model.cropToolActive = false
-                model.healToolActive = false
-            }.keyboardShortcut(.escape, modifiers: [])
+            Button("") { model.disarmTools() }.keyboardShortcut(.escape, modifiers: [])
             Button("") { model.undo() }.keyboardShortcut("z", modifiers: .command)
             Button("") { model.redo() }.keyboardShortcut("z", modifiers: [.command, .shift])
         }
@@ -431,67 +441,37 @@ struct ContentView: View {
                         .truncationMode(.middle)
                 }
 
-                cropSection
-                healSection
+                DisclosureGroup(isExpanded: $whiteBalanceExpanded) {
+                    whiteBalanceSection.padding(.top, 8)
+                } label: {
+                    disclosureLabel("White Balance")
+                }
 
-                section("White Balance") {
-                    temperatureRow
-                    sliderRow(title: "Tint",
-                               value: $model.parameters.whiteBalance.tint,
-                               range: ColorKit.WhiteBalance.tintRange,
-                               format: "%+.0f")
+                DisclosureGroup(isExpanded: $toneExpanded) {
+                    toneSection.padding(.top, 8)
+                } label: {
+                    disclosureLabel("Tone")
+                }
+
+                DisclosureGroup(isExpanded: $cropExpanded) {
+                    cropSection.padding(.top, 8)
+                } label: {
                     HStack {
-                        Button("As Shot") { model.resetWhiteBalance() }
-                            .controlSize(.small)
-                            .disabled(!model.hasImage)
-                        Spacer()
-                        Text(String(format: "camera: %.0fK %+.0f",
-                                     model.asShotWhiteBalance.temperature,
-                                     model.asShotWhiteBalance.tint))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        disclosureLabel("Crop & Straighten")
+                        if model.cropToolActive { activeToolBadge }
                     }
                 }
 
-                section("Tone") {
+                DisclosureGroup(isExpanded: $healExpanded) {
+                    healSection.padding(.top, 8)
+                } label: {
                     HStack {
-                        Button("Auto") { model.autoAdjust() }
-                            .controlSize(.small)
-                            .keyboardShortcut("u", modifiers: .command)
-                            .disabled(!model.hasImage)
-                            .help("Estimate exposure, contrast and white balance from the image (⌘U)")
-                        Spacer()
-                    }
-                    sliderRow(title: "Exposure",
-                               value: $model.parameters.exposureEV,
-                               range: -5...5, format: "%+.2f EV")
-                    sliderRow(title: "Contrast",
-                               value: $model.parameters.contrast,
-                               range: 0.5...3.0, format: "%.2f")
-                    sliderRow(title: "Mid Grey",
-                               value: $model.parameters.greyPoint,
-                               range: 0.05...0.5, format: "%.3f")
-
-                    // Only offered on screens that can actually show more
-                    // than paper white; on an SDR display it would be a
-                    // switch that does nothing.
-                    if model.displayHasHeadroom {
-                        Toggle(isOn: $model.hdrDisplayEnabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("HDR display")
-                                    .font(.subheadline)
-                                Text(String(format: "this screen: %.1f× above white",
-                                            model.displayHeadroom))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .disabled(!model.hasImage)
+                        disclosureLabel("Spot Removal")
+                        if model.healToolActive { activeToolBadge }
                     }
                 }
 
+                EmptyView()
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 10) {
                         sliderRow(title: "Recovery",
@@ -702,13 +682,92 @@ struct ContentView: View {
             .textCase(.uppercase)
     }
 
+    private var whiteBalanceSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+
+                    temperatureRow
+                    sliderRow(title: "Tint",
+                               value: $model.parameters.whiteBalance.tint,
+                               range: ColorKit.WhiteBalance.tintRange,
+                               format: "%+.0f")
+                    HStack {
+                        Button("As Shot") { model.resetWhiteBalance() }
+                            .controlSize(.small)
+                            .disabled(!model.hasImage)
+                        Spacer()
+                        Text(String(format: "camera: %.0fK %+.0f",
+                                     model.asShotWhiteBalance.temperature,
+                                     model.asShotWhiteBalance.tint))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                
+        }
+    }
+
+    private var toneSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+
+                    HStack {
+                        Button("Auto") { model.autoAdjust() }
+                            .controlSize(.small)
+                            .keyboardShortcut("u", modifiers: .command)
+                            .disabled(!model.hasImage)
+                            .help("Estimate exposure, contrast and white balance from the image (⌘U)")
+                        Spacer()
+                    }
+                    sliderRow(title: "Exposure",
+                               value: $model.parameters.exposureEV,
+                               range: -5...5, format: "%+.2f EV")
+                    sliderRow(title: "Contrast",
+                               value: $model.parameters.contrast,
+                               range: 0.5...3.0, format: "%.2f")
+                    sliderRow(title: "Mid Grey",
+                               value: $model.parameters.greyPoint,
+                               range: 0.05...0.5, format: "%.3f")
+
+                    // Only offered on screens that can actually show more
+                    // than paper white; on an SDR display it would be a
+                    // switch that does nothing.
+                    if model.displayHasHeadroom {
+                        Toggle(isOn: $model.hdrDisplayEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("HDR display")
+                                    .font(.subheadline)
+                                Text(String(format: "this screen: %.1f× above white",
+                                            model.displayHeadroom))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .disabled(!model.hasImage)
+                    }
+                
+        }
+    }
+
+    /// Marks a group whose tool is armed on the image.
+    private var activeToolBadge: some View {
+        Text("ON")
+            .font(.system(size: 9, weight: .bold))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(Color.accentColor.opacity(0.85), in: RoundedRectangle(cornerRadius: 3))
+            .foregroundStyle(.white)
+    }
+
     /// Crop & straighten. R opens and closes the tool; the rectangle is
     /// edited on the image, the angle here.
     private var cropSection: some View {
-        section("Crop & Straighten") {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Button(model.cropToolActive ? "Done" : "Crop…") { model.cropToolActive.toggle() }
-                    .help("Show the crop rectangle on the image (R)")
+                Toggle(isOn: $model.cropToolActive) {
+                    Text(model.cropToolActive ? "Cropping: on" : "Crop…")
+                }
+                .toggleStyle(.button)
+                .help("Show the crop rectangle on the image (R)")
                 Picker("Aspect", selection: Binding(
                     get: { CropAspectOption.matching(model.cropAspectDisplayRatio, original: model.originalDisplayRatio) },
                     set: { model.setCropAspect(displayRatio: $0.ratio(original: model.originalDisplayRatio)) })) {
@@ -739,10 +798,13 @@ struct ContentView: View {
 
     /// Spot removal. H opens the tool; patches are placed on the image.
     private var healSection: some View {
-        section("Spot Removal") {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Button(model.healToolActive ? "Done" : "Heal…") { model.healToolActive.toggle() }
-                    .help("Click a spot to remove it, drag to pick the source (H)")
+                Toggle(isOn: $model.healToolActive) {
+                    Text(model.healToolActive ? "Healing: on" : "Heal…")
+                }
+                .toggleStyle(.button)
+                .help("Arm the tool, then click a spot to remove it; drag to pick the source (H)")
                 Picker("Mode", selection: Binding(get: { model.activeHealMode },
                                                   set: { model.activeHealMode = $0 })) {
                     Text("Heal").tag(HealPatch.Mode.heal)
