@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class LibraryTests: XCTestCase {
-    var folder: URL!
+    nonisolated(unsafe) var folder: URL!
 
     override func setUpWithError() throws {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),

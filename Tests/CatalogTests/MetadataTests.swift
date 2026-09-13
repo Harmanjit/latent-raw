@@ -5,7 +5,7 @@ import XCTest
 /// sidecar, not re-read on the next reconcile, and recoverable from the
 /// sidecar alone.
 final class MetadataTests: XCTestCase {
-    var folder: URL!
+    nonisolated(unsafe) var folder: URL!
 
     override func setUpWithError() throws {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
