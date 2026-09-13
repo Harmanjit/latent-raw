@@ -24,8 +24,8 @@ SRC="${SRC:-$VENDOR/libraw-src}"
 OUT="${OUT:-$VENDOR/LibRaw.xcframework}"
 STAMP="$OUT/.libraw-tag"
 
-if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$LIBRAW_TAG" ]; then
-  echo "LibRaw $LIBRAW_TAG already built at $OUT"
+if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "${LIBRAW_TAG}" ]; then
+  echo "LibRaw ${LIBRAW_TAG} already built at $OUT"
   exit 0
 fi
 
@@ -34,21 +34,21 @@ for tool in autoreconf glibtoolize xcodebuild; do
 done
 echo "Tools: $(command -v autoreconf) $(command -v glibtoolize) $(xcodebuild -version | head -1)"
 
-if [ ! -d "$SRC/.git" ] || [ "$(git -C "$SRC" describe --tags --exact-match 2>/dev/null || true)" != "$LIBRAW_TAG" ]; then
+if [ ! -d "$SRC/.git" ] || [ "$(git -C "$SRC" describe --tags --exact-match 2>/dev/null || true)" != "${LIBRAW_TAG}" ]; then
   rm -rf "$SRC"
-  echo "Cloning LibRaw $LIBRAW_TAG…"
-  git clone --quiet --branch "$LIBRAW_TAG" --depth 1 https://github.com/LibRaw/LibRaw.git "$SRC"
+  echo "Cloning LibRaw ${LIBRAW_TAG}..."
+  git clone --quiet --branch "${LIBRAW_TAG}" --depth 1 https://github.com/LibRaw/LibRaw.git "$SRC"
 fi
 
 cd "$SRC"
-echo "Configuring…"
+echo "Configuring..."
 autoreconf --install
 ./configure --host=aarch64-apple-darwin \
             --disable-shared --enable-static \
             --disable-openmp --disable-jpeg --disable-lcms \
             CFLAGS="-arch arm64 -mmacosx-version-min=15.0" \
             CXXFLAGS="-arch arm64 -mmacosx-version-min=15.0"
-echo "Building…"
+echo "Building..."
 # Only the library: LibRaw's sample programs are C sources linked without
 # the C++ runtime and fail to link on current Xcode; we never use them.
 make -j"$(sysctl -n hw.ncpu)" lib/libraw.la
@@ -58,5 +58,5 @@ rm -rf "$OUT"
 xcodebuild -create-xcframework \
   -library lib/.libs/libraw.a -headers libraw \
   -output "$OUT"
-echo "$LIBRAW_TAG" > "$STAMP"
-echo "Built $OUT from LibRaw $LIBRAW_TAG"
+echo "${LIBRAW_TAG}" > "$STAMP"
+echo "Built $OUT from LibRaw ${LIBRAW_TAG}"
