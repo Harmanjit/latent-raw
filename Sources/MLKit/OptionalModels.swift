@@ -87,8 +87,39 @@ public enum ModelDownloader {
         try unzip(temp, into: CoreMLStore.externalModelsDirectory, replacing: model.installedURL)
     }
 
+    /// Entry names an archive may contain: relative, no parent references,
+    /// no absolute paths. Checked before anything is written, so a zip
+    /// that tries to climb out of the models folder is refused whole.
+    static func entriesAreSafe(_ entries: [String]) -> Bool {
+        for e in entries {
+            let name = e.trimmingCharacters(in: .whitespacesAndNewlines)
+            if name.isEmpty { continue }
+            if name.hasPrefix("/") || name.hasPrefix("\\") || name.contains("../") || name.hasPrefix("..")
+                || name.contains("/../") || name.hasSuffix("/..") || name.contains("\u{0}") {
+                return false
+            }
+        }
+        return true
+    }
+
+    static func listEntries(_ zip: URL) throws -> [String] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/zipinfo")
+        process.arguments = ["-1", zip.path]
+        let out = Pipe(); process.standardOutput = out; process.standardError = Pipe()
+        try process.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw ModelDownloadError.unzipFailed("could not list the archive") }
+        return String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
+    }
+
     static func unzip(_ zip: URL, into directory: URL, replacing target: URL) throws {
         let fm = FileManager.default
+        let entries = try listEntries(zip)
+        guard entriesAreSafe(entries) else {
+            throw ModelDownloadError.unzipFailed("archive contains unsafe paths; refused")
+        }
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
         if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
         let process = Process()

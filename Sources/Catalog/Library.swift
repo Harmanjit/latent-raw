@@ -97,7 +97,7 @@ public final class Library: ObservableObject {
                 try await operation()
             } catch {
                 lastError = "\(what) failed: \(error)"
-                Self.logger.error("\(what, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                Self.logger.error("\(what, privacy: .public) failed: \(String(describing: error), privacy: .private)")
             }
         }
     }
@@ -364,7 +364,7 @@ public final class Library: ObservableObject {
                 next = try transform(existing)
             } catch {
                 outcome.skipped.append(record.fileName)
-                Self.logger.error("Skipped \(record.fileName, privacy: .public): \(String(describing: error), privacy: .public)")
+                Self.logger.error("Skipped \(record.fileName, privacy: .private): \(String(describing: error), privacy: .private)")
                 continue
             }
             if next != existing {

@@ -121,14 +121,34 @@ public enum XMPSidecar {
     /// Parses a sidecar. Tolerant of what it doesn't recognise: a sidecar
     /// written by another application yields whatever standard fields it
     /// carries (rating, label, keywords) and an empty edit stack.
+    /// A sidecar is a few kilobytes; anything past this is not one.
+    public static let maximumSidecarBytes = 16 * 1024 * 1024
+
+    /// Parsing options: never resolve external entities or DTDs, so a
+    /// sidecar someone drops into a photo folder cannot make the app read
+    /// other files or fetch a URL.
+    static let parseOptions: XMLNode.Options = [.nodePreserveWhitespace, .nodeLoadExternalEntitiesNever]
+
     public static func read(from url: URL) throws -> Fields {
-        let document = try XMLDocument(contentsOf: url, options: [.nodePreserveWhitespace])
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        if let size = attrs[.size] as? Int, size > maximumSidecarBytes {
+            throw SidecarError.tooLarge(size)
+        }
+        let document = try XMLDocument(contentsOf: url, options: parseOptions)
         return try parse(document)
     }
 
     public static func read(xml: String) throws -> Fields {
-        let document = try XMLDocument(xmlString: xml, options: [.nodePreserveWhitespace])
+        guard xml.utf8.count <= maximumSidecarBytes else { throw SidecarError.tooLarge(xml.utf8.count) }
+        let document = try XMLDocument(xmlString: xml, options: parseOptions)
         return try parse(document)
+    }
+
+    public enum SidecarError: Error, CustomStringConvertible {
+        case tooLarge(Int)
+        public var description: String {
+            switch self { case .tooLarge(let n): "sidecar is \(n) bytes; the limit is \(maximumSidecarBytes)" }
+        }
     }
 
     private static func parse(_ document: XMLDocument) throws -> Fields {

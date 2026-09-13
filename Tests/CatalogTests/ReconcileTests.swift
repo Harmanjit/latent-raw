@@ -139,4 +139,23 @@ final class ReconcileTests: XCTestCase {
         let rebuiltKeywords = try await catalog.keywords(forImageID: rebuilt[0].id!)
         XCTAssertEqual(rebuiltKeywords, ["keep"])
     }
+
+    /// Symlinks are never followed: a linked folder or file could point
+    /// anywhere on the disk, and a catalog is exactly one folder.
+    func testSymlinksAreSkipped() async throws {
+        let fm = FileManager.default
+        let outside = fm.temporaryDirectory.appendingPathComponent("latent-outside-\(UUID().uuidString)")
+        try fm.createDirectory(at: outside, withIntermediateDirectories: true)
+        try fm.copyItem(atPath: Self.sampleNEF, toPath: outside.appendingPathComponent("Elsewhere.NEF").path)
+        defer { try? fm.removeItem(at: outside) }
+        try fm.createSymbolicLink(at: folder.appendingPathComponent("linked-dir"), withDestinationURL: outside)
+        try fm.createSymbolicLink(at: folder.appendingPathComponent("Linked.NEF"),
+                                  withDestinationURL: outside.appendingPathComponent("Elsewhere.NEF"))
+
+        let catalog = try Catalog.open(at: folder)
+        let report = try await catalog.reconcile()
+        let names = try await catalog.allImages().map(\.relPath)
+        XCTAssertFalse(names.contains { $0.contains("linked-dir") || $0 == "Linked.NEF" }, "\(names)")
+        XCTAssertFalse(report.undecidedSubfolders.contains("linked-dir"))
+    }
 }

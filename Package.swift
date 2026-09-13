@@ -17,7 +17,9 @@ let package = Package(
         .executable(name: "latent-app", targets: ["latent-app"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.29.0"),
+        // Exact, not "from": a fresh resolve must never pull in a version
+        // nobody tested. Bump deliberately.
+        .package(url: "https://github.com/groue/GRDB.swift.git", exact: "6.29.3"),
         // LibRaw and Lensfun are vendored as XCFrameworks under vendor/ rather than
         // pulled as SwiftPM dependencies — see vendor/README.md for why and how.
     ],

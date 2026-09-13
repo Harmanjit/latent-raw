@@ -18,6 +18,9 @@ set -euo pipefail
 trap 'echo "build_libraw.sh: failed at line $LINENO (see output above)"' ERR
 
 LIBRAW_TAG="${LIBRAW_TAG:-0.22.2}"
+# The commit the tag pointed at when it was vetted. Tags can be moved;
+# commits can't. Update both together when bumping LibRaw.
+LIBRAW_COMMIT="${LIBRAW_COMMIT:-b93f6e45c194f5df9b02a43b1af9a54b4f41f33f}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENDOR="$ROOT/vendor"
 SRC="${SRC:-$VENDOR/libraw-src}"
@@ -41,6 +44,11 @@ if [ ! -d "$SRC/.git" ] || [ "$(git -C "$SRC" describe --tags --exact-match 2>/d
 fi
 
 cd "$SRC"
+ACTUAL="$(git rev-parse HEAD)"
+if [ "$ACTUAL" != "$LIBRAW_COMMIT" ]; then
+  echo "LibRaw tag ${LIBRAW_TAG} resolves to $ACTUAL, expected $LIBRAW_COMMIT; refusing to build" >&2
+  exit 1
+fi
 echo "Configuring..."
 autoreconf --install
 ./configure --host=aarch64-apple-darwin \

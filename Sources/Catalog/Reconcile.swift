@@ -187,7 +187,8 @@ extension Catalog {
     private func scan(directory: URL, relPrefix: String, defaultMode: SubfolderMode,
                       into files: inout [DiskFile], report: inout ReconcileReport) throws {
         let fm = FileManager.default
-        let keys: [URLResourceKey] = [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .nameKey]
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey,
+                                      .contentModificationDateKey, .nameKey]
         let entries = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys,
                                                  options: [.skipsHiddenFiles])
 
@@ -195,6 +196,12 @@ extension Catalog {
             let values = try entry.resourceValues(forKeys: Set(keys))
             let name = values.name ?? entry.lastPathComponent
             let relPath = relPrefix.isEmpty ? name : relPrefix + "/" + name
+
+            // A symlink could point anywhere on the disk; a catalog is one
+            // folder and stays inside it. Files that are links are skipped
+            // for the same reason: their sidecar would be written here for
+            // a photo that lives elsewhere.
+            if values.isSymbolicLink == true { continue }
 
             if values.isDirectory == true {
                 if name == Self.containerName || name == Self.legacyContainerName { continue }

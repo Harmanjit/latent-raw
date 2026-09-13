@@ -39,7 +39,10 @@ args = parser.parse_args()
 
 t0 = time.time()
 print(f"Loading {args.model} …")
-model = SegformerForSemanticSegmentation.from_pretrained(args.model).eval()
+# Pinned to the repository revision that was vetted, so a changed upload
+# cannot silently change the bundled model.
+SEGFORMER_REVISION = "de01bae28967510f9ddd496c60a969357195400c"
+model = SegformerForSemanticSegmentation.from_pretrained(args.model, revision=SEGFORMER_REVISION).eval()
 id2label = {int(k): v for k, v in model.config.id2label.items()}
 print(f"  {len(id2label)} classes, {sum(p.numel() for p in model.parameters())/1e6:.1f} M parameters")
 

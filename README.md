@@ -32,6 +32,29 @@ vendor/           Vendored C/C++ dependencies (LibRaw, etc.) built as XCFramewor
 TestAssets/       Sample RAW files for the CI test matrix (not committed — see below)
 ```
 
+## Privacy
+
+Latent makes no network requests. There is no telemetry, no analytics,
+no crash reporting and no update check. The only code that can reach
+the network is the optional model download, which is not offered in the
+current build and, when it is, fetches one fixed URL and verifies a
+checksum before installing anything.
+
+What it writes, and where:
+
+- `_latent/` inside each photo folder you open: the catalog database,
+  one XMP sidecar per image (ratings, keywords, edits, history) and
+  thumbnails. Nothing is written elsewhere in your photo folders.
+- `~/Library/Application Support/latent/`: compiled Core ML models and
+  your saved presets.
+- Preferences in the app's UserDefaults, including the last export folder.
+- Exported files go only where you choose; the export sheet can strip
+  camera metadata, keywords and rating from them.
+
+Failures are logged to the unified system log under `com.latent.app`
+with file names marked private, so they show as `<private>` in Console
+unless you opt in.
+
 ## Preferences (⌘,)
 
 Theme (system/light/dark), accent colour, image surround grey, render

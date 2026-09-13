@@ -33,6 +33,7 @@ import coremltools as ct
 from huggingface_hub import hf_hub_download
 
 import argparse
+import hashlib
 _args = argparse.ArgumentParser()
 _args.add_argument("--width", type=int, default=32, help="32 (bundled) or 64 (optional download)")
 _args.add_argument("--out", default=None, help="output directory (default: the bundled Models folder)")
@@ -137,9 +138,31 @@ class NAFNet(nn.Module):
         return self.ending(x) + inp
 
 
+# The mirror's repository revision and the SHA-256 of each weight file, as
+# vetted. A changed file on the mirror fails here instead of shipping.
+WEIGHTS_REPO = "nyanko7/nafnet-models"
+WEIGHTS_REVISION = "08e8c701eb662688cccda3bf3074e90e902bcd3b"
+WEIGHTS_SHA256 = {
+    32: "89c70e808d1783b6c07911306e106aaf0d4f7f3da8c61078b99ff7f8929a26f4",
+    64: "cd685efaae01f7c4e9951f2deab05780079c8eb1e49ed664b72f6db04dabb445",
+}
+
+
+def sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def main():
     print(f"Downloading NAFNet-SIDD-width{WIDTH}.pth (official weights, MIT)…")
-    path = hf_hub_download("nyanko7/nafnet-models", f"NAFNet-SIDD-width{WIDTH}.pth")
+    path = hf_hub_download(WEIGHTS_REPO, f"NAFNet-SIDD-width{WIDTH}.pth", revision=WEIGHTS_REVISION)
+    digest = sha256_of(path)
+    if digest != WEIGHTS_SHA256[WIDTH]:
+        print(f"Weight file checksum mismatch: {digest} != {WEIGHTS_SHA256[WIDTH]}; refusing to convert")
+        sys.exit(1)
     state = torch.load(path, map_location="cpu", weights_only=False)
     if "params" in state:
         state = state["params"]

@@ -1,0 +1,11 @@
+# Python tooling for the model conversion scripts, pinned to the versions
+# the bundled models were built with. Newer versions may work; these are
+# known to.
+#   python3.12 -m venv ~/rawhead-ml && source ~/rawhead-ml/bin/activate
+#   pip install -r scripts/requirements.txt
+torch==2.14.0
+transformers==5.17.0
+coremltools==9.0
+huggingface_hub==1.31.0
+numpy==2.5.3
+safetensors==0.8.0

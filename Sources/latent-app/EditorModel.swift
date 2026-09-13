@@ -1459,7 +1459,7 @@ final class EditorModel: ObservableObject {
 
     func reportFailure(_ what: String, _ error: Error) {
         lastError = "\(what) failed: \(error)"
-        Log.editor.error("\(what, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+        Log.editor.error("\(what, privacy: .private) failed: \(String(describing: error), privacy: .private)")
     }
 
     func resetWhiteBalance() {
