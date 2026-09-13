@@ -1,0 +1,154 @@
+import Foundation
+import os
+
+/// What a decode produces, in a form that crosses a process boundary.
+///
+/// The service sends three payloads: this metadata as JSON, the sensor
+/// plane as one `Data` (which XPC moves out of line, so it is not
+/// copied byte by byte), and the embedded preview. Keeping the wire
+/// format to plain `Data` and `Codable` avoids the NSSecureCoding
+/// boilerplate and any class-name whitelisting on the receiving side.
+public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
+    public var width, height, rawWidth, rawHeight: Int
+    /// 0xFF for non-Bayer, else the packed 2x2 order.
+    public var cfaCode: UInt8
+    public var cameraMultipliers: [Float]
+    public var blackLevel, whiteLevel: Float
+    public var cameraMake, cameraModel, lensModel: String
+    public var iso, shutter, aperture, focalLength: Double
+    public var timestamp: Int64
+    public var orientation: Int
+    public var lensMake, lensMakerNotesName: String
+    public var makerLensID: UInt64
+    public var nikonLensID, nikonLensType: UInt8
+    public var minFocal, maxFocal, maxApertureAtMinFocal, maxApertureAtMaxFocal, cropFactor: Double
+    public var cameraToXYZ: [Float]?
+    public var thumbnailError: Int32
+    public var isMetadataOnly: Bool
+
+    public init(summary s: RawSummary, cameraToXYZ: [Float]?, thumbnailError: Int32, isMetadataOnly: Bool) {
+        width = s.width; height = s.height; rawWidth = s.rawWidth; rawHeight = s.rawHeight
+        cfaCode = s.cfaPattern.rawCode
+        cameraMultipliers = [s.cameraMultipliers.0, s.cameraMultipliers.1, s.cameraMultipliers.2, s.cameraMultipliers.3]
+        blackLevel = s.blackLevel; whiteLevel = s.whiteLevel
+        cameraMake = s.cameraMake; cameraModel = s.cameraModel; lensModel = s.lensModel
+        iso = s.iso; shutter = s.shutter; aperture = s.aperture; focalLength = s.focalLength
+        timestamp = Int64(s.captureTime.timeIntervalSince1970)
+        orientation = s.orientation
+        lensMake = s.lens.make; lensMakerNotesName = s.lens.makerNotesName
+        makerLensID = s.lens.makerLensID; nikonLensID = s.lens.nikonLensID; nikonLensType = s.lens.nikonLensType
+        minFocal = s.lens.minFocal; maxFocal = s.lens.maxFocal
+        maxApertureAtMinFocal = s.lens.maxApertureAtMinFocal; maxApertureAtMaxFocal = s.lens.maxApertureAtMaxFocal
+        cropFactor = s.lens.cropFactor
+        self.cameraToXYZ = cameraToXYZ
+        self.thumbnailError = thumbnailError
+        self.isMetadataOnly = isMetadataOnly
+    }
+
+    public var summary: RawSummary {
+        RawSummary(
+            width: width, height: height, rawWidth: rawWidth, rawHeight: rawHeight,
+            cfaPattern: CFAPattern(rawValue: cfaCode),
+            cameraMultipliers: (cameraMultipliers[0], cameraMultipliers[1], cameraMultipliers[2], cameraMultipliers[3]),
+            blackLevel: blackLevel, whiteLevel: whiteLevel,
+            cameraMake: cameraMake, cameraModel: cameraModel, lensModel: lensModel,
+            iso: iso, shutter: shutter, aperture: aperture, focalLength: focalLength,
+            captureTime: Date(timeIntervalSince1970: TimeInterval(timestamp)),
+            orientation: orientation,
+            lens: LensIdentity(make: lensMake, makerNotesName: lensMakerNotesName, makerLensID: makerLensID,
+                               nikonLensID: nikonLensID, nikonLensType: nikonLensType,
+                               minFocal: minFocal, maxFocal: maxFocal,
+                               maxApertureAtMinFocal: maxApertureAtMinFocal,
+                               maxApertureAtMaxFocal: maxApertureAtMaxFocal, cropFactor: cropFactor))
+    }
+}
+
+/// The XPC interface. One method: decode the file behind an open
+/// descriptor. The service never receives a path and has no file
+/// access of its own; the descriptor is the only thing it can read.
+@objc public protocol RawDecoderProtocol {
+    func decode(_ file: FileHandle, metadataOnly: Bool,
+                reply: @escaping (_ metadataJSON: Data?, _ plane: Data?, _ preview: Data?, _ error: String?) -> Void)
+}
+
+public enum RawDecoderXPC {
+    public static let serviceName = "com.latent.app.rawdecoder"
+    public static let bundleName = "LatentRawDecoder.xpc"
+    static let logger = Logger(subsystem: "com.latent.app", category: "rawdecoder")
+
+    /// True when this process is the app bundle and carries the service.
+    /// `LATENT_RAW_INPROCESS=1` forces in-process decoding for debugging.
+    public static var isServiceAvailable: Bool {
+        if ProcessInfo.processInfo.environment["LATENT_RAW_INPROCESS"] == "1" { return false }
+        let url = Bundle.main.bundleURL.appendingPathComponent("Contents/XPCServices/\(bundleName)")
+        let available = FileManager.default.fileExists(atPath: url.path)
+        if !loggedAvailability {
+            loggedAvailability = true
+            logger.notice("raw decoder service \(available ? "found" : "not found", privacy: .public) at \(url.path, privacy: .public)")
+        }
+        return available
+    }
+    nonisolated(unsafe) private static var loggedAvailability = false
+}
+
+/// Host-side client. One connection, made lazily and remade after the
+/// service exits (which XPC does on its own after idle time, and which a
+/// crash on a malicious file also causes). Calls are synchronous because
+/// every caller of `RawFile.init` already blocks on the decode.
+public final class RawDecoderClient: @unchecked Sendable {
+    public static let shared = RawDecoderClient()
+    private let lock = NSLock()
+    private var connection: NSXPCConnection?
+
+    public enum ClientError: Error, CustomStringConvertible {
+        case serviceFailed(String)
+        case connectionLost(String)
+        public var description: String {
+            switch self {
+            case .serviceFailed(let s): "raw decoder service: \(s)"
+            case .connectionLost(let s): "raw decoder connection lost (\(s)); the file may have crashed the decoder"
+            }
+        }
+    }
+
+    private func proxy(errorHandler: @escaping (Error) -> Void) -> RawDecoderProtocol? {
+        lock.lock(); defer { lock.unlock() }
+        if connection == nil {
+            let c = NSXPCConnection(serviceName: RawDecoderXPC.serviceName)
+            c.remoteObjectInterface = NSXPCInterface(with: RawDecoderProtocol.self)
+            c.invalidationHandler = { [weak self] in
+                self?.lock.lock(); self?.connection = nil; self?.lock.unlock()
+            }
+            c.resume()
+            connection = c
+        }
+        return connection?.synchronousRemoteObjectProxyWithErrorHandler(errorHandler) as? RawDecoderProtocol
+    }
+
+    /// Decodes synchronously. `plane` is nil for metadata-only opens.
+    public func decode(fileDescriptor fd: Int32, metadataOnly: Bool) throws
+        -> (metadata: RawSnapshotMetadata, plane: Data?, preview: Data?) {
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
+        var result: (Data?, Data?, Data?, String?) = (nil, nil, nil, nil)
+        var transportError: Error?
+        guard let proxy = proxy(errorHandler: { transportError = $0 }) else {
+            throw ClientError.connectionLost("no proxy")
+        }
+        let start = Date()
+        proxy.decode(handle, metadataOnly: metadataOnly) { meta, plane, preview, error in
+            result = (meta, plane, preview, error)
+        }
+        if let transportError {
+            RawDecoderXPC.logger.error("raw decoder transport error: \(String(describing: transportError), privacy: .public)")
+            throw ClientError.connectionLost(String(describing: transportError))
+        }
+        if let error = result.3 {
+            RawDecoderXPC.logger.error("raw decoder service error: \(error, privacy: .public)")
+            throw ClientError.serviceFailed(error)
+        }
+        guard let metaData = result.0 else { throw ClientError.serviceFailed("empty reply") }
+        let metadata = try JSONDecoder().decode(RawSnapshotMetadata.self, from: metaData)
+        RawDecoderXPC.logger.notice("decoded \(metadata.cameraModel, privacy: .public) in service, \(Int(Date().timeIntervalSince(start) * 1000)) ms, plane \(result.1?.count ?? 0) bytes")
+        return (metadata, result.1, result.2)
+    }
+}

@@ -150,7 +150,9 @@ do {
     let t1 = Date()
     print("Opened + unpacked: \(file.summary.cameraMake) \(file.summary.cameraModel), " +
           "\(file.summary.rawWidth)x\(file.summary.rawHeight), " +
-          "in \(Int((t1.timeIntervalSince(t0)) * 1000))ms")
+          "in \(Int((t1.timeIntervalSince(t0)) * 1000))ms " +
+          "(decoder: \(file.decodedInService ? "XPC service" : "in-process"), " +
+          "service \(RawDecoderXPC.isServiceAvailable ? "available" : "absent"))")
 
     let li = file.summary.lens
     print(String(format: "  lens: name='%@' makernotes='%@' make='%@' id=%llu nikonID=%d type=%d " +

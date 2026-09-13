@@ -42,6 +42,13 @@ between launches by security-scoped bookmark), its own container under
 `~/Library/Containers/com.latent.app`, and nothing on the network, since
 the network entitlement is deliberately absent.
 
+Raw decoding runs in a separate XPC service, `LatentRawDecoder.xpc`,
+signed with the sandbox and nothing else: no file access (it is handed
+an open descriptor per file), no network. A crafted raw file that
+exploits the decoder gets a process that can do nothing, and the app
+reports an error instead of crashing. `swift run` builds and the tests
+decode in-process; `LATENT_RAW_INPROCESS=1` forces that in the bundle.
+
 What an account would add is notarisation. Without it, another Mac shows
 "cannot verify the developer" on first launch. Right-click the app and
 choose Open once, or run:

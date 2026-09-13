@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "MLKit", targets: ["MLKit"]),
         .executable(name: "latent-cli", targets: ["latent-cli"]),
         .executable(name: "latent-app", targets: ["latent-app"]),
+        .executable(name: "latent-rawdecoder", targets: ["latent-rawdecoder"]),
     ],
     dependencies: [
         // Exact, not "from": a fresh resolve must never pull in a version
@@ -68,6 +69,11 @@ let package = Package(
             name: "MLKitTests",
             dependencies: ["MLKit", "PixelEngine", "RawCore"],
             path: "Tests/MLKitTests"
+        ),
+        .executableTarget(
+            name: "latent-rawdecoder",
+            dependencies: ["RawCore"],
+            path: "Sources/latent-rawdecoder"
         ),
         .executableTarget(
             name: "latent-cli",
