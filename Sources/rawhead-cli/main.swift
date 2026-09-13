@@ -148,6 +148,13 @@ do {
           "\(file.summary.rawWidth)x\(file.summary.rawHeight), " +
           "in \(Int((t1.timeIntervalSince(t0)) * 1000))ms")
 
+    let li = file.summary.lens
+    print(String(format: "  lens: name='%@' makernotes='%@' make='%@' id=%llu nikonID=%d type=%d " +
+                 "range %.0f-%.0fmm f/%.1f-%.1f crop=%.2f",
+                 file.summary.lensModel, li.makerNotesName, li.make, li.makerLensID,
+                 Int(li.nikonLensID), Int(li.nikonLensType), li.minFocal, li.maxFocal,
+                 li.maxApertureAtMinFocal, li.maxApertureAtMaxFocal, li.cropFactor))
+
     let gpu = try GPUContext()
 
     let t2 = Date()

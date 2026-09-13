@@ -36,7 +36,14 @@ let package = Package(
         ),
         .target(
             name: "LensKit",
-            path: "Sources/LensKit"
+            dependencies: ["RawCore"],
+            path: "Sources/LensKit",
+            resources: [.copy("Resources/lensfun-db")]
+        ),
+        .testTarget(
+            name: "LensKitTests",
+            dependencies: ["LensKit", "RawCore"],
+            path: "Tests/LensKitTests"
         ),
         .target(
             name: "PixelEngine",

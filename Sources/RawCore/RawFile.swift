@@ -39,6 +39,41 @@ public struct RawSummary: Sendable {
     /// LibRaw's `flip`: 0 upright, 3 rotated 180°, 5 rotated 90° CCW,
     /// 6 rotated 90° CW. What the camera recorded, not yet applied.
     public let orientation: Int
+    /// Lens identity for profile lookup (LensKit).
+    public let lens: LensIdentity
+}
+
+/// What the file says about the lens, beyond its (often empty) name.
+public struct LensIdentity: Sendable, Equatable {
+    public let make: String
+    /// Name from the maker notes, when the camera recorded one.
+    public let makerNotesName: String
+    public let makerLensID: UInt64
+    public let nikonLensID: UInt8
+    public let nikonLensType: UInt8
+    public let minFocal: Double
+    public let maxFocal: Double
+    public let maxApertureAtMinFocal: Double
+    public let maxApertureAtMaxFocal: Double
+    /// Sensor crop factor vs 35mm, 0 when the file doesn't say.
+    public let cropFactor: Double
+
+    public var isZoom: Bool { maxFocal > minFocal + 0.5 }
+
+    public init(make: String, makerNotesName: String, makerLensID: UInt64, nikonLensID: UInt8,
+                nikonLensType: UInt8, minFocal: Double, maxFocal: Double,
+                maxApertureAtMinFocal: Double, maxApertureAtMaxFocal: Double, cropFactor: Double) {
+        self.make = make
+        self.makerNotesName = makerNotesName
+        self.makerLensID = makerLensID
+        self.nikonLensID = nikonLensID
+        self.nikonLensType = nikonLensType
+        self.minFocal = minFocal
+        self.maxFocal = maxFocal
+        self.maxApertureAtMinFocal = maxApertureAtMinFocal
+        self.maxApertureAtMaxFocal = maxApertureAtMaxFocal
+        self.cropFactor = cropFactor
+    }
 }
 
 /// Which demosaic family a file needs. Only `.bayer` gets the full v1
@@ -132,7 +167,22 @@ public final class RawFile {
             iso: cSummary.iso, shutter: cSummary.shutter,
             aperture: cSummary.aperture, focalLength: cSummary.focal_length,
             captureTime: Date(timeIntervalSince1970: TimeInterval(cSummary.timestamp)),
-            orientation: Int(cSummary.orientation)
+            orientation: Int(cSummary.orientation),
+            lens: LensIdentity(
+                make: withUnsafePointer(to: cSummary.lens_make) {
+                    $0.withMemoryRebound(to: CChar.self, capacity: 64) { String(cString: $0) }
+                },
+                makerNotesName: withUnsafePointer(to: cSummary.lens_makernotes) {
+                    $0.withMemoryRebound(to: CChar.self, capacity: 128) { String(cString: $0) }
+                },
+                makerLensID: cSummary.lens_id,
+                nikonLensID: cSummary.nikon_lens_id,
+                nikonLensType: cSummary.nikon_lens_type,
+                minFocal: Double(cSummary.lens_min_focal),
+                maxFocal: Double(cSummary.lens_max_focal),
+                maxApertureAtMinFocal: Double(cSummary.lens_max_ap_min_focal),
+                maxApertureAtMaxFocal: Double(cSummary.lens_max_ap_max_focal),
+                cropFactor: Double(cSummary.crop_factor))
         )
 
         var matrix12 = [Float](repeating: 0, count: 12)

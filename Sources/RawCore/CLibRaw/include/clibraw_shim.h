@@ -31,6 +31,18 @@ typedef struct {
     double   focal_length;
     int64_t  timestamp; // unix epoch seconds
     int32_t  orientation; // LibRaw `flip`: 0 none, 3 = 180°, 5 = 90° CCW, 6 = 90° CW
+
+    // Lens identity, for lens-correction profile lookup. Cameras rarely
+    // record a full lens name; most record an ID plus the lens's focal
+    // range and maximum apertures, which is enough to match a profile.
+    char     lens_make[64];
+    char     lens_makernotes[128]; // name from the maker notes, if any
+    uint64_t lens_id;              // maker-specific lens ID (makernotes)
+    uint8_t  nikon_lens_id;        // Nikon's 8-bit LensIDNumber
+    uint8_t  nikon_lens_type;
+    float    lens_min_focal, lens_max_focal;
+    float    lens_max_ap_min_focal, lens_max_ap_max_focal;
+    float    crop_factor;          // vs 35mm full frame; 0 if unknown
 } CLibRawSummary;
 
 // Opens and unpacks a raw file from an already-mapped read-only buffer

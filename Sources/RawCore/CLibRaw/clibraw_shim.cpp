@@ -71,6 +71,24 @@ extern "C" int clibraw_get_summary(CLibRawHandle *handle, CLibRawSummary *out) {
     out->timestamp     = static_cast<int64_t>(d.other.timestamp);
     out->orientation   = d.sizes.flip;
 
+    auto &lens = d.lens;
+    std::strncpy(out->lens_make, lens.LensMake, sizeof(out->lens_make) - 1);
+    std::strncpy(out->lens_makernotes, lens.makernotes.Lens, sizeof(out->lens_makernotes) - 1);
+    out->lens_id         = lens.makernotes.LensID;
+    out->nikon_lens_id   = lens.nikon.LensIDNumber;
+    out->nikon_lens_type = lens.nikon.LensType;
+    // Prefer the maker-note values; fall back to the EXIF-level ones.
+    out->lens_min_focal = lens.makernotes.MinFocal > 0 ? lens.makernotes.MinFocal : lens.MinFocal;
+    out->lens_max_focal = lens.makernotes.MaxFocal > 0 ? lens.makernotes.MaxFocal : lens.MaxFocal;
+    out->lens_max_ap_min_focal = lens.makernotes.MaxAp4MinFocal > 0
+        ? lens.makernotes.MaxAp4MinFocal : lens.MaxAp4MinFocal;
+    out->lens_max_ap_max_focal = lens.makernotes.MaxAp4MaxFocal > 0
+        ? lens.makernotes.MaxAp4MaxFocal : lens.MaxAp4MaxFocal;
+    // Crop factor from the 35mm-equivalent focal length when recorded.
+    float eq = lens.FocalLengthIn35mmFormat > 0 ? float(lens.FocalLengthIn35mmFormat)
+             : lens.makernotes.FocalLengthIn35mmFormat;
+    out->crop_factor = (eq > 0 && d.other.focal_len > 0) ? eq / d.other.focal_len : 0.0f;
+
     return 0;
 }
 
