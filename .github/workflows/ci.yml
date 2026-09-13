@@ -29,7 +29,14 @@ jobs:
 
       - name: Build LibRaw
         if: steps.libraw-cache.outputs.cache-hit != 'true'
-        run: scripts/build_libraw.sh
+        # The tail of the output is raised as an annotation, which the
+        # public API exposes; full logs need a signed-in viewer.
+        run: |
+          set -o pipefail
+          if ! scripts/build_libraw.sh 2>&1 | tee libraw-build.log; then
+            echo "::error title=LibRaw build failed::$(tail -c 1500 libraw-build.log | tr '\n' ' ' | tr -d '\r')"
+            exit 1
+          fi
 
       - name: Swift version
         run: swift --version

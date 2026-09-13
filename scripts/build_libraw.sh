@@ -15,6 +15,7 @@
 # so the static library has no dependencies beyond zlib, which
 # Package.swift links. Only the library target is built.
 set -euo pipefail
+trap 'echo "build_libraw.sh: failed at line $LINENO (see output above)"' ERR
 
 LIBRAW_TAG="${LIBRAW_TAG:-0.22.2}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,6 +32,7 @@ fi
 for tool in autoreconf glibtoolize xcodebuild; do
   command -v "$tool" >/dev/null || { echo "missing $tool (brew install autoconf automake libtool)"; exit 1; }
 done
+echo "Tools: $(command -v autoreconf) $(command -v glibtoolize) $(xcodebuild -version | head -1)"
 
 if [ ! -d "$SRC/.git" ] || [ "$(git -C "$SRC" describe --tags --exact-match 2>/dev/null || true)" != "$LIBRAW_TAG" ]; then
   rm -rf "$SRC"
@@ -40,21 +42,21 @@ fi
 
 cd "$SRC"
 echo "Configuring…"
-autoreconf --install >/dev/null 2>&1
+autoreconf --install
 ./configure --host=aarch64-apple-darwin \
             --disable-shared --enable-static \
             --disable-openmp --disable-jpeg --disable-lcms \
             CFLAGS="-arch arm64 -mmacosx-version-min=15.0" \
-            CXXFLAGS="-arch arm64 -mmacosx-version-min=15.0" >/dev/null
+            CXXFLAGS="-arch arm64 -mmacosx-version-min=15.0"
 echo "Building…"
 # Only the library: LibRaw's sample programs are C sources linked without
 # the C++ runtime and fail to link on current Xcode; we never use them.
-make -j"$(sysctl -n hw.ncpu)" lib/libraw.la >/dev/null
+make -j"$(sysctl -n hw.ncpu)" lib/libraw.la
 [ -f lib/.libs/libraw.a ] || { echo "libraw.a was not produced"; exit 1; }
 
 rm -rf "$OUT"
 xcodebuild -create-xcframework \
   -library lib/.libs/libraw.a -headers libraw \
-  -output "$OUT" >/dev/null
+  -output "$OUT"
 echo "$LIBRAW_TAG" > "$STAMP"
 echo "Built $OUT from LibRaw $LIBRAW_TAG"
