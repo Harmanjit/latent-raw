@@ -47,8 +47,12 @@ struct ContentView: View {
                 Divider()
                 switch mode {
                 case .library:
-                    ThumbnailGridView(library: library, onOpen: openInEditor)
-                .onDisappear { model.flushPendingSave() }
+                    VStack(spacing: 0) {
+                        FilterBar(library: library)
+                        Divider()
+                        ThumbnailGridView(library: library, onOpen: openInEditor)
+                    }
+                    .onDisappear { model.flushPendingSave() }
                 case .develop:
                     imageArea
                     Divider()

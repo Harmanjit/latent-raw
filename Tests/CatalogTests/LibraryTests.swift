@@ -87,4 +87,46 @@ final class LibraryTests: XCTestCase {
         library.selectedImageID = nil
         XCTAssertEqual(library.selectPrevious()?.id, ids[1], "previous from nothing selects the last")
     }
+
+    /// The grid walks `visibleImages`; filters narrow it, sort orders it,
+    /// and arrow-key navigation never lands on a hidden image.
+    func testFilterAndSortDriveVisibleImagesAndNavigation() async throws {
+        let library = Library()
+        try await library.open(folder: folder)
+        XCTAssertEqual(library.visibleImages.count, 2)
+        XCTAssertEqual(library.visibleImages, library.images, "no filter: same list")
+
+        // Both copies share a capture time, so name order is the tie-break.
+        library.sort = LibrarySort(key: .fileName, ascending: false)
+        XCTAssertEqual(library.visibleImages.map(\.fileName), ["B.NEF", "A.NEF"])
+
+        // Pick A, then show picks only.
+        library.selectedImageID = library.images.first { $0.fileName == "A.NEF" }?.id
+        try await library.setFlag(.picked)
+        library.filter.flags = [.picked]
+        XCTAssertEqual(library.visibleImages.map(\.fileName), ["A.NEF"])
+        XCTAssertNil(library.moveSelection(by: 1), "nothing after A in the filtered view")
+
+        // Keywords: the index updates on edit, without a reload.
+        library.filter = LibraryFilter()
+        library.filter.keyword = "tree"
+        XCTAssertEqual(library.visibleImages.count, 0)
+        try await library.setKeywords(["tree", " sky "])
+        XCTAssertEqual(library.visibleImages.map(\.fileName), ["A.NEF"])
+        XCTAssertEqual(library.availableKeywords, ["sky", "tree"])
+
+        // Selection may point at a hidden image; the next step lands on a visible one.
+        library.filter = LibraryFilter()
+        library.filter.text = "B"
+        XCTAssertEqual(library.visibleImages.map(\.fileName), ["B.NEF"])
+        XCTAssertNil(library.selectedIndex, "A is selected but hidden")
+        XCTAssertEqual(library.moveSelection(by: 1)?.fileName, "B.NEF")
+
+        // Refresh keeps the filter and the keyword index.
+        try await library.refresh()
+        XCTAssertEqual(library.visibleImages.map(\.fileName), ["B.NEF"])
+        library.filter = LibraryFilter()
+        library.filter.keyword = "sky"
+        XCTAssertEqual(library.visibleImages.map(\.fileName), ["A.NEF"])
+    }
 }

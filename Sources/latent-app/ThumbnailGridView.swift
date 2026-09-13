@@ -67,8 +67,8 @@ struct ThumbnailGridView: NSViewRepresentable {
         /// the highlight.
         func sync(with library: Library) {
             guard let collectionView else { return }
-            if library.images != images {
-                images = library.images
+            if library.visibleImages != images {
+                images = library.visibleImages
                 collectionView.reloadData()
             } else if library.thumbnailVersion != thumbnailVersion
                         || library.editedImageIDs != editedIDs {

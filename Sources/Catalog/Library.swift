@@ -18,7 +18,22 @@ public struct ThumbnailImage: @unchecked Sendable {
 @MainActor
 public final class Library: ObservableObject {
     @Published public private(set) var folderURL: URL?
-    @Published public private(set) var images: [ImageRecord] = []
+    @Published public private(set) var images: [ImageRecord] = [] {
+        didSet { recomputeVisible() }
+    }
+    /// The grid's contents: `images` after `filter` and `sort`.
+    @Published public private(set) var visibleImages: [ImageRecord] = []
+    @Published public var filter = LibraryFilter() {
+        didSet { if filter != oldValue { recomputeVisible() } }
+    }
+    @Published public var sort = LibrarySort.default {
+        didSet { if sort != oldValue { recomputeVisible() } }
+    }
+    /// image id → keywords, for filtering; refreshed with the image list
+    /// and whenever keywords are edited.
+    private var keywordIndex: [Int64: Set<String>] = [:] {
+        didSet { recomputeVisible() }
+    }
     @Published public private(set) var isBusy = false
     @Published public private(set) var statusText = "No folder open"
     @Published public private(set) var thumbnailsDone = 0
@@ -28,7 +43,9 @@ public final class Library: ObservableObject {
     /// Bumped whenever thumbnails land, so a grid knows to refresh cells.
     @Published public private(set) var thumbnailVersion = 0
     /// Images that have a stored edit, so the grid can badge them.
-    @Published public private(set) var editedImageIDs: Set<Int64> = []
+    @Published public private(set) var editedImageIDs: Set<Int64> = [] {
+        didSet { if filter.editedOnly { recomputeVisible() } }
+    }
 
     /// The primary selection: what the editor opens and the panel edits.
     @Published public var selectedImageID: Int64? {
@@ -66,8 +83,37 @@ public final class Library: ObservableObject {
         images.first { $0.id == selectedImageID }
     }
 
+    /// Position in the *visible* list, which is what arrow keys walk.
     public var selectedIndex: Int? {
-        images.firstIndex { $0.id == selectedImageID }
+        visibleImages.firstIndex { $0.id == selectedImageID }
+    }
+
+    // MARK: - Filtering and sorting
+
+    private func recomputeVisible() {
+        let edited = editedImageIDs
+        let filter = filter
+        let index = keywordIndex
+        let passing = filter.isActive
+            ? images.filter { record in
+                filter.matches(record, isEdited: record.id.map(edited.contains) ?? false,
+                               keywords: record.id.flatMap { index[$0] } ?? [])
+            }
+            : images
+        let next = passing.sorted(by: sort)
+        if next != visibleImages { visibleImages = next }
+    }
+
+    /// Distinct values for the filter pickers, from the whole folder (not
+    /// the filtered view, or a picker would lose entries as you narrow).
+    public var availableCameras: [String] {
+        Array(Set(images.compactMap(\.camera))).sorted()
+    }
+    public var availableLenses: [String] {
+        Array(Set(images.compactMap(\.lens))).sorted()
+    }
+    public var availableKeywords: [String] {
+        Array(keywordIndex.values.reduce(into: Set<String>()) { $0.formUnion($1) }).sorted()
     }
 
     public func fileURL(for record: ImageRecord) -> URL? {
@@ -104,6 +150,7 @@ public final class Library: ObservableObject {
         undecidedSubfolders = report.undecidedSubfolders
         images = try await catalog.allImages()
         editedImageIDs = try await catalog.editedImageIDs()
+        keywordIndex = try await catalog.allImageKeywords()
         if let selected = selectedImageID, !images.contains(where: { $0.id == selected }) {
             selectedImageID = nil
         }
@@ -221,6 +268,10 @@ public final class Library: ObservableObject {
 
     public func setKeywords(_ keywords: [String]) async throws {
         try await changeSelected { try await $0.setKeywords(keywords, forImageID: $1) }
+        if let id = selectedImageID {
+            let cleaned = Set(keywords.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+            keywordIndex[id] = cleaned.isEmpty ? nil : cleaned
+        }
     }
 
     /// Adds quarter turns clockwise (negative for counter-clockwise).
@@ -303,13 +354,14 @@ public final class Library: ObservableObject {
     /// newly selected image, or nil if nothing changed.
     @discardableResult
     public func moveSelection(by offset: Int) -> ImageRecord? {
-        guard !images.isEmpty else { return nil }
-        let current = selectedIndex ?? (offset > 0 ? -1 : images.count)
-        let target = min(max(current + offset, 0), images.count - 1)
+        let list = visibleImages
+        guard !list.isEmpty else { return nil }
+        let current = selectedIndex ?? (offset > 0 ? -1 : list.count)
+        let target = min(max(current + offset, 0), list.count - 1)
         guard target != selectedIndex else { return nil }
-        selectedImageID = images[target].id
-        selectedImageIDs = [images[target].id!]
-        return images[target]
+        selectedImageID = list[target].id
+        selectedImageIDs = [list[target].id!]
+        return list[target]
     }
 
     public func selectNext() -> ImageRecord? { moveSelection(by: 1) }

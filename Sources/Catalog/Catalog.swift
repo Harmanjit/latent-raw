@@ -127,6 +127,23 @@ public actor Catalog {
         }
     }
 
+    /// Every keyword assignment in one query, image id → names. Loaded
+    /// with the image list so the grid can filter by keyword without a
+    /// round trip per image.
+    public func allImageKeywords() throws -> [Int64: Set<String>] {
+        try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT ik.image_id AS image_id, k.name AS name FROM image_keywords ik
+                JOIN keywords k ON k.id = ik.keyword_id
+                """)
+            var index: [Int64: Set<String>] = [:]
+            for row in rows {
+                index[row["image_id"], default: []].insert(row["name"])
+            }
+            return index
+        }
+    }
+
     // MARK: - Settings and subfolder modes
 
     public func setting(_ key: String) throws -> String? {
