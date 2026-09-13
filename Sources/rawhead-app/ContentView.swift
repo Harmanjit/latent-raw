@@ -30,13 +30,17 @@ enum AppMode: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @StateObject private var model = EditorModel()
     @StateObject private var library = Library()
+    @StateObject private var exportQueue = ExportQueue()
     @State private var mode: AppMode = .library
+    @State private var showingExportSheet = false
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                LibraryPanel(library: library, onOpenFolder: showOpenFolderPanel,
-                             onRate: rate, onFlag: flag)
+                LibraryPanel(library: library, exportQueue: exportQueue,
+                             onOpenFolder: showOpenFolderPanel,
+                             onRate: rate, onFlag: flag,
+                             onExport: { showingExportSheet = true })
                 Divider()
                 switch mode {
                 case .library:
@@ -53,6 +57,15 @@ struct ContentView: View {
             statusBar
         }
         .background(navigationShortcuts)
+        .sheet(isPresented: $showingExportSheet) {
+            ExportSheet(count: library.selectedImageIDs.count) { preset, destination in
+                guard let gpu = model.gpu else { return }
+                // Flush the editor's pending edit so the export sees it.
+                model.flushPendingSave()
+                exportQueue.start(records: library.selectedImages, library: library,
+                                  preset: preset, destination: destination, gpu: gpu)
+            }
+        }
         .onAppear {
             LensfunDatabase.warmUp()
             wireEditSaving()

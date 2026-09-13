@@ -27,7 +27,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         collection.collectionViewLayout = layout
         collection.isSelectable = true
         collection.allowsEmptySelection = true
-        collection.allowsMultipleSelection = false
+        collection.allowsMultipleSelection = true
         collection.backgroundColors = [NSColor(white: 0.12, alpha: 1)]
         collection.register(ThumbnailItem.self, forItemWithIdentifier: ThumbnailItem.identifier)
         collection.dataSource = context.coordinator
@@ -55,6 +55,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         private var thumbnailVersion = -1
         private var editedIDs: Set<Int64> = []
         private var selectedID: Int64?
+        private var selectedIDs: Set<Int64> = []
 
         init(library: Library, onOpen: @escaping (ImageRecord) -> Void) {
             self.library = library
@@ -76,15 +77,19 @@ struct ThumbnailGridView: NSViewRepresentable {
             thumbnailVersion = library.thumbnailVersion
             editedIDs = library.editedImageIDs
 
-            if library.selectedImageID != selectedID {
+            if library.selectedImageID != selectedID || library.selectedImageIDs != selectedIDs {
                 selectedID = library.selectedImageID
-                if let index = images.firstIndex(where: { $0.id == selectedID }) {
-                    let path = IndexPath(item: index, section: 0)
-                    collectionView.selectionIndexPaths = [path]
-                    collectionView.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge)
-                } else {
-                    collectionView.selectionIndexPaths = []
+                selectedIDs = library.selectedImageIDs
+                var paths = Set<IndexPath>()
+                for (index, image) in images.enumerated() where image.id.map(selectedIDs.contains) ?? false {
+                    paths.insert(IndexPath(item: index, section: 0))
                 }
+                if let primary = selectedID, let index = images.firstIndex(where: { $0.id == primary }) {
+                    let path = IndexPath(item: index, section: 0)
+                    paths.insert(path)
+                    collectionView.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge)
+                }
+                collectionView.selectionIndexPaths = paths
             }
         }
 
@@ -117,17 +122,22 @@ struct ThumbnailGridView: NSViewRepresentable {
 
         // MARK: Delegate
 
+        /// Mirrors the collection view's selection into the library: every
+        /// selected item, with the most recently clicked one as primary.
+        private func pushSelection(_ collectionView: NSCollectionView, primaryPath: IndexPath?) {
+            let ids = Set(collectionView.selectionIndexPaths.compactMap { images[$0.item].id })
+            let primary = primaryPath.flatMap { images[$0.item].id } ?? (ids.count == 1 ? ids.first : selectedID)
+            selectedIDs = ids
+            selectedID = ids.contains(primary ?? -1) ? primary : ids.first
+            library.setSelection(ids, primary: selectedID)
+        }
+
         func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
-            guard let path = indexPaths.first else { return }
-            selectedID = images[path.item].id
-            library.selectedImageID = selectedID
+            pushSelection(collectionView, primaryPath: indexPaths.first)
         }
 
         func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
-            if collectionView.selectionIndexPaths.isEmpty {
-                selectedID = nil
-                library.selectedImageID = nil
-            }
+            pushSelection(collectionView, primaryPath: nil)
         }
     }
 }

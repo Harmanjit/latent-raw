@@ -5,9 +5,11 @@ import Catalog
 /// Collections, presets and the navigator arrive here in later phases.
 struct LibraryPanel: View {
     @ObservedObject var library: Library
+    @ObservedObject var exportQueue: ExportQueue
     let onOpenFolder: () -> Void
     let onRate: (Int) -> Void
     let onFlag: (ImageFlag) -> Void
+    let onExport: () -> Void
 
     @State private var keywordText = ""
 
@@ -60,12 +62,46 @@ struct LibraryPanel: View {
                 selectionSection(selected)
             }
 
+            exportSection
+
             Spacer()
         }
         .padding(14)
         .frame(width: 220, alignment: .leading)
         .onChange(of: library.selectedKeywords, initial: true) { _, keywords in
             keywordText = keywords.joined(separator: ", ")
+        }
+    }
+
+    /// Export the selection, and how the current batch is going.
+    private var exportSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionLabel("Export")
+            let n = library.selectedImageIDs.count
+            Button(n <= 1 ? "Export…" : "Export \(n) images…", action: onExport)
+                .controlSize(.small)
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(n == 0 || exportQueue.isRunning)
+            if exportQueue.isRunning {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text("\(exportQueue.done) of \(exportQueue.total)").font(.caption2)
+                        Spacer()
+                        Button("Cancel") { exportQueue.cancel() }.controlSize(.mini)
+                    }
+                    ProgressView(value: Double(exportQueue.done), total: Double(max(exportQueue.total, 1)))
+                        .controlSize(.small)
+                    Text(exportQueue.currentName).font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+            } else if !exportQueue.summary.isEmpty {
+                Text(exportQueue.summary).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(exportQueue.failures) { f in
+                    Text("✗ \(f.name): \(f.reason)").font(.caption2).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 

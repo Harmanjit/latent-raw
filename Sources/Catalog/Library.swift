@@ -30,8 +30,23 @@ public final class Library: ObservableObject {
     /// Images that have a stored edit, so the grid can badge them.
     @Published public private(set) var editedImageIDs: Set<Int64> = []
 
+    /// The primary selection: what the editor opens and the panel edits.
     @Published public var selectedImageID: Int64? {
         didSet { if selectedImageID != oldValue { Task { await reloadSelectedKeywords() } } }
+    }
+    /// Everything selected in the grid (Cmd-click, Shift-click). Batch
+    /// operations such as export act on this; it always contains the
+    /// primary selection when there is one.
+    @Published public var selectedImageIDs: Set<Int64> = []
+
+    public var selectedImages: [ImageRecord] {
+        images.filter { $0.id.map(selectedImageIDs.contains) ?? false }
+    }
+
+    /// Sets both selections from the grid.
+    public func setSelection(_ ids: Set<Int64>, primary: Int64?) {
+        selectedImageIDs = ids
+        selectedImageID = primary ?? ids.first.flatMap { id in images.first { $0.id == id }?.id }
     }
 
     public private(set) var catalog: Catalog?
@@ -92,6 +107,7 @@ public final class Library: ObservableObject {
         if let selected = selectedImageID, !images.contains(where: { $0.id == selected }) {
             selectedImageID = nil
         }
+        selectedImageIDs = selectedImageIDs.filter { id in images.contains { $0.id == id } }
         statusText = "\(images.count) images · \(report)"
 
         startThumbnailGeneration()
@@ -248,6 +264,7 @@ public final class Library: ObservableObject {
         let target = min(max(current + offset, 0), images.count - 1)
         guard target != selectedIndex else { return nil }
         selectedImageID = images[target].id
+        selectedImageIDs = [images[target].id!]
         return images[target]
     }
 
