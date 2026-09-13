@@ -203,7 +203,7 @@ To search across catalogs, Latent uses SQLite's `ATTACH` to query several catalo
     xmlns:xmp="http://ns.adobe.com/xap/1.0/"
     xmlns:dc="http://purl.org/dc/elements/1.1/"
     xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"
-    xmlns:latent="https://github.com/OWNER/latent/ns/1.0/"
+    xmlns:latent="https://github.com/Harmanjit/latent/ns/1.0/"
     xmp:Rating="4"
     xmp:Label="Green"
     xmpMM:PreservedFileName="DSC_0001.NEF"
@@ -514,6 +514,6 @@ Phase 0 is complete when all of the following hold:
 
 ## 16. Open Items
 
-- **Namespace owner.** Decide the GitHub owner used in the `latent:` namespace URI. It must be fixed before the first public release.
-- **Name availability.** Confirm "Latent" is available as a GitHub name and isn't used by an existing photo app.
+- **Namespace owner.** Resolved 2026-09-13: `https://github.com/Harmanjit/latent/ns/1.0/`.
+- **Name availability.** Checked 2026-09-13: no "Latent" trademark in US or EU for software. A mobile app called "Latente" exists; see the note on naming in README.md.
 - **Tokina vignetting.** Validate the borrowed Canon EF vignetting profile against real shots from the Nikon F version.
