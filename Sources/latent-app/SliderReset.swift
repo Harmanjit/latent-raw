@@ -43,7 +43,7 @@ struct ResettableSlider: NSViewRepresentable {
         slider.isEnabled = context.environment.isEnabled
     }
 
-    final class Coordinator: NSObject {
+    @MainActor final class Coordinator: NSObject {
         var parent: ResettableSlider
         init(_ parent: ResettableSlider) { self.parent = parent }
         @objc func changed(_ sender: NSSlider) {
