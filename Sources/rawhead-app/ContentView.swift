@@ -193,7 +193,11 @@ struct ContentView: View {
                                 backgroundLevel: model.backgroundLevel,
                                 onZoom: { model.zoom(by: $0, about: $1) },
                                 onPan: { model.pan(by: $0) },
-                                onDoubleClick: { model.toggleZoom(at: $0) })
+                                onDoubleClick: { model.toggleZoom(at: $0) },
+                                toolActive: model.maskToolActive,
+                                onToolBegan: { model.maskToolBegan(at: $0) },
+                                onToolMoved: { model.maskToolMoved(to: $0) },
+                                onToolEnded: { model.maskToolEnded() })
             } else {
                 VStack(spacing: 12) {
                     Text(model.isReady ? "No image open" : "Metal unavailable")
@@ -296,6 +300,13 @@ struct ContentView: View {
                     .padding(.top, 8)
                 } label: {
                     disclosureLabel("Highlight Reconstruction")
+                }
+
+                DisclosureGroup {
+                    LocalAdjustmentsPanel(model: model)
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Local Adjustments")
                 }
 
                 DisclosureGroup {

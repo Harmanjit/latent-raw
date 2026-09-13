@@ -36,6 +36,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var curve: Curve?
         public var hsl: HSLAdjustments?
         public var splittoning: SplitToning?
+        public var locals: [LocalAdjustment]?
     }
 
     public struct Curve: Codable, Equatable, Sendable {
@@ -125,6 +126,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.curve = Curve(points: p.toneCurve.points.map { [$0.x, $0.y] })
         modules.hsl = p.hsl
         modules.splittoning = p.splitToning
+        modules.locals = p.locals.isEmpty ? nil : p.locals
     }
 
     /// Records which profile produced this edit. Not part of equality
@@ -173,6 +175,7 @@ public struct EditStack: Codable, Equatable, Sendable {
             p.hsl = h
         }
         if let st = modules.splittoning { p.splitToning = st }
+        p.locals = modules.locals ?? []
         return p
     }
 

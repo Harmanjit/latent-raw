@@ -183,6 +183,99 @@ inline float3 applyCurve(float3 p, constant float *lut) {
     return out;
 }
 
+// ---------------------------------------------------------------------
+// Local adjustments (stage 10): each has a mask in [0,1] built from its
+// geometry, optionally narrowed by a luminance or hue range, and applies
+// exposure / contrast / saturation / warmth in scene-linear light scaled
+// by that mask. Geometry is in normalized sensor coordinates.
+// ---------------------------------------------------------------------
+struct LocalAdjust {
+    float4 geometry0;
+    float4 geometry1;
+    float4 adjust;     // ev, contrast, saturation, warmth
+    float4 lumRange;   // low, high, feather, enabled
+    float4 hueRange;   // centre, width, minSat, enabled
+    int4   info;       // type (1 linear, 2 radial, 3 brush, 4 whole), brushSlice, invert
+};
+
+constant int kMaxLocals = 8;
+
+inline float localMask(constant LocalAdjust &l, float2 pNorm, float2 sensorSize,
+                       texture2d_array<float, access::sample> brushes,
+                       float displayLuma, float3 perceptual) {
+    constexpr sampler ms(coord::normalized, address::clamp_to_edge, filter::linear);
+    float m = 0.0;
+    switch (l.info.x) {
+        case 1: {   // linear: 1 at start, 0 past end, in sensor pixels
+            float2 a = l.geometry0.xy * sensorSize, b = l.geometry0.zw * sensorSize;
+            float2 d = b - a;
+            float len2 = max(dot(d, d), 1e-6);
+            float t = dot(pNorm * sensorSize - a, d) / len2;
+            m = 1.0 - smoothstep(0.0, 1.0, t);
+            break;
+        }
+        case 2: {   // radial ellipse, radii as fractions of the short side
+            float shortSide = min(sensorSize.x, sensorSize.y);
+            float2 c = l.geometry0.xy * sensorSize;
+            float2 r = max(l.geometry0.zw * shortSide, float2(1.0));
+            float2 q = (pNorm * sensorSize - c) / r;
+            float e = length(q);
+            float inner = 1.0 - clamp(l.geometry1.x, 0.0, 0.999);
+            m = 1.0 - smoothstep(inner, 1.0, e);
+            break;
+        }
+        case 3:     // brush: sample the rasterized slice
+            m = brushes.sample(ms, pNorm, uint(l.info.y)).r;
+            break;
+        case 4:     // whole image
+            m = 1.0;
+            break;
+        default:
+            return 0.0;
+    }
+    if (l.info.z != 0) m = 1.0 - m;
+
+    if (l.lumRange.w != 0.0) {
+        float f = max(l.lumRange.z, 1e-3);
+        float lo = l.lumRange.x, hi = l.lumRange.y;
+        float inLow  = smoothstep(lo - f, lo + f * 0.001, displayLuma);   // ramps up at lo
+        float inHigh = 1.0 - smoothstep(hi - f * 0.001, hi + f, displayLuma);
+        m *= inLow * inHigh;
+    }
+    if (l.hueRange.w != 0.0) {
+        float3 hsv = rgbToHSV(perceptual);
+        float dh = abs(fmod(hsv.x - l.hueRange.x + 540.0, 360.0) - 180.0);
+        float hueW = 1.0 - smoothstep(l.hueRange.y * 0.7, l.hueRange.y, dh);
+        float satW = smoothstep(l.hueRange.z * 0.5, l.hueRange.z, hsv.y);
+        m *= hueW * satW;
+    }
+    return clamp(m, 0.0, 1.0);
+}
+
+inline float3 applyLocal(float3 working, constant LocalAdjust &l, float m, float greyPoint) {
+    if (m <= 0.0) return working;
+    float4 a = l.adjust;
+    // Exposure: light, not paint — a multiply in linear.
+    working *= exp2(a.x * m);
+    // Contrast: a gamma about mid grey, per channel.
+    if (a.y != 0.0) {
+        float g = max(greyPoint, 1e-4);
+        float gamma = exp2(a.y * m);
+        working = g * pow(max(working / g, 0.0), gamma);
+    }
+    // Saturation: pull toward / push away from the pixel's own luminance.
+    if (a.z != 0.0) {
+        float y = dot(working, float3(0.2627, 0.6780, 0.0593));
+        working = max(mix(float3(y), working, 1.0 + a.z * m), 0.0);
+    }
+    // Warmth: a small red/blue see-saw.
+    if (a.w != 0.0) {
+        float w = a.w * m * 0.15;
+        working *= float3(1.0 + w, 1.0, 1.0 - w);
+    }
+    return working;
+}
+
 kernel void colorAndTone(
     texture2d<float, access::read>  input        [[texture(0)]],
     texture2d<float, access::write> output       [[texture(1)]],
@@ -202,6 +295,13 @@ kernel void colorAndTone(
     constant float *hsl                          [[buffer(13)]],  // 8 hue, 8 sat, 8 lum
     constant float4 &splitTint                   [[buffer(14)]],
     constant float &splitBalance                 [[buffer(15)]],
+    constant LocalAdjust *locals                 [[buffer(16)]],
+    constant int &localCount                     [[buffer(17)]],
+    constant float2 &sensorSize                  [[buffer(18)]],
+    constant float2 &tileOrigin                  [[buffer(19)]],
+    constant float &binSpan                      [[buffer(20)]],
+    constant int &maskOverlayIndex               [[buffer(21)]],  // -1 = none
+    texture2d_array<float, access::sample> brushMasks [[texture(2)]],
     uint2 gid                                    [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
@@ -220,6 +320,22 @@ kernel void colorAndTone(
 
     // Stage 6: exposure, in linear light (the only place it's meaningful).
     working *= exposureScale;
+
+    // Stage 10: local adjustments. Range masks look at the pixel *before*
+    // any local changes it, so brightening the shadows can't push a pixel
+    // out of its own mask mid-computation.
+    float overlay = 0.0;
+    if (localCount > 0) {
+        float2 pNorm = (tileOrigin + (float2(gid) + 0.5) * binSpan) / sensorSize;
+        float3 baseDisplay = toneMapSigmoid(working, contrast, greyPoint, 1.0);
+        float displayLuma = pow(max(dot(baseDisplay, float3(0.2627, 0.6780, 0.0593)), 0.0), 1.0 / 2.2);
+        float3 perceptual = pow(max(baseDisplay, 0.0), 1.0 / 2.2);
+        for (int i = 0; i < localCount && i < kMaxLocals; i++) {
+            float m = localMask(locals[i], pNorm, sensorSize, brushMasks, displayLuma, perceptual);
+            if (i == maskOverlayIndex) overlay = m;
+            working = applyLocal(working, locals[i], m, greyPoint);
+        }
+    }
 
     // Stage 9: scene-referred -> display-referred, up to the headroom.
     // Analysis renders skip this to get scene-linear numbers out.
@@ -243,6 +359,11 @@ kernel void colorAndTone(
     // An EDR screen buffer wants linear light, above 1.0 where the scene
     // was, and the compositor handles the rest.
     float3 outputLinear = workingToOutput * display;
+    // Mask overlay for editing: the selected local's mask as a red tint.
+    if (maskOverlayIndex >= 0) {
+        float3 red = float3(0.8, 0.05, 0.05) * (encodeOutput != 0 ? 1.0 : 0.6);
+        outputLinear = mix(outputLinear, red, overlay * 0.5);
+    }
     float3 result = (encodeOutput != 0) ? encodeSRGB(outputLinear) : max(outputLinear, 0.0);
 
     output.write(float4(result, 1.0), gid);

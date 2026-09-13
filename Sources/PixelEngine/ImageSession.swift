@@ -88,6 +88,36 @@ public final class ImageSession {
 
     private var texturePool: [TextureKey: MTLTexture] = [:]
 
+    /// Rasterized brush masks, created on first use.
+    private var brushMasks: BrushMaskSet?
+    /// A 1x1 array texture to bind when there are no brush masks: Metal
+    /// requires every declared texture slot to be bound.
+    private var placeholderMasks: MTLTexture?
+
+    /// Keeps brush mask slices in step with `locals`; returns the texture
+    /// to bind and each brush local's slice.
+    func brushMaskTexture(for locals: [LocalAdjustment]) -> (MTLTexture?, [UUID: Int32]) {
+        let hasBrush = locals.contains { if case .brush = $0.shape { return true } else { return false } }
+        if hasBrush {
+            if brushMasks == nil {
+                brushMasks = BrushMaskSet(device: gpu.device, sensorWidth: file.summary.rawWidth,
+                                          sensorHeight: file.summary.rawHeight)
+            }
+            guard let set = brushMasks else { return (nil, [:]) }
+            return (set.texture, set.sync(locals: locals))
+        }
+        if placeholderMasks == nil {
+            let d = MTLTextureDescriptor()
+            d.textureType = .type2DArray
+            d.pixelFormat = .r8Unorm
+            d.width = 1; d.height = 1; d.arrayLength = 1
+            d.storageMode = .shared
+            d.usage = [.shaderRead]
+            placeholderMasks = gpu.device.makeTexture(descriptor: d)
+        }
+        return (placeholderMasks, [:])
+    }
+
     /// Everything the demosaiced camera-RGB stage depends on. Two renders
     /// with equal keys produce identical camera-RGB textures, so the second
     /// can skip demosaicing entirely (DESIGN.md §8.2, "stage cache").

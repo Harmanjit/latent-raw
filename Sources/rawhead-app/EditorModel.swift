@@ -134,8 +134,144 @@ final class EditorModel: ObservableObject {
     var displayHasHeadroom: Bool { displayHeadroom > 1.001 }
 
     /// What the pipeline renders for the screen: linear Display P3, so
-    /// the presenter can hand it to the EDR layer untouched.
-    private var displayOutput: RenderOutput { .edrDisplay(headroom: effectiveHeadroom) }
+    /// the presenter can hand it to the EDR layer untouched. While a local
+    /// is selected and its mask should be visible, the overlay index rides
+    /// along — a display setting, never part of the edit.
+    private var displayOutput: RenderOutput {
+        var output = RenderOutput.edrDisplay(headroom: effectiveHeadroom)
+        if showMaskOverlay || isDraggingMask, let i = selectedLocalIndex, i < parameters.locals.count {
+            output.maskOverlay = i
+        }
+        return output
+    }
+
+    // MARK: - Local adjustments
+
+    enum MaskTool: String, CaseIterable { case none, linear, radial, brush, erase }
+
+    @Published var selectedLocalIndex: Int? {
+        didSet { if selectedLocalIndex != oldValue { maskTool = .none; rerender() } }
+    }
+    @Published var maskTool: MaskTool = .none
+    @Published var showMaskOverlay = false {
+        didSet { if showMaskOverlay != oldValue { rerender() } }
+    }
+    @Published var brushRadius: Float = 0.04    // fraction of the short side
+    @Published var brushFeather: Float = 0.5
+    @Published var brushFlow: Float = 1.0
+    private var isDraggingMask = false {
+        didSet { if isDraggingMask != oldValue { rerender() } }
+    }
+    private var lastDab: SIMD2<Float>?
+
+    var selectedLocal: LocalAdjustment? {
+        guard let i = selectedLocalIndex, i < parameters.locals.count else { return nil }
+        return parameters.locals[i]
+    }
+
+    /// Adds a local with sensible starting geometry, selects it, and arms
+    /// the matching tool so the next drag on the image places it.
+    func addLocal(_ kind: MaskTool) {
+        guard hasImage, parameters.locals.count < LocalAdjustment.maximumCount else { return }
+        let n = parameters.locals.count + 1
+        let local: LocalAdjustment
+        switch kind {
+        case .linear:
+            local = LocalAdjustment(name: "Gradient \(n)", shape: .linear(start: SIMD2(0.5, 0.0), end: SIMD2(0.5, 0.5)))
+        case .radial:
+            local = LocalAdjustment(name: "Radial \(n)", shape: .radial(centre: SIMD2(0.5, 0.5), radii: SIMD2(0.3, 0.3), feather: 0.5))
+        case .brush, .erase:
+            local = LocalAdjustment(name: "Brush \(n)", shape: .brush(strokes: []))
+        case .none:
+            local = LocalAdjustment(name: "Whole image \(n)", shape: .whole)
+        }
+        parameters.locals.append(local)
+        selectedLocalIndex = parameters.locals.count - 1
+        maskTool = kind == .none ? .none : (kind == .erase ? .brush : kind)
+    }
+
+    func removeSelectedLocal() {
+        guard let i = selectedLocalIndex, i < parameters.locals.count else { return }
+        parameters.locals.remove(at: i)
+        selectedLocalIndex = parameters.locals.isEmpty ? nil : min(i, parameters.locals.count - 1)
+    }
+
+    /// Whether drags on the image should shape a mask instead of panning.
+    var maskToolActive: Bool { maskTool != .none && selectedLocal != nil }
+
+    /// Screen pixel -> normalized sensor coordinate, through the viewport
+    /// (rotated image space) and the rotation (back to the sensor).
+    private func sensorNormalized(_ screen: CGPoint) -> SIMD2<Float> {
+        let image = viewport.sensorPoint(forScreenPoint: screen, drawableSize: drawableSize)
+        let sensor = rotation.sensorPoint(fromImagePoint: image, sensorSize: sensorSize)
+        return SIMD2(Float(sensor.x / sensorSize.width), Float(sensor.y / sensorSize.height))
+    }
+
+    func maskToolBegan(at screen: CGPoint) {
+        guard let i = selectedLocalIndex, i < parameters.locals.count else { return }
+        let p = sensorNormalized(screen)
+        isDraggingMask = true
+        switch (maskTool, parameters.locals[i].shape) {
+        case (.linear, _):
+            parameters.locals[i].shape = .linear(start: p, end: p)
+        case (.radial, _):
+            parameters.locals[i].shape = .radial(centre: p, radii: SIMD2(0.001, 0.001), feather: currentFeather(i))
+        case (.brush, .brush(var strokes)), (.erase, .brush(var strokes)):
+            strokes.append(BrushStroke(points: [p], radius: brushRadius, feather: brushFeather,
+                                       flow: brushFlow, erase: maskTool == .erase))
+            parameters.locals[i].shape = .brush(strokes: strokes)
+            lastDab = p
+        default:
+            break
+        }
+    }
+
+    func maskToolMoved(to screen: CGPoint) {
+        guard isDraggingMask, let i = selectedLocalIndex, i < parameters.locals.count else { return }
+        let p = sensorNormalized(screen)
+        switch (maskTool, parameters.locals[i].shape) {
+        case (.linear, .linear(let start, _)):
+            parameters.locals[i].shape = .linear(start: start, end: p)
+        case (.radial, .radial(let centre, _, let feather)):
+            // Distance in sensor pixels as a fraction of the short side, so
+            // the circle is round whatever the aspect ratio.
+            let d = (p - centre) * SIMD2(Float(sensorSize.width), Float(sensorSize.height))
+            let r = max((d.x * d.x + d.y * d.y).squareRoot() / Float(min(sensorSize.width, sensorSize.height)), 0.005)
+            parameters.locals[i].shape = .radial(centre: centre, radii: SIMD2(r, r), feather: feather)
+        case (.brush, .brush(var strokes)), (.erase, .brush(var strokes)):
+            // Space dabs at a quarter radius so the stroke reads as continuous.
+            guard var last = strokes.popLast() else { return }
+            let spacing = brushRadius * 0.25
+            let scale = SIMD2(Float(sensorSize.width), Float(sensorSize.height)) / Float(min(sensorSize.width, sensorSize.height))
+            let from = lastDab ?? p
+            let delta = (p - from) * scale
+            let dist = (delta.x * delta.x + delta.y * delta.y).squareRoot()
+            if dist >= spacing {
+                let steps = Int(dist / spacing)
+                for k in 1...steps {
+                    last.points.append(from + (p - from) * (Float(k) / Float(steps)))
+                }
+                lastDab = p
+            }
+            strokes.append(last)
+            parameters.locals[i].shape = .brush(strokes: strokes)
+        default:
+            break
+        }
+    }
+
+    func maskToolEnded() {
+        isDraggingMask = false
+        lastDab = nil
+        // A gradient or radial is placed once; further drags would move it
+        // again, which is rarely what's wanted. Brushes keep painting.
+        if maskTool == .linear || maskTool == .radial { maskTool = .none }
+    }
+
+    private func currentFeather(_ i: Int) -> Float {
+        if case .radial(_, _, let f) = parameters.locals[i].shape { return f }
+        return 0.5
+    }
 
     /// The surround grey, in the drawable's linear encoding. 0.12 in sRGB
     /// terms — Lightroom's mid-dark grey — is about 0.0137 linear.

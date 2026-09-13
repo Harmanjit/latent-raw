@@ -113,6 +113,8 @@ public struct EditParameters: Sendable, Equatable {
     public var toneCurve: ToneCurve
     public var hsl: HSLAdjustments
     public var splitToning: SplitToning
+    /// Local adjustments, applied in order.
+    public var locals: [LocalAdjustment]
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -134,7 +136,8 @@ public struct EditParameters: Sendable, Equatable {
                 manualVignetting: Float = 0,
                 toneCurve: ToneCurve = .identity,
                 hsl: HSLAdjustments = .neutral,
-                splitToning: SplitToning = .neutral) {
+                splitToning: SplitToning = .neutral,
+                locals: [LocalAdjustment] = []) {
         self.whiteBalance = whiteBalance
         self.exposureEV = exposureEV
         self.contrast = contrast
@@ -156,6 +159,7 @@ public struct EditParameters: Sendable, Equatable {
         self.toneCurve = toneCurve
         self.hsl = hsl
         self.splitToning = splitToning
+        self.locals = locals
     }
 
     public static let neutral = EditParameters()
@@ -175,6 +179,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.lensVignetting == b.lensVignetting
             && a.manualDistortion == b.manualDistortion && a.manualVignetting == b.manualVignetting
             && a.toneCurve == b.toneCurve && a.hsl == b.hsl && a.splitToning == b.splitToning
+            && a.locals == b.locals
     }
 }
 
@@ -191,6 +196,9 @@ public struct RenderOutput: Sendable, Equatable {
     /// Run the tone curve? Off for analysis renders that want scene-linear
     /// values (exposure applied, nothing else).
     public var toneMapped: Bool
+    /// Index into `EditParameters.locals` whose mask to paint as a red
+    /// overlay, for editing. nil normally. A display concern, not an edit.
+    public var maskOverlay: Int? = nil
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -219,7 +227,7 @@ public struct RenderOutput: Sendable, Equatable {
     public static func == (a: RenderOutput, b: RenderOutput) -> Bool {
         String(describing: a.space) == String(describing: b.space)
             && a.headroom == b.headroom && a.encoded == b.encoded
-            && a.toneMapped == b.toneMapped
+            && a.toneMapped == b.toneMapped && a.maskOverlay == b.maskOverlay
     }
 }
 
@@ -403,7 +411,8 @@ public final class RenderPipeline {
                                           cameraToWorking: cameraToWorking,
                                           multipliers: multipliers,
                                           parameters: parameters,
-                                          output: output)
+                                          output: output,
+                                          renderInfo: renderInfo, binSpan: binSpan)
 
         // Stage 12: sharpening, on the display-referred result.
         if parameters.sharpenAmount > 0 {
@@ -618,9 +627,13 @@ public final class RenderPipeline {
                                     cameraToWorking: simd_float3x3,
                                     multipliers: SIMD4<Float>,
                                     parameters: EditParameters,
-                                    output: RenderOutput) throws -> MTLTexture {
+                                    output: RenderOutput,
+                                    renderInfo: RenderInfo, binSpan: Float) throws -> MTLTexture {
         let outputTexture = try session.texture(width: input.width, height: input.height,
                                                  pixelFormat: .rgba16Float, role: outputRole)
+        // Brush masks are rasterized (if needed) before encoding begins.
+        let locals = Array(parameters.locals.prefix(LocalAdjustment.maximumCount))
+        let (maskTexture, slices) = session.brushMaskTexture(for: locals)
 
         guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             throw RenderError.commandBufferFailed
@@ -673,6 +686,24 @@ public final class RenderPipeline {
         encoder.setBytes(&hslTable, length: hslTable.count * 4, index: 13)
         encoder.setBytes(&tint, length: 16, index: 14)
         encoder.setBytes(&balance, length: 4, index: 15)
+
+        // Local adjustments.
+        var packed = locals.map { LocalAdjustGPU($0, brushSlice: slices[$0.id] ?? 0) }
+        if packed.isEmpty { packed = [LocalAdjustGPU(LocalAdjustment(name: "", shape: .whole), brushSlice: 0)] }
+        var localCount = Int32(locals.count)
+        var sensorSize = SIMD2<Float>(Float(session.file.summary.rawWidth),
+                                      Float(session.file.summary.rawHeight))
+        var tileOrigin = SIMD2<Float>(Float(renderInfo.sensorRect.origin.x),
+                                      Float(renderInfo.sensorRect.origin.y))
+        var span = binSpan
+        var overlay = Int32(output.maskOverlay ?? -1)
+        encoder.setBytes(&packed, length: packed.count * MemoryLayout<LocalAdjustGPU>.stride, index: 16)
+        encoder.setBytes(&localCount, length: 4, index: 17)
+        encoder.setBytes(&sensorSize, length: 8, index: 18)
+        encoder.setBytes(&tileOrigin, length: 8, index: 19)
+        encoder.setBytes(&span, length: 4, index: 20)
+        encoder.setBytes(&overlay, length: 4, index: 21)
+        encoder.setTexture(maskTexture, index: 2)
 
         dispatch(encoder, pso: gpu.colorAndTonePSO, width: input.width, height: input.height)
         encoder.endEncoding()

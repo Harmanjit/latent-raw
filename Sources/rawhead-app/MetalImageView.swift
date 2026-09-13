@@ -41,6 +41,11 @@ struct MetalImageView: NSViewRepresentable {
     /// Scroll or drag: move the content by this many device pixels.
     let onPan: (CGSize) -> Void
     let onDoubleClick: (CGPoint) -> Void
+    /// When true, drags shape a mask instead of panning.
+    let toolActive: Bool
+    let onToolBegan: (CGPoint) -> Void
+    let onToolMoved: (CGPoint) -> Void
+    let onToolEnded: () -> Void
 
     func makeNSView(context: Context) -> MetalLayerView {
         let view = MetalLayerView()
@@ -50,11 +55,15 @@ struct MetalImageView: NSViewRepresentable {
         view.onZoom = onZoom
         view.onPan = onPan
         view.onDoubleClick = onDoubleClick
+        view.onToolBegan = onToolBegan
+        view.onToolMoved = onToolMoved
+        view.onToolEnded = onToolEnded
         return view
     }
 
     func updateNSView(_ view: MetalLayerView, context: Context) {
         view.backgroundLevel = backgroundLevel
+        view.toolActive = toolActive
         view.display(preview: preview, tile: tile, transform: transform,
                      rotation: rotation, sensorSize: sensorSize)
     }
@@ -78,6 +87,10 @@ final class MetalLayerView: NSView {
     var onZoom: ((CGFloat, CGPoint) -> Void)?
     var onPan: ((CGSize) -> Void)?
     var onDoubleClick: ((CGPoint) -> Void)?
+    var toolActive = false
+    var onToolBegan: ((CGPoint) -> Void)?
+    var onToolMoved: ((CGPoint) -> Void)?
+    var onToolEnded: (() -> Void)?
 
     /// Top-left origin, like the Metal drawable. Without this AppKit puts
     /// (0,0) at the bottom-left and every y coordinate would need
@@ -215,14 +228,27 @@ final class MetalLayerView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if toolActive {
+            onToolBegan?(screenPoint(for: event))
+            return
+        }
         if event.clickCount == 2 {
             onDoubleClick?(screenPoint(for: event))
         }
     }
 
-    /// Click-drag pans; the content follows the pointer.
+    /// Click-drag pans; the content follows the pointer. With a mask tool
+    /// armed, the drag shapes the mask instead.
     override func mouseDragged(with event: NSEvent) {
+        if toolActive {
+            onToolMoved?(screenPoint(for: event))
+            return
+        }
         onPan?(CGSize(width: event.deltaX * backingScale,
                       height: event.deltaY * backingScale))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if toolActive { onToolEnded?() }
     }
 }
