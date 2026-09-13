@@ -5,7 +5,7 @@ import Foundation
 /// (DESIGN.md §5.6), so choosing "Tone" carries exposure, the curve's
 /// inputs and highlight recovery together, the way a person thinks of it.
 public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
-    case whiteBalance, tone, toneCurve, colour, splitToning, detail, lens, locals
+    case whiteBalance, tone, toneCurve, colour, splitToning, detail, lens, locals, crop
 
     public var id: String { rawValue }
 
@@ -19,6 +19,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .detail:       return "Detail (sharpening, noise)"
         case .lens:         return "Lens Corrections"
         case .locals:       return "Local Adjustments"
+        case .crop:         return "Crop & Straighten"
         }
     }
 
@@ -57,6 +58,8 @@ extension EditStack {
                 result.modules.lens = other.modules.lens
             case .locals:
                 result.modules.locals = other.modules.locals
+            case .crop:
+                result.modules.crop = other.modules.crop
             }
         }
         return result
@@ -81,6 +84,7 @@ extension EditStack {
         if m.denoise != nil || m.sharpen != nil || m.demosaic != nil { g.insert(.detail) }
         if m.lens != nil { g.insert(.lens) }
         if m.locals != nil { g.insert(.locals) }
+        if m.crop != nil { g.insert(.crop) }
         return g
     }
 }

@@ -2,31 +2,26 @@
 using namespace metal;
 
 // Packs a rendered (display-encoded) texture into the final export
-// pixels in one pass: rotation and the last resize are folded into the
-// sampling, and the write converts to 8- or 16-bit unorm because that's
-// the destination texture's format. This replaces per-pixel CPU loops
-// that took seconds for a 24 MP frame in a debug build.
+// pixels in one pass: crop, straighten, rotation and the last resize are
+// all folded into one affine map from destination coordinates to source
+// texture coordinates, and the write converts to 8- or 16-bit unorm
+// because that's the destination texture's format. This replaces
+// per-pixel CPU loops that took seconds for a 24 MP frame.
 //
-// `rotation` is quarter turns clockwise. For each destination pixel we
-// ask "where in the unrotated source does this come from?" — the same
-// inverse-mapping idea as the lens and present kernels.
+// `map` takes a normalized destination point (0...1 across the output)
+// to a normalized source coordinate — the same inverse-mapping idea as
+// the lens and present kernels. It's built on the CPU by CropFrame.
 kernel void packForExport(
     texture2d<float, access::sample> source [[texture(0)]],
     texture2d<float, access::write>  dest   [[texture(1)]],
-    constant uint &rotation                 [[buffer(0)]],
+    constant float3x2 &map                  [[buffer(0)]],
     uint2 gid                               [[thread_position_in_grid]])
 {
     if (gid.x >= dest.get_width() || gid.y >= dest.get_height()) return;
     constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);
 
     float2 p = (float2(gid) + 0.5) / float2(dest.get_width(), dest.get_height());
-    float2 uv;
-    switch (rotation) {
-        case 1:  uv = float2(p.y, 1.0 - p.x); break;        // 90° CW
-        case 2:  uv = 1.0 - p; break;                        // 180°
-        case 3:  uv = float2(1.0 - p.y, p.x); break;        // 270° CW
-        default: uv = p; break;
-    }
+    float2 uv = map * float3(p, 1.0);
     float4 c = source.sample(s, uv);
     dest.write(float4(clamp(c.rgb, 0.0, 1.0), 1.0), gid);
 }

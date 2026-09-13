@@ -37,9 +37,102 @@ final class EditorModel: ObservableObject {
     @Published var parameters = EditParameters() {
         didSet {
             if parameters != oldValue {
+                if parameters.crop != oldValue.crop { canvasDidChange() }
                 rerender()
                 scheduleSave()
             }
+        }
+    }
+
+    // MARK: - Crop and straighten
+
+    /// While on, the viewport shows the whole (straightened) sensor with
+    /// the crop rectangle drawn over it; off, it shows only the crop.
+    @Published var cropToolActive = false {
+        didSet {
+            guard cropToolActive != oldValue else { return }
+            if !cropToolActive { straightenBase = nil }
+            canvasDidChange()
+            rerenderForViewport()
+        }
+    }
+    /// The crop as it was before the straighten slider started moving, so
+    /// turning the angle back re-grows the crop instead of leaving it at
+    /// whatever the largest angle forced it to.
+    private var straightenBase: CropParameters?
+
+    /// The geometry of the stored crop (what export uses).
+    private var cropFrame: CropFrame {
+        CropFrame(sensorSize: sensorSize, crop: parameters.crop, rotation: rotation)
+    }
+
+    /// The geometry the viewport shows: the crop, or with the tool open,
+    /// the whole sensor at the crop's angle.
+    var frame: CropFrame { cropToolActive ? cropFrame.toolFrame : cropFrame }
+
+    /// The crop rectangle on the tool canvas, in canvas pixels. Setting it
+    /// is what the overlay's handles do.
+    var cropCanvasRect: CGRect {
+        get { cropFrame.toolCanvasRect }
+        set {
+            guard hasImage else { return }
+            straightenBase = nil
+            parameters.crop = cropFrame.cropForToolCanvasRect(newValue).constrained(sensorSize: sensorSize)
+        }
+    }
+
+    /// Bounds the crop rectangle may occupy on the tool canvas. Exact at
+    /// 0°; at other angles the sensor is a tilted rectangle inside this
+    /// box and `constrained` shrinks the crop to stay on it.
+    var cropCanvasBounds: CGRect { CGRect(origin: .zero, size: frame.canvasSize) }
+
+    func setStraighten(_ degrees: Float) {
+        guard hasImage else { return }
+        var base = straightenBase ?? parameters.crop
+        base.angle = max(-45, min(45, degrees))
+        straightenBase = base
+        parameters.crop = base.constrained(sensorSize: sensorSize)
+    }
+
+    /// Locks the crop to `ratio` (width:height as displayed, so a
+    /// portrait-oriented image's "3:2" is tall), or frees it with nil.
+    func setCropAspect(displayRatio ratio: Float?) {
+        guard hasImage else { return }
+        straightenBase = nil
+        guard let ratio else { parameters.crop.aspect = nil; return }
+        let sensorRatio = rotation.swapsAxes ? 1 / ratio : ratio
+        parameters.crop = parameters.crop.withAspect(sensorRatio, sensorSize: sensorSize)
+    }
+
+    /// The lock as displayed, or nil when free.
+    var cropAspectDisplayRatio: Float? {
+        guard let a = parameters.crop.aspect else { return nil }
+        return rotation.swapsAxes ? 1 / a : a
+    }
+
+    /// The image's own ratio as displayed, for the "Original" option.
+    var originalDisplayRatio: Float {
+        let s = rotation.imageSize(forSensorSize: sensorSize)
+        return s.height > 0 ? Float(s.width / s.height) : 1
+    }
+
+    /// Output size in pixels after the crop, as displayed.
+    var croppedPixelSize: CGSize { cropFrame.canvasSize }
+
+    func resetCrop() {
+        guard hasImage else { return }
+        straightenBase = nil
+        parameters.crop = .none
+    }
+
+    /// The canvas changed size or shape (crop, tool, rotation): re-fit if
+    /// fitted, else keep the view clamped to the new canvas.
+    private func canvasDidChange() {
+        guard hasImage, drawableSize.width > 0 else { return }
+        if fitMode {
+            viewport = .fit(imageSize: imageSize, drawableSize: drawableSize)
+        } else {
+            viewport = viewport.clamped(imageSize: imageSize, drawableSize: drawableSize)
         }
     }
 
@@ -420,13 +513,13 @@ final class EditorModel: ObservableObject {
     }
 
     /// Whether drags on the image should shape a mask instead of panning.
-    var maskToolActive: Bool { maskTool != .none && selectedLocal != nil }
+    var maskToolActive: Bool { maskTool != .none && selectedLocal != nil && !cropToolActive }
 
     /// Screen pixel -> normalized sensor coordinate, through the viewport
     /// (rotated image space) and the rotation (back to the sensor).
     private func sensorNormalized(_ screen: CGPoint) -> SIMD2<Float> {
-        let image = viewport.sensorPoint(forScreenPoint: screen, drawableSize: drawableSize)
-        let sensor = rotation.sensorPoint(fromImagePoint: image, sensorSize: sensorSize)
+        let canvas = viewport.sensorPoint(forScreenPoint: screen, drawableSize: drawableSize)
+        let sensor = frame.sensorPoint(fromCanvasPoint: canvas)
         return SIMD2(Float(sensor.x / sensorSize.width), Float(sensor.y / sensorSize.height))
     }
 
@@ -525,7 +618,7 @@ final class EditorModel: ObservableObject {
 
     /// The viewport's size in device pixels, reported by the Metal view.
     /// Zero until the view first appears.
-    private var drawableSize: CGSize = .zero
+    private(set) var drawableSize: CGSize = .zero
 
     /// True until the user zooms. While set, window resizes keep the image
     /// fitted rather than preserving an arbitrary zoom.
@@ -607,9 +700,10 @@ final class EditorModel: ObservableObject {
     /// What's actually shown: camera orientation plus the user's turns.
     var rotation: ImageRotation { cameraRotation.rotated(by: userRotation) }
 
-    /// The image as the user sees it — rotated. Zoom, pan and fit all
-    /// work in this space; the pipeline never sees it.
-    private var imageSize: CGSize { rotation.imageSize(forSensorSize: sensorSize) }
+    /// The image as the user sees it — cropped, straightened and rotated.
+    /// Zoom, pan and fit all work in this canvas space; the pipeline
+    /// never sees it.
+    private var imageSize: CGSize { frame.canvasSize }
 
     /// Called by the library when the user rotates, and when opening an
     /// image that already has a stored rotation. Re-fits if fitted, else
@@ -859,8 +953,8 @@ final class EditorModel: ObservableObject {
     /// The visible area in *sensor* space: the viewport's visible rect is
     /// in rotated image space, so it's mapped back before asking for a tile.
     private var visibleSensorRect: CGRect {
-        let visibleImage = viewport.visibleSensorRect(drawableSize: drawableSize)
-        return rotation.sensorRect(fromImageRect: visibleImage, sensorSize: sensorSize)
+        let visibleCanvas = viewport.visibleSensorRect(drawableSize: drawableSize)
+        return frame.sensorRect(fromCanvasRect: visibleCanvas)
     }
 
     private func wantedTileRegion() -> (x: Int, y: Int, width: Int, height: Int) {

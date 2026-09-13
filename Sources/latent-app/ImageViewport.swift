@@ -21,8 +21,7 @@ struct ImageViewport: View {
                 MetalImageView(preview: preview,
                                 tile: model.tile,
                                 transform: model.viewport,
-                                rotation: model.rotation,
-                                sensorSize: model.sensorSize,
+                                frame: model.frame,
                                 presenter: presenter,
                                 device: device,
                                 onResize: { model.viewportDidResize(to: $0) },
@@ -47,6 +46,9 @@ struct ImageViewport: View {
                                 },
                                 onToolMoved: { model.maskToolMoved(to: $0) },
                                 onToolEnded: { model.maskToolEnded() })
+                if model.cropToolActive {
+                    CropOverlay(model: model)
+                }
             } else {
                 VStack(spacing: 12) {
                     Text(model.isReady ? "No image open" : "Metal unavailable")

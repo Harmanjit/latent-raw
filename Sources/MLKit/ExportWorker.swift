@@ -108,6 +108,7 @@ public enum ExportWorker {
         let exporter = Exporter(gpu: gpu)
         let written = try exporter.write(texture, to: request.destinationURL, settings: request.settings,
                                          colorSpace: request.colorSpace, rotation: rotation,
+                                         crop: parameters.crop,
                                          metadata: metadata, maxLongEdge: request.maxLongEdge)
         lap("write")
         return Outcome(pixelWidth: written.width, pixelHeight: written.height,

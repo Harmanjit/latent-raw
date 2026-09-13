@@ -4,6 +4,7 @@ import ImageIO
 import CoreGraphics
 import UniformTypeIdentifiers
 import ColorKit
+import simd
 
 public enum ExportError: Error, CustomStringConvertible {
     case readbackFailed
@@ -162,9 +163,10 @@ public final class Exporter {
                        settings: ExportSettings,
                        colorSpace: ColorKit.OutputSpace,
                        rotation: ImageRotation = .none,
+                       crop: CropParameters = .none,
                        metadata: ExportMetadata? = nil,
                        maxLongEdge: Int? = nil) throws -> (width: Int, height: Int) {
-        let cgImage = try cgImage(from: texture, colorSpace: colorSpace, rotation: rotation,
+        let cgImage = try cgImage(from: texture, colorSpace: colorSpace, rotation: rotation, crop: crop,
                                   bitsPerComponent: settings.format.bitsPerComponent,
                                   maxLongEdge: maxLongEdge)
         try Self.write(cgImage: cgImage, to: url, settings: settings, metadata: metadata)
@@ -206,10 +208,10 @@ public final class Exporter {
         return ctx.makeImage() ?? image
     }
 
-    /// Output size after rotation and resize.
-    static func outputSize(width: Int, height: Int, rotation: ImageRotation, maxLongEdge: Int?) -> (Int, Int) {
-        var w = width, h = height
-        if rotation.swapsAxes { swap(&w, &h) }
+    /// Output size after crop, rotation and resize.
+    static func outputSize(frame: CropFrame, maxLongEdge: Int?) -> (Int, Int) {
+        let canvas = frame.canvasSize
+        var w = max(1, Int(canvas.width.rounded())), h = max(1, Int(canvas.height.rounded()))
         if let target = maxLongEdge, target > 0, max(w, h) > target {
             let scale = Double(target) / Double(max(w, h))
             w = max(1, Int((Double(w) * scale).rounded()))
@@ -220,10 +222,13 @@ public final class Exporter {
 
     /// One GPU pass: sample the rendered texture (rotated, resized) into
     /// a shared-storage 8- or 16-bit texture the CPU can read directly.
-    func packedTexture(from texture: MTLTexture, rotation: ImageRotation,
+    func packedTexture(from texture: MTLTexture, rotation: ImageRotation, crop: CropParameters,
                        bitsPerComponent: Int, maxLongEdge: Int?) throws -> MTLTexture {
-        let (w, h) = Self.outputSize(width: texture.width, height: texture.height,
-                                     rotation: rotation, maxLongEdge: maxLongEdge)
+        // The rendered texture stands in for the sensor: the crop is
+        // normalized, so a binned render crops identically to a full one.
+        let frame = CropFrame(sensorSize: CGSize(width: texture.width, height: texture.height),
+                              crop: crop, rotation: rotation)
+        let (w, h) = Self.outputSize(frame: frame, maxLongEdge: maxLongEdge)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: bitsPerComponent == 16 ? .rgba16Unorm : .rgba8Unorm,
             width: w, height: h, mipmapped: false)
@@ -237,8 +242,8 @@ public final class Exporter {
         encoder.setComputePipelineState(gpu.packForExportPSO)
         encoder.setTexture(texture, index: 0)
         encoder.setTexture(dest, index: 1)
-        var turns = UInt32(rotation.rawValue)
-        encoder.setBytes(&turns, length: 4, index: 0)
+        var map = frame.normalizedSamplingMap()
+        encoder.setBytes(&map, length: MemoryLayout<simd_float3x2>.size, index: 0)
         let pso = gpu.packForExportPSO
         let tw = pso.threadExecutionWidth, th = max(1, pso.maxTotalThreadsPerThreadgroup / tw)
         encoder.dispatchThreadgroups(MTLSize(width: (w + tw - 1) / tw, height: (h + th - 1) / th, depth: 1),
@@ -256,9 +261,10 @@ public final class Exporter {
     public func cgImage(from texture: MTLTexture,
                         colorSpace: ColorKit.OutputSpace,
                         rotation: ImageRotation = .none,
+                        crop: CropParameters = .none,
                         bitsPerComponent: Int = 8,
                         maxLongEdge: Int? = nil) throws -> CGImage {
-        let packed = try packedTexture(from: texture, rotation: rotation,
+        let packed = try packedTexture(from: texture, rotation: rotation, crop: crop,
                                        bitsPerComponent: bitsPerComponent, maxLongEdge: maxLongEdge)
         let w = packed.width, h = packed.height
         let bytesPerPixel = bitsPerComponent / 8 * 4

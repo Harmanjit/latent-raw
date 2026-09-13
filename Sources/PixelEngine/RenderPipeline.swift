@@ -115,6 +115,9 @@ public struct EditParameters: Sendable, Equatable {
     public var splitToning: SplitToning
     /// Local adjustments, applied in order.
     public var locals: [LocalAdjustment]
+    /// Crop and straighten. Not a pipeline stage: the presenter and the
+    /// exporter sample through it (see `CropFrame`).
+    public var crop: CropParameters
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -137,7 +140,8 @@ public struct EditParameters: Sendable, Equatable {
                 toneCurve: ToneCurve = .identity,
                 hsl: HSLAdjustments = .neutral,
                 splitToning: SplitToning = .neutral,
-                locals: [LocalAdjustment] = []) {
+                locals: [LocalAdjustment] = [],
+                crop: CropParameters = .none) {
         self.whiteBalance = whiteBalance
         self.exposureEV = exposureEV
         self.contrast = contrast
@@ -160,6 +164,7 @@ public struct EditParameters: Sendable, Equatable {
         self.hsl = hsl
         self.splitToning = splitToning
         self.locals = locals
+        self.crop = crop
     }
 
     public static let neutral = EditParameters()
@@ -179,7 +184,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.lensVignetting == b.lensVignetting
             && a.manualDistortion == b.manualDistortion && a.manualVignetting == b.manualVignetting
             && a.toneCurve == b.toneCurve && a.hsl == b.hsl && a.splitToning == b.splitToning
-            && a.locals == b.locals
+            && a.locals == b.locals && a.crop == b.crop
     }
 }
 

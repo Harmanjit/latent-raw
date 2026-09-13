@@ -78,16 +78,28 @@ public final class Presenter {
                          sensorSize: CGSize,
                          to drawable: CAMetalDrawable,
                          backgroundLevel: Float = 0.12) {
+        present(base: base, tile: tile, transform: transform,
+                frame: CropFrame(sensorSize: sensorSize, rotation: rotation),
+                to: drawable, backgroundLevel: backgroundLevel)
+    }
+
+    /// The general form: `frame` carries rotation, crop and straighten.
+    public func present(base: PresentLayer,
+                         tile: PresentLayer?,
+                         transform: ViewportTransform,
+                         frame: CropFrame,
+                         to drawable: CAMetalDrawable,
+                         backgroundLevel: Float = 0.12) {
         let drawableSize = CGSize(width: drawable.texture.width, height: drawable.texture.height)
-        let baseMap = transform.screenToTextureMap(coverage: base.coverage, rotation: rotation,
-                                                   sensorSize: sensorSize, drawableSize: drawableSize)
+        let baseMap = transform.screenToTextureMap(coverage: base.coverage, frame: frame,
+                                                   drawableSize: drawableSize)
 
         var tileMap = baseMap
         var tileSource = SIMD4<Float>(0, 0, 1, 1)
         if let tile {
             let shown = tile.coverage.insetBy(dx: tile.inset, dy: tile.inset)
-            tileMap = transform.screenToTextureMap(coverage: shown, rotation: rotation,
-                                                   sensorSize: sensorSize, drawableSize: drawableSize)
+            tileMap = transform.screenToTextureMap(coverage: shown, frame: frame,
+                                                   drawableSize: drawableSize)
             let w = Float(tile.texture.width), h = Float(tile.texture.height)
             let i = Float(tile.inset)
             tileSource = SIMD4<Float>(i / w, i / h, (w - 2 * i) / w, (h - 2 * i) / h)

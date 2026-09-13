@@ -22,8 +22,8 @@ struct MetalImageView: NSViewRepresentable {
     let preview: PresentLayer
     let tile: PresentLayer?
     let transform: ViewportTransform
-    let rotation: ImageRotation
-    let sensorSize: CGSize
+    /// Crop, straighten and rotation: how canvas pixels reach the sensor.
+    let frame: CropFrame
     let presenter: Presenter
     let device: MTLDevice
 
@@ -65,8 +65,7 @@ struct MetalImageView: NSViewRepresentable {
     func updateNSView(_ view: MetalLayerView, context: Context) {
         view.backgroundLevel = backgroundLevel
         view.toolActive = toolActive
-        view.display(preview: preview, tile: tile, transform: transform,
-                     rotation: rotation, sensorSize: sensorSize)
+        view.display(preview: preview, tile: tile, transform: transform, frame: frame)
     }
 }
 
@@ -77,8 +76,7 @@ final class MetalLayerView: NSView {
     private var currentPreview: PresentLayer?
     private var currentTile: PresentLayer?
     private var currentTransform = ViewportTransform(zoom: 1, center: .zero)
-    private var currentRotation = ImageRotation.none
-    private var currentSensorSize = CGSize.zero
+    private var currentFrame = CropFrame(sensorSize: .zero)
     private var lastReportedSize: CGSize = .zero
     private var lastReportedHeadroom: CGFloat = 0
     var backgroundLevel: Float = 0.12
@@ -178,12 +176,11 @@ final class MetalLayerView: NSView {
     // MARK: - Drawing
 
     func display(preview: PresentLayer, tile: PresentLayer?, transform: ViewportTransform,
-                 rotation: ImageRotation, sensorSize: CGSize) {
+                 frame: CropFrame) {
         currentPreview = preview
         currentTile = tile
         currentTransform = transform
-        currentRotation = rotation
-        currentSensorSize = sensorSize
+        currentFrame = frame
         redraw()
     }
 
@@ -192,8 +189,7 @@ final class MetalLayerView: NSView {
               metalLayer.drawableSize.width > 0,
               let drawable = metalLayer.nextDrawable() else { return }
         presenter.present(base: preview, tile: currentTile,
-                          transform: currentTransform,
-                          rotation: currentRotation, sensorSize: currentSensorSize,
+                          transform: currentTransform, frame: currentFrame,
                           to: drawable, backgroundLevel: backgroundLevel)
     }
 

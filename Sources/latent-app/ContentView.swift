@@ -327,6 +327,10 @@ struct ContentView: View {
             Button("") { pasteSettings() }.keyboardShortcut("v", modifiers: [.command, .shift])
             Button("") { if model.hasImage { model.showingBefore.toggle() } }
                 .keyboardShortcut("\\", modifiers: [])
+            Button("") {
+                if mode == .develop, model.hasImage { model.cropToolActive.toggle() }
+            }.keyboardShortcut("r", modifiers: [])
+            Button("") { model.cropToolActive = false }.keyboardShortcut(.escape, modifiers: [])
             Button("") { model.undo() }.keyboardShortcut("z", modifiers: .command)
             Button("") { model.redo() }.keyboardShortcut("z", modifiers: [.command, .shift])
         }
@@ -417,6 +421,8 @@ struct ContentView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
+
+                cropSection
 
                 section("White Balance") {
                     temperatureRow
@@ -686,6 +692,41 @@ struct ContentView: View {
             .textCase(.uppercase)
     }
 
+    /// Crop & straighten. R opens and closes the tool; the rectangle is
+    /// edited on the image, the angle here.
+    private var cropSection: some View {
+        section("Crop & Straighten") {
+            HStack(spacing: 8) {
+                Button(model.cropToolActive ? "Done" : "Crop…") { model.cropToolActive.toggle() }
+                    .help("Show the crop rectangle on the image (R)")
+                Picker("Aspect", selection: Binding(
+                    get: { CropAspectOption.matching(model.cropAspectDisplayRatio, original: model.originalDisplayRatio) },
+                    set: { model.setCropAspect(displayRatio: $0.ratio(original: model.originalDisplayRatio)) })) {
+                    ForEach(CropAspectOption.allCases) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .frame(width: 96)
+                Spacer()
+                Button("Reset") { model.resetCrop() }
+                    .disabled(model.parameters.crop == .none)
+            }
+            .controlSize(.small)
+            .disabled(!model.hasImage)
+
+            sliderRow(title: "Straighten",
+                      value: Binding(get: { model.parameters.crop.angle },
+                                     set: { model.setStraighten($0) }),
+                      range: -45...45, format: "%.2f°")
+
+            if model.hasImage {
+                let s = model.croppedPixelSize
+                Text("\(Int(s.width.rounded())) × \(Int(s.height.rounded())) px")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private func section<Content: View>(_ title: String,
                                           @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -776,5 +817,52 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+}
+
+/// The aspect menu's entries, as displayed (portrait images see "3:2" tall).
+enum CropAspectOption: String, CaseIterable, Identifiable {
+    case free, original, square, r3x2, r2x3, r4x3, r3x4, r5x4, r4x5, r16x9, r9x16
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .free: "Free"
+        case .original: "Original"
+        case .square: "1:1"
+        case .r3x2: "3:2"
+        case .r2x3: "2:3"
+        case .r4x3: "4:3"
+        case .r3x4: "3:4"
+        case .r5x4: "5:4"
+        case .r4x5: "4:5"
+        case .r16x9: "16:9"
+        case .r9x16: "9:16"
+        }
+    }
+
+    func ratio(original: Float) -> Float? {
+        switch self {
+        case .free: nil
+        case .original: original
+        case .square: 1
+        case .r3x2: 3 / 2
+        case .r2x3: 2 / 3
+        case .r4x3: 4 / 3
+        case .r3x4: 3 / 4
+        case .r5x4: 5 / 4
+        case .r4x5: 4 / 5
+        case .r16x9: 16 / 9
+        case .r9x16: 9 / 16
+        }
+    }
+
+    /// The entry whose ratio matches `ratio` (within a hair), else Free.
+    static func matching(_ ratio: Float?, original: Float) -> CropAspectOption {
+        guard let ratio else { return .free }
+        return allCases.first { option in
+            guard let r = option.ratio(original: original) else { return false }
+            return abs(r - ratio) < 0.002
+        } ?? .free
     }
 }

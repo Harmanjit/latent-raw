@@ -34,6 +34,7 @@ struct PipelineThumbnailRenderer: EditedThumbnailRenderer {
         // Camera orientation only; the user's manual turns are applied at
         // display time, like the embedded-preview thumbnails.
         let rotation = ImageRotation(libRawFlip: file.summary.orientation)
-        return try Exporter(gpu: gpu).cgImage(from: texture, colorSpace: .sRGB, rotation: rotation)
+        return try Exporter(gpu: gpu).cgImage(from: texture, colorSpace: .sRGB, rotation: rotation,
+                                              crop: parameters.crop)
     }
 }

@@ -55,7 +55,7 @@ public actor ExportService {
         let rotation = ImageRotation(libRawFlip: file.summary.orientation).rotated(by: userRotation)
         try exporter.write(rendered, to: destinationURL,
                             settings: settings, colorSpace: parameters.outputSpace,
-                            rotation: rotation)
+                            rotation: rotation, crop: parameters.crop)
 
         // The session goes out of scope here, taking its textures with it —
         // the RCD intermediates alone run to several hundred megabytes at
