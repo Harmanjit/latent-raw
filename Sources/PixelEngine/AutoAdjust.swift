@@ -58,16 +58,21 @@ public enum AutoAdjust {
             return Suggestion(exposureEV: 0, contrast: current.contrast, whiteBalance: nil)
         }
 
-        // Exposure: geometric mean to grey, with a highlight guard.
+        // Exposure: geometric mean to grey — but the highlight guard wins.
+        // A scene with deep shadows and bright subjects (sunlit logs over
+        // shaded grass) has a low log-mean while being perfectly exposed;
+        // lifting it to grey would blow the subject. So the brightest 1% of
+        // pixels may not be pushed past 0.7 linear (~0.86 on screen after
+        // the curve), whatever the mean says.
         let meanLog = logs.reduce(0, +) / Float(logs.count)
         var ev = log2(current.greyPoint) - meanLog
         let sorted = luminances.sorted()
-        let p995 = sorted[Int(Float(sorted.count - 1) * 0.995)]
-        let highlightCeiling: Float = 8 * current.greyPoint   // ~3 stops over grey
-        if p995 * pow(2, ev) > highlightCeiling {
-            ev = log2(highlightCeiling / max(p995, 1e-6))
+        let p99 = sorted[Int(Float(sorted.count - 1) * 0.99)]
+        let highlightCeiling: Float = 0.7
+        if p99 * pow(2, ev) > highlightCeiling {
+            ev = log2(highlightCeiling / max(p99, 1e-6))
         }
-        ev = min(max(ev, -3), 3)
+        ev = min(max(ev, -3), 2)
 
         // Contrast: standard deviation of log brightness. ~2.2 stops is a
         // typical scene at the default 1.5; scale gently around that.
