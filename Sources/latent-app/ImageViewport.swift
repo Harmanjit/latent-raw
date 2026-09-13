@@ -39,15 +39,15 @@ struct ImageViewport: View {
                                     model.toggleZoom(at: point)
                                     mirror?.toggleZoom(at: point)
                                 },
-                                toolActive: model.maskToolActive,
-                                onToolBegan: { point, exclude in
-                                    model.promptModifierExclude = exclude
-                                    model.maskToolBegan(at: point)
-                                },
-                                onToolMoved: { model.maskToolMoved(to: $0) },
-                                onToolEnded: { model.maskToolEnded() })
+                                toolActive: model.imageToolActive,
+                                onToolBegan: { model.imageToolBegan(at: $0, exclude: $1) },
+                                onToolMoved: { model.imageToolMoved(to: $0) },
+                                onToolEnded: { model.imageToolEnded() })
                 if model.cropToolActive {
                     CropOverlay(model: model)
+                }
+                if model.healToolActive {
+                    HealOverlay(model: model)
                 }
             } else {
                 VStack(spacing: 12) {

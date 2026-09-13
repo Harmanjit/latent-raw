@@ -72,6 +72,7 @@ public final class ImageSession {
         case rcdPQDir       // diagonal directional discrimination
         case rcdScratch     // ping-pong partner for the RGB passes
         case denoised       // camera RGB after noise reduction
+        case healed         // camera RGB after spot removal
         case lensCorrected  // camera RGB after lens corrections
         case blurA          // sharpening: horizontal blur of luminance
         case blurB          // sharpening: full blur of luminance

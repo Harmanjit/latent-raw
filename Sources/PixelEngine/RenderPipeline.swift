@@ -118,6 +118,8 @@ public struct EditParameters: Sendable, Equatable {
     /// Crop and straighten. Not a pipeline stage: the presenter and the
     /// exporter sample through it (see `CropFrame`).
     public var crop: CropParameters
+    /// Spot removal patches, applied in order in camera space.
+    public var heals: [HealPatch]
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -141,7 +143,8 @@ public struct EditParameters: Sendable, Equatable {
                 hsl: HSLAdjustments = .neutral,
                 splitToning: SplitToning = .neutral,
                 locals: [LocalAdjustment] = [],
-                crop: CropParameters = .none) {
+                crop: CropParameters = .none,
+                heals: [HealPatch] = []) {
         self.whiteBalance = whiteBalance
         self.exposureEV = exposureEV
         self.contrast = contrast
@@ -165,6 +168,7 @@ public struct EditParameters: Sendable, Equatable {
         self.splitToning = splitToning
         self.locals = locals
         self.crop = crop
+        self.heals = heals
     }
 
     public static let neutral = EditParameters()
@@ -184,7 +188,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.lensVignetting == b.lensVignetting
             && a.manualDistortion == b.manualDistortion && a.manualVignetting == b.manualVignetting
             && a.toneCurve == b.toneCurve && a.hsl == b.hsl && a.splitToning == b.splitToning
-            && a.locals == b.locals && a.crop == b.crop
+            && a.locals == b.locals && a.crop == b.crop && a.heals == b.heals
     }
 }
 
@@ -429,6 +433,15 @@ public final class RenderPipeline {
                                            binSpan: binSpan)
         }
 
+        // Spot removal, in camera space, before the lens stage moves pixels.
+        let activeHeals = parameters.heals.filter {
+            $0.targetBounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(renderInfo.sensorRect)
+        }
+        if !activeHeals.isEmpty {
+            colourInput = try applyHeal(session: session, cmdBuffer: cmdBuffer, input: colourInput,
+                                        patches: activeHeals, renderInfo: renderInfo, binSpan: binSpan)
+        }
+
         // Stage 7: lens corrections, still in camera space.
         if Self.wantsLensCorrection(session: session, parameters: parameters) {
             colourInput = try applyLensCorrection(session: session, cmdBuffer: cmdBuffer,
@@ -521,6 +534,55 @@ public final class RenderPipeline {
         encoder.setBytes(&vig, length: 16, index: 12)
         encoder.setBytes(&manualVig, length: 4, index: 13)
         dispatch(encoder, pso: gpu.lensCorrectPSO, width: input.width, height: input.height)
+        encoder.endEncoding()
+        return output
+    }
+
+    // MARK: - Spot removal
+
+    /// Two dispatches: rim statistics per patch, then the copy. The stats
+    /// buffer is tiny (32 patches × 2 colours) and shared-storage, made
+    /// fresh per render; Metal recycles it.
+    private func applyHeal(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                           input: MTLTexture, patches: [HealPatch],
+                           renderInfo: RenderInfo, binSpan: Float) throws -> MTLTexture {
+        let output = try session.texture(width: input.width, height: input.height,
+                                         pixelFormat: .rgba16Float, role: .healed)
+        let count = min(patches.count, HealPatch.maximumCount)
+        var gpuPatches = patches.prefix(count).map(HealPatchGPU.init)
+        let statsLength = 2 * HealPatch.maximumCount * MemoryLayout<SIMD4<Float>>.size
+        guard let stats = gpu.device.makeBuffer(length: statsLength, options: .storageModeShared),
+              let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+            throw RenderError.commandBufferFailed
+        }
+        let summary = session.file.summary
+        var sensorSize = SIMD2<Float>(Float(summary.rawWidth), Float(summary.rawHeight))
+        var tileOrigin = SIMD2<Float>(Float(renderInfo.sensorRect.origin.x),
+                                      Float(renderInfo.sensorRect.origin.y))
+        var span = binSpan
+        var patchCount = Int32(count)
+        let patchBytes = count * MemoryLayout<HealPatchGPU>.stride
+
+        encoder.setComputePipelineState(gpu.healStatsPSO)
+        encoder.setTexture(input, index: 0)
+        gpuPatches.withUnsafeMutableBytes { encoder.setBytes($0.baseAddress!, length: patchBytes, index: 0) }
+        encoder.setBuffer(stats, offset: 0, index: 1)
+        encoder.setBytes(&sensorSize, length: 8, index: 2)
+        encoder.setBytes(&tileOrigin, length: 8, index: 3)
+        encoder.setBytes(&span, length: 4, index: 4)
+        encoder.dispatchThreadgroups(MTLSize(width: count, height: 1, depth: 1),
+                                     threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+
+        encoder.setComputePipelineState(gpu.healApplyPSO)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(output, index: 1)
+        gpuPatches.withUnsafeMutableBytes { encoder.setBytes($0.baseAddress!, length: patchBytes, index: 0) }
+        encoder.setBuffer(stats, offset: 0, index: 1)
+        encoder.setBytes(&patchCount, length: 4, index: 2)
+        encoder.setBytes(&sensorSize, length: 8, index: 3)
+        encoder.setBytes(&tileOrigin, length: 8, index: 4)
+        encoder.setBytes(&span, length: 4, index: 5)
+        dispatch(encoder, pso: gpu.healApplyPSO, width: input.width, height: input.height)
         encoder.endEncoding()
         return output
     }

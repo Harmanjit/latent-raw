@@ -54,6 +54,8 @@ public final class GPUContext: @unchecked Sendable {
     let sharpenApplyPSO: MTLComputePipelineState
     let lensCorrectPSO: MTLComputePipelineState
     let packForExportPSO: MTLComputePipelineState
+    let healStatsPSO: MTLComputePipelineState
+    let healApplyPSO: MTLComputePipelineState
 
     // RCD demosaic, six passes (see RCD.metal).
     let rcdDirectionsVHPSO: MTLComputePipelineState
@@ -95,6 +97,8 @@ public final class GPUContext: @unchecked Sendable {
         let sharpenPipeline = try makePipeline("sharpenApply")
         let lensPipeline = try makePipeline("lensCorrect")
         let packPipeline = try makePipeline("packForExport")
+        let healStatsPipeline = try makePipeline("healStats")
+        let healApplyPipeline = try makePipeline("healApply")
         let vhPipeline = try makePipeline("rcdDirectionsVH")
         let lowPassPipeline = try makePipeline("rcdLowPass")
         let greenPipeline = try makePipeline("rcdGreen")
@@ -120,6 +124,8 @@ public final class GPUContext: @unchecked Sendable {
         self.sharpenApplyPSO = sharpenPipeline
         self.lensCorrectPSO = lensPipeline
         self.packForExportPSO = packPipeline
+        self.healStatsPSO = healStatsPipeline
+        self.healApplyPSO = healApplyPipeline
         self.rcdDirectionsVHPSO = vhPipeline
         self.rcdLowPassPSO = lowPassPipeline
         self.rcdGreenPSO = greenPipeline
@@ -153,7 +159,7 @@ public final class GPUContext: @unchecked Sendable {
         // Every kernel source file must be listed here, or its functions
         // won't exist in the runtime-compiled library.
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
-                            "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD"]
+                            "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound

@@ -38,6 +38,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var splittoning: SplitToning?
         public var locals: [LocalAdjustment]?
         public var crop: Crop?
+        public var heal: [HealPatch]?
     }
 
     /// Normalized sensor coordinates; see `CropParameters`.
@@ -135,6 +136,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.hsl = p.hsl
         modules.splittoning = p.splitToning
         modules.locals = p.locals.isEmpty ? nil : p.locals
+        modules.heal = p.heals.isEmpty ? nil : p.heals
         modules.crop = (p.crop.isIdentity && p.crop.aspect == nil) ? nil
             : Crop(cx: p.crop.centre.x, cy: p.crop.centre.y, w: p.crop.size.x, h: p.crop.size.y,
                    angle: p.crop.angle, aspect: p.crop.aspect)
@@ -187,6 +189,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         }
         if let st = modules.splittoning { p.splitToning = st }
         p.locals = modules.locals ?? []
+        p.heals = modules.heal ?? []
         if let c = modules.crop, c.w > 0, c.h > 0 {
             p.crop = CropParameters(centre: [c.cx, c.cy], size: [c.w, c.h], angle: c.angle, aspect: c.aspect)
         } else {

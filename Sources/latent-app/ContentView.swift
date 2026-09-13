@@ -330,7 +330,16 @@ struct ContentView: View {
             Button("") {
                 if mode == .develop, model.hasImage { model.cropToolActive.toggle() }
             }.keyboardShortcut("r", modifiers: [])
-            Button("") { model.cropToolActive = false }.keyboardShortcut(.escape, modifiers: [])
+            Button("") {
+                if mode == .develop, model.hasImage { model.healToolActive.toggle() }
+            }.keyboardShortcut("h", modifiers: [])
+            Button("") {
+                if model.healToolActive { model.deleteSelectedHeal() }
+            }.keyboardShortcut(.delete, modifiers: [])
+            Button("") {
+                model.cropToolActive = false
+                model.healToolActive = false
+            }.keyboardShortcut(.escape, modifiers: [])
             Button("") { model.undo() }.keyboardShortcut("z", modifiers: .command)
             Button("") { model.redo() }.keyboardShortcut("z", modifiers: [.command, .shift])
         }
@@ -423,6 +432,7 @@ struct ContentView: View {
                 }
 
                 cropSection
+                healSection
 
                 section("White Balance") {
                     temperatureRow
@@ -723,6 +733,51 @@ struct ContentView: View {
                 Text("\(Int(s.width.rounded())) × \(Int(s.height.rounded())) px")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Spot removal. H opens the tool; patches are placed on the image.
+    private var healSection: some View {
+        section("Spot Removal") {
+            HStack(spacing: 8) {
+                Button(model.healToolActive ? "Done" : "Heal…") { model.healToolActive.toggle() }
+                    .help("Click a spot to remove it, drag to pick the source (H)")
+                Picker("Mode", selection: Binding(get: { model.activeHealMode },
+                                                  set: { model.activeHealMode = $0 })) {
+                    Text("Heal").tag(HealPatch.Mode.heal)
+                    Text("Clone").tag(HealPatch.Mode.clone)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 100)
+                Spacer()
+                Button("Delete") { model.deleteSelectedHeal() }
+                    .disabled(model.selectedHeal == nil)
+                    .help("Remove the selected patch (⌫)")
+            }
+            .controlSize(.small)
+            .disabled(!model.hasImage)
+
+            sliderRow(title: "Size",
+                      value: Binding(get: { model.activeHealRadiusPixels },
+                                     set: { model.activeHealRadiusPixels = $0 }),
+                      range: 4...600, format: "%.0f px")
+            sliderRow(title: "Feather",
+                      value: Binding(get: { model.activeHealFeather },
+                                     set: { model.activeHealFeather = $0 }),
+                      range: 0...1, format: "%.2f")
+
+            HStack {
+                let n = model.parameters.heals.count
+                Text(n == 0 ? "No patches. Click a dust spot or blemish to remove it."
+                     : "\(n) patch\(n == 1 ? "" : "es")")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if n > 0 {
+                    Button("Clear all") { model.clearHeals() }.controlSize(.mini)
+                }
             }
         }
     }
