@@ -50,9 +50,64 @@ final class EditorModel: ObservableObject {
     @Published private(set) var aiDenoiseStatus = ""
     @Published private(set) var aiDenoiseRunning = false
     private var aiDenoiseTask: Task<Void, Never>?
-    private static var sharedDenoiser: AIDenoiser?
+    private static var sharedDenoisers: [AIDenoiser.Variant: AIDenoiser] = [:]
     var aiDenoiseAvailable: Bool { AIDenoiser.isAvailable }
     var hasAIDenoiseResult: Bool { session?.aiDenoisedCameraRGB != nil }
+
+    /// Which network to use. Changing it drops the cached result and, if
+    /// the strength is up, runs the new one.
+    @Published var aiDenoiseVariant: AIDenoiser.Variant = AIDenoiser.preferredVariant {
+        didSet {
+            guard aiDenoiseVariant != oldValue else { return }
+            AIDenoiser.preferredVariant = aiDenoiseVariant
+            aiDenoiseTask?.cancel()
+            aiDenoiseRunning = false
+            session?.setAIDenoised(nil, model: nil)
+            aiDenoiseStatus = ""
+            if parameters.aiDenoise > 0 { runAIDenoise() } else { rerender() }
+        }
+    }
+
+    // Optional high-quality model: download state.
+    @Published private(set) var modelDownloadProgress: Double?   // 0…1 while downloading
+    @Published private(set) var modelDownloadStatus = ""
+    @Published private(set) var highQualityModelInstalled = OptionalModel.nafnetWidth64.isInstalled
+    private var modelDownloadTask: Task<Void, Never>?
+
+    func downloadHighQualityModel() {
+        guard modelDownloadProgress == nil else { return }
+        let model = OptionalModel.nafnetWidth64
+        modelDownloadProgress = 0
+        modelDownloadStatus = "Downloading \(model.title) (\(model.sizeMB) MB)…"
+        modelDownloadTask = Task { [weak self] in
+            do {
+                try await ModelDownloader.install(model) { [weak self] received, expected in
+                    Task { @MainActor in
+                        self?.modelDownloadProgress = expected > 0 ? Double(received) / Double(expected) : 0
+                    }
+                }
+                self?.modelDownloadProgress = nil
+                self?.highQualityModelInstalled = model.isInstalled
+                self?.modelDownloadStatus = "Installed. Choose “High quality” above."
+            } catch is CancellationError {
+                self?.modelDownloadProgress = nil
+                self?.modelDownloadStatus = ""
+            } catch {
+                self?.modelDownloadProgress = nil
+                self?.modelDownloadStatus = "\(error)"
+            }
+        }
+    }
+
+    func cancelModelDownload() { modelDownloadTask?.cancel() }
+
+    func removeHighQualityModel() {
+        try? ModelDownloader.remove(.nafnetWidth64)
+        highQualityModelInstalled = OptionalModel.nafnetWidth64.isInstalled
+        Self.sharedDenoisers[.high] = nil
+        if aiDenoiseVariant == .high { aiDenoiseVariant = .standard }
+        modelDownloadStatus = "Removed."
+    }
 
     /// Runs the network over the open image (once; the result lives with
     /// the session) and re-renders. ~12 s for 24 MP on the GPU.
@@ -67,10 +122,11 @@ final class EditorModel: ObservableObject {
         let imageID = catalogImageID
         aiDenoiseTask = Task { [weak self] in
             do {
+                let variant = AIDenoiser.preferredVariant
                 let denoiser: AIDenoiser
-                if let d = Self.sharedDenoiser { denoiser = d } else {
-                    denoiser = try await AIDenoiser.load()
-                    Self.sharedDenoiser = denoiser
+                if let d = Self.sharedDenoisers[variant] { denoiser = d } else {
+                    denoiser = try await AIDenoiser.load(variant)
+                    Self.sharedDenoisers[variant] = denoiser
                 }
                 let seconds = try await AIDenoiseWorker.run(
                     session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser
@@ -80,7 +136,7 @@ final class EditorModel: ObservableObject {
                     }
                 }
                 guard let model = self, model.catalogImageID == imageID || model.session === session else { return }
-                model.aiDenoiseStatus = String(format: "Denoised in %.1f s", seconds)
+                model.aiDenoiseStatus = String(format: "Denoised in %.1f s (%@)", seconds, denoiser.variant.displayName)
                 model.aiDenoiseRunning = false
                 if model.parameters.aiDenoise == 0 { model.parameters.aiDenoise = 1 } else { model.rerender() }
             } catch is CancellationError {

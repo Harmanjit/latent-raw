@@ -1,6 +1,7 @@
 import SwiftUI
 import Metal
 import PixelEngine
+import MLKit
 import ColorKit
 import Catalog
 import LensKit
@@ -769,7 +770,36 @@ struct ContentView: View {
                 Text(model.aiDenoiseStatus).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("NAFNet (SIDD) on the GPU, in camera space before colour. About 12 s per 24 MP frame; the result is kept while the image is open and recomputed on export.")
+            Picker("Model", selection: $model.aiDenoiseVariant) {
+                ForEach(AIDenoiser.Variant.allCases.filter { $0.isAvailable }, id: \.self) { v in
+                    Text(v.displayName).tag(v)
+                }
+            }
+            .pickerStyle(.menu)
+            .controlSize(.small)
+
+            // Optional larger model, fetched on request so the app stays small.
+            HStack {
+                if let p = model.modelDownloadProgress {
+                    ProgressView(value: p).controlSize(.small)
+                    Button("Cancel") { model.cancelModelDownload() }
+                } else if model.highQualityModelInstalled {
+                    Text("High-quality model installed").font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Remove") { model.removeHighQualityModel() }
+                } else {
+                    Button("Download high-quality model (\(OptionalModel.nafnetWidth64.sizeMB) MB)") {
+                        model.downloadHighQualityModel()
+                    }
+                }
+            }
+            .controlSize(.small)
+            if !model.modelDownloadStatus.isEmpty {
+                Text(model.modelDownloadStatus).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("NAFNet (SIDD) on the GPU, in camera space before colour. Standard: ~11 s per 24 MP frame; high quality: ~2.5× longer, slightly cleaner. The result is kept while the image is open and recomputed on export.")
                 .font(.caption2).foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }

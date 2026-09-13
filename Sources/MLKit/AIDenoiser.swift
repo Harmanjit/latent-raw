@@ -16,27 +16,72 @@ import PixelEngine
 /// pushed past white) are handed back unchanged: they carry no noise
 /// worth removing and lie outside the model's input range.
 public final class AIDenoiser: @unchecked Sendable {
-    public static let packageName = "NAFNet_SIDD_width32"
-    public static let modelName = EditStack.aiDenoiseModelName
+    /// The bundled network and the optional, larger one (`OptionalModel`).
+    public enum Variant: String, CaseIterable, Sendable {
+        case standard, high
+
+        public var packageName: String {
+            switch self {
+            case .standard: "NAFNet_SIDD_width32"
+            case .high: "NAFNet_SIDD_width64"
+            }
+        }
+        /// Recorded in the edit stack, so a file says which network made it.
+        public var modelName: String {
+            switch self {
+            case .standard: "nafnet-sidd-w32"
+            case .high: "nafnet-sidd-w64"
+            }
+        }
+        public var displayName: String {
+            switch self {
+            case .standard: "Standard (bundled)"
+            case .high: "High quality (downloaded)"
+            }
+        }
+        public var isAvailable: Bool { CoreMLStore.isAvailable(packageName) }
+    }
+
     public static let tile = 256
     /// Overlap between neighbouring tiles; the seam is blended across it.
     public static let overlap = 32
+    static let preferenceKey = "latent.aiDenoiseModel"
 
+    public let variant: Variant
     private let model: MLModel
 
-    public static var isAvailable: Bool { CoreMLStore.isAvailable(packageName) }
-
-    public static func load() async throws -> AIDenoiser {
-        AIDenoiser(model: try await CoreMLStore.load(packageName))
+    /// The user's choice, falling back to the bundled model when the
+    /// chosen one isn't installed. Read by the editor and the export
+    /// worker alike, so exports match the screen.
+    public static var preferredVariant: Variant {
+        get {
+            let stored = UserDefaults.standard.string(forKey: preferenceKey).flatMap(Variant.init(rawValue:)) ?? .standard
+            return stored.isAvailable ? stored : .standard
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: preferenceKey) }
     }
 
-    private init(model: MLModel) { self.model = model }
+    public static var isAvailable: Bool { Variant.standard.isAvailable }
+    public var modelName: String { variant.modelName }
 
-    /// Denoises an RGBA float16 image (row-major, four halfs per pixel)
-    /// in place, returning the result. `progress` receives tiles done and
-    /// total. Checks for cancellation between tiles.
-    public func denoise(_ pixels: [Float16], width: Int, height: Int,
+    public static func load(_ variant: Variant? = nil) async throws -> AIDenoiser {
+        let v = variant ?? preferredVariant
+        return AIDenoiser(variant: v, model: try await CoreMLStore.load(v.packageName))
+    }
+
+    private init(variant: Variant, model: MLModel) { self.variant = variant; self.model = model }
+
+    /// Denoises an RGBA float16 image (row-major, four halfs per pixel),
+    /// returning the result. `white` is the largest value an unclipped
+    /// pixel can take (after white balance a channel can sit well above
+    /// 1.0); everything is scaled by it so the network sees [0, 1].
+    /// Pixels at or near clipping fade back to the original with a soft
+    /// ramp — per pixel, never per channel, which would leave a coloured
+    /// grid where one channel clips and another doesn't. `progress`
+    /// receives tiles done and total. Checks for cancellation between tiles.
+    public func denoise(_ pixels: [Float16], width: Int, height: Int, white: Float = 1,
                         progress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> [Float16] {
+        let white = max(white, 1e-3)
         let t = Self.tile, o = Self.overlap, stride = t - o
         let cols = max(1, Int(ceil(Double(max(width - o, 1)) / Double(stride))))
         let rows = max(1, Int(ceil(Double(max(height - o, 1)) / Double(stride))))
@@ -60,7 +105,7 @@ public final class AIDenoiser: @unchecked Sendable {
                 let row = i / cols, col = i % cols
                 let x0 = min(col * stride, max(0, width - t))
                 let y0 = min(row * stride, max(0, height - t))
-                let input = Self.packTile(pixels, width: width, height: height, x0: x0, y0: y0)
+                let input = Self.packTile(pixels, width: width, height: height, x0: x0, y0: y0, white: white)
                 let model = self.model
                 group.addTask {
                     try Task.checkCancellation()
@@ -82,11 +127,16 @@ public final class AIDenoiser: @unchecked Sendable {
         for i in 0..<(width * height) {
             let w = weight[i]
             guard w > 0 else { continue }
+            let r = Float(pixels[i * 4]), g = Float(pixels[i * 4 + 1]), b = Float(pixels[i * 4 + 2])
+            // Near-clipped pixels keep their original value, fading in
+            // over the last 15% below white so there is no visible edge.
+            let peak = max(r, g, b) / white
+            let keep = Self.smoothstep(0.85, 1.0, peak)
+            if keep >= 1 { continue }
             for c in 0..<3 {
                 let original = Float(pixels[i * 4 + c])
-                if original > 1 { continue }   // clipped: keep
-                let encoded = accum[i * 3 + c] / w
-                result[i * 4 + c] = Float16(Self.decode(encoded))
+                let denoised = Self.decode(accum[i * 3 + c] / w) * white
+                result[i * 4 + c] = Float16(denoised + (original - denoised) * keep)
             }
         }
         return result
@@ -96,12 +146,18 @@ public final class AIDenoiser: @unchecked Sendable {
 
     static func encode(_ v: Float) -> Float { pow(max(v, 0), 1 / 2.2) }
     static func decode(_ v: Float) -> Float { pow(max(v, 0), 2.2) }
+    static func smoothstep(_ a: Float, _ b: Float, _ x: Float) -> Float {
+        let t = min(max((x - a) / (b - a), 0), 1)
+        return t * t * (3 - 2 * t)
+    }
 
-    /// Extracts a tile as the model's 1×3×T×T planar float array,
-    /// gamma-encoded and clamped to [0, 1]. Tiles that fall off the
-    /// image's edge (small images) are padded by clamping coordinates.
-    static func packTile(_ pixels: [Float16], width: Int, height: Int, x0: Int, y0: Int) -> [Float] {
+    /// Extracts a tile as the model's 1×3×T×T planar float array, scaled
+    /// by `white`, gamma-encoded and clamped to [0, 1]. Tiles that fall
+    /// off the image's edge (small images) are padded by clamping.
+    static func packTile(_ pixels: [Float16], width: Int, height: Int, x0: Int, y0: Int,
+                         white: Float) -> [Float] {
         let t = tile
+        let inv = 1 / white
         var out = [Float](repeating: 0, count: 3 * t * t)
         for y in 0..<t {
             let sy = min(y0 + y, height - 1)
@@ -109,7 +165,7 @@ public final class AIDenoiser: @unchecked Sendable {
                 let sx = min(x0 + x, width - 1)
                 let i = (sy * width + sx) * 4
                 for c in 0..<3 {
-                    out[c * t * t + y * t + x] = min(encode(Float(pixels[i + c])), 1)
+                    out[c * t * t + y * t + x] = min(encode(Float(pixels[i + c]) * inv), 1)
                 }
             }
         }
@@ -168,7 +224,10 @@ public enum AIDenoiseWorker {
         let width = camera.width, height = camera.height
         let pixels = try TextureReadback.float16Pixels(of: camera, gpu: gpu)
 
-        let denoised = try await denoiser.denoise(pixels, width: width, height: height, progress: progress)
+        let m = session.asShotMultipliers
+        let white = max(m.x, m.y, m.z, 1)
+        let denoised = try await denoiser.denoise(pixels, width: width, height: height, white: white,
+                                                  progress: progress)
         try Task.checkCancellation()
 
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -182,7 +241,7 @@ public enum AIDenoiseWorker {
             texture.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0,
                             withBytes: bytes.baseAddress!, bytesPerRow: width * 8)
         }
-        session.setAIDenoised(texture, model: AIDenoiser.modelName)
+        session.setAIDenoised(texture, model: denoiser.modelName)
         return Date().timeIntervalSince(start)
     }
 }

@@ -32,13 +32,19 @@ import torch.nn.functional as F
 import coremltools as ct
 from huggingface_hub import hf_hub_download
 
+import argparse
+_args = argparse.ArgumentParser()
+_args.add_argument("--width", type=int, default=32, help="32 (bundled) or 64 (optional download)")
+_args.add_argument("--out", default=None, help="output directory (default: the bundled Models folder)")
+ARGS = _args.parse_args()
+
 TILE = 256
-WIDTH = 32
+WIDTH = ARGS.width
 ENC_BLKS = [2, 2, 4, 8]
 MID_BLKS = 12
 DEC_BLKS = [2, 2, 2, 2]
-OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "Sources", "MLKit", "Resources", "Models")
-PACKAGE = "NAFNet_SIDD_width32.mlpackage"
+OUT_DIR = ARGS.out or os.path.join(os.path.dirname(__file__), "..", "Sources", "MLKit", "Resources", "Models")
+PACKAGE = f"NAFNet_SIDD_width{WIDTH}.mlpackage"
 
 
 class LayerNorm2d(nn.Module):
@@ -132,8 +138,8 @@ class NAFNet(nn.Module):
 
 
 def main():
-    print("Downloading NAFNet-SIDD-width32.pth (official weights, MIT)…")
-    path = hf_hub_download("nyanko7/nafnet-models", "NAFNet-SIDD-width32.pth")
+    print(f"Downloading NAFNet-SIDD-width{WIDTH}.pth (official weights, MIT)…")
+    path = hf_hub_download("nyanko7/nafnet-models", f"NAFNet-SIDD-width{WIDTH}.pth")
     state = torch.load(path, map_location="cpu", weights_only=False)
     if "params" in state:
         state = state["params"]
@@ -163,7 +169,7 @@ def main():
         minimum_deployment_target=ct.target.macOS15,
     )
     mlmodel.author = "Converted for Latent from official NAFNet weights (Chen et al. 2022, MIT)"
-    mlmodel.short_description = "NAFNet SIDD width32 real-noise denoiser, 256x256 tiles"
+    mlmodel.short_description = f"NAFNet SIDD width{WIDTH} real-noise denoiser, 256x256 tiles"
     os.makedirs(OUT_DIR, exist_ok=True)
     out_path = os.path.join(OUT_DIR, PACKAGE)
     mlmodel.save(out_path)

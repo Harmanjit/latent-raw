@@ -21,9 +21,27 @@ public enum CoreMLStore {
         Bundle.latentResources.url(forResource: "Models", withExtension: nil)
     }
 
+    /// Where optional, downloaded models live (see `OptionalModel`). Kept
+    /// out of the app bundle so the app itself stays small and a model can
+    /// be added or removed without reinstalling.
+    public static var externalModelsDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return base.appendingPathComponent("latent/models", isDirectory: true)
+    }
+
+    /// The package for `name`: bundled first, then downloaded.
+    static func packageURL(_ name: String) -> URL? {
+        let file = name + ".mlpackage"
+        if let dir = modelsDirectory {
+            let bundled = dir.appendingPathComponent(file)
+            if FileManager.default.fileExists(atPath: bundled.path) { return bundled }
+        }
+        let external = externalModelsDirectory.appendingPathComponent(file)
+        return FileManager.default.fileExists(atPath: external.path) ? external : nil
+    }
+
     public static func isAvailable(_ name: String) -> Bool {
-        guard let dir = modelsDirectory else { return false }
-        return FileManager.default.fileExists(atPath: dir.appendingPathComponent(name + ".mlpackage").path)
+        packageURL(name) != nil
     }
 
     static var cacheDirectory: URL {
@@ -63,9 +81,7 @@ public enum CoreMLStore {
     public static func load(_ name: String,
                             computeUnits: MLComputeUnits? = nil) async throws -> MLModel {
         let computeUnits = computeUnits ?? defaultComputeUnits
-        guard let dir = modelsDirectory else { throw StoreError.modelMissing(name) }
-        let package = dir.appendingPathComponent(name + ".mlpackage")
-        guard FileManager.default.fileExists(atPath: package.path) else { throw StoreError.modelMissing(name) }
+        guard let package = packageURL(name) else { throw StoreError.modelMissing(name) }
 
         // Cache key from the weights file, the part that actually changes.
         let weights = package.appendingPathComponent("Data/com.apple.CoreML/weights/weight.bin")

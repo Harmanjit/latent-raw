@@ -42,6 +42,14 @@ final class AIDenoiseTests: XCTestCase {
         let before = stdDev(pixels, skipClipped: true), after = stdDev(out, skipClipped: true)
         XCTAssertLessThan(after, before * 0.4, "noise std \(before) -> \(after)")
         XCTAssertEqual(Float(out[0]), 1.5, "clipped pixels pass through")
+        // A pixel with one channel clipped and the others not must come
+        // back whole: either all original or all denoised, never mixed
+        // per channel (that mixing is a coloured grid on screen).
+        var mixed = pixels
+        let j = (150 * w + 150) * 4
+        mixed[j] = 1.2; mixed[j + 1] = 0.3; mixed[j + 2] = 0.3
+        let out2 = try await denoiser.denoise(mixed, width: w, height: h, white: 1)
+        XCTAssertEqual(Float(out2[j]), 1.2, accuracy: 1e-3); XCTAssertEqual(Float(out2[j + 1]), 0.3, accuracy: 1e-3); XCTAssertEqual(Float(out2[j + 2]), 0.3, accuracy: 1e-3)
         // Mean preserved (no brightness shift from the gamma round trip).
         var meanIn: Float = 0, meanOut: Float = 0
         for i in 400..<(w * h) { meanIn += Float(pixels[i * 4 + 1]); meanOut += Float(out[i * 4 + 1]) }
