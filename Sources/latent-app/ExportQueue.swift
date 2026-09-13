@@ -63,9 +63,21 @@ final class ExportQueue: ObservableObject {
                 let name = record.fileName
                 await MainActor.run { self?.currentName = name }
 
-                // Everything the worker needs, gathered on the actor side.
-                let json = try? await catalog.editStack(forImageID: record.id ?? -1)
-                let keywords = (try? await catalog.keywords(forImageID: record.id ?? -1)) ?? []
+                // Everything the worker needs, gathered on the actor side. A
+                // read failure fails this file; exporting it unedited would
+                // be a wrong file with no warning.
+                let json: String?
+                let keywords: [String]
+                do {
+                    json = try await catalog.editStack(forImageID: record.id ?? -1)
+                    keywords = try await catalog.keywords(forImageID: record.id ?? -1)
+                } catch {
+                    await MainActor.run {
+                        self?.failures.append(Failure(name: name, reason: "could not read its edit: \(error)"))
+                        self?.done += 1
+                    }
+                    continue
+                }
                 let base = (record.relPath as NSString).deletingPathExtension.replacingOccurrences(of: "/", with: "_")
                 let file = base + preset.suffix + "." + preset.settings.format.fileExtension
                 let request = ExportWorker.Request(

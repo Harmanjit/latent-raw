@@ -102,7 +102,7 @@ final class EditorModel: ObservableObject {
     func cancelModelDownload() { modelDownloadTask?.cancel() }
 
     func removeHighQualityModel() {
-        try? ModelDownloader.remove(.nafnetWidth64)
+        do { try ModelDownloader.remove(.nafnetWidth64) } catch { reportFailure("Removing the model", error) }
         highQualityModelInstalled = OptionalModel.nafnetWidth64.isInstalled
         Self.sharedDenoisers[.high] = nil
         if aiDenoiseVariant == .high { aiDenoiseVariant = .standard }
@@ -443,7 +443,11 @@ final class EditorModel: ObservableObject {
             if let lens = session?.lensCorrection {
                 stack.setLensProvenance(profile: lens.profileName, databaseVersion: lens.databaseVersion)
             }
-            onEditSettled?(id, try? stack.encodeJSON())
+            do {
+                onEditSettled?(id, try stack.encodeJSON())
+            } catch {
+                reportFailure("Encoding the edit", error)
+            }
         }
         recordHistoryStep()
     }
@@ -711,7 +715,11 @@ final class EditorModel: ObservableObject {
 
     private func ensureSAM2Session() {
         guard sam2Session == nil, sam2Encoding == nil, let session else { return }
-        guard let image = try? modelInputImage() else { return }
+        let image: CGImage
+        do { image = try modelInputImage() } catch {
+            sam2Status = "Click-to-select unavailable: \(error)"
+            return
+        }
         let input = SendableImage(cgImage: image)
         sam2Status = "Encoding image for click-to-select…"
         sam2Encoding = Task { @MainActor [weak self] in
@@ -1067,9 +1075,16 @@ final class EditorModel: ObservableObject {
             fresh.whiteBalance = newSession.asShotWhiteBalance
             defaultParameters = fresh
             var restored = fresh
-            if let editStackJSON, let stack = try? EditStack.decode(json: editStackJSON) {
-                restored = stack.parameters(defaults: fresh)
-                if restored.whiteBalance.isAsShot { restored.whiteBalance = fresh.whiteBalance }
+            if let editStackJSON {
+                do {
+                    let stack = try EditStack.decode(json: editStackJSON)
+                    restored = stack.parameters(defaults: fresh)
+                    if restored.whiteBalance.isAsShot { restored.whiteBalance = fresh.whiteBalance }
+                } catch {
+                    // Showing defaults is the only option, but the user must
+                    // know the stored edit exists and wasn't applied.
+                    reportFailure("Reading the stored edit for \(url.lastPathComponent) (showing defaults; editing will replace it)", error)
+                }
             }
             pendingSave?.cancel()   // the assignment below must not save
             pendingSave = nil
@@ -1438,6 +1453,15 @@ final class EditorModel: ObservableObject {
         status = message
     }
 
+    /// A failure the user must see: shown in red in the status bar in
+    /// every mode until dismissed, and logged with the full error.
+    @Published var lastError: String?
+
+    func reportFailure(_ what: String, _ error: Error) {
+        lastError = "\(what) failed: \(error)"
+        Log.editor.error("\(what, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+    }
+
     func resetWhiteBalance() {
         parameters.whiteBalance = asShotWhiteBalance
     }
@@ -1520,7 +1544,7 @@ final class EditorModel: ObservableObject {
 
     func deletePreset(_ preset: Preset) {
         guard !preset.isBuiltIn else { return }
-        try? PresetStore.delete(named: preset.name)
+        do { try PresetStore.delete(named: preset.name) } catch { reportFailure("Deleting preset “\(preset.name)”", error) }
         presets = PresetStore.load()
     }
 
@@ -1586,7 +1610,11 @@ final class EditorModel: ObservableObject {
         pendingSave?.cancel(); pendingSave = nil
         if let id = catalogImageID {
             let isDefault = EditStack.isDefault(parameters, relativeTo: defaultParameters)
-            onEditSettled?(id, isDefault ? nil : (try? EditStack(parameters: parameters).encodeJSON()))
+            do {
+                onEditSettled?(id, isDefault ? nil : try EditStack(parameters: parameters).encodeJSON())
+            } catch {
+                reportFailure("Encoding the edit", error)
+            }
         }
         persistHistory()
     }

@@ -37,6 +37,7 @@ TestAssets/       Sample RAW files for the CI test matrix (not committed — see
 ```
 swift build                                   # everything, debug
 swift test                                    # unit + golden tests (GPU tests skip without TestAssets)
+scripts/build_libraw.sh                      # once per clone: builds vendor/LibRaw.xcframework from a pinned tag
 swift run latent-app TestAssets/photo.nef    # the editor, opening a file straight away
 swift run latent-cli render photo.nef --out /tmp/out.png   # headless render + timings
 ```

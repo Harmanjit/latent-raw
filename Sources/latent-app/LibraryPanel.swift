@@ -192,7 +192,7 @@ struct LibraryPanel: View {
                 .controlSize(.small)
                 .onSubmit {
                     let keywords = keywordText.split(separator: ",").map(String.init)
-                    Task { try? await library.setKeywords(keywords) }
+                    library.perform("Saving keywords") { try await library.setKeywords(keywords) }
                 }
 
             if image.userRotation != 0 {
@@ -269,7 +269,9 @@ struct LibraryPanel: View {
     }
 
     private func decide(_ include: Bool) {
-        Task { try? await library.decideUndecidedSubfolders(include: include) }
+        library.perform("Applying the subfolder decision") {
+            try await library.decideUndecidedSubfolders(include: include)
+        }
     }
 
     private func sectionLabel(_ title: String) -> some View {

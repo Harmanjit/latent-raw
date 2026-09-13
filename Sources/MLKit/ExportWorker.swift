@@ -12,6 +12,15 @@ import ColorKit
 /// Lives in MLKit rather than PixelEngine because a faithful export must
 /// regenerate AI masks, and only MLKit knows how. The app's queue calls
 /// this once per image; the CLI could too.
+public enum ExportWorkerError: Error, CustomStringConvertible {
+    case unreadableEdit(Error)
+    public var description: String {
+        switch self {
+        case .unreadableEdit(let e): "the stored edit could not be read (\(e)); not exported unedited"
+        }
+    }
+}
+
 public enum ExportWorker {
     public struct Request: Sendable {
         public var sourceURL: URL
@@ -66,7 +75,9 @@ public enum ExportWorker {
         var defaults = EditParameters()
         defaults.whiteBalance = session.asShotWhiteBalance
         var parameters = defaults
-        if let json = request.editStackJSON, let stack = try? EditStack.decode(json: json) {
+        if let json = request.editStackJSON {
+            let stack: EditStack
+            do { stack = try EditStack.decode(json: json) } catch { throw ExportWorkerError.unreadableEdit(error) }
             parameters = stack.parameters(defaults: defaults)
             if parameters.whiteBalance.isAsShot { parameters.whiteBalance = defaults.whiteBalance }
         }

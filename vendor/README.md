@@ -6,6 +6,15 @@ Metal-adjacent build flags (no OpenMP — Latent does its own parallelism),
 and we want a pinned, reproducible binary checked into CI rather than a
 source build that could pick up an unexpected LibRaw version.
 
+## The short version
+
+```bash
+brew install autoconf automake libtool pkg-config
+scripts/build_libraw.sh        # pinned tag, idempotent; CI runs the same script
+```
+
+Everything below is what that script does, kept for reference.
+
 ## Prerequisites (Homebrew)
 
 ```bash

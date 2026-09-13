@@ -129,4 +129,28 @@ final class LibraryTests: XCTestCase {
         library.filter.keyword = "sky"
         XCTAssertEqual(library.visibleImages.map(\.fileName), ["A.NEF"])
     }
+
+    /// A batch transform skips an image whose stored edit can't be parsed
+    /// and names it, rather than writing over it.
+    func testTransformSkipsUnreadableEdits() async throws {
+        let library = Library()
+        try await library.open(folder: folder)
+        let a = library.images.first { $0.fileName == "A.NEF" }!
+        let b = library.images.first { $0.fileName == "B.NEF" }!
+        try await library.saveEditStack("{not json", schemaVersion: 1, processVersion: "1.0", forImageID: a.id!)
+        try await library.saveEditStack("{\"schema\":1}", schemaVersion: 1, processVersion: "1.0", forImageID: b.id!)
+        library.setSelection([a.id!, b.id!], primary: a.id)
+
+        struct Unreadable: Error {}
+        let outcome = try await library.transformSelectedEdits(schemaVersion: 1, processVersion: "1.0") { existing in
+            guard let existing, existing.hasPrefix("{\"") else { throw Unreadable() }
+            return "{\"schema\":1,\"pasted\":true}"
+        }
+        XCTAssertEqual(outcome.changed, 1)
+        XCTAssertEqual(outcome.skipped, ["A.NEF"])
+        let storedA = try await library.editStack(for: a)
+        let storedB = try await library.editStack(for: b)
+        XCTAssertEqual(storedA, "{not json", "untouched")
+        XCTAssertEqual(storedB, "{\"schema\":1,\"pasted\":true}")
+    }
 }

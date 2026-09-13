@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import CoreGraphics
+import os
 
 /// CGImage is immutable but not declared Sendable; this vouches for it so
 /// a thumbnail decoded on a background task can be handed to the UI.
@@ -42,6 +43,9 @@ public final class Library: ObservableObject {
     @Published public private(set) var undecidedSubfolders: [String] = []
     /// Bumped whenever thumbnails land, so a grid knows to refresh cells.
     @Published public private(set) var thumbnailVersion = 0
+    /// The most recent failure of a catalog operation, for the status bar.
+    /// Cleared by the next success or by the user.
+    @Published public var lastError: String?
     /// Images that have a stored edit, so the grid can badge them.
     @Published public private(set) var editedImageIDs: Set<Int64> = [] {
         didSet { if filter.editedOnly { recomputeVisible() } }
@@ -82,6 +86,23 @@ public final class Library: ObservableObject {
     public var selectedImage: ImageRecord? {
         images.first { $0.id == selectedImageID }
     }
+
+    /// Runs a catalog operation and, if it fails, records what and why
+    /// instead of dropping the error. Every UI action that writes to the
+    /// catalog goes through here, so a read-only or full volume shows
+    /// up in the status bar rather than as a rating that didn't stick.
+    public func perform(_ what: String, _ operation: @escaping @MainActor () async throws -> Void) {
+        Task { @MainActor in
+            do {
+                try await operation()
+            } catch {
+                lastError = "\(what) failed: \(error)"
+                Self.logger.error("\(what, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    static let logger = Logger(subsystem: "com.latent.app", category: "catalog")
 
     /// Position in the *visible* list, which is what arrow keys walk.
     public var selectedIndex: Int? {
@@ -243,7 +264,12 @@ public final class Library: ObservableObject {
 
     private func reloadSelectedKeywords() async {
         guard let id = selectedImageID, let catalog else { selectedKeywords = []; return }
-        selectedKeywords = (try? await catalog.keywords(forImageID: id)) ?? []
+        do {
+            selectedKeywords = try await catalog.keywords(forImageID: id)
+        } catch {
+            selectedKeywords = []
+            lastError = "Reading keywords failed: \(error)"
+        }
     }
 
     /// Runs a catalog change for the selected image, then refreshes that
@@ -283,10 +309,13 @@ public final class Library: ObservableObject {
 
     // MARK: - Edits
 
-    /// The stored edit stack for an image, or nil if it's unedited.
-    public func editStack(for record: ImageRecord) async -> String? {
+    /// The stored edit stack for an image, or nil if it's unedited. Throws
+    /// if the catalog can't be read: "unedited" and "unreadable" must not
+    /// look the same, or an image would open at defaults and the next
+    /// save would overwrite an edit that was there all along.
+    public func editStack(for record: ImageRecord) async throws -> String? {
         guard let id = record.id, let catalog else { return nil }
-        return try? await catalog.editStack(forImageID: id)
+        return try await catalog.editStack(forImageID: id)
     }
 
     /// Persists an edit stack (nil = back to defaults) for an image by id,
@@ -304,44 +333,60 @@ public final class Library: ObservableObject {
         startThumbnailGeneration()
     }
 
+    public struct TransformOutcome: Equatable, Sendable {
+        public var changed = 0
+        /// Images left alone because their stored edit couldn't be read or
+        /// the transform threw; never silently replaced.
+        public var skipped: [String] = []
+    }
+
     /// Applies `transform` to the stored edit JSON of each selected image
     /// (nil in = no edit yet). Used for batch paste and presets; the
     /// caller supplies the merge since the catalog doesn't know the
-    /// stack's contents. Returns how many were changed.
+    /// stack's contents. An image whose existing edit can't be read, or
+    /// whose transform throws, is skipped and named in the outcome.
     @discardableResult
     public func transformSelectedEdits(schemaVersion: Int, processVersion: String,
-                                       _ transform: (String?) -> String?) async throws -> Int {
-        guard let catalog else { return 0 }
-        var changed = 0
+                                       _ transform: (String?) throws -> String?) async throws -> TransformOutcome {
+        guard let catalog else { return TransformOutcome() }
+        var outcome = TransformOutcome()
         for record in selectedImages {
             guard let id = record.id else { continue }
-            let existing = try? await catalog.editStack(forImageID: id)
-            let next = transform(existing)
+            let existing: String?
+            let next: String?
+            do {
+                existing = try await catalog.editStack(forImageID: id)
+                next = try transform(existing)
+            } catch {
+                outcome.skipped.append(record.fileName)
+                Self.logger.error("Skipped \(record.fileName, privacy: .public): \(String(describing: error), privacy: .public)")
+                continue
+            }
             if next != existing {
                 try await catalog.setEditStack(next, schemaVersion: schemaVersion,
                                                processVersion: processVersion, forImageID: id)
                 if next == nil { editedImageIDs.remove(id) } else { editedImageIDs.insert(id) }
-                changed += 1
+                outcome.changed += 1
             }
         }
-        if changed > 0 { startThumbnailGeneration() }
-        return changed
+        if outcome.changed > 0 { startThumbnailGeneration() }
+        return outcome
     }
 
     // MARK: - Snapshots and history (per image, stored with the catalog)
 
-    public func snapshots(for record: ImageRecord) async -> [(name: String, stackJSON: String)] {
+    public func snapshots(for record: ImageRecord) async throws -> [(name: String, stackJSON: String)] {
         guard let id = record.id, let catalog else { return [] }
-        return (try? await catalog.snapshots(forImageID: id)) ?? []
+        return try await catalog.snapshots(forImageID: id)
     }
 
     public func setSnapshots(_ snapshots: [(name: String, stackJSON: String)], forImageID id: Int64) async throws {
         try await catalog?.setSnapshots(snapshots, forImageID: id)
     }
 
-    public func history(for record: ImageRecord) async -> [(stackJSON: String, createdAt: Int64)] {
+    public func history(for record: ImageRecord) async throws -> [(stackJSON: String, createdAt: Int64)] {
         guard let id = record.id, let catalog else { return [] }
-        return (try? await catalog.history(forImageID: id)) ?? []
+        return try await catalog.history(forImageID: id)
     }
 
     public func setHistory(_ steps: [(stackJSON: String, createdAt: Int64)], forImageID id: Int64) async throws {

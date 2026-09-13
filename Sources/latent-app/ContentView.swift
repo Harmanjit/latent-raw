@@ -155,14 +155,26 @@ struct ContentView: View {
         guard let url = library.fileURL(for: record) else { return }
         library.selectedImageID = record.id
         Task {
-            let stack = await library.editStack(for: record)
+            let stack: String?
+            do {
+                stack = try await library.editStack(for: record)
+            } catch {
+                // Don't open at defaults over an edit we couldn't read: the
+                // next save would replace it. Say so and stop.
+                model.reportFailure("Reading the edit for \(record.fileName)", error)
+                return
+            }
             model.open(url: url, userRotation: record.userRotation,
                        catalogImageID: record.id, editStackJSON: stack)
             // History and snapshots follow, from the catalog.
-            let steps = await library.history(for: record)
-            let snaps = await library.snapshots(for: record)
-            if model.catalogImageID == record.id {
-                model.loadHistory(steps: steps, snapshots: snaps)
+            do {
+                let steps = try await library.history(for: record)
+                let snaps = try await library.snapshots(for: record)
+                if model.catalogImageID == record.id {
+                    model.loadHistory(steps: steps, snapshots: snaps)
+                }
+            } catch {
+                model.reportFailure("Reading history for \(record.fileName)", error)
             }
         }
     }
@@ -174,9 +186,13 @@ struct ContentView: View {
         if compareModel == nil { compareModel = EditorModel() }
         compareRecord = record
         Task {
-            let stack = await library.editStack(for: record)
-            compareModel?.open(url: url, userRotation: record.userRotation,
-                               catalogImageID: nil, editStackJSON: stack)
+            do {
+                let stack = try await library.editStack(for: record)
+                compareModel?.open(url: url, userRotation: record.userRotation,
+                                   catalogImageID: nil, editStackJSON: stack)
+            } catch {
+                model.reportFailure("Reading the edit for \(record.fileName)", error)
+            }
         }
     }
 
@@ -251,35 +267,35 @@ struct ContentView: View {
     /// history steps and snapshots.
     private func wireEditSaving() {
         model.onEditSettled = { imageID, json in
-            Task {
-                try? await library.saveEditStack(json, schemaVersion: EditStack.schemaVersion,
-                                                  processVersion: EditStack.processVersion,
-                                                  forImageID: imageID)
+            library.perform("Saving the edit") {
+                try await library.saveEditStack(json, schemaVersion: EditStack.schemaVersion,
+                                                 processVersion: EditStack.processVersion,
+                                                 forImageID: imageID)
             }
         }
         model.onHistoryChanged = { imageID, steps in
-            Task { try? await library.setHistory(steps, forImageID: imageID) }
+            library.perform("Saving history") { try await library.setHistory(steps, forImageID: imageID) }
         }
         model.onSnapshotsChanged = { imageID, snapshots in
-            Task { try? await library.setSnapshots(snapshots, forImageID: imageID) }
+            library.perform("Saving snapshots") { try await library.setSnapshots(snapshots, forImageID: imageID) }
         }
     }
 
     // MARK: - Metadata shortcuts (both modes)
 
     private func rate(_ stars: Int) {
-        Task { try? await library.setRating(stars) }
+        library.perform("Rating") { try await library.setRating(stars) }
     }
 
     private func flag(_ flag: ImageFlag) {
-        Task { try? await library.setFlag(flag) }
+        library.perform("Flagging") { try await library.setFlag(flag) }
     }
 
     /// Rotates the selected image in the catalog and, if it's the one in
     /// the editor, on screen too.
     private func rotate(by quarterTurns: Int) {
-        Task {
-            try? await library.rotateSelected(by: quarterTurns)
+        library.perform("Rotating") {
+            try await library.rotateSelected(by: quarterTurns)
             if let selected = library.selectedImage,
                model.imageTitle == selected.fileName {
                 model.setUserRotation(selected.userRotation)
@@ -367,14 +383,18 @@ struct ContentView: View {
         } else if let first = library.selectedImage {
             // In the grid with nothing open: copy the primary selection's stored edit.
             Task {
-                guard let json = await library.editStack(for: first),
-                      let stack = try? EditStack.decode(json: json) else { return }
-                let restricted = stack.restricted(to: model.pasteGroups)
-                if let text = try? restricted.encodeJSON() {
+                do {
+                    guard let json = try await library.editStack(for: first) else {
+                        model.reportError("\(first.fileName) has no edits to copy"); return
+                    }
+                    let stack = try EditStack.decode(json: json)
+                    let text = try stack.restricted(to: model.pasteGroups).encodeJSON()
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: EditorModel.pasteboardType)
                     NSPasteboard.general.setString(text, forType: .string)
                     model.reportError("Copied settings from \(first.fileName)")
+                } catch {
+                    model.reportFailure("Copying settings from \(first.fileName)", error)
                 }
             }
         }
@@ -393,14 +413,27 @@ struct ContentView: View {
             return
         }
         Task {
-            let n = try? await library.transformSelectedEdits(
-                schemaVersion: EditStack.schemaVersion, processVersion: EditStack.processVersion
-            ) { existing in
-                let current = existing.flatMap { try? EditStack.decode(json: $0) } ?? EditStack()
-                let merged = current.merged(with: stack, groups: groups)
-                return merged == EditStack() ? nil : (try? merged.encodeJSON())
+            let outcome: Library.TransformOutcome
+            do {
+                outcome = try await library.transformSelectedEdits(
+                    schemaVersion: EditStack.schemaVersion, processVersion: EditStack.processVersion
+                ) { existing in
+                    // An unreadable existing edit throws here and the image
+                    // is skipped, never replaced by the pasted modules alone.
+                    let current = try existing.map { try EditStack.decode(json: $0) } ?? EditStack()
+                    let merged = current.merged(with: stack, groups: groups)
+                    return merged == EditStack() ? nil : try merged.encodeJSON()
+                }
+            } catch {
+                model.reportFailure("\(what) settings", error)
+                return
             }
-            model.reportError("\(what) settings to \(n ?? 0) image\((n ?? 0) == 1 ? "" : "s")")
+            let n = outcome.changed
+            var message = "\(what) settings to \(n) image\(n == 1 ? "" : "s")"
+            if !outcome.skipped.isEmpty {
+                message += " · skipped \(outcome.skipped.count) with unreadable edits: " + outcome.skipped.joined(separator: ", ")
+            }
+            model.reportError(message)
             // If the open image was among them, reload its sliders.
             if let selected = library.selectedImage, model.imageTitle == selected.fileName,
                library.selectedImageIDs.contains(selected.id ?? -1) {
@@ -929,11 +962,30 @@ struct ContentView: View {
             .disabled(library.selectedImage == nil)
             .help("Rotate the selected image (⌘[ and ⌘]). Remembered in the catalog.")
 
-            Text(model.setupError ?? (mode == .library ? library.statusText : model.status))
+            if let problem = model.setupError ?? library.lastError ?? model.lastError {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text(problem)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(problem)
+                    if model.setupError == nil {
+                        Button { library.lastError = nil; model.lastError = nil } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Dismiss")
+                    }
+                }
                 .font(.caption)
-                .foregroundStyle(model.setupError == nil ? Color.secondary : Color.red)
-                .lineLimit(1)
-                .truncationMode(.middle)
+                .foregroundStyle(Color.red)
+            } else {
+                Text(mode == .library ? library.statusText : model.status)
+                    .font(.caption)
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
 
             Spacer()
 
