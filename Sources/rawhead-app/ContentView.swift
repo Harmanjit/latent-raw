@@ -409,6 +409,39 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Soft proof", isOn: $model.proofEnabled)
+                            .toggleStyle(.switch).controlSize(.small)
+                        Picker("Target", selection: Binding(
+                            get: { model.proofTarget == .sRGB ? 0 : model.proofTarget == .displayP3 ? 1 : 2 },
+                            set: { v in
+                                if v == 0 { model.proofTarget = .sRGB }
+                                else if v == 1 { model.proofTarget = .displayP3 }
+                                else { model.chooseProofProfile() }
+                            })) {
+                            Text("sRGB").tag(0)
+                            Text("Display P3").tag(1)
+                            Text(model.proofTarget.displayName == "sRGB" || model.proofTarget.displayName == "Display P3"
+                                 ? "ICC profile…" : model.proofTarget.displayName + "…").tag(2)
+                        }
+                        .pickerStyle(.menu).labelsHidden().controlSize(.small)
+                        Toggle("Gamut warning (grey = can't be reproduced)", isOn: $model.gamutWarning)
+                            .toggleStyle(.checkbox).controlSize(.small)
+                        if !model.proofStatus.isEmpty {
+                            Text(model.proofStatus).font(.caption2).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Text("Shows what the file will look like in the target's gamut. HDR headroom is off while proofing.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .disabled(!model.hasImage)
+                    .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Soft Proof")
+                }
+
+                DisclosureGroup {
                     VStack(alignment: .leading, spacing: 10) {
                         Picker("Format", selection: $model.exportSettings.format) {
                             ForEach(ExportSettings.Format.allCases, id: \.self) { format in

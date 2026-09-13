@@ -139,11 +139,53 @@ final class EditorModel: ObservableObject {
     /// is selected and its mask should be visible, the overlay index rides
     /// along — a display setting, never part of the edit.
     private var displayOutput: RenderOutput {
-        var output = RenderOutput.edrDisplay(headroom: effectiveHeadroom)
+        // Proofing simulates an SDR file, so the display headroom is
+        // dropped to 1 while it's on: an EDR highlight can't be in a JPEG.
+        var output = RenderOutput.edrDisplay(headroom: proofLUT == nil ? effectiveHeadroom : 1)
         if showMaskOverlay || isDraggingMask, let i = selectedLocalIndex, i < parameters.locals.count {
             output.maskOverlay = i
         }
+        output.proof = proofLUT
+        output.gamutWarning = gamutWarning
         return output
+    }
+
+    // MARK: - Soft proofing
+
+    @Published var proofEnabled = false { didSet { if proofEnabled != oldValue { rebuildProof() } } }
+    @Published var proofTarget: SoftProofTarget = .sRGB { didSet { if proofTarget != oldValue { rebuildProof() } } }
+    @Published var gamutWarning = false { didSet { if gamutWarning != oldValue { rerender() } } }
+    @Published private(set) var proofStatus = ""
+    private(set) var proofLUT: SoftProofLUT?
+
+    /// Builds the proof table (a few ms for a matrix space, tens for an
+    /// ICC profile) and re-renders. Off = no table at all, so proofing
+    /// costs nothing when it isn't on.
+    private func rebuildProof() {
+        guard proofEnabled else {
+            proofLUT = nil; proofStatus = ""; rerender(); return
+        }
+        do {
+            let lut = try SoftProofLUT.build(proofTarget)
+            proofLUT = lut
+            proofStatus = String(format: "%@ · %.1f%% of colours out of gamut",
+                                 proofTarget.displayName, lut.outOfGamutFraction * 100)
+        } catch {
+            proofLUT = nil
+            proofStatus = "Proof failed: \(error)"
+        }
+        rerender()
+    }
+
+    func chooseProofProfile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "icc") ?? .data,
+                                     UTType(filenameExtension: "icm") ?? .data]
+        panel.directoryURL = URL(fileURLWithPath: "/Library/ColorSync/Profiles")
+        panel.message = "Choose an ICC profile to proof against (printer, paper, display)"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        proofTarget = .icc(url)
+        proofEnabled = true
     }
 
     // MARK: - Local adjustments

@@ -199,6 +199,9 @@ public struct RenderOutput: Sendable, Equatable {
     /// Index into `EditParameters.locals` whose mask to paint as a red
     /// overlay, for editing. nil normally. A display concern, not an edit.
     public var maskOverlay: Int? = nil
+    /// Soft-proof table to apply, and whether to flag clipped colours.
+    public var proof: SoftProofLUT? = nil
+    public var gamutWarning = false
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -228,6 +231,7 @@ public struct RenderOutput: Sendable, Equatable {
         String(describing: a.space) == String(describing: b.space)
             && a.headroom == b.headroom && a.encoded == b.encoded
             && a.toneMapped == b.toneMapped && a.maskOverlay == b.maskOverlay
+            && a.proof?.id == b.proof?.id && a.gamutWarning == b.gamutWarning
     }
 }
 
@@ -278,8 +282,30 @@ enum RenderPlan {
 public final class RenderPipeline {
     let gpu: GPUContext
 
+    /// The most recent proof table as a texture, so a proofed render
+    /// doesn't rebuild 143K texels every frame.
+    private var proofTexture: (id: UUID, texture: MTLTexture)?
+    private var placeholder3D: MTLTexture?
+
     public init(gpu: GPUContext) {
         self.gpu = gpu
+    }
+
+    private func proofTexture(for lut: SoftProofLUT?) -> MTLTexture? {
+        if let lut {
+            if let cached = proofTexture, cached.id == lut.id { return cached.texture }
+            guard let texture = lut.makeTexture(device: gpu.device) else { return nil }
+            proofTexture = (lut.id, texture)
+            return texture
+        }
+        if placeholder3D == nil {
+            let d = MTLTextureDescriptor()
+            d.textureType = .type3D; d.pixelFormat = .rgba16Float
+            d.width = 1; d.height = 1; d.depth = 1
+            d.storageMode = .shared; d.usage = [.shaderRead]
+            placeholder3D = gpu.device.makeTexture(descriptor: d)
+        }
+        return placeholder3D
     }
 
     /// `output` defaults to an encoded file in `parameters.outputSpace`,
@@ -704,6 +730,10 @@ public final class RenderPipeline {
         encoder.setBytes(&span, length: 4, index: 20)
         encoder.setBytes(&overlay, length: 4, index: 21)
         encoder.setTexture(maskTexture, index: 2)
+
+        var proofMode: UInt32 = output.proof == nil ? 0 : (output.gamutWarning ? 2 : 1)
+        encoder.setBytes(&proofMode, length: 4, index: 22)
+        encoder.setTexture(proofTexture(for: output.proof), index: 3)
 
         dispatch(encoder, pso: gpu.colorAndTonePSO, width: input.width, height: input.height)
         encoder.endEncoding()

@@ -302,7 +302,9 @@ kernel void colorAndTone(
     constant float2 &tileOrigin                  [[buffer(19)]],
     constant float &binSpan                      [[buffer(20)]],
     constant int &maskOverlayIndex               [[buffer(21)]],  // -1 = none
+    constant uint &proofMode                     [[buffer(22)]],  // 0 off, 1 proof, 2 proof + warning
     texture2d_array<float, access::sample> brushMasks [[texture(2)]],
+    texture3d<float, access::sample> proofLUT    [[texture(3)]],
     uint2 gid                                    [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
@@ -353,6 +355,21 @@ kernel void colorAndTone(
         if (gradingFlags.y != 0) p = applyHSL(p, hsl);
         if (gradingFlags.z != 0) p = applySplitToning(p, splitTint, splitBalance);
         display = pow(max(p, 0.0), 2.2) * headroom;
+    }
+
+    // Soft proof: replace each colour with what the target can show of
+    // it. The table covers [0,1]^3 at 33 samples; the sampler maps the
+    // colour onto texel centres so the corners of the cube land exactly
+    // on the first and last samples.
+    if (proofMode != 0) {
+        constexpr sampler s3(coord::normalized, address::clamp_to_edge, filter::linear);
+        float3 d = clamp(display / headroom, 0.0, 1.0);
+        float3 uvw = d * (32.0 / 33.0) + (0.5 / 33.0);
+        float4 proofed = proofLUT.sample(s3, uvw);
+        display = proofed.rgb * headroom;
+        // Warning: paint clipped colours mid-grey, the convention every
+        // editor uses, so they stand out against anything photographic.
+        if (proofMode == 2 && proofed.a > 0.5) display = float3(0.5 * headroom);
     }
 
     // Stage 13: working space -> output space, then encode — or not.
