@@ -199,6 +199,8 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
         outlineView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         outlineView.dataSource = self
         outlineView.delegate = self
+        outlineView.target = self
+        outlineView.action = #selector(rowClicked(_:))
         outlineView.menu = NSMenu()
         outlineView.menu?.delegate = self
         outlineView.registerForDraggedTypes([.fileURL])
@@ -289,10 +291,17 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
         let old = node.children ?? []
         var existing: [String: FolderNode] = [:]
         for child in old { if let url = child.url { existing[url.standardizedFileURL.path] = child } }
+        var rowsChanged = false
         let children = found.map { folder -> FolderNode in
             if let child = existing.removeValue(forKey: folder.url.standardizedFileURL.path) {
-                if child.children == nil { child.mayHaveChildren = folder.hasSubfolders }
-                child.hasCatalog = folder.hasCatalog
+                if child.children == nil, child.mayHaveChildren != folder.hasSubfolders {
+                    child.mayHaveChildren = folder.hasSubfolders
+                    rowsChanged = true
+                }
+                if child.hasCatalog != folder.hasCatalog {
+                    child.hasCatalog = folder.hasCatalog
+                    rowsChanged = true
+                }
                 return child
             }
             return FolderNode(kind: .folder, title: folder.title, url: folder.url, hasCatalog: folder.hasCatalog,
@@ -302,7 +311,7 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
         let unchanged = node.children != nil && children.map(ObjectIdentifier.init) == old.map(ObjectIdentifier.init)
         node.children = children
         node.mayHaveChildren = !children.isEmpty
-        if !unchanged { reloadRow(node, children: true) }
+        if !unchanged || rowsChanged { reloadRow(node, children: true) }
         if node.wantsExpansion {
             node.wantsExpansion = false
             isChangingInCode = true
@@ -519,20 +528,21 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
         return cell
     }
 
-    /// A click opens the folder. The highlight stays where the click put it
-    /// while the folder opens, and goes back to the open catalog if it
-    /// can't (ContentView passes the folder being opened as current).
-    func outlineViewSelectionDidChange(_ notification: Notification) {
-        guard !isChangingInCode, let node = outlineView.item(atRow: outlineView.selectedRow) as? FolderNode,
-              let url = node.url else { return }
+    /// A click opens the folder: on the click itself, not on a selection
+    /// change, so dragging across rows doesn't open each one and a click on
+    /// a disclosure triangle only expands. The highlight follows the folder
+    /// being opened (ContentView passes it as current) and goes back if the
+    /// folder is refused.
+    @objc private func rowClicked(_ sender: Any?) {
+        let row = outlineView.clickedRow
+        guard row >= 0, let node = outlineView.item(atRow: row) as? FolderNode, let url = node.url else { return }
+        if let event = NSApp.currentEvent,
+           outlineView.frameOfOutlineCell(atRow: row).contains(outlineView.convert(event.locationInWindow, from: nil)) {
+            return
+        }
         if let currentFolder, FolderAccess.samePath(currentFolder, url) { return }
         guard onOpen?(url) == false else { return }
-        // Refused at once: the highlight goes back to the open catalog, after
-        // the click that moved it has finished.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.select(self.node(for: self.currentFolder))
-        }
+        select(self.node(for: currentFolder))
     }
 
     // MARK: - Context menu
