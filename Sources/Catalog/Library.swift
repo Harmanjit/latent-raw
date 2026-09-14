@@ -20,10 +20,17 @@ public struct ThumbnailImage: @unchecked Sendable {
 public final class Library: ObservableObject {
     @Published public private(set) var folderURL: URL?
     @Published public private(set) var images: [ImageRecord] = [] {
-        didSet { recomputeVisible() }
+        didSet { if !isPatchingRecords { recomputeVisible() } }
     }
     /// The grid's contents: `images` after `filter` and `sort`.
     @Published public private(set) var visibleImages: [ImageRecord] = []
+    /// Bumped when `visibleImages` gains, loses or reorders images, but not
+    /// when a record in it only changes in place (a rating, say). The grid
+    /// rebuilds on the first and redraws just the changed cells on the second.
+    public private(set) var visibleListVersion = 0
+    /// Set while re-read records are patched into `images`, which then
+    /// decides for itself whether the visible list needs recomputing.
+    private var isPatchingRecords = false
     @Published public var filter = LibraryFilter() {
         didSet { if filter != oldValue { recomputeVisible() } }
     }
@@ -33,7 +40,7 @@ public final class Library: ObservableObject {
     /// image id → keywords, for filtering; refreshed with the image list
     /// and whenever keywords are edited.
     private var keywordIndex: [Int64: Set<String>] = [:] {
-        didSet { recomputeVisible() }
+        didSet { if filter.keyword != nil { recomputeVisible() } }
     }
     @Published public private(set) var isBusy = false
     @Published public private(set) var statusText = "No folder open"
@@ -64,24 +71,37 @@ public final class Library: ObservableObject {
         images.filter { $0.id.map(selectedImageIDs.contains) ?? false }
     }
 
-    /// Sets both selections from the grid.
+    /// Sets both selections from the grid. The primary (lead) is `primary`
+    /// if it's selected, else the current one if it still is, else the
+    /// first selected image in grid order: never an arbitrary member of
+    /// the set (see `GridSelection`).
     public func setSelection(_ ids: Set<Int64>, primary: Int64?) {
-        selectedImageIDs = ids
-        selectedImageID = primary ?? ids.first.flatMap { id in images.first { $0.id == id }?.id }
+        let lead = GridSelection.resolvedLead(proposed: primary, current: selectedImageID, selected: ids,
+                                              order: visibleImages)
+        if selectedImageIDs != ids { selectedImageIDs = ids }
+        if selectedImageID != lead { selectedImageID = lead }
+    }
+
+    /// Selects every visible image and keeps the lead where it is (⌘A).
+    public func selectAllVisible() {
+        setSelection(Set(visibleImages.compactMap(\.id)), primary: selectedImageID)
     }
 
     public private(set) var catalog: Catalog?
 
-    private let thumbnailCache = NSCache<NSNumber, CGImage>()
+    /// Decoded thumbnails for display, bounded in bytes. The HEIC files in
+    /// `_latent/thumbnails` are the disk tier.
+    public let thumbnailLoader = ThumbnailLoader()
+    /// Where the open catalog's thumbnail files are; nil while a folder is
+    /// opening, so nothing is decoded for ids that are about to change.
+    private var thumbnailDirectory: URL?
 
     /// Renders thumbnails for edited images. Set by the app (it needs the
     /// GPU pipeline, which the catalog doesn't know about).
     public var thumbnailRenderer: (any EditedThumbnailRenderer)?
     private var thumbnailTask: Task<Void, Never>?
 
-    public init() {
-        thumbnailCache.countLimit = 2000
-    }
+    public init() {}
 
     public var selectedImage: ImageRecord? {
         images.first { $0.id == selectedImageID }
@@ -156,7 +176,42 @@ public final class Library: ObservableObject {
             }
             : images
         let next = passing.sorted(by: sort)
-        if next != visibleImages { visibleImages = next }
+        if next != visibleImages {
+            if !next.elementsEqual(visibleImages, by: { $0.id == $1.id }) { visibleListVersion += 1 }
+            visibleImages = next
+        }
+    }
+
+    /// Puts re-read records into `images` and `visibleImages` in place.
+    /// The whole folder is filtered and sorted again only when the active
+    /// filter or sort looks at what changed (rating under a rating sort,
+    /// say), so a rating or flag key press doesn't rebuild the grid.
+    private func applyChangedRecords(_ fresh: [Int64: ImageRecord]) {
+        var updated = images
+        var changed = false
+        var reorder = false
+        for index in updated.indices {
+            guard let id = updated[index].id, let record = fresh[id], record != updated[index] else { continue }
+            if filter.dependsOnChange(from: updated[index], to: record)
+                || sort.dependsOnChange(from: updated[index], to: record) {
+                reorder = true
+            }
+            updated[index] = record
+            changed = true
+        }
+        guard changed else { return }
+        isPatchingRecords = true
+        images = updated
+        isPatchingRecords = false
+        if reorder {
+            recomputeVisible()
+            return
+        }
+        var visible = visibleImages
+        for index in visible.indices {
+            if let id = visible[index].id, let record = fresh[id] { visible[index] = record }
+        }
+        if visible != visibleImages { visibleImages = visible }
     }
 
     /// Distinct values for the filter pickers, from the whole folder (not
@@ -175,6 +230,14 @@ public final class Library: ObservableObject {
         folderURL?.appendingPathComponent(record.relPath)
     }
 
+    /// What Reveal in Finder shows: the selected originals, or the primary
+    /// when only that is set, or the folder itself when nothing is selected.
+    public var revealInFinderURLs: [URL] {
+        guard let folderURL else { return [] }
+        let targets = selectedImageIDs.isEmpty ? selectedImage.map { [$0] } ?? [] : selectedImages
+        return targets.isEmpty ? [folderURL] : targets.map { folderURL.appendingPathComponent($0.relPath) }
+    }
+
     // MARK: - Opening
 
     /// Opens (or creates) the catalog in `folder`, reconciles, shows the
@@ -186,6 +249,13 @@ public final class Library: ObservableObject {
         defer { isBusy = false }
 
         let catalog = try Catalog.open(at: folder)
+        // Image ids belong to a catalog: nothing decoded for the old one may
+        // be shown, or cached, under the new one's ids. Ids also restart in
+        // every catalog, so two folders can list the same ids (even the same
+        // names) in the same order: a new catalog always counts as a new list.
+        thumbnailDirectory = nil
+        thumbnailLoader.removeAll()
+        visibleListVersion += 1
         // A catalog that has never recorded a subfolder policy takes the
         // app's default; one that has keeps its own.
         if let mode = defaultSubfolderMode, try await catalog.setting(Catalog.defaultSubfolderModeKey) == nil {
@@ -193,8 +263,8 @@ public final class Library: ObservableObject {
         }
         self.catalog = catalog
         self.folderURL = await catalog.rootPath
-        thumbnailCache.removeAllObjects()
         selectedImageID = nil
+        selectedImageIDs = []
 
         try await refresh()
     }
@@ -208,7 +278,11 @@ public final class Library: ObservableObject {
 
         let report = try await catalog.reconcile()
         undecidedSubfolders = report.undecidedSubfolders
-        images = try await catalog.allImages()
+        let all = try await catalog.allImages()
+        // Set together, with no suspension between, so a cell never asks for
+        // one catalog's thumbnail under another's ids.
+        thumbnailDirectory = await catalog.thumbnailDirectory
+        images = all
         editedImageIDs = try await catalog.editedImageIDs()
         keywordIndex = try await catalog.allImageKeywords()
         if let selected = selectedImageID, !images.contains(where: { $0.id == selected }) {
@@ -256,11 +330,12 @@ public final class Library: ObservableObject {
                 }
                 await MainActor.run {
                     guard let self else { return }
-                    // Regenerated files replace what the cache holds.
-                    for relPath in report.regeneratedRelPaths {
-                        if let id = self.images.first(where: { $0.relPath == relPath })?.id {
-                            self.thumbnailCache.removeObject(forKey: NSNumber(value: id))
-                        }
+                    // Files that replaced an older thumbnail replace what the
+                    // cache holds; first-time files can't be cached stale.
+                    if !report.replacedRelPaths.isEmpty {
+                        let replaced = Set(report.replacedRelPaths)
+                        self.thumbnailLoader.invalidate(ids: Set(self.images.lazy
+                            .filter { replaced.contains($0.relPath) }.compactMap(\.id)))
                     }
                     if !report.regeneratedRelPaths.isEmpty { self.thumbnailVersion += 1 }
                     if !report.failures.isEmpty {
@@ -273,25 +348,51 @@ public final class Library: ObservableObject {
         }
     }
 
-    /// The cached thumbnail, if it's been loaded. Cells call this first;
-    /// on a miss they call `loadThumbnail` and update when it returns.
+    /// The cached thumbnail, camera-oriented (the user's rotation not
+    /// applied), if it's been loaded. On a miss, call `loadThumbnail`.
     public func cachedThumbnail(for record: ImageRecord) -> CGImage? {
         guard let id = record.id else { return nil }
-        return thumbnailCache.object(forKey: NSNumber(value: id))
+        return thumbnailLoader.cachedImage(id: id, quarterTurns: 0, pixelSize: Thumbnailer.size)
     }
 
-    /// Decodes the thumbnail file on a utility task and caches it. Returns
+    /// Decodes the thumbnail file off the main thread and caches it. Returns
     /// nil when the file doesn't exist yet (generation still running).
+    /// Camera-oriented, like `cachedThumbnail`.
     public func loadThumbnail(for record: ImageRecord) async -> CGImage? {
-        guard let id = record.id, let catalog else { return nil }
-        if let cached = thumbnailCache.object(forKey: NSNumber(value: id)) { return cached }
-        let url = await catalog.thumbnailURL(forRelPath: record.relPath)
-        let loaded = await Task.detached(priority: .utility) { () -> ThumbnailImage? in
-            Thumbnailer.load(from: url).map(ThumbnailImage.init)
-        }.value
-        guard let image = loaded?.cgImage else { return nil }
-        thumbnailCache.setObject(image, forKey: NSNumber(value: id))
-        return image
+        if let cached = cachedThumbnail(for: record) { return cached }
+        let image: ThumbnailImage? = await withCheckedContinuation { continuation in
+            let started = requestThumbnail(for: record, quarterTurns: 0, pixelSize: Thumbnailer.size) { image in
+                continuation.resume(returning: image.map(ThumbnailImage.init))
+            }
+            if started == nil { continuation.resume(returning: nil) }
+        }
+        return image?.cgImage
+    }
+
+    /// The thumbnail as the grid shows it, turned by the image's own
+    /// rotation and at least `pixelSize` on its long edge, if it's in memory.
+    public func displayThumbnail(for record: ImageRecord, pixelSize: Int) -> CGImage? {
+        guard let id = record.id else { return nil }
+        return thumbnailLoader.cachedImage(id: id, quarterTurns: record.userRotation, pixelSize: pixelSize)
+    }
+
+    /// Asks for `displayThumbnail` to be decoded. The completion runs on the
+    /// main actor, never after the returned request is cancelled; nil means
+    /// nothing was asked for (no catalog open yet, or an unsaved record).
+    @discardableResult
+    public func requestDisplayThumbnail(for record: ImageRecord, pixelSize: Int,
+                                        completion: @escaping @MainActor @Sendable (CGImage?) -> Void) -> ThumbnailRequest? {
+        requestThumbnail(for: record, quarterTurns: record.userRotation, pixelSize: pixelSize, completion: completion)
+    }
+
+    private func requestThumbnail(for record: ImageRecord, quarterTurns: Int, pixelSize: Int,
+                                  completion: @escaping @MainActor @Sendable (CGImage?) -> Void) -> ThumbnailRequest? {
+        guard let id = record.id, let thumbnailDirectory else { return nil }
+        // Same layout as Catalog.thumbnailURL(forRelPath:), without a hop
+        // onto the catalog's actor for every cell.
+        let url = thumbnailDirectory.appendingPathComponent(record.relPath + ".heic")
+        return thumbnailLoader.request(id: id, url: url, quarterTurns: quarterTurns, pixelSize: pixelSize,
+                                       completion: completion)
     }
 
     // MARK: - Metadata on the selection
@@ -363,13 +464,9 @@ public final class Library: ObservableObject {
             }
         }
         // Patch whatever `images` is now (a refresh may have landed during
-        // the awaits), in one assignment so the visible list is recomputed
-        // once rather than per image.
-        var updated = images
-        for index in updated.indices {
-            if let id = updated[index].id, let record = fresh[id] { updated[index] = record }
-        }
-        images = updated
+        // the awaits), in one assignment, recomputing the visible list only
+        // if the filter or sort cares.
+        applyChangedRecords(fresh)
         await reloadSelectedKeywords()
         if failures.count == 1, records.count == 1 { throw failures[0].error }
         if !failures.isEmpty { throw SelectionChangeError(total: records.count, failures: failures) }

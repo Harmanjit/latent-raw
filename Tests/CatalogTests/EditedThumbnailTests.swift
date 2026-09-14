@@ -34,7 +34,8 @@ final class EditedThumbnailTests: XCTestCase {
     func testEditChangesTheKeyAndRegenerates() async throws {
         let catalog = try Catalog.open(at: folder)
         _ = try await catalog.reconcile()
-        _ = try await catalog.generateMissingThumbnails()
+        let first = try await catalog.generateMissingThumbnails()
+        XCTAssertEqual(first.replacedRelPaths, [], "nothing was there to replace")
         let firstImage = try await catalog.image(forRelPath: "A.NEF")
         let id = try XCTUnwrap(firstImage?.id)
         XCTAssertEqual(firstImage?.thumbKey, Thumbnailer.embeddedPreviewKey)
@@ -56,6 +57,7 @@ final class EditedThumbnailTests: XCTestCase {
         report = try await catalog.generateMissingThumbnails(editedRenderer: SolidRenderer())
         XCTAssertEqual(report.generated, 1)
         XCTAssertEqual(report.regeneratedRelPaths, ["A.NEF"])
+        XCTAssertEqual(report.replacedRelPaths, ["A.NEF"], "so a memory cache must drop it")
         let edited = try await catalog.image(forRelPath: "A.NEF")
         XCTAssertEqual(edited?.thumbKey, Thumbnailer.key(forEditStack: json))
         let url = await catalog.thumbnailURL(forRelPath: "A.NEF")
