@@ -90,6 +90,8 @@ final class AppPreferences: ObservableObject {
         }
     }
     @Published var mlCompute: MLCompute { didSet { defaults.set(mlCompute.rawValue, forKey: CoreMLStore.computePreferenceKey) } }
+    /// Side of a grid thumbnail in points: the Library's size slider, ⌘= and ⌘-.
+    @Published var thumbnailSize: Double { didSet { defaults.set(thumbnailSize, forKey: "latent.thumbnailSize") } }
 
     private init() {
         appearance = Appearance(rawValue: defaults.string(forKey: "latent.appearance") ?? "") ?? .system
@@ -99,6 +101,8 @@ final class AppPreferences: ObservableObject {
         defaultSubfolderMode = SubfolderMode(rawValue: defaults.string(forKey: "latent.defaultSubfolderMode") ?? "") ?? .ask
         defaultExportFolder = BookmarkStore.resolve(key: BookmarkStore.defaultExportFolder)
         mlCompute = MLCompute(rawValue: defaults.string(forKey: CoreMLStore.computePreferenceKey) ?? "") ?? .gpu
+        thumbnailSize = ThumbnailGridLayout.clamped(defaults.object(forKey: "latent.thumbnailSize") as? Double
+                                                    ?? ThumbnailGridLayout.defaultSide)
     }
 
     func applyAppearance() {

@@ -16,6 +16,9 @@ public struct ThumbnailReport: Sendable, CustomStringConvertible {
     public var generated = 0
     /// Images whose thumbnail file changed, so caches can drop them.
     public var regeneratedRelPaths: [String] = []
+    /// The subset that overwrote an existing thumbnail file. Only these can
+    /// be in a memory cache with old pixels.
+    public var replacedRelPaths: [String] = []
     public var failures: [(relPath: String, reason: String)] = []
     public var duration: TimeInterval = 0
 
@@ -84,13 +87,15 @@ extension Catalog {
             let destination: URL
             let editStackJSON: String?
             let key: Data
+            let replaces: Bool
         }
         let jobs = needed.map { job in
             Work(relPath: job.record.relPath,
                  source: fileURL(forRelPath: job.record.relPath),
                  destination: thumbnailURL(forRelPath: job.record.relPath),
                  editStackJSON: job.editStackJSON,
-                 key: job.expectedKey)
+                 key: job.expectedKey,
+                 replaces: FileManager.default.fileExists(atPath: thumbnailURL(forRelPath: job.record.relPath).path))
         }
         let total = jobs.count
 
@@ -144,6 +149,7 @@ extension Catalog {
         }
         report.generated = succeeded.count
         report.regeneratedRelPaths = keys.map(\.0)
+        report.replacedRelPaths = jobs.filter { $0.replaces && succeeded.contains($0.relPath) }.map(\.relPath)
         report.duration = Date().timeIntervalSince(start)
         return report
     }

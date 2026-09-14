@@ -71,7 +71,7 @@ struct ContentView: View {
                     VStack(spacing: 0) {
                         FilterBar(library: library)
                         Divider()
-                        ThumbnailGridView(library: library, onOpen: openInEditor)
+                        ThumbnailGridView(library: library, onOpen: openInEditor, actions: gridActions)
                     }
                     .onDisappear { model.flushPendingSave() }
                 case .loupe:
@@ -163,6 +163,20 @@ struct ContentView: View {
     private func openInEditor(_ record: ImageRecord) {
         load(record)
         mode = .develop
+    }
+
+    /// The grid's right-click menu, acting as the same keys and buttons do.
+    private var gridActions: GridActions {
+        GridActions(
+            openLoupe: { if library.selectedImage != nil { mode = .loupe } },
+            openDevelop: { if let selected = library.selectedImage { openInEditor(selected) } },
+            openCompare: { if library.selectedImage != nil { mode = .compare } },
+            rate: rate, flag: flag, rotate: { rotate(by: $0) },
+            copySettings: copySettings, pasteSettings: pasteSettings,
+            canPasteSettings: { EditorModel.clipboardStack() != nil },
+            presets: { model.presets }, applyPreset: applyPresetToSelection,
+            export: { showingExportSheet = true },
+            canExport: { !exportQueue.isRunning })
     }
 
     /// Loads `record` (with its stored edit, history and snapshots) into
@@ -406,7 +420,10 @@ struct ContentView: View {
     // MARK: - Settings clipboard and presets, in either mode
 
     private func copySettings() {
-        if mode == .develop || library.selectedImageIDs.count <= 1, model.hasImage {
+        // In the grid the editor may still hold an image other than the one
+        // selected; that one's stored edit is what gets copied then.
+        if mode == .develop || (library.selectedImageIDs.count <= 1 && model.catalogImageID == library.selectedImageID),
+           model.hasImage {
             model.copySettings()
         } else if let first = library.selectedImage {
             // In the grid with nothing open: copy the primary selection's stored edit.
