@@ -1088,6 +1088,7 @@ final class EditorModel: ObservableObject {
             parameters = restored   // triggers rerender via didSet
             pendingSave?.cancel()
             pendingSave = nil
+            joinLinkedPane()   // after the crop is restored: it sets the canvas
 
             if newSession.profile == nil {
                 status = "No colour profile for \(file.summary.cameraModel) — cannot render"
@@ -1130,6 +1131,7 @@ final class EditorModel: ObservableObject {
 
     func viewportDidResize(to size: CGSize) {
         guard size != drawableSize else { return }
+        let oldSize = drawableSize
         drawableSize = size
         guard hasImage else { return }
         if fitMode {
@@ -1137,6 +1139,9 @@ final class EditorModel: ObservableObject {
         } else {
             viewport = viewport.clamped(imageSize: imageSize, drawableSize: size)
         }
+        // Compare: a pane laid out for the first time joins the other; a
+        // zoomed pane that changed size keeps the other lined up with it.
+        if oldSize == .zero { joinLinkedPane() } else if !fitMode { carryViewToLinkedPane() }
         scheduleRender()
     }
 
@@ -1168,10 +1173,11 @@ final class EditorModel: ObservableObject {
     }
 
     func zoomToFit() {
-        guard hasImage else { return }
+        guard hasImage, !tookLinkedViewThisTurn else { return }
         fitMode = true
         viewport = .fit(imageSize: imageSize, drawableSize: drawableSize)
         rerenderForViewport()
+        carryViewToLinkedPane()
     }
 
     func zoomToActualSize() {
@@ -1194,11 +1200,13 @@ final class EditorModel: ObservableObject {
     /// Every gesture lands here: clamp, publish (the view redraws at once),
     /// and queue a render for when the gesture settles.
     private func apply(_ proposed: ViewportTransform) {
+        guard !tookLinkedViewThisTurn else { return }
         let clamped = proposed.clamped(imageSize: imageSize, drawableSize: drawableSize)
         fitMode = clamped.isFit(imageSize: imageSize, drawableSize: drawableSize)
         guard clamped != viewport else { return }
         viewport = clamped
         scheduleRender()
+        carryViewToLinkedPane()
     }
 
     /// Coalesces a burst of gesture events into one render, shortly after
@@ -1212,6 +1220,57 @@ final class EditorModel: ObservableObject {
             guard !Task.isCancelled else { return }
             self?.rerenderForViewport()
         }
+    }
+
+    // MARK: - Compare: linked view
+
+    /// Compare's other pane while Sync is on; ContentView sets it on both.
+    /// Every zoom and pan made here is shown there as the same
+    /// `RelativeView`, so both panes show the same part of the scene even
+    /// when their crops, rotations or pixel sizes differ.
+    weak var linkedPane: EditorModel?
+
+    /// Set when this pane has just taken the linked pane's view, until the
+    /// main queue next turns. Compare's zoom buttons and Z key send each
+    /// command to both panes; once the first has carried it over, the copy
+    /// arriving here must not apply it again (Z would toggle straight back
+    /// to fit, and + would zoom twice).
+    private var tookLinkedViewThisTurn = false
+
+    /// This pane's zoom and pan in terms another pane can apply.
+    var relativeView: RelativeView {
+        RelativeView(transform: viewport, isFit: fitMode, imageSize: imageSize, drawableSize: drawableSize)
+    }
+
+    /// Shows `view` of this pane's own image. Never carried back.
+    func takeLinkedView(_ view: RelativeView) {
+        if !tookLinkedViewThisTurn {
+            tookLinkedViewThisTurn = true
+            Task { @MainActor [weak self] in self?.tookLinkedViewThisTurn = false }
+        }
+        show(view)
+    }
+
+    private func show(_ view: RelativeView) {
+        guard hasImage, drawableSize.width > 0, drawableSize.height > 0 else { return }
+        let target = view.transform(imageSize: imageSize, drawableSize: drawableSize)
+            .clamped(imageSize: imageSize, drawableSize: drawableSize)
+        fitMode = view.isFit || target.isFit(imageSize: imageSize, drawableSize: drawableSize)
+        guard target != viewport else { return }
+        viewport = target
+        scheduleRender()
+    }
+
+    private func carryViewToLinkedPane() {
+        linkedPane?.takeLinkedView(relativeView)
+    }
+
+    /// An image that opens (or is first laid out) while the other pane is
+    /// zoomed in joins it, so stepping the candidate keeps the same detail
+    /// in view. A fitted pane has nothing to share: images open fitted.
+    private func joinLinkedPane() {
+        guard let other = linkedPane, other.hasImage, !other.fitMode else { return }
+        show(other.relativeView)
     }
 
     // MARK: - Rendering
