@@ -1,13 +1,14 @@
 import Foundation
+import IOSurface
 import os
 
 /// What a decode produces, in a form that crosses a process boundary.
 ///
 /// The service sends three payloads: this metadata as JSON, the sensor
-/// plane as one `Data` (which XPC moves out of line, so it is not
-/// copied byte by byte), and the embedded preview. Keeping the wire
-/// format to plain `Data` and `Codable` avoids the NSSecureCoding
-/// boilerplate and any class-name whitelisting on the receiving side.
+/// plane as an IOSurface (shared memory: XPC passes a reference, and the
+/// app's GPU reads the very pages the service wrote), and the embedded
+/// preview as `Data`. IOSurface is the only non-plist class on the wire,
+/// and the interface whitelists exactly that.
 public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
     public var width, height, rawWidth, rawHeight: Int
     /// 0xFF for non-Bayer, else the packed 2x2 order.
@@ -25,8 +26,11 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
     public var cameraToXYZ: [Float]?
     public var thumbnailError: Int32
     public var isMetadataOnly: Bool
+    /// UInt16 samples in the plane; checked against the surface's size.
+    public var planeSampleCount: Int
 
-    public init(summary s: RawSummary, cameraToXYZ: [Float]?, thumbnailError: Int32, isMetadataOnly: Bool) {
+    public init(summary s: RawSummary, cameraToXYZ: [Float]?, thumbnailError: Int32, isMetadataOnly: Bool,
+                planeSampleCount: Int) {
         width = s.width; height = s.height; rawWidth = s.rawWidth; rawHeight = s.rawHeight
         cfaCode = s.cfaPattern.rawCode
         cameraMultipliers = [s.cameraMultipliers.0, s.cameraMultipliers.1, s.cameraMultipliers.2, s.cameraMultipliers.3]
@@ -43,6 +47,7 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
         self.cameraToXYZ = cameraToXYZ
         self.thumbnailError = thumbnailError
         self.isMetadataOnly = isMetadataOnly
+        self.planeSampleCount = planeSampleCount
     }
 
     public var summary: RawSummary {
@@ -68,13 +73,22 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
 /// access of its own; the descriptor is the only thing it can read.
 @objc public protocol RawDecoderProtocol {
     func decode(_ file: FileHandle, metadataOnly: Bool,
-                reply: @escaping (_ metadataJSON: Data?, _ plane: Data?, _ preview: Data?, _ error: String?) -> Void)
+                reply: @escaping (_ metadataJSON: Data?, _ plane: IOSurface?, _ preview: Data?, _ error: String?) -> Void)
 }
 
 public enum RawDecoderXPC {
     public static let serviceName = "com.latent.app.rawdecoder"
     public static let bundleName = "LatentRawDecoder.xpc"
     static let logger = Logger(subsystem: "com.latent.app", category: "rawdecoder")
+
+    /// The interface both ends use. The reply's plane argument is
+    /// allowed to decode as an IOSurface and nothing else.
+    public static func makeInterface() -> NSXPCInterface {
+        let interface = NSXPCInterface(with: RawDecoderProtocol.self)
+        let selector = #selector(RawDecoderProtocol.decode(_:metadataOnly:reply:))
+        interface.setClasses(NSSet(object: IOSurface.self) as! Set<AnyHashable>, for: selector, argumentIndex: 1, ofReply: true)
+        return interface
+    }
 
     /// True when this process is the app bundle and carries the service.
     /// `LATENT_RAW_INPROCESS=1` forces in-process decoding for debugging.
@@ -115,7 +129,7 @@ public final class RawDecoderClient: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         if connection == nil {
             let c = NSXPCConnection(serviceName: RawDecoderXPC.serviceName)
-            c.remoteObjectInterface = NSXPCInterface(with: RawDecoderProtocol.self)
+            c.remoteObjectInterface = RawDecoderXPC.makeInterface()
             c.invalidationHandler = { [weak self] in
                 self?.lock.lock(); self?.connection = nil; self?.lock.unlock()
             }
@@ -127,9 +141,9 @@ public final class RawDecoderClient: @unchecked Sendable {
 
     /// Decodes synchronously. `plane` is nil for metadata-only opens.
     public func decode(fileDescriptor fd: Int32, metadataOnly: Bool) throws
-        -> (metadata: RawSnapshotMetadata, plane: Data?, preview: Data?) {
+        -> (metadata: RawSnapshotMetadata, plane: IOSurface?, preview: Data?) {
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
-        var result: (Data?, Data?, Data?, String?) = (nil, nil, nil, nil)
+        var result: (Data?, IOSurface?, Data?, String?) = (nil, nil, nil, nil)
         var transportError: Error?
         guard let proxy = proxy(errorHandler: { transportError = $0 }) else {
             throw ClientError.connectionLost("no proxy")
@@ -148,7 +162,7 @@ public final class RawDecoderClient: @unchecked Sendable {
         }
         guard let metaData = result.0 else { throw ClientError.serviceFailed("empty reply") }
         let metadata = try JSONDecoder().decode(RawSnapshotMetadata.self, from: metaData)
-        RawDecoderXPC.logger.notice("decoded \(metadata.cameraModel, privacy: .public) in service, \(Int(Date().timeIntervalSince(start) * 1000)) ms, plane \(result.1?.count ?? 0) bytes")
+        RawDecoderXPC.logger.notice("decoded \(metadata.cameraModel, privacy: .public) in service, \(Int(Date().timeIntervalSince(start) * 1000)) ms, plane \(result.1?.allocationSize ?? 0) bytes shared")
         return (metadata, result.1, result.2)
     }
 }

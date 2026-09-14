@@ -95,12 +95,12 @@ LibRaw parses files Latent did not create, so the design assumes a crafted file 
 | App Sandbox, hardened runtime | Both the app and the decoder service are signed with `--options runtime` and sandbox entitlements (`scripts/make_app.sh`) |
 | App entitlements | `scripts/Latent.entitlements`: sandbox, user-selected files read-write, app-scope security-scoped bookmarks. No `network.client`, so the OS forbids network access |
 | Bookmarks | The last folder and the export destination are kept as security-scoped bookmarks, so they reopen on the next launch without a panel |
-| Raw decoding out of process | `LatentRawDecoder.xpc` (`scripts/LatentRawDecoder.entitlements`: sandbox only) has no file access and no network. The app opens the file and passes a file descriptor over XPC (`Sources/RawCore/RawDecoderXPC.swift`); the service returns metadata, the sensor plane and the embedded preview as `Data`. A crash invalidates the connection, the app shows an error, and the next call starts a fresh service |
+| Raw decoding out of process | `LatentRawDecoder.xpc` (`scripts/LatentRawDecoder.entitlements`: sandbox only) has no file access and no network. The app opens the file and passes a file descriptor over XPC (`Sources/RawCore/RawDecoderXPC.swift`); the service returns metadata and the embedded preview as `Data`, and the sensor plane as a shared IOSurface. A crash invalidates the connection, the app shows an error, and the next call starts a fresh service |
 | Signing | Ad hoc (`--sign -`), not notarised: there is no Apple developer account. Gatekeeper warns once on any other Mac |
 
 `swift run` and `swift test` have no bundled service, so they decode in process; `LATENT_RAW_INPROCESS=1` forces the same in the bundle for debugging. `make_app.sh --dev` builds without sandbox entitlements.
 
-**Decision:** decoder isolation costs extra copies of the sensor plane (§7.1). Security was chosen over those copies.
+**Decision:** decoder isolation must not cost extra copies of the sensor plane. The plane crosses the process boundary as shared memory (§7.1).
 
 A dormant model-download path (`MLKit/OptionalModels.swift`, `EditorModel.downloadHighQualityModel`) exists but no view calls it; it would need the network entitlement added back.
 
@@ -340,18 +340,19 @@ Filename collisions are a real risk here, because each camera's file counter eve
 
 1. Latent memory-maps the raw file read-only and passes it to LibRaw with `open_buffer`. The kernel loads only the pages that are actually read.
 2. LibRaw unpacks the sensor data into its own allocation.
-3. The sensor plane reaches a shared-storage `MTLBuffer` (`GPUContext.makeSharedBuffer`), which the GPU kernels read directly.
+3. LibRaw's plane is copied once into an IOSurface (`Sources/RawCore/SensorPlane.swift`), and LibRaw is closed straight away, freeing its own allocation.
+4. `GPUContext.makeSharedBuffer(wrapping:)` wraps the surface's pages as a shared-storage `MTLBuffer` with `makeBuffer(bytesNoCopy:)`. The GPU kernels read the very pages LibRaw's output was copied into.
 
-The number of copies in step 3 depends on where decoding runs:
+The path is the same wherever decoding runs:
 
 | Build | Path | Copies of the sensor plane |
 |---|---|---|
-| App bundle | In `LatentRawDecoder.xpc` (§4a): LibRaw's allocation → `Data` in the service → across XPC (out of line) → host buffer owned by `RawFile` → shared `MTLBuffer` | Several; the `RawFile` host copy lives for the whole editing session alongside the `MTLBuffer` |
-| `swift run`, `swift test` | In process: LibRaw's allocation → shared `MTLBuffer` | One |
+| App bundle | In `LatentRawDecoder.xpc` (§4a): LibRaw's allocation → IOSurface in the service → XPC passes the surface by reference → the app wraps it as the `MTLBuffer` | One |
+| `swift run`, `swift test` | In process: LibRaw's allocation → IOSurface → `MTLBuffer` | One |
 
-**Decision (Phase 0):** keep one copy (option c in §13) rather than wrapping LibRaw's allocation with `makeBuffer(bytesNoCopy:)` or patching LibRaw. LibRaw's allocation is page-aligned but its length is not a page multiple, and the copy measured about 3 ms per image (PHASE0.md §3).
+An IOSurface is page-aligned, a whole number of pages, and transferable over XPC as a mach port rather than bytes, which is what both halves need. The app checks the service's claimed sample count against the surface's real size before reading.
 
-**Decision (security):** the bundle's extra copies, and the extra memory held per open image, are the price of running LibRaw in a sandboxed process with no file access. Security was chosen over copies.
+**Decision (September 2026):** replaced the earlier bundle path (LibRaw → `Data` → XPC → host buffer → `MTLBuffer`, with the host buffer held for the whole session). Measured on the D750 sample through the sandboxed service: peak resident memory 321 MB → 223 MB, open time unchanged (about 235 ms, dominated by LibRaw), output byte-identical. `SensorPlaneTests` asserts that the session's `MTLBuffer` is the plane's own memory.
 
 ### 7.2 Storage-mode policy
 

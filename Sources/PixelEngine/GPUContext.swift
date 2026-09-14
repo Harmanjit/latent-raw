@@ -197,20 +197,23 @@ public final class GPUContext: @unchecked Sendable {
         return try device.makeLibrary(source: combinedSource, options: nil)
     }
 
-    /// Wraps a raw sensor plane as a shared-storage MTLBuffer (DESIGN.md
-    /// §7.2: the raw input crosses the CPU/GPU boundary, so it stays shared).
-    ///
-    /// Phase 0 task 2 is CLOSED: the copy stays. LibRaw's allocation is
-    /// page-aligned but its length is not a page multiple, so
-    /// makeBuffer(bytesNoCopy:) can't take it without padding past the end
-    /// of a real allocation. Measured at ~3ms, paid once per image.
-    func makeSharedBuffer(from plane: UnsafeBufferPointer<UInt16>) -> MTLBuffer? {
-        guard let base = plane.baseAddress else { return nil }
+    /// Wraps the sensor plane as a shared-storage MTLBuffer without
+    /// copying it (DESIGN.md §7.2: the raw input crosses the CPU/GPU
+    /// boundary, so it stays shared). The plane's IOSurface is
+    /// page-aligned and a whole number of pages, which is what
+    /// `makeBuffer(bytesNoCopy:)` needs; the buffer keeps the plane alive.
+    /// Falls back to a copy if Metal ever refuses the memory.
+    func makeSharedBuffer(wrapping plane: SensorPlane) -> MTLBuffer? {
+        if let buffer = device.makeBuffer(bytesNoCopy: plane.pointer, length: plane.allocationLength,
+                                          options: .storageModeShared,
+                                          deallocator: { _, _ in withExtendedLifetime(plane) {} }) {
+            return buffer
+        }
         let byteLength = plane.count * MemoryLayout<UInt16>.size
         guard let buffer = device.makeBuffer(length: byteLength, options: .storageModeShared) else {
             return nil
         }
-        buffer.contents().copyMemory(from: base, byteCount: byteLength)
+        buffer.contents().copyMemory(from: plane.pointer, byteCount: byteLength)
         return buffer
     }
 

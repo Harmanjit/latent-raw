@@ -7,6 +7,7 @@ public enum RawFileError: Error, CustomStringConvertible {
     case mmapFailed(errno: Int32)
     case libRawOpenFailed
     case unsupportedCFA
+    case planeAllocationFailed
 
     public var description: String {
         switch self {
@@ -14,6 +15,7 @@ public enum RawFileError: Error, CustomStringConvertible {
         case .mmapFailed(let e):          return "mmap failed (errno \(e))"
         case .libRawOpenFailed:           return "LibRaw could not open or unpack this file"
         case .unsupportedCFA:             return "Unsupported colour filter array"
+        case .planeAllocationFailed:      return "Could not allocate memory for the sensor data"
         }
     }
 }
@@ -108,17 +110,14 @@ public enum CFAPattern: Sendable {
 /// A crafted file that exploits the decoder gets a process that can do
 /// nothing, and the app sees an error rather than a crash. Everywhere
 /// else (`swift run`, the CLI, tests) LibRaw runs in this process from a
-/// read-only memory map, exactly as before.
+/// read-only memory map.
 ///
-/// Either way the object owns the sensor plane and hands out a pointer
-/// into it; `rawSensorPlane` is valid for the lifetime of this object.
+/// Either way the result is the same: LibRaw is asked for everything
+/// once (metadata, sensor plane, embedded preview) and closed straight
+/// away, so its own copy of the sensor data is freed before the image is
+/// ever shown. The plane lives in a `SensorPlane` that the GPU uses in
+/// place.
 public final class RawFile {
-    private enum Backend {
-        case local(handle: OpaquePointer, mapped: UnsafeMutableRawPointer, length: Int)
-        case remote(plane: UnsafeMutableBufferPointer<UInt16>?, preview: Data?, thumbnailError: Int32)
-    }
-    private let backend: Backend
-
     public let summary: RawSummary
     /// True when opened with `metadataOnly`: no sensor plane is available.
     public let isMetadataOnly: Bool
@@ -132,6 +131,12 @@ public final class RawFile {
     /// This is the Adobe ColorMatrix convention. ColorKit inverts and
     /// composes it to build the camera -> working-space transform.
     public let cameraToXYZMatrixRaw: [Float]?
+
+    /// The unpacked sensor data; nil for metadata-only opens.
+    public let sensorPlane: SensorPlane?
+    private let preview: Data?
+    /// Diagnostic: the return code from LibRaw's thumbnail call.
+    public let lastThumbnailError: Int32
 
     /// `metadataOnly` skips decoding the sensor data — EXIF, the colour
     /// matrix and the embedded preview are still available, at roughly a
@@ -161,42 +166,55 @@ public final class RawFile {
               mapped != MAP_FAILED else {
             throw RawFileError.mmapFailed(errno: errno)
         }
+        defer { munmap(mapped, length) }
         let opened = metadataOnly ? clibraw_open_buffer_metadata(mapped, length)
                                   : clibraw_open_buffer(mapped, length)
-        guard let h = opened else {
-            munmap(mapped, length)
-            throw RawFileError.libRawOpenFailed
-        }
-        backend = .local(handle: h, mapped: mapped, length: length)
-        isMetadataOnly = metadataOnly
-        decodedInService = false
+        guard let h = opened else { throw RawFileError.libRawOpenFailed }
+        defer { clibraw_close(h) }
+
         summary = Self.readSummary(h)
         var matrix12 = [Float](repeating: 0, count: 12)
         let matrixResult = matrix12.withUnsafeMutableBufferPointer { buf in
             clibraw_get_cam_xyz(h, buf.baseAddress)
         }
         cameraToXYZMatrixRaw = (matrixResult == 0) ? Array(matrix12.prefix(9)) : nil
+        (preview, lastThumbnailError) = Self.readPreview(h)
+
+        if metadataOnly {
+            sensorPlane = nil
+        } else {
+            var planeLength = 0
+            guard let ptr = clibraw_get_raw_plane(h, &planeLength), planeLength > 0 else {
+                throw RawFileError.libRawOpenFailed
+            }
+            let samples = UnsafeBufferPointer(start: ptr, count: planeLength / MemoryLayout<UInt16>.size)
+            guard let plane = SensorPlane(copying: samples) else { throw RawFileError.planeAllocationFailed }
+            sensorPlane = plane
+        }
+        isMetadataOnly = metadataOnly
+        decodedInService = false
     }
 
-    /// Decoded by the service. The plane is copied once into memory this
-    /// object owns; the transport `Data` is then released.
+    /// Decoded by the service. The plane arrives as a shared surface the
+    /// service filled; nothing is copied on this side.
     private init(remoteFileDescriptor fd: Int32, metadataOnly: Bool) throws {
-        let (meta, planeData, preview) = try RawDecoderClient.shared.decode(fileDescriptor: fd, metadataOnly: metadataOnly)
-        var plane: UnsafeMutableBufferPointer<UInt16>?
-        if let planeData, !planeData.isEmpty {
-            let count = planeData.count / MemoryLayout<UInt16>.size
-            let buffer = UnsafeMutableBufferPointer<UInt16>.allocate(capacity: count)
-            planeData.withUnsafeBytes { src in
-                UnsafeMutableRawPointer(buffer.baseAddress!).copyMemory(from: src.baseAddress!, byteCount: count * 2)
+        let reply = try RawDecoderClient.shared.decode(fileDescriptor: fd, metadataOnly: metadataOnly)
+        let meta = reply.metadata
+        if metadataOnly {
+            sensorPlane = nil
+        } else {
+            guard let surface = reply.plane,
+                  let plane = SensorPlane(surface: surface, count: meta.planeSampleCount) else {
+                throw RawDecoderClient.ClientError.serviceFailed("no usable sensor plane in reply")
             }
-            plane = buffer
+            sensorPlane = plane
         }
-        backend = .remote(plane: plane, preview: preview, thumbnailError: meta.thumbnailError)
+        preview = reply.preview
+        lastThumbnailError = meta.thumbnailError
         isMetadataOnly = metadataOnly
         decodedInService = true
         summary = meta.summary
         cameraToXYZMatrixRaw = meta.cameraToXYZ
-        lastThumbnailError = meta.thumbnailError
     }
 
     private static func readSummary(_ h: OpaquePointer) -> RawSummary {
@@ -227,60 +245,32 @@ public final class RawFile {
                 cropFactor: Double(c.crop_factor)))
     }
 
-    /// The unpacked sensor plane. `PixelEngine` is the only module that
-    /// should call this.
-    public func rawSensorPlane() -> UnsafeBufferPointer<UInt16>? {
-        guard !isMetadataOnly else { return nil }
-        switch backend {
-        case .local(let h, _, _):
-            var length: Int = 0
-            guard let ptr = clibraw_get_raw_plane(h, &length), length > 0 else { return nil }
-            return UnsafeBufferPointer(start: ptr, count: length / MemoryLayout<UInt16>.size)
-        case .remote(let plane, _, _):
-            return plane.map { UnsafeBufferPointer($0) }
+    private static func readPreview(_ h: OpaquePointer) -> (Data?, Int32) {
+        var length: Int = 0
+        let rc = clibraw_get_thumbnail(h, nil, &length)
+        guard rc == 0, length > 0 else { return (nil, rc) }
+        var data = Data(count: length)
+        let ok = data.withUnsafeMutableBytes { buf -> Bool in
+            var len = length
+            return clibraw_get_thumbnail(h, buf.bindMemory(to: UInt8.self).baseAddress, &len) == 0
         }
+        return (ok ? data : nil, rc)
+    }
+
+    /// The unpacked sensor plane. `PixelEngine` is the only module that
+    /// should call this. Valid for the lifetime of this object.
+    public func rawSensorPlane() -> UnsafeBufferPointer<UInt16>? {
+        sensorPlane?.samples
     }
 
     /// The camera's embedded JPEG preview — the basis for unedited-image
     /// thumbnails (DESIGN.md §10). Returns nil if the file has none.
-    /// Diagnostic: the last return code from the thumbnail call.
-    public private(set) var lastThumbnailError: Int32 = 0
+    public func embeddedJPEGPreview() -> Data? { preview }
 
-    public func embeddedJPEGPreview() -> Data? {
-        switch backend {
-        case .remote(_, let preview, let error):
-            lastThumbnailError = error
-            return preview
-        case .local(let h, _, _):
-            var length: Int = 0
-            let rc = clibraw_get_thumbnail(h, nil, &length)
-            lastThumbnailError = rc
-            guard rc == 0, length > 0 else { return nil }
-            var data = Data(count: length)
-            let ok = data.withUnsafeMutableBytes { buf -> Bool in
-                var len = length
-                return clibraw_get_thumbnail(h, buf.bindMemory(to: UInt8.self).baseAddress, &len) == 0
-            }
-            return ok ? data : nil
-        }
-    }
-
-    /// Everything the service sends back for this file (in-process only).
-    public func snapshot() -> (metadata: RawSnapshotMetadata, plane: Data?, preview: Data?) {
-        let preview = embeddedJPEGPreview()
-        let meta = RawSnapshotMetadata(summary: summary, cameraToXYZ: cameraToXYZMatrixRaw,
-                                       thumbnailError: lastThumbnailError, isMetadataOnly: isMetadataOnly)
-        let plane = rawSensorPlane().map { Data(buffer: $0) }
-        return (meta, plane, preview)
-    }
-
-    deinit {
-        switch backend {
-        case .local(let h, let mapped, let length):
-            clibraw_close(h)
-            munmap(mapped, length)
-        case .remote(let plane, _, _):
-            plane?.deallocate()
-        }
+    /// What the service sends back for this file.
+    public var snapshotMetadata: RawSnapshotMetadata {
+        RawSnapshotMetadata(summary: summary, cameraToXYZ: cameraToXYZMatrixRaw,
+                            thumbnailError: lastThumbnailError, isMetadataOnly: isMetadataOnly,
+                            planeSampleCount: sensorPlane?.count ?? 0)
     }
 }

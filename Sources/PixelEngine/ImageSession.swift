@@ -177,8 +177,8 @@ public final class ImageSession {
     }
 
     public init(file: RawFile, gpu: GPUContext) throws {
-        guard let plane = file.rawSensorPlane(),
-              let buffer = gpu.makeSharedBuffer(from: plane) else {
+        guard let plane = file.sensorPlane,
+              let buffer = gpu.makeSharedBuffer(wrapping: plane) else {
             throw RenderError.gpuBufferAllocationFailed
         }
         self.file = file

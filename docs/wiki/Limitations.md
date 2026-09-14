@@ -16,7 +16,6 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 - **Apple Silicon and macOS 15 only.** No Intel Macs, no Windows, no Linux, by design.
 - **Not notarised.** Without an Apple developer account, every other Mac shows the Gatekeeper dialog once.
-- **Memory per open image.** The app bundle copies the sensor plane several times (into the decoder service's reply, into the app, then onto the GPU), and keeps a host copy for as long as the image is open. That is the cost of running the raw decoder isolated in its own sandboxed process.
 - **Large.** The app is about 215 MB, of which 198 MB are the three bundled machine-learning models.
 - **Neural Engine off by default** because its compiler hangs on some macOS 15 builds. The GPU is fast enough.
 
