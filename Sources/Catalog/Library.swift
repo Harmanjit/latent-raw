@@ -277,39 +277,97 @@ public final class Library: ObservableObject {
         }
     }
 
-    /// Runs a catalog change for the selected image, then refreshes that
-    /// one row locally so the UI updates without a full reload.
-    private func changeSelected(_ change: @Sendable (Catalog, Int64) async throws -> Void) async throws {
-        guard let id = selectedImageID, let catalog else { return }
-        try await change(catalog, id)
-        if let index = images.firstIndex(where: { $0.id == id }),
-           let fresh = try await catalog.image(forRelPath: images[index].relPath) {
-            images[index] = fresh
+    /// The images a rating, flag or rotation applies to: the whole grid
+    /// selection, as in Lightroom's grid. If the set doesn't hold the
+    /// primary — the editor made another image primary without touching
+    /// the grid, or the set is left over from before — only the primary
+    /// changes, so images the user can't see selected are never touched.
+    private var metadataTargets: [ImageRecord] {
+        guard let primary = selectedImage else { return [] }
+        guard let primaryID = primary.id, selectedImageIDs.contains(primaryID) else { return [primary] }
+        return selectedImages
+    }
+
+    /// A metadata change that failed on some of the selected images. The
+    /// others were still changed; this names the ones that weren't.
+    public struct SelectionChangeError: Error, CustomStringConvertible {
+        public var total: Int
+        public var failures: [(fileName: String, error: any Error)]
+
+        public var description: String {
+            let names = failures.map { "\($0.fileName) (\($0.error))" }.joined(separator: ", ")
+            return "\(failures.count) of \(total) images: \(names)"
         }
+    }
+
+    /// Runs a catalog change (row plus sidecar, like any single change) on
+    /// each of `records`, then refreshes those rows locally so the grid,
+    /// filters and badges update without a full reload. One image failing
+    /// doesn't stop the rest; the failures are thrown together at the end
+    /// so `perform` reports them.
+    private func change(_ records: [ImageRecord],
+                        _ change: @Sendable (Catalog, Int64, ImageRecord) async throws -> Void) async throws {
+        guard let catalog, !records.isEmpty else { return }
+        var failures: [(fileName: String, error: any Error)] = []
+        var fresh: [Int64: ImageRecord] = [:]
+        for record in records {
+            guard let id = record.id else { continue }
+            var failed = false
+            do {
+                try await change(catalog, id, record)
+            } catch {
+                failed = true
+                failures.append((record.fileName, error))
+                Self.logger.error("Changing \(record.fileName, privacy: .private) failed: \(String(describing: error), privacy: .private)")
+            }
+            // Re-read even after a failure: the row commits before the
+            // sidecar is written, so a failed sidecar can leave a changed row.
+            do {
+                fresh[id] = try await catalog.image(forRelPath: record.relPath)
+            } catch {
+                if !failed { failures.append((record.fileName, error)) }
+            }
+        }
+        // Patch whatever `images` is now (a refresh may have landed during
+        // the awaits), in one assignment so the visible list is recomputed
+        // once rather than per image.
+        var updated = images
+        for index in updated.indices {
+            if let id = updated[index].id, let record = fresh[id] { updated[index] = record }
+        }
+        images = updated
         await reloadSelectedKeywords()
+        if failures.count == 1, records.count == 1 { throw failures[0].error }
+        if !failures.isEmpty { throw SelectionChangeError(total: records.count, failures: failures) }
     }
 
     public func setRating(_ rating: Int) async throws {
-        try await changeSelected { try await $0.setRating(rating, forImageID: $1) }
+        try await change(metadataTargets) { catalog, id, _ in try await catalog.setRating(rating, forImageID: id) }
     }
 
     public func setFlag(_ flag: ImageFlag) async throws {
-        try await changeSelected { try await $0.setFlag(flag, forImageID: $1) }
+        try await change(metadataTargets) { catalog, id, _ in try await catalog.setFlag(flag, forImageID: id) }
     }
 
+    /// Keywords stay primary-only: the keyword field shows the primary's
+    /// keywords and this replaces the whole list with them, so applying
+    /// it to the selection would wipe every other image's own keywords.
     public func setKeywords(_ keywords: [String]) async throws {
-        try await changeSelected { try await $0.setKeywords(keywords, forImageID: $1) }
+        try await change(selectedImage.map { [$0] } ?? []) { catalog, id, _ in
+            try await catalog.setKeywords(keywords, forImageID: id)
+        }
         if let id = selectedImageID {
             let cleaned = Set(keywords.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
             keywordIndex[id] = cleaned.isEmpty ? nil : cleaned
         }
     }
 
-    /// Adds quarter turns clockwise (negative for counter-clockwise).
+    /// Adds quarter turns clockwise (negative for counter-clockwise) to
+    /// each selected image, each from its own current rotation.
     public func rotateSelected(by quarterTurns: Int) async throws {
-        guard let current = selectedImage else { return }
-        let next = current.userRotation + quarterTurns
-        try await changeSelected { try await $0.setUserRotation(next, forImageID: $1) }
+        try await change(metadataTargets) { catalog, id, record in
+            try await catalog.setUserRotation(record.userRotation + quarterTurns, forImageID: id)
+        }
     }
 
     // MARK: - Edits

@@ -153,4 +153,98 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(storedA, "{not json", "untouched")
         XCTAssertEqual(storedB, "{\"schema\":1,\"pasted\":true}")
     }
+
+    /// Rating, flag and rotation apply to every selected image, each
+    /// rotated from its own angle, with a sidecar per image; keywords
+    /// stay with the primary.
+    func testMetadataShortcutsApplyToWholeSelection() async throws {
+        let library = Library()
+        try await library.open(folder: folder)
+        try await library.decideUndecidedSubfolders(include: true)
+        func record(_ name: String) -> ImageRecord { library.images.first { $0.fileName == name }! }
+        let (a, b, c) = (record("A.NEF").id!, record("B.NEF").id!, record("C.NEF").id!)
+
+        // Turn A once on its own, so the batch turn starts from different angles.
+        library.setSelection([a], primary: a)
+        try await library.rotateSelected(by: 1)
+
+        library.setSelection([a, b], primary: a)
+        try await library.setRating(4)
+        try await library.setFlag(.picked)
+        try await library.rotateSelected(by: 1)
+        try await library.setKeywords(["tree"])
+
+        XCTAssertEqual(record("A.NEF").rating, 4)
+        XCTAssertEqual(record("B.NEF").rating, 4)
+        XCTAssertEqual(record("C.NEF").rating, 0, "not selected")
+        XCTAssertEqual(record("A.NEF").userRotation, 2, "its own 1, plus 1")
+        XCTAssertEqual(record("B.NEF").userRotation, 1, "its own 0, plus 1")
+        XCTAssertEqual(record("C.NEF").userRotation, 0)
+
+        // The in-memory rows drive the filters.
+        library.filter.flags = [.picked]
+        XCTAssertEqual(Set(library.visibleImages.map(\.fileName)), ["A.NEF", "B.NEF"])
+        library.filter = LibraryFilter()
+        library.filter.keyword = "tree"
+        XCTAssertEqual(library.visibleImages.map(\.fileName), ["A.NEF"], "keywords are primary-only")
+
+        // Each changed image has its own sidecar saying so.
+        let catalog = try XCTUnwrap(library.catalog)
+        for (relPath, rotation) in [("A.NEF", 2), ("B.NEF", 1)] {
+            let fields = try XMPSidecar.read(from: await catalog.sidecarURL(forRelPath: relPath))
+            XCTAssertEqual(fields.rating, 4, relPath)
+            XCTAssertEqual(fields.flag, ImageFlag.picked.rawValue, relPath)
+            XCTAssertEqual(fields.rotation, rotation, relPath)
+        }
+        let bKeywords = try await catalog.keywords(forImageID: b)
+        XCTAssertEqual(bKeywords, [])
+
+        // The editor can make an image primary without touching the grid
+        // selection; then only that image changes, not the stale set.
+        library.selectedImageID = c
+        try await library.setRating(1)
+        XCTAssertEqual(record("C.NEF").rating, 1)
+        XCTAssertEqual(record("A.NEF").rating, 4)
+        XCTAssertEqual(record("B.NEF").rating, 4)
+    }
+
+    /// One image whose sidecar can't be written doesn't stop the others,
+    /// and the failure is reported by name rather than dropped.
+    func testSelectionChangeReportsFailuresAndFinishesTheRest() async throws {
+        try FileManager.default.copyItem(atPath: ReconcileTests.sampleNEF,
+                                         toPath: folder.appendingPathComponent("E.NEF").path)
+        let library = Library()
+        try await library.open(folder: folder)
+        try await library.decideUndecidedSubfolders(include: true)
+        XCTAssertEqual(library.images.map(\.fileName), ["A.NEF", "B.NEF", "C.NEF", "E.NEF"],
+                       "C comes before E, so a failure on C has work after it")
+
+        // A read-only sidecar folder for Day 2 makes C's sidecar write fail.
+        let catalog = try XCTUnwrap(library.catalog)
+        let day2 = await catalog.sidecarURL(forRelPath: "Day 2/C.NEF").deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: day2, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: day2.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: day2.path) }
+
+        library.setSelection(Set(library.images.compactMap(\.id)), primary: library.images[0].id)
+        do {
+            try await library.setRating(5)
+            XCTFail("C's sidecar can't be written")
+        } catch let error as Library.SelectionChangeError {
+            XCTAssertEqual(error.total, 4)
+            XCTAssertEqual(error.failures.map(\.fileName), ["C.NEF"])
+            XCTAssertTrue(String(describing: error).hasPrefix("1 of 4 images: C.NEF"))
+        }
+        for name in ["A.NEF", "B.NEF", "E.NEF"] {
+            XCTAssertEqual(library.images.first { $0.fileName == name }?.rating, 5, name)
+        }
+        let eFields = try XMPSidecar.read(from: await catalog.sidecarURL(forRelPath: "E.NEF"))
+        XCTAssertEqual(eFields.rating, 5, "the image after the failure got its sidecar")
+        // C's row committed before its sidecar failed; the grid shows the row.
+        XCTAssertEqual(library.images.first { $0.fileName == "C.NEF" }?.rating, 5)
+
+        // Through perform, as the app calls it, the failure lands in lastError.
+        library.perform("Rating") { try await library.setRating(2) }
+        await eventually { library.lastError?.contains("C.NEF") == true }
+    }
 }
