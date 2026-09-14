@@ -4,6 +4,9 @@ import RawCore
 import PixelEngine
 import LensKit
 import ColorKit
+import os
+
+private let exportLogger = Logger(subsystem: "com.latent.app", category: "export")
 
 /// One export, start to finish, on any thread: open the raw, rebuild the
 /// edit (including any model-generated masks), render at the right
@@ -33,7 +36,7 @@ public enum ExportWorker {
         public var maxLongEdge: Int?
         public var keywords: [String]
         public var rating: Int
-        /// False writes pixels only: no camera, date, keywords or rating.
+        /// False writes pixels only: no camera, date, location, keywords or rating.
         public var includeMetadata: Bool
 
         public init(sourceURL: URL, destinationURL: URL, editStackJSON: String?, userRotation: Int,
@@ -111,6 +114,16 @@ public enum ExportWorker {
         metadata.captureDate = s.captureTime.timeIntervalSince1970 > 0 ? s.captureTime : nil
         metadata.keywords = request.keywords
         metadata.rating = request.rating
+        if request.includeMetadata {
+            // GPS, copyright, exposure details and the rest, read from the
+            // raw in the decoder service. A file it can't read still gets
+            // the summary fields above rather than failing the export.
+            do {
+                metadata.source = try SourceMetadata(path: request.sourceURL.path)
+            } catch {
+                exportLogger.error("source metadata unavailable for \(request.sourceURL.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
 
         // Rotation, the final resize and the quantisation to 8 or 16 bits
         // all happen in one GPU pass inside the exporter; the CPU only

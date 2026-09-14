@@ -4,6 +4,7 @@ import ImageIO
 import CoreGraphics
 import UniformTypeIdentifiers
 import ColorKit
+import RawCore
 import simd
 
 public enum ExportError: Error, CustomStringConvertible {
@@ -92,6 +93,14 @@ public struct ExportSettings: Sendable {
 /// What gets written into the file besides pixels. A file with no
 /// metadata is an orphan: no camera, no date, no keywords. These land in
 /// the standard EXIF / TIFF / IPTC fields every browser and editor reads.
+///
+/// The photo's own tags come first (`source`, read from the raw by the
+/// decoder service): GPS, artist and copyright, exposure details, the
+/// capture time with its subseconds and offset, IPTC and XMP fields. The
+/// summary fields below only fill what those lack, which is everything
+/// when ImageIO can't read the raw. Latent's keywords are added to the
+/// file's own, its rating (when it has one) replaces the file's, and the
+/// software is Latent.
 public struct ExportMetadata: Sendable, Equatable {
     public var cameraMake: String?
     public var cameraModel: String?
@@ -104,33 +113,86 @@ public struct ExportMetadata: Sendable, Equatable {
     public var keywords: [String] = []
     public var rating: Int = 0
     public var software: String = "Latent"
+    /// The raw's own metadata, already cleaned of storage-specific tags.
+    public var source: SourceMetadata?
 
     public init() {}
 
-    /// The ImageIO properties dictionary for this metadata.
+    /// The ImageIO properties dictionary for this metadata, without the
+    /// values that depend on the written image (see `encoding(for:)`).
     public var imageIOProperties: [CFString: Any] {
-        var tiff: [CFString: Any] = [kCGImagePropertyTIFFSoftware: software]
-        if let m = cameraMake { tiff[kCGImagePropertyTIFFMake] = m }
-        if let m = cameraModel { tiff[kCGImagePropertyTIFFModel] = m }
-        var exif: [CFString: Any] = [:]
-        if let iso { exif[kCGImagePropertyExifISOSpeedRatings] = [iso] }
-        if let shutter { exif[kCGImagePropertyExifExposureTime] = shutter }
-        if let aperture { exif[kCGImagePropertyExifFNumber] = aperture }
-        if let focalLength { exif[kCGImagePropertyExifFocalLength] = focalLength }
-        if let lensModel { exif[kCGImagePropertyExifLensModel] = lensModel }
+        encoding(width: nil, height: nil, colorSpace: nil).properties
+    }
+
+    /// The properties and XMP to write with `image`: its pixel size, its
+    /// colour space and an upright orientation, since Latent bakes the
+    /// rotation into the pixels. When there is XMP, ImageIO lets its tags
+    /// win over the dictionaries, so Latent's own values are set in both.
+    public func encoding(for image: CGImage) -> (properties: [CFString: Any], xmp: CGImageMetadata?) {
+        encoding(width: image.width, height: image.height, colorSpace: image.colorSpace)
+    }
+
+    func encoding(width: Int?, height: Int?, colorSpace: CGColorSpace?)
+        -> (properties: [CFString: Any], xmp: CGImageMetadata?) {
+        let tiffKey = kCGImagePropertyTIFFDictionary as String, exifKey = kCGImagePropertyExifDictionary as String
+        let iptcKey = kCGImagePropertyIPTCDictionary as String
+        var props = source?.imageProperties() ?? [:]
+        var tiff = props[tiffKey] as? [String: Any] ?? [:]
+        var exif = props[exifKey] as? [String: Any] ?? [:]
+        var iptc = props[iptcKey] as? [String: Any] ?? [:]
+
+        func fill(_ dictionary: inout [String: Any], _ key: CFString, _ value: Any?) {
+            if let value, dictionary[key as String] == nil { dictionary[key as String] = value }
+        }
+        fill(&tiff, kCGImagePropertyTIFFMake, cameraMake)
+        fill(&tiff, kCGImagePropertyTIFFModel, cameraModel)
+        fill(&exif, kCGImagePropertyExifISOSpeedRatings, iso.map { [$0] })
+        fill(&exif, kCGImagePropertyExifExposureTime, shutter)
+        fill(&exif, kCGImagePropertyExifFNumber, aperture)
+        fill(&exif, kCGImagePropertyExifFocalLength, focalLength)
+        fill(&exif, kCGImagePropertyExifLensModel, lensModel)
         if let captureDate {
             let f = DateFormatter()
             f.dateFormat = "yyyy:MM:dd HH:mm:ss"
-            exif[kCGImagePropertyExifDateTimeOriginal] = f.string(from: captureDate)
-            tiff[kCGImagePropertyTIFFDateTime] = f.string(from: captureDate)
+            fill(&exif, kCGImagePropertyExifDateTimeOriginal, f.string(from: captureDate))
+            fill(&tiff, kCGImagePropertyTIFFDateTime, f.string(from: captureDate))
         }
-        var iptc: [CFString: Any] = [:]
-        if !keywords.isEmpty { iptc[kCGImagePropertyIPTCKeywords] = keywords }
-        if rating > 0 { iptc[kCGImagePropertyIPTCStarRating] = rating }
-        var props: [CFString: Any] = [kCGImagePropertyTIFFDictionary: tiff,
-                                      kCGImagePropertyExifDictionary: exif]
-        if !iptc.isEmpty { props[kCGImagePropertyIPTCDictionary] = iptc }
-        return props
+        tiff[kCGImagePropertyTIFFSoftware as String] = software
+        tiff[kCGImagePropertyTIFFOrientation as String] = 1
+        props[kCGImagePropertyOrientation as String] = 1
+        if let width, let height {
+            exif[kCGImagePropertyExifPixelXDimension as String] = width
+            exif[kCGImagePropertyExifPixelYDimension as String] = height
+        }
+        if let colorSpace {
+            // 1 is sRGB; 0xFFFF ("uncalibrated") sends readers to the
+            // embedded profile, which is what a P3 or Rec. 2020 file needs.
+            let isSRGB = (colorSpace.name as String?) == (CGColorSpace.sRGB as String)
+            exif[kCGImagePropertyExifColorSpace as String] = isSRGB ? 1 : 0xFFFF
+        }
+        let fileKeywords = iptc[kCGImagePropertyIPTCKeywords as String] as? [String] ?? []
+        let allKeywords = fileKeywords + keywords.filter { !fileKeywords.contains($0) }
+        if !allKeywords.isEmpty { iptc[kCGImagePropertyIPTCKeywords as String] = allKeywords }
+        if rating > 0 { iptc[kCGImagePropertyIPTCStarRating as String] = rating }
+
+        props[tiffKey] = tiff
+        props[exifKey] = exif
+        props[iptcKey] = iptc.isEmpty ? nil : iptc
+
+        let xmp = source?.xmpMetadata()
+        if let xmp {
+            CGImageMetadataSetValueMatchingImageProperty(xmp, kCGImagePropertyTIFFDictionary,
+                                                         kCGImagePropertyTIFFSoftware, software as CFString)
+            if !allKeywords.isEmpty {
+                CGImageMetadataSetValueMatchingImageProperty(xmp, kCGImagePropertyIPTCDictionary,
+                                                             kCGImagePropertyIPTCKeywords, allKeywords as CFArray)
+            }
+            if rating > 0 {
+                CGImageMetadataSetValueMatchingImageProperty(xmp, kCGImagePropertyIPTCDictionary,
+                                                             kCGImagePropertyIPTCStarRating, rating as CFNumber)
+            }
+        }
+        return (Dictionary(uniqueKeysWithValues: props.map { ($0.key as CFString, $0.value) }), xmp)
     }
 }
 
@@ -181,11 +243,19 @@ public final class Exporter {
                 url as CFURL, settings.format.contentType.identifier as CFString, 1, nil) else {
             throw ExportError.destinationCreationFailed(url)
         }
-        var properties: [CFString: Any] = metadata?.imageIOProperties ?? [:]
+        let encoding = metadata?.encoding(for: cgImage)
+        var properties: [CFString: Any] = encoding?.properties ?? [:]
+        // An embedded thumbnail would be a second, smaller copy of the
+        // picture that nothing keeps in step with it.
+        properties[kCGImageDestinationEmbedThumbnail] = false
         if settings.format.supportsQuality {
             properties[kCGImageDestinationLossyCompressionQuality] = max(0, min(1, settings.quality))
         }
-        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        if let xmp = encoding?.xmp {
+            CGImageDestinationAddImageAndMetadata(destination, cgImage, xmp, properties as CFDictionary)
+        } else {
+            CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        }
         guard CGImageDestinationFinalize(destination) else {
             throw ExportError.writeFailed(url)
         }
