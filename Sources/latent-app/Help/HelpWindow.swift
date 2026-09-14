@@ -101,6 +101,14 @@ final class HelpModel {
 
     var isSearching: Bool { !HelpSearch.normalized(query).isEmpty }
 
+    /// A search that leaves the open page out of the sidebar moves to the
+    /// first page that matches, so what was found is on screen.
+    func queryDidChange() {
+        let visible = visiblePages
+        guard isSearching, !visible.isEmpty, !visible.contains(where: { $0.name == selection }) else { return }
+        selection = visible.first?.name
+    }
+
     func matchCount(_ page: HelpPage) -> Int {
         guard isSearching, let book else { return 0 }
         return HelpSearch.matchCount(of: query, in: book.searchableText(of: page))

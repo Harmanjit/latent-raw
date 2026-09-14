@@ -80,6 +80,8 @@ public struct HelpBook: Sendable {
     /// Reads every page in `folder`. File I/O and parsing, a few
     /// milliseconds for the whole wiki: call it off the main thread.
     public static func load(from folder: URL) -> HelpBook {
+        // Listing a symlink to a folder lists nothing.
+        let folder = folder.resolvingSymlinksInPath()
         let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         let names = Set(files.filter { $0.pathExtension == "md" }
             .map { $0.deletingPathExtension().lastPathComponent }

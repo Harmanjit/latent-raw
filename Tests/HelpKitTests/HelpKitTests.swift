@@ -90,6 +90,12 @@ import Foundation
         try write("_Sidebar.md", "- [Last First](Zeta-Page)\n- [Gone](Missing)\n")
         let book = HelpBook.load(from: folder)
         #expect(book.pages == [HelpPage(name: "Zeta-Page", title: "Last First"), HelpPage(name: "Alpha", title: "Alpha")])
+
+        // A symlink to the folder reads the same.
+        let link = folder.deletingLastPathComponent().appendingPathComponent("help-link-\(UUID().uuidString)")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: folder)
+        defer { try? FileManager.default.removeItem(at: link) }
+        #expect(HelpBook.load(from: link).pages == book.pages)
     }
 
     /// An app bundle's Help folder comes first; in `swift run` and tests

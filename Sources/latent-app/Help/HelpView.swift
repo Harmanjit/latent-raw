@@ -14,6 +14,7 @@ struct HelpView: View {
                     .accessibilityValue(model.isSearching ? "\(matches) \(matches == 1 ? "match" : "matches")" : "")
             }
             .searchable(text: $model.query, placement: .sidebar, prompt: "Search Help")
+            .onChange(of: model.query) { model.queryDidChange() }
             .overlay {
                 if model.isSearching && model.visiblePages.isEmpty {
                     ContentUnavailableView.search(text: model.query)
