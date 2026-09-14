@@ -12,6 +12,8 @@ import AppKit
 ///
 /// `label` and `format` tell VoiceOver what the slider is and how to read
 /// its value; without them it reads a number formatted from the range.
+/// `accessibilityValue` overrides the reading for a slider whose position
+/// isn't the value shown (temperature travels in mired, reads in Kelvin).
 /// `showsField` puts a `SliderValueField` after the slider, for rows that
 /// show the value there; rows with the value above the slider place a
 /// `SliderValueField` themselves.
@@ -21,15 +23,18 @@ struct ResettableSlider: View {
     let label: String?
     let format: SliderValueFormat
     let showsField: Bool
+    let accessibilityValue: String?
     let reset: () -> Void
 
     init(value: Binding<Float>, in range: ClosedRange<Float>, label: String? = nil,
-         format: SliderValueFormat? = nil, showsField: Bool = false, reset: @escaping () -> Void) {
+         format: SliderValueFormat? = nil, showsField: Bool = false, accessibilityValue: String? = nil,
+         reset: @escaping () -> Void) {
         _value = value
         self.range = range
         self.label = label
         self.format = format ?? .derived(from: range)
         self.showsField = showsField
+        self.accessibilityValue = accessibilityValue
         self.reset = reset
     }
 
@@ -46,7 +51,7 @@ struct ResettableSlider: View {
 
     private var slider: some View {
         DoubleClickSliderView(value: $value, range: range, label: label,
-                              valueText: format.text(value), reset: reset)
+                              valueText: accessibilityValue ?? format.text(value), reset: reset)
     }
 }
 
