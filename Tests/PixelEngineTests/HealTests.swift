@@ -14,6 +14,20 @@ final class HealTests: XCTestCase {
         let far = HealPatch(target: [0.9, 0.1], source: [0.5, 0.5], radius: 0.05)
         XCTAssertEqual(HealPatch.regionIncludingSources(region, patches: [far], sensorSize: s), region)
         XCTAssertEqual(p.radiusPixels(sensorSize: s), 40, accuracy: 1e-4)
+        // A heal also reads the surroundings of both circles, well past
+        // their edges; a clone only its source.
+        let reach = p.readRadiusPixels(sensorSize: s)
+        XCTAssertGreaterThan(reach, 40 + 3 * 20)
+        XCTAssertTrue(grown.contains(p.targetBounds(sensorSize: s).insetBy(dx: 40.5 - reach, dy: 40.5 - reach)))
+        XCTAssertTrue(grown.contains(p.sourceBounds(sensorSize: s).insetBy(dx: 40.5 - reach, dy: 40.5 - reach)))
+        var clone = p
+        clone.mode = .clone
+        XCTAssertEqual(clone.readRadiusPixels(sensorSize: s), 42, accuracy: 1e-4)
+        // Patches read earlier ones: a patch whose source reads an earlier
+        // patch's target pulls in that patch's source too.
+        let earlier = HealPatch(target: [0.9, 0.9], source: [0.5, 0.1], radius: 0.02, mode: .clone)
+        let chained = HealPatch.regionIncludingSources(region, patches: [earlier, p], sensorSize: s)
+        XCTAssertTrue(chained.contains(earlier.sourceBounds(sensorSize: s)))
     }
 
     func testEditStackRoundTrip() throws {

@@ -8,10 +8,12 @@ import simd
 /// Coordinates are normalized sensor coordinates like the masks, and the
 /// patch is applied in camera-linear space before lens correction, so it
 /// is unaffected by rotation, crop, zoom or colour edits. `clone` copies
-/// pixels exactly; `heal` also scales them so the rim of the patch
-/// matches the rim of the target in brightness and colour, which hides
-/// the seam on skin and sky the way a Poisson blend would, at a fraction
-/// of the cost.
+/// pixels exactly; `heal` also multiplies them by a smooth ratio field,
+/// the target's surroundings over the source's, so tone and colour follow
+/// what is around the target on every side (a gradient or a horizon
+/// included) while the texture is the source's. That hides the seam the
+/// way a Poisson blend would, at the cost of a few small blurs. Patches
+/// apply in order, each reading the result of the ones before.
 public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
     public enum Mode: String, Codable, Sendable, CaseIterable {
         case heal, clone
@@ -57,16 +59,41 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
                       width: 2 * r, height: 2 * r)
     }
 
+    /// How far from its centres the patch reads, in sensor pixels at full
+    /// resolution: the source circle (and a pixel for filtering) for a
+    /// clone, the blurred surroundings for a heal.
+    public func readRadiusPixels(sensorSize s: CGSize) -> CGFloat {
+        let r = radiusPixels(sensorSize: s)
+        switch mode {
+        case .clone: return r + 2
+        case .heal: return max(r + 2, CGFloat(HealFieldLayout(radius: Float(r)).reach))
+        }
+    }
+
     /// The sensor region a render of `region` must include so every patch
-    /// whose target it touches can also read its source. A tile that only
-    /// covers the visible area would otherwise have nothing to copy from.
+    /// whose target it touches can also read its source and, for a heal,
+    /// the surroundings of both circles. A tile that only covers the
+    /// visible area would otherwise have nothing to copy from. Patches
+    /// read the ones before them, so the region grows until no further
+    /// patch is touched. Not clipped to the sensor; the render clamps.
     public static func regionIncludingSources(_ region: CGRect, patches: [HealPatch],
                                               sensorSize s: CGSize) -> CGRect {
         var out = region
-        for p in patches where p.targetBounds(sensorSize: s).intersects(region) {
-            out = out.union(p.sourceBounds(sensorSize: s).insetBy(dx: -2, dy: -2))
+        var included = [Bool](repeating: false, count: patches.count)
+        var grew = true
+        while grew {
+            grew = false
+            for (i, p) in patches.enumerated() where !included[i] && p.targetBounds(sensorSize: s).intersects(out) {
+                included[i] = true
+                grew = true
+                let margin = p.readRadiusPixels(sensorSize: s) - p.radiusPixels(sensorSize: s)
+                if p.mode == .heal {
+                    out = out.union(p.targetBounds(sensorSize: s).insetBy(dx: -margin, dy: -margin))
+                }
+                out = out.union(p.sourceBounds(sensorSize: s).insetBy(dx: -margin, dy: -margin))
+            }
         }
-        return out.intersection(CGRect(origin: .zero, size: s))
+        return out
     }
 }
 

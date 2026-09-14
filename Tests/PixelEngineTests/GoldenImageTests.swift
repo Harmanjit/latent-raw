@@ -129,6 +129,16 @@ final class GoldenImageTests: XCTestCase {
         })
     }
 
+    /// The heal's ratio field on the ball's dense detail, where a tone or
+    /// colour mismatch along the patch edge shows. (The heal in heal-clone
+    /// lies outside that recipe's detail window and covers a few pixels of
+    /// its overview, too few for the tolerances to notice a change.)
+    func testHealRatioField() throws {
+        try check(Recipe(name: "heal-field", overview: false, detail: Self.ballCentre) {
+            $0.heals = [HealPatch(id: Self.uuid(5), target: [0.50, 0.55], source: [0.44, 0.50], radius: 0.02, mode: .heal)]
+        })
+    }
+
     func testLocalAdjustments() throws {
         try check(Recipe(name: "local-adjustments") {
             $0.locals = [

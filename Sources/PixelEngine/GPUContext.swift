@@ -54,8 +54,10 @@ public final class GPUContext: @unchecked Sendable {
     let sharpenApplyPSO: MTLComputePipelineState
     let lensCorrectPSO: MTLComputePipelineState
     let packForExportPSO: MTLComputePipelineState
-    let healStatsPSO: MTLComputePipelineState
+    let healGatherPSO: MTLComputePipelineState
+    let healBlurPSO: MTLComputePipelineState
     let healApplyPSO: MTLComputePipelineState
+    let healPastePSO: MTLComputePipelineState
     let lcPreparePSO: MTLComputePipelineState
     let lcDownsamplePSO: MTLComputePipelineState
     let lcBlurHPSO: MTLComputePipelineState
@@ -103,8 +105,10 @@ public final class GPUContext: @unchecked Sendable {
         let sharpenPipeline = try makePipeline("sharpenApply")
         let lensPipeline = try makePipeline("lensCorrect")
         let packPipeline = try makePipeline("packForExport")
-        let healStatsPipeline = try makePipeline("healStats")
+        let healGatherPipeline = try makePipeline("healGather")
+        let healBlurPipeline = try makePipeline("healBlur")
         let healApplyPipeline = try makePipeline("healApply")
+        let healPastePipeline = try makePipeline("healPaste")
         let lcPrepare = try makePipeline("lcPrepare")
         let lcDownsample = try makePipeline("lcDownsample")
         let lcBlurH = try makePipeline("lcBlurH")
@@ -136,8 +140,10 @@ public final class GPUContext: @unchecked Sendable {
         self.sharpenApplyPSO = sharpenPipeline
         self.lensCorrectPSO = lensPipeline
         self.packForExportPSO = packPipeline
-        self.healStatsPSO = healStatsPipeline
+        self.healGatherPSO = healGatherPipeline
+        self.healBlurPSO = healBlurPipeline
         self.healApplyPSO = healApplyPipeline
+        self.healPastePSO = healPastePipeline
         self.lcPreparePSO = lcPrepare
         self.lcDownsamplePSO = lcDownsample
         self.lcBlurHPSO = lcBlurH
