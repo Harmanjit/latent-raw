@@ -87,6 +87,8 @@ public struct EditParameters: Sendable, Equatable {
     public var highlightRecovery: Float
     /// Where highlight reconstruction starts, as a fraction of clip level.
     public var highlightThreshold: Float
+    /// Highlights, Shadows, Whites and Blacks (not highlight recovery).
+    public var toneRanges: ToneRanges = .neutral
     /// Demosaic algorithm for full-resolution renders.
     public var demosaic: DemosaicMethod
     /// Colour space the render is encoded into.
@@ -111,6 +113,8 @@ public struct EditParameters: Sendable, Equatable {
     public var manualVignetting: Float
     /// Colour grading.
     public var toneCurve: ToneCurve
+    /// Per-channel curves, after `toneCurve`.
+    public var channelCurves: RGBCurves = .identity
     public var hsl: HSLAdjustments
     public var splitToning: SplitToning
     /// Local adjustments, applied in order.
@@ -208,6 +212,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.greyPoint == b.greyPoint
             && a.highlightRecovery == b.highlightRecovery
             && a.highlightThreshold == b.highlightThreshold
+            && a.toneRanges == b.toneRanges && a.channelCurves == b.channelCurves
             && a.demosaic == b.demosaic
             && String(describing: a.outputSpace) == String(describing: b.outputSpace)
             && a.denoiseLuminance == b.denoiseLuminance && a.denoiseColor == b.denoiseColor
@@ -525,6 +530,19 @@ public final class RenderPipeline {
     }
 
     private static let identityLUT: [Float] = ToneCurve.identity.lookupTable()
+
+    /// Buffers 24 to 26 of the colour kernel. Both tables are small enough
+    /// for setBytes (1 KB and 3 KB); a neutral module binds a single zero
+    /// and its flag keeps the kernel from reading further.
+    private func encodeToneRangesAndChannelCurves(_ encoder: MTLComputeCommandEncoder,
+                                                  parameters: EditParameters) {
+        var toneRangesOn: UInt32 = parameters.toneRanges.isNeutral ? 0 : 1
+        var toneRangeLUT = toneRangesOn == 0 ? [Float(0)] : parameters.toneRanges.lookupTable()
+        var channelLUT = parameters.channelCurves.isIdentity ? [Float(0)] : parameters.channelCurves.lookupTable()
+        encoder.setBytes(&toneRangeLUT, length: toneRangeLUT.count * 4, index: 24)
+        encoder.setBytes(&channelLUT, length: channelLUT.count * 4, index: 25)
+        encoder.setBytes(&toneRangesOn, length: 4, index: 26)
+    }
 
     // MARK: - Lens corrections
 
@@ -945,7 +963,8 @@ public final class RenderPipeline {
 
         // Grading. The LUT is 1 KB and the HSL table 96 bytes, both well
         // under setBytes' 4 KB limit, so no buffers to manage.
-        var flags = SIMD3<UInt32>(parameters.toneCurve.isIdentity ? 0 : 1,
+        // The curve flag is a bit mask: 1 master curve, 2 channel curves.
+        var flags = SIMD3<UInt32>((parameters.toneCurve.isIdentity ? 0 : 1) | (parameters.channelCurves.isIdentity ? 0 : 2),
                                   parameters.hsl.isNeutral ? 0 : 1,
                                   parameters.splitToning.isNeutral ? 0 : 1)
         var lut = parameters.toneCurve.isIdentity ? Self.identityLUT : parameters.toneCurve.lookupTable()
@@ -981,6 +1000,7 @@ public final class RenderPipeline {
         encoder.setBytes(&proofMode, length: 4, index: 22)
         var vibrance = parameters.vibrance
         encoder.setBytes(&vibrance, length: 4, index: 23)
+        encodeToneRangesAndChannelCurves(encoder, parameters: parameters)
         encoder.setTexture(proofTexture(for: output.proof), index: 3)
 
         dispatch(encoder, pso: gpu.colorAndTonePSO, width: input.width, height: input.height)

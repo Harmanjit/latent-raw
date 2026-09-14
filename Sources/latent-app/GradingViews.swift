@@ -1,11 +1,86 @@
 import SwiftUI
 import PixelEngine
 
+/// The channel a curve editor is showing.
+enum CurveChannel: Int, CaseIterable, Identifiable {
+    case master, red, green, blue
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .master: return "RGB"
+        case .red:    return "Red"
+        case .green:  return "Green"
+        case .blue:   return "Blue"
+        }
+    }
+
+    var colour: Color {
+        switch self {
+        case .master: return .white
+        case .red:    return Color(red: 1, green: 0.35, blue: 0.35)
+        case .green:  return Color(red: 0.35, green: 0.9, blue: 0.4)
+        case .blue:   return Color(red: 0.4, green: 0.6, blue: 1)
+        }
+    }
+}
+
+/// The master curve and the red, green and blue curves, one at a time,
+/// picked Lightroom-style above the graph. The channel curves the user
+/// isn't editing are drawn faintly behind, so a colour shift made earlier
+/// stays in view.
+struct ToneCurvePanel: View {
+    @Binding var master: ToneCurve
+    @Binding var channels: RGBCurves
+    @State private var channel: CurveChannel = .master
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Curve channel", selection: $channel) {
+                ForEach(CurveChannel.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .accessibilityLabel("Curve channel")
+
+            CurveEditor(curve: binding(for: channel), channel: channel,
+                        behind: CurveChannel.allCases.filter { $0 != channel && $0 != .master }
+                            .map { (curve($0), $0.colour) }
+                            .filter { !$0.0.isIdentity })
+                // A fresh editor per channel, so a drag can't carry over.
+                .id(channel)
+        }
+    }
+
+    private func curve(_ c: CurveChannel) -> ToneCurve {
+        switch c {
+        case .master: return master
+        case .red:    return channels.red
+        case .green:  return channels.green
+        case .blue:   return channels.blue
+        }
+    }
+
+    private func binding(for c: CurveChannel) -> Binding<ToneCurve> {
+        switch c {
+        case .master: return $master
+        case .red:    return $channels.red
+        case .green:  return $channels.green
+        case .blue:   return $channels.blue
+        }
+    }
+}
+
 /// The tone curve editor: drag points, click the curve to add one,
 /// double-click a point to remove it. Drawn with Canvas; hit-testing is
 /// done by hand, which is simpler than a view per point.
 struct CurveEditor: View {
     @Binding var curve: ToneCurve
+    var channel: CurveChannel = .master
+    /// Other curves drawn faintly underneath, with their colours.
+    var behind: [(ToneCurve, Color)] = []
     @State private var dragging: Int?
 
     private let pointRadius: CGFloat = 5
@@ -16,7 +91,10 @@ struct CurveEditor: View {
                 let size = geo.size
                 Canvas { context, size in
                     drawGrid(&context, size)
-                    drawCurve(&context, size)
+                    for (other, colour) in behind {
+                        drawCurve(other, colour: colour.opacity(0.35), width: 1, &context, size)
+                    }
+                    drawCurve(curve, colour: channel.colour.opacity(0.9), width: 1.5, &context, size)
                     drawPoints(&context, size)
                 }
                 .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 4))
@@ -28,6 +106,9 @@ struct CurveEditor: View {
                 }
             }
             .aspectRatio(1, contentMode: .fit)
+            .accessibilityElement()
+            .accessibilityLabel("\(channel.title) curve")
+            .accessibilityValue(curve.isIdentity ? "Linear" : "\(curve.points.count) points")
 
             HStack {
                 Text("Drag points · click to add · double-click to remove")
@@ -102,14 +183,15 @@ struct CurveEditor: View {
         context.stroke(diag, with: .color(Color(white: 0.25)), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
     }
 
-    private func drawCurve(_ context: inout GraphicsContext, _ size: CGSize) {
+    private func drawCurve(_ curve: ToneCurve, colour: Color, width: CGFloat,
+                           _ context: inout GraphicsContext, _ size: CGSize) {
         let lut = curve.lookupTable()
         var path = Path()
         for (i, y) in lut.enumerated() {
             let pt = CGPoint(x: CGFloat(i) / 255 * size.width, y: (1 - CGFloat(y)) * size.height)
             if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
         }
-        context.stroke(path, with: .color(.white.opacity(0.9)), lineWidth: 1.5)
+        context.stroke(path, with: .color(colour), lineWidth: width)
     }
 
     private func drawPoints(_ context: inout GraphicsContext, _ size: CGSize) {
@@ -117,8 +199,41 @@ struct CurveEditor: View {
             let v = toView(p, size)
             let rect = CGRect(x: v.x - pointRadius, y: v.y - pointRadius,
                               width: pointRadius * 2, height: pointRadius * 2)
-            context.fill(Path(ellipseIn: rect), with: .color(i == dragging ? .accentColor : .white))
+            context.fill(Path(ellipseIn: rect), with: .color(i == dragging ? .accentColor : channel.colour))
             context.stroke(Path(ellipseIn: rect), with: .color(Color(white: 0.1)), lineWidth: 1)
+        }
+    }
+}
+
+/// Highlights, Shadows, Whites and Blacks, laid out like the Develop
+/// panel's other slider rows. Separate from Highlight Reconstruction's
+/// Recovery, which repairs clipped colour rather than moving tones.
+struct ToneRangeSliders: View {
+    @Binding var ranges: ToneRanges
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            row("Highlights", $ranges.highlights)
+            row("Shadows", $ranges.shadows)
+            row("Whites", $ranges.whites)
+            row("Blacks", $ranges.blacks)
+        }
+    }
+
+    private func row(_ title: String, _ value: Binding<Float>) -> some View {
+        let text = String(format: "%+.2f", value.wrappedValue)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title).font(.subheadline)
+                Spacer()
+                Text(text)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            ResettableSlider(value: value, in: -1...1) { value.wrappedValue = 0 }
+                .help("Double-click to reset")
+                .accessibilityLabel(title)
+                .accessibilityValue(text)
         }
     }
 }

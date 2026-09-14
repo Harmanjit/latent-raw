@@ -64,6 +64,31 @@ public struct ToneCurve: Equatable, Sendable, Codable {
     }
 }
 
+/// Red, green and blue point curves, applied after the master curve and
+/// on the same display-referred, gamma 2.2 scale, as Lightroom does. The
+/// master curve shapes contrast; these then shift the colour balance of
+/// particular tones (say, blue into the shadows) without that contrast
+/// being bent per channel.
+public struct RGBCurves: Equatable, Sendable, Codable {
+    public var red: ToneCurve
+    public var green: ToneCurve
+    public var blue: ToneCurve
+
+    public static let identity = RGBCurves(red: .identity, green: .identity, blue: .identity)
+
+    public init(red: ToneCurve = .identity, green: ToneCurve = .identity, blue: ToneCurve = .identity) {
+        self.red = red; self.green = green; self.blue = blue
+    }
+
+    public var isIdentity: Bool { self == .identity }
+
+    /// The three tables end to end (red, green, blue), `ToneCurve.lutSize`
+    /// each, for the colour kernel.
+    public func lookupTable() -> [Float] {
+        red.lookupTable() + green.lookupTable() + blue.lookupTable()
+    }
+}
+
 /// Per-hue-band adjustments, Lightroom's eight bands.
 public struct HSLAdjustments: Equatable, Sendable, Codable {
     public static let bandNames = ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"]

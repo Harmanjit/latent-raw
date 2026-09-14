@@ -44,6 +44,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var defringe: Defringe?
         public var perspective: Perspective?
         public var aidenoise: AIDenoise?
+        /// Highlights, Shadows, Whites, Blacks. Absent when all are zero,
+        /// so edits that never touched them encode exactly as before.
+        public var toneranges: ToneRanges?
     }
 
     public struct AIDenoise: Codable, Equatable, Sendable {
@@ -70,6 +73,30 @@ public struct EditStack: Codable, Equatable, Sendable {
     public struct Curve: Codable, Equatable, Sendable {
         /// [[x, y], ...]
         public var points: [[Float]]
+        /// Channel curves in the same form, each absent while it's a
+        /// straight line (and in every stack older than them).
+        public var red: [[Float]]?
+        public var green: [[Float]]?
+        public var blue: [[Float]]?
+
+        public init(points: [[Float]], red: [[Float]]? = nil, green: [[Float]]? = nil, blue: [[Float]]? = nil) {
+            self.points = points; self.red = red; self.green = green; self.blue = blue
+        }
+
+        init(master: ToneCurve, channels: RGBCurves) {
+            func encoded(_ c: ToneCurve) -> [[Float]] { c.points.map { [$0.x, $0.y] } }
+            self.init(points: encoded(master),
+                      red: channels.red.isIdentity ? nil : encoded(channels.red),
+                      green: channels.green.isIdentity ? nil : encoded(channels.green),
+                      blue: channels.blue.isIdentity ? nil : encoded(channels.blue))
+        }
+
+        /// A usable curve from stored points, or nil when there are fewer
+        /// than two well-formed ones.
+        static func decoded(_ points: [[Float]]?) -> ToneCurve? {
+            let pts = (points ?? []).compactMap { $0.count == 2 ? SIMD2<Float>($0[0], $0[1]) : nil }
+            return pts.count >= 2 ? ToneCurve(points: pts) : nil
+        }
     }
 
     /// DESIGN.md §5.6: which corrections are on, and which profile and
@@ -151,7 +178,8 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.lens = Lens(distortion: p.lensDistortion, tca: p.lensTCA, vignetting: p.lensVignetting,
                             manualDistortion: p.manualDistortion, manualVignetting: p.manualVignetting,
                             profile: nil, lensfunDb: nil)
-        modules.curve = Curve(points: p.toneCurve.points.map { [$0.x, $0.y] })
+        modules.curve = Curve(master: p.toneCurve, channels: p.channelCurves)
+        modules.toneranges = p.toneRanges.isNeutral ? nil : p.toneRanges
         modules.hsl = p.hsl
         modules.splittoning = p.splitToning
         modules.locals = p.locals.isEmpty ? nil : p.locals
@@ -210,7 +238,11 @@ public struct EditStack: Codable, Equatable, Sendable {
         if let c = modules.curve {
             let pts = c.points.compactMap { $0.count == 2 ? SIMD2<Float>($0[0], $0[1]) : nil }
             if pts.count >= 2 { p.toneCurve = ToneCurve(points: pts) }
+            p.channelCurves = RGBCurves(red: Curve.decoded(c.red) ?? .identity,
+                                        green: Curve.decoded(c.green) ?? .identity,
+                                        blue: Curve.decoded(c.blue) ?? .identity)
         }
+        p.toneRanges = modules.toneranges ?? .neutral
         if let h = modules.hsl, h.hue.count == 8, h.saturation.count == 8, h.luminance.count == 8 {
             p.hsl = h
         }

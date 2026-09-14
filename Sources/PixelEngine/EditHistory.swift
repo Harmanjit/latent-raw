@@ -79,7 +79,8 @@ public struct EditHistory: Equatable, Sendable, Codable {
         if a.modules.whitebalance != b.modules.whitebalance { names.append("White Balance") }
         if a.modules.exposure != b.modules.exposure { names.append("Exposure") }
         if a.modules.tone != b.modules.tone { names.append("Tone") }
-        if a.modules.highlights != b.modules.highlights { names.append("Highlights") }
+        if a.modules.highlights != b.modules.highlights { names.append("Highlight Recovery") }
+        names += toneRangeChanges(from: a.modules.toneranges ?? .neutral, to: b.modules.toneranges ?? .neutral)
         if a.modules.curve != b.modules.curve { names.append("Curve") }
         if a.modules.hsl != b.modules.hsl { names.append("HSL") }
         if a.modules.splittoning != b.modules.splittoning { names.append("Split Toning") }
@@ -89,6 +90,16 @@ public struct EditHistory: Equatable, Sendable, Codable {
         if a.modules.lens != b.modules.lens { names.append("Lens") }
         if a.modules.locals != b.modules.locals { names.append("Local Adjustments") }
         return names.isEmpty ? "Edit" : names.joined(separator: ", ")
+    }
+
+    /// Each of the four sliders by its own name, in panel order.
+    private static func toneRangeChanges(from a: ToneRanges, to b: ToneRanges) -> [String] {
+        var names: [String] = []
+        if a.highlights != b.highlights { names.append("Highlights") }
+        if a.shadows != b.shadows { names.append("Shadows") }
+        if a.whites != b.whites { names.append("Whites") }
+        if a.blacks != b.blacks { names.append("Blacks") }
+        return names
     }
 }
 
