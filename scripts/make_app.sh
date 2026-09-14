@@ -96,8 +96,9 @@ PLIST
 # runtime. No developer account is involved: the sandbox and the runtime
 # hardening are enforced from the signature on this machine regardless.
 # What ad-hoc cannot give is notarisation, so on another Mac Gatekeeper
-# shows "cannot verify the developer" until the user right-clicks > Open
-# once (or removes the quarantine attribute). See README.
+# stops the first launch until the user clicks Open Anyway in System
+# Settings > Privacy & Security (Control-click > Open no longer works
+# since macOS 15), or removes the quarantine attribute. See README.
 SCRIPTS="$(dirname "$0")"
 if [ "$DEV" = "1" ]; then
   codesign --force --options runtime --sign - "$APP/Contents/MacOS/latent-cli"

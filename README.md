@@ -51,9 +51,12 @@ exploits the decoder gets a process that can do nothing, and the app
 reports an error instead of crashing. `swift run` builds and the tests
 decode in-process; `LATENT_RAW_INPROCESS=1` forces that in the bundle.
 
-What an account would add is notarisation. Without it, another Mac shows
-"cannot verify the developer" on first launch. Right-click the app and
-choose Open once, or run:
+What an account would add is notarisation. Without it, Gatekeeper stops
+the app the first time it is opened from a download or a copy on another
+Mac. Try to open it once, then open **System Settings > Privacy & Security**
+and click **Open Anyway** next to the message about Latent. (Since macOS 15,
+Control-click > Open no longer skips this step.) The Mac that built the app
+opens it straight away. Alternatively, remove the quarantine attribute:
 
 ```
 xattr -dr com.apple.quarantine /Applications/Latent.app

@@ -1,7 +1,7 @@
 # Troubleshooting
 
-**"Latent cannot be opened because the developer cannot be verified."**
-Right-click the app and choose Open once, or `xattr -dr com.apple.quarantine /path/to/Latent.app`. The app is not notarised; see [Installation](Installation).
+**macOS says Latent can't be opened, or can't be checked for malware.**
+Try to open it once, then click **Open Anyway** in System Settings > Privacy & Security. Since macOS 15, Control-click > Open no longer skips this step. Alternatively, run `xattr -dr com.apple.quarantine /path/to/Latent.app`. The app is not notarised; see [Installation](Installation).
 
 **I changed the code and the app looks the same.**
 `build/Latent.app` is a snapshot. Run `scripts/make_app.sh` again after any change. `swift run latent-app` always reflects the current source but is slower and unsandboxed.

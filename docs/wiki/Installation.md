@@ -33,7 +33,12 @@ Drag `build/Latent.app` to Applications if you want it in the Dock.
 
 ## The Gatekeeper dialog
 
-The app is signed ad hoc, not by an Apple Developer ID, so on any Mac other than the one that built it the first launch shows "cannot verify the developer". Either right-click the app and choose Open once, or run:
+The app is signed ad hoc, not by an Apple Developer ID, and isn't notarised, so Gatekeeper stops it the first time it is opened from a download or a copy on another Mac. The Mac that built it opens it straight away.
+
+1. Try to open the app once and dismiss the dialog.
+2. Open **System Settings > Privacy & Security**, scroll to the message about Latent, and click **Open Anyway**.
+
+Since macOS 15, Control-click > Open no longer skips this step. Alternatively, remove the quarantine attribute:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Latent.app
