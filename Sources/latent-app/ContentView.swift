@@ -108,12 +108,15 @@ struct ContentView: View {
         .onAppear {
             LensfunDatabase.warmUp()
             wireEditSaving()
+            // Quitting flushes and waits for these (AppDelegate).
+            AppDelegate.register(model: model, library: library, exportQueue: exportQueue)
             if let gpu = model.gpu {
                 library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu)
             }
             // Developer convenience: `swift run latent-app <folder-or-file>`
-            // opens it straight away, skipping the dialogs.
-            if let path = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") }) {
+            // opens it straight away, skipping the dialogs. Defaults
+            // overrides such as `-AppleLanguages (en)` are skipped.
+            if let path = LaunchArguments.paths(from: Array(CommandLine.arguments.dropFirst())).first {
                 var isDir: ObjCBool = false
                 FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
                 if isDir.boolValue {

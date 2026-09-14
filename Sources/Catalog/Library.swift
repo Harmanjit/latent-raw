@@ -91,8 +91,14 @@ public final class Library: ObservableObject {
     /// instead of dropping the error. Every UI action that writes to the
     /// catalog goes through here, so a read-only or full volume shows
     /// up in the status bar rather than as a rating that didn't stick.
+    ///
+    /// Each operation is counted until it finishes, so quitting can wait
+    /// for a rating or an edit made just before Cmd-Q to reach the sidecar
+    /// and the database (see `waitForPendingWork`).
     public func perform(_ what: String, _ operation: @escaping @MainActor () async throws -> Void) {
+        pendingOperations += 1
         Task { @MainActor in
+            defer { operationFinished() }
             do {
                 try await operation()
             } catch {
@@ -100,6 +106,34 @@ public final class Library: ObservableObject {
                 Self.logger.error("\(what, privacy: .public) failed: \(String(describing: error), privacy: .private)")
             }
         }
+    }
+
+    /// Operations started with `perform` that haven't finished, and the
+    /// callers waiting for that count to reach zero.
+    private var pendingOperations = 0
+    private var pendingWorkWaiters: [CheckedContinuation<Void, Never>] = []
+
+    /// Whether any operation started with `perform` is still running.
+    public var hasPendingWork: Bool { pendingOperations > 0 }
+
+    /// Returns once every operation started with `perform` has finished,
+    /// including any started while it waits (an operation that starts
+    /// another, say). There is no timeout here; a caller that can't wait
+    /// forever, such as quitting, bounds the wait itself.
+    public func waitForPendingWork() async {
+        // A loop, not a single wait: between the count reaching zero and
+        // this waiter running, another operation may have started.
+        while pendingOperations > 0 {
+            await withCheckedContinuation { pendingWorkWaiters.append($0) }
+        }
+    }
+
+    private func operationFinished() {
+        pendingOperations -= 1
+        guard pendingOperations == 0 else { return }
+        let waiters = pendingWorkWaiters
+        pendingWorkWaiters = []
+        for waiter in waiters { waiter.resume() }
     }
 
     static let logger = Logger(subsystem: "com.latent.app", category: "catalog")

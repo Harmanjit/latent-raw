@@ -113,6 +113,7 @@ final class ExportQueue: ObservableObject {
                destination: URL, gpu: GPUContext) {
         guard !isRunning, !records.isEmpty, let catalog = library.catalog, let root = library.folderURL else { return }
         isRunning = true
+        stoppingForQuit = false
         done = 0; total = records.count; failures = []; summary = ""
         preset.save()
 
@@ -203,7 +204,7 @@ final class ExportQueue: ObservableObject {
                 self.summary = String(format: "%d of %d exported%@ in %.1fs · %.1f MP total%@",
                                       exported.count, self.total, cancelled, elapsed,
                                       Double(totalPixels) / 1_000_000, skippedNote)
-                if preset.revealWhenDone, !exported.isEmpty {
+                if preset.revealWhenDone, !exported.isEmpty, !self.stoppingForQuit {
                     NSWorkspace.shared.activateFileViewerSelecting(Array(exported.prefix(50)))
                 }
             }
@@ -211,6 +212,22 @@ final class ExportQueue: ObservableObject {
     }
 
     func cancel() { task?.cancel() }
+
+    /// Set when quitting stops the run, so it doesn't bring Finder forward
+    /// as the app goes away.
+    private var stoppingForQuit = false
+
+    /// For quitting: stops the run after the file being written and
+    /// returns once that file is complete (at once when nothing is
+    /// running). Cancelling only stops the loop from starting the next
+    /// image; the render and write run in a detached task, which
+    /// cancellation doesn't reach, so a file is never left half-written.
+    func stopAfterCurrentFile() async {
+        guard let task else { return }
+        stoppingForQuit = true
+        task.cancel()
+        await task.value
+    }
 }
 
 /// The export sheet: saved presets, format and size, naming and
