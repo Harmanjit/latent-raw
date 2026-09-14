@@ -54,7 +54,7 @@ struct ImageViewport: View {
                 }
             } else {
                 VStack(spacing: 12) {
-                    Text(model.isReady ? "No image open" : "Metal unavailable")
+                    Text(model.isReady ? "No image open" : model.setupError == nil ? "Starting…" : "Metal unavailable")
                         .foregroundStyle(.secondary)
                     if model.isReady && mirror == nil {
                         Button("Open Raw File…") { model.showOpenPanel() }

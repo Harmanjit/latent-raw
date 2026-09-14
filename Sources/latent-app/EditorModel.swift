@@ -876,17 +876,18 @@ final class EditorModel: ObservableObject {
     var backgroundLevel: Float { AppPreferences.shared.surroundLinear }
 
     /// Non-nil when Metal setup failed, in which case nothing else works.
-    let setupError: String?
+    private(set) var setupError: String?
 
-    private let gpuContext: GPUContext?
-    private let pipeline: RenderPipeline?
-    private let presenterInstance: Presenter?
-    private let histogramCalculator: HistogramCalculator?
-    private let scopeCalculator: ScopeCalculator?
+    // Set once, when the shared GPU context is ready (see init).
+    private var gpuContext: GPUContext?
+    private var pipeline: RenderPipeline?
+    private var presenterInstance: Presenter?
+    private var histogramCalculator: HistogramCalculator?
+    private var scopeCalculator: ScopeCalculator?
     /// The small render the scopes measure. Kept so switching scope
     /// doesn't need a render; replaced on every preview render.
     private var analysisTexture: MTLTexture?
-    private let exportService: ExportService?
+    private var exportService: ExportService?
     private var session: ImageSession?
     private var sourceURL: URL?
 
@@ -913,25 +914,48 @@ final class EditorModel: ObservableObject {
     /// neighbourhood reach, where clamped reads produce colour fringes.
     private static let tileInset: CGFloat = 8
 
+    /// An image asked for before the GPU was ready, opened when it is.
+    private var openWhenGPUReady: (() -> Void)?
+
+    /// Every model shares the process's one GPU context, built off the
+    /// main thread (`GPUContext.shared()`), so the window appears without
+    /// waiting for shaders. Once it exists, as for Compare's model or once
+    /// a caller has awaited `GPUContext.shared()`, a new model is ready on
+    /// return, as before; otherwise it isn't `isReady` for the moment the
+    /// build takes, and an image opened meanwhile opens when it's done.
     init() {
-        do {
-            let gpu = try GPUContext()
-            self.gpuContext = gpu
-            self.pipeline = RenderPipeline(gpu: gpu)
-            self.presenterInstance = Presenter(gpu: gpu)
-            self.histogramCalculator = try? HistogramCalculator(gpu: gpu)
-            self.scopeCalculator = try? ScopeCalculator(gpu: gpu)
-            self.exportService = ExportService(gpu: gpu)
-            self.setupError = nil
-        } catch {
-            self.gpuContext = nil
-            self.pipeline = nil
-            self.presenterInstance = nil
-            self.histogramCalculator = nil
-            self.scopeCalculator = nil
-            self.exportService = nil
-            self.setupError = String(describing: error)
-            self.status = "Metal setup failed"
+        if let built = GPUContext.sharedIfBuilt {
+            attachGPU(built)
+        } else {
+            Task { [weak self] in
+                do {
+                    let gpu = try await GPUContext.shared()
+                    self?.attachGPU(.success(gpu))
+                } catch {
+                    self?.attachGPU(.failure(error))
+                }
+            }
+        }
+    }
+
+    private func attachGPU(_ built: Result<GPUContext, any Error>) {
+        objectWillChange.send()
+        switch built {
+        case .success(let gpu):
+            gpuContext = gpu
+            pipeline = RenderPipeline(gpu: gpu)
+            presenterInstance = Presenter(gpu: gpu)
+            histogramCalculator = try? HistogramCalculator(gpu: gpu)
+            scopeCalculator = try? ScopeCalculator(gpu: gpu)
+            exportService = ExportService(gpu: gpu)
+            if let open = openWhenGPUReady {
+                openWhenGPUReady = nil
+                open()
+            }
+        case .failure(let error):
+            setupError = String(describing: error)
+            status = "Metal setup failed"
+            openWhenGPUReady = nil
         }
     }
 
@@ -1042,7 +1066,15 @@ final class EditorModel: ObservableObject {
     /// made here be saved back.
     func open(url: URL, userRotation: Int = 0, catalogImageID: Int64? = nil,
               editStackJSON: String? = nil) {
-        guard let gpu = gpuContext else { return }
+        guard let gpu = gpuContext else {
+            if setupError == nil {
+                openWhenGPUReady = { [weak self] in
+                    self?.open(url: url, userRotation: userRotation, catalogImageID: catalogImageID,
+                               editStackJSON: editStackJSON)
+                }
+            }
+            return
+        }
         flushPendingSave()
         self.catalogImageID = catalogImageID
         status = "Opening \(url.lastPathComponent)…"

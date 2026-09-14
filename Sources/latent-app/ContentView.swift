@@ -146,6 +146,7 @@ struct ContentView: View {
     private func openFolder(_ url: URL) {
         mode = .library
         Task {
+            await attachEditedThumbnailRenderer()
             do {
                 try await library.open(folder: url, defaultSubfolderMode: prefs.defaultSubfolderMode)
                 BookmarkStore.save(url, key: BookmarkStore.lastFolder)
@@ -153,6 +154,16 @@ struct ContentView: View {
                 model.reportFailure("Opening \(url.lastPathComponent)", error)
             }
         }
+    }
+
+    /// Edited thumbnails render through the pipeline, so they need the
+    /// GPU, which starts in the background as the app launches. Waiting for
+    /// it here, which only ever happens at launch and for no longer than
+    /// the GPU takes to start, keeps the folder reopened at launch from
+    /// getting unedited thumbnails for its edited images.
+    private func attachEditedThumbnailRenderer() async {
+        guard library.thumbnailRenderer == nil, let gpu = try? await GPUContext.shared() else { return }
+        library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu)
     }
 
     private func openInEditor(_ record: ImageRecord) {

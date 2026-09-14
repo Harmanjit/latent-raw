@@ -1,5 +1,6 @@
 import Foundation
 import Metal
+import os
 import RawCore
 
 public enum GPUContextError: Error, CustomStringConvertible {
@@ -38,6 +39,8 @@ public final class GPUContext: @unchecked Sendable {
     public let device: MTLDevice
     public let commandQueue: MTLCommandQueue
     let library: MTLLibrary
+    /// Whether the shaders came precompiled or were compiled at launch.
+    public let shaderLibrarySource: ShaderLibrarySource
 
     // Pipeline states are built once at startup, not per frame.
     let whiteBalanceBlackLevelPSO: MTLComputePipelineState
@@ -79,7 +82,7 @@ public final class GPUContext: @unchecked Sendable {
         guard let queue = device.makeCommandQueue() else {
             throw GPUContextError.commandQueueCreationFailed
         }
-        let library = try GPUContext.loadShaderLibrary(device: device)
+        let (library, librarySource) = try GPUContext.loadShaderLibrary(device: device)
 
         // Captures only the locals `device` and `library`, never `self` —
         // Swift forbids touching self until every property is initialized.
@@ -122,6 +125,7 @@ public final class GPUContext: @unchecked Sendable {
         self.device = device
         self.commandQueue = queue
         self.library = library
+        self.shaderLibrarySource = librarySource
         self.whiteBalanceBlackLevelPSO = whiteBalancePSO
         self.demosaicBilinearPSO = bilinearPSO
         self.demosaicBinnedPSO = binnedPSO
@@ -157,18 +161,29 @@ public final class GPUContext: @unchecked Sendable {
     /// `default.metallib` and falling back to compiling the bundled `.metal`
     /// sources at runtime (which `swift build` on the command line needs).
     ///
+    /// scripts/make_app.sh writes the metallib when the Metal toolchain is
+    /// installed. Loading it takes milliseconds; compiling the sources takes
+    /// about 0.4 s the first time this machine sees them (Metal caches the
+    /// result, so later launches are quick either way). A metallib that
+    /// won't load, say one built by a toolchain newer than this system, is
+    /// logged and the sources are used instead: they ship beside it.
+    ///
     /// Runtime compilation can't resolve `#include "Common.h"` between
     /// separate source strings, so the fallback inlines Common.h once and
     /// strips the include lines from each kernel file.
-    private static func loadShaderLibrary(device: MTLDevice) throws -> MTLLibrary {
-        if let precompiled = try? device.makeDefaultLibrary(bundle: .latentResources) {
-            return precompiled
-        }
-
-        let bundle = Bundle.latentResources
+    static func loadShaderLibrary(device: MTLDevice, bundle: Bundle = .latentResources,
+                                  compileOptions: MTLCompileOptions? = nil) throws -> (MTLLibrary, ShaderLibrarySource) {
         func resourceURL(_ name: String, _ ext: String) -> URL? {
             bundle.url(forResource: name, withExtension: ext)
                 ?? bundle.url(forResource: name, withExtension: ext, subdirectory: "Shaders")
+        }
+
+        if let metallib = resourceURL("default", "metallib") {
+            do {
+                return (try device.makeLibrary(URL: metallib), .precompiled)
+            } catch {
+                gpuLog.error("Precompiled shaders failed to load, compiling the sources instead: \(String(describing: error), privacy: .public)")
+            }
         }
 
         guard let headerURL = resourceURL("Common", "h") else {
@@ -194,7 +209,7 @@ public final class GPUContext: @unchecked Sendable {
         }
 
         let combinedSource = ([header] + kernels).joined(separator: "\n\n")
-        return try device.makeLibrary(source: combinedSource, options: nil)
+        return (try device.makeLibrary(source: combinedSource, options: compileOptions), .compiledFromSource)
     }
 
     /// Wraps the sensor plane as a shared-storage MTLBuffer without
@@ -225,6 +240,102 @@ public final class GPUContext: @unchecked Sendable {
         descriptor.storageMode = .private
         descriptor.usage = [.shaderRead, .shaderWrite]
         return device.makeTexture(descriptor: descriptor)
+    }
+}
+
+/// Where a context's shader library came from.
+public enum ShaderLibrarySource: String, Sendable {
+    /// default.metallib, written by scripts/make_app.sh.
+    case precompiled
+    /// The bundled .metal sources, compiled at launch.
+    case compiledFromSource
+}
+
+let gpuLog = Logger(subsystem: "com.latent.app", category: "gpu")
+
+// MARK: - Shared context
+
+extension GPUContext {
+    /// Starts building the app's shared context on a background thread, if
+    /// nothing has started it yet. The app calls this as it launches, so
+    /// the first window never waits for shader loading and pipeline
+    /// creation (a few milliseconds on a warm launch, over half a second
+    /// the first time a build's shaders are compiled).
+    ///
+    /// Tests and the CLI keep calling `GPUContext()` directly: the shared
+    /// context is only for code that wants one context for the process.
+    public static func warmUp() {
+        SharedContextBuild.instance.start()
+    }
+
+    /// The shared context once built, or the error that stopped it; nil
+    /// while the build is still running or before `warmUp()`.
+    public static var sharedIfBuilt: Result<GPUContext, any Error>? {
+        SharedContextBuild.instance.result
+    }
+
+    /// The shared context, waiting for the build (and starting it if
+    /// nothing has).
+    public static func shared() async throws -> GPUContext {
+        try await SharedContextBuild.instance.value()
+    }
+}
+
+/// Builds the shared context once, on a GCD thread rather than in a task:
+/// compiling shaders blocks, and a blocked cooperative thread is one the
+/// app's other async work can't use.
+private final class SharedContextBuild: @unchecked Sendable {
+    static let instance = SharedContextBuild()
+
+    // Everything below is guarded by `lock`.
+    private let lock = NSLock()
+    private var started = false
+    private var built: Result<GPUContext, any Error>?
+    private var waiters: [CheckedContinuation<GPUContext, any Error>] = []
+
+    var result: Result<GPUContext, any Error>? {
+        lock.withLock { built }
+    }
+
+    func start() {
+        let isFirst = lock.withLock {
+            defer { started = true }
+            return !started
+        }
+        guard isFirst else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let clock = ContinuousClock()
+            let start = clock.now
+            let result = Result { try GPUContext() }
+            let elapsed = clock.now - start
+            switch result {
+            case .success(let gpu):
+                gpuLog.info("GPU context built in \(elapsed, privacy: .public) (shaders \(gpu.shaderLibrarySource.rawValue, privacy: .public))")
+            case .failure(let error):
+                gpuLog.error("GPU context failed after \(elapsed, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+            self.finish(result)
+        }
+    }
+
+    func value() async throws -> GPUContext {
+        start()
+        return try await withCheckedThrowingContinuation { continuation in
+            let ready: Result<GPUContext, any Error>? = lock.withLock {
+                if built == nil { waiters.append(continuation) }
+                return built
+            }
+            if let ready { continuation.resume(with: ready) }
+        }
+    }
+
+    private func finish(_ result: Result<GPUContext, any Error>) {
+        let waiting = lock.withLock {
+            built = result
+            defer { waiters = [] }
+            return waiters
+        }
+        for continuation in waiting { continuation.resume(with: result) }
     }
 }
 
