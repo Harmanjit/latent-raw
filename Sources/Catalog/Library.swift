@@ -515,11 +515,16 @@ public final class Library: ObservableObject {
     /// Persists an edit stack (nil = back to defaults) for an image by id,
     /// which need not be the selection — the editor may still be saving
     /// the previous image after the user moved on.
+    ///
+    /// `target` is the catalog the id belongs to, captured when the edit
+    /// settled: by the time this runs another folder may be open, where
+    /// the same id is a different photo. Nil means the open catalog.
     public func saveEditStack(_ json: String?, schemaVersion: Int, processVersion: String,
-                              forImageID id: Int64) async throws {
-        guard let catalog else { return }
+                              forImageID id: Int64, in target: Catalog? = nil) async throws {
+        guard let catalog = target ?? catalog else { return }
         try await catalog.setEditStack(json, schemaVersion: schemaVersion,
                                        processVersion: processVersion, forImageID: id)
+        guard catalog === self.catalog else { return }
         if json == nil { editedImageIDs.remove(id) } else { editedImageIDs.insert(id) }
         // The thumbnail no longer matches the edit; regenerate in the
         // background (DESIGN.md §10: after the edit is saved, never while
@@ -574,8 +579,9 @@ public final class Library: ObservableObject {
         return try await catalog.snapshots(forImageID: id)
     }
 
-    public func setSnapshots(_ snapshots: [(name: String, stackJSON: String)], forImageID id: Int64) async throws {
-        try await catalog?.setSnapshots(snapshots, forImageID: id)
+    public func setSnapshots(_ snapshots: [(name: String, stackJSON: String)], forImageID id: Int64,
+                             in target: Catalog? = nil) async throws {
+        try await (target ?? catalog)?.setSnapshots(snapshots, forImageID: id)
     }
 
     public func history(for record: ImageRecord) async throws -> [(stackJSON: String, createdAt: Int64)] {
@@ -583,8 +589,9 @@ public final class Library: ObservableObject {
         return try await catalog.history(forImageID: id)
     }
 
-    public func setHistory(_ steps: [(stackJSON: String, createdAt: Int64)], forImageID id: Int64) async throws {
-        try await catalog?.setHistory(steps, forImageID: id)
+    public func setHistory(_ steps: [(stackJSON: String, createdAt: Int64)], forImageID id: Int64,
+                           in target: Catalog? = nil) async throws {
+        try await (target ?? catalog)?.setHistory(steps, forImageID: id)
     }
 
     // MARK: - Navigation

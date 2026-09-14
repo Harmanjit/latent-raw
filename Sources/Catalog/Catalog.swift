@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import os
 
 public enum CatalogError: Error {
     case volumeDetectionFailed
@@ -13,6 +14,11 @@ public actor Catalog {
     public let rootPath: URL          // the photo folder itself, not _latent/
     public let containerPath: URL     // .../_latent
     let dbQueue: DatabaseQueue
+    /// Where a damaged database was moved when this catalog opened, or nil
+    /// if the database was fine. The catalog then started empty and fills
+    /// again from the sidecars on the next reconcile; the subfolder
+    /// choices, which live only in the database, are gone.
+    public nonisolated let damagedDatabaseSetAside: URL?
 
     public static let containerName = "_latent"
     /// The container name before the app was renamed (September 2026).
@@ -20,10 +26,11 @@ public actor Catalog {
     /// build keep their database, sidecars and thumbnails.
     public static let legacyContainerName = "_rawhead"
 
-    private init(rootPath: URL, containerPath: URL, dbQueue: DatabaseQueue) {
+    private init(rootPath: URL, containerPath: URL, dbQueue: DatabaseQueue, damagedDatabaseSetAside: URL? = nil) {
         self.rootPath = rootPath
         self.containerPath = containerPath
         self.dbQueue = dbQueue
+        self.damagedDatabaseSetAside = damagedDatabaseSetAside
     }
 
     /// Opens (or creates) the catalog for `folder`. Journal mode is chosen
@@ -64,10 +71,62 @@ public actor Catalog {
             try db.execute(sql: "PRAGMA journal_mode = \(isNetworkVolume ? "DELETE" : "WAL")")
         }
 
-        let dbQueue = try DatabaseQueue(path: dbPath, configuration: config)
-        try Schema.migrator().migrate(dbQueue)
+        // DESIGN.md §5.3: the database can be rebuilt from the sidecars. A
+        // file SQLite calls corrupt or not a database is moved aside, never
+        // deleted (it may still hold subfolder choices someone can recover
+        // by hand), and a fresh one starts in its place.
+        let dbQueue: DatabaseQueue
+        var setAside: URL?
+        do {
+            dbQueue = try openMigrated(path: dbPath, configuration: config)
+        } catch let error as DatabaseError where error.resultCode == .SQLITE_CORRUPT || error.resultCode == .SQLITE_NOTADB {
+            setAside = try setAsideDamagedDatabase(at: URL(fileURLWithPath: dbPath), because: error)
+            dbQueue = try openMigrated(path: dbPath, configuration: config)
+        }
 
-        return Catalog(rootPath: folder, containerPath: container, dbQueue: dbQueue)
+        return Catalog(rootPath: folder, containerPath: container, dbQueue: dbQueue,
+                       damagedDatabaseSetAside: setAside)
+    }
+
+    /// A function of its own so a queue that fails to migrate is closed (by
+    /// going out of scope) before its files are moved.
+    private static func openMigrated(path: String, configuration: Configuration) throws -> DatabaseQueue {
+        let dbQueue = try DatabaseQueue(path: path, configuration: configuration)
+        try Schema.migrator().migrate(dbQueue)
+        return dbQueue
+    }
+
+    static let logger = Logger(subsystem: "com.latent.app", category: "catalog")
+
+    /// Renames `catalog.sqlite` and its `-wal` and `-shm` files to
+    /// `catalog.damaged-<date>.sqlite…`. The journal files go too: left
+    /// behind, SQLite would try to apply them to the new database. Throws
+    /// the original error if the database itself can't be moved.
+    static func setAsideDamagedDatabase(at database: URL, because error: DatabaseError,
+                                        now: Date = Date()) throws -> URL {
+        let fm = FileManager.default
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        let folder = database.deletingLastPathComponent()
+        let stem = database.deletingPathExtension().lastPathComponent
+        var target = folder.appendingPathComponent("\(stem).damaged-\(formatter.string(from: now)).sqlite")
+        var attempt = 2
+        while fm.fileExists(atPath: target.path) {
+            target = folder.appendingPathComponent("\(stem).damaged-\(formatter.string(from: now))-\(attempt).sqlite")
+            attempt += 1
+        }
+        for suffix in ["-wal", "-shm"] where fm.fileExists(atPath: database.path + suffix) {
+            try? fm.moveItem(atPath: database.path + suffix, toPath: target.path + suffix)
+        }
+        do {
+            try fm.moveItem(at: database, to: target)
+        } catch let moveError {
+            logger.error("Catalog database is damaged and could not be moved aside: \(String(describing: moveError), privacy: .public)")
+            throw error
+        }
+        logger.error("Catalog database was damaged (\(String(describing: error), privacy: .public)); moved to \(target.lastPathComponent, privacy: .public) and started afresh")
+        return target
     }
 
     private static func isOnNetworkVolume(_ url: URL) throws -> Bool {

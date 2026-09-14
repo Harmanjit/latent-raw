@@ -1115,6 +1115,34 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    /// Closes the image, saving a pending edit first. Used when another
+    /// folder opens: the catalog id belongs to the catalog being left, and
+    /// the same id in the next one is a different photo, so once the save
+    /// is on its way nothing may be saved under that id again.
+    func closeImage() {
+        flushPendingSave()
+        catalogImageID = nil
+        disarmTools()
+        aiDenoiseTask?.cancel()
+        aiDenoiseRunning = false
+        aiDenoiseStatus = ""
+        sam2Encoding?.cancel()
+        sam2Encoding = nil
+        sam2Session = nil
+        sam2Status = ""
+        session = nil
+        sourceURL = nil
+        preview = nil
+        tile = nil
+        histogram = nil
+        waveform = nil
+        vectorscope = nil
+        imageTitle = nil
+        history = EditHistory(initial: EditStack(parameters: parameters))
+        snapshots = []
+        status = "Open a raw file to begin"
+    }
+
     // MARK: - Viewport
 
     /// The Metal view's drawable size changed (window resize, or the view

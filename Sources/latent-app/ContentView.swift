@@ -54,8 +54,34 @@ struct ContentView: View {
     @State private var presenceExpanded = true
     @State private var healExpanded = false
     @State private var compareRecord: ImageRecord?
+    /// The sidebar and filmstrip stay as the user left them.
+    @AppStorage("latent.sidebarVisible") private var sidebarVisible = true
+    @AppStorage("latent.filmstripVisible") private var filmstripVisible = true
+    /// The folder being opened, highlighted in the sidebar until it has
+    /// opened (or failed to, when the highlight goes back).
+    @State private var openingFolder: URL?
 
     var body: some View {
+        NavigationSplitView(columnVisibility: sidebarVisibility) {
+            FolderSidebar(favourites: FavouriteFolders.shared, currentFolder: openingFolder ?? library.folderURL,
+                          onOpen: openFolder, onChooseFolder: chooseFavouriteFolder)
+                .navigationSplitViewColumnWidth(min: 170, ideal: 220, max: 360)
+        } detail: {
+            mainArea
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    private var sidebarVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(get: { sidebarVisible ? .all : .detailOnly },
+                set: { sidebarVisible = $0 != .detailOnly })
+    }
+
+    private var showsFilmstrip: Bool {
+        filmstripVisible && (mode == .loupe || mode == .develop) && library.folderURL != nil
+    }
+
+    private var mainArea: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 LibraryPanel(library: library, exportQueue: exportQueue, model: model,
@@ -88,6 +114,11 @@ struct ContentView: View {
                     adjustmentPanel
                         .frame(width: 280)
                 }
+            }
+            if showsFilmstrip {
+                Divider()
+                FilmstripView(library: library, onSelect: openFromFilmstrip)
+                    .frame(height: FilmstripView.height)
             }
             Divider()
             statusBar
@@ -126,11 +157,17 @@ struct ContentView: View {
                     model.open(url: URL(fileURLWithPath: path))
                     mode = .develop
                 }
-            } else if let last = BookmarkStore.resolve(key: BookmarkStore.lastFolder),
-                      FileManager.default.fileExists(atPath: last.path) {
+            } else if let last = BookmarkStore.resolve(key: BookmarkStore.lastFolder) {
                 // Reopen where the user left off; the bookmark carries the
-                // sandbox permission the open panel granted last time.
+                // sandbox permission the open panel granted last time. A
+                // folder that has gone says so rather than leaving an empty
+                // window.
                 openFolder(last)
+            } else if let stored = BookmarkStore.storedPath(key: BookmarkStore.lastFolder) {
+                // The bookmark didn't resolve: its disk isn't mounted (it is
+                // never mounted for this), or the folder was deleted.
+                let trouble: FolderAccess.Trouble = FolderAccess.isOnDisconnectedVolume(stored.path) ? .notConnected : .missing
+                model.lastError = FolderAccess.message(for: trouble, folder: stored)
             }
         }
     }
@@ -147,16 +184,92 @@ struct ContentView: View {
         openFolder(url)
     }
 
-    private func openFolder(_ url: URL) {
-        mode = .library
+    /// Opens `url` as the catalog, from Open Folder, the sidebar or launch.
+    /// Returns false when the folder is refused before anything changes,
+    /// with the reason in the status bar.
+    @discardableResult
+    private func openFolder(_ url: URL) -> Bool {
+        // Opening the directory, not asking whether it exists: the sandbox
+        // lets the app see folders it won't let it read.
+        if let trouble = FolderAccess.problem(opening: url) {
+            model.lastError = FolderAccess.message(for: trouble, folder: url)
+            return false
+        }
+        openingFolder = url
         // Through perform, so quitting waits for the catalog it is building.
         library.perform("Opening \(url.lastPathComponent)") {
-            do {
-                try await library.open(folder: url, defaultSubfolderMode: prefs.defaultSubfolderMode)
-                BookmarkStore.save(url, key: BookmarkStore.lastFolder)
-            } catch {
-                model.reportFailure("Opening \(url.lastPathComponent)", error)
+            defer { if openingFolder == url { openingFolder = nil } }
+            // An included subfolder belongs to the catalog above it; opening
+            // it alone would give it a container and split that catalog.
+            let owner = await Task.detached(priority: .userInitiated) { FolderAccess.owningCatalog(of: url) }.value
+            let folder = owner?.root ?? url
+            if let owner {
+                model.lastError = "“\(url.lastPathComponent)” is part of the catalog of “\(owner.root.lastPathComponent)” "
+                    + "(an included subfolder), so that catalog is open."
+                if let open = library.folderURL, FolderAccess.samePath(open, owner.root) { return }
             }
+            closeEditorForFolderChange()
+            mode = .library
+            do {
+                try await library.open(folder: folder, defaultSubfolderMode: prefs.defaultSubfolderMode)
+                BookmarkStore.save(folder, key: BookmarkStore.lastFolder)
+                if let setAside = library.catalog?.damagedDatabaseSetAside {
+                    // After this operation, so the alert doesn't hold it open.
+                    DispatchQueue.main.async { reportRebuiltCatalog(folder, setAside: setAside) }
+                }
+            } catch {
+                let trouble = FolderAccess.trouble(for: error, folder: folder)
+                if case .other = trouble {
+                    model.reportFailure("Opening \(folder.lastPathComponent)", error)
+                } else {
+                    model.lastError = FolderAccess.message(for: trouble, folder: folder)
+                    Log.catalog.error("Opening a folder failed: \(String(describing: error), privacy: .private)")
+                }
+            }
+        }
+        return true
+    }
+
+    /// Before another folder opens. The editor's image and catalog id
+    /// belong to the catalog being left, and the same id in the next one is
+    /// a different photo, so the pending edit is saved (into the catalog it
+    /// belongs to; see `wireEditSaving`) and the image closed. Compare's
+    /// Select pane holds a record of the old catalog too.
+    private func closeEditorForFolderChange() {
+        model.closeImage()
+        compareModel = nil
+        compareRecord = nil
+    }
+
+    /// Adds a folder to the sidebar's Favourites through the open panel,
+    /// which is also what grants the sandbox access to it.
+    private func chooseFavouriteFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        panel.message = "Choose folders to add to Favourites. Every folder inside them opens from the sidebar."
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls where !FavouriteFolders.shared.add(url) {
+            model.lastError = "“\(url.lastPathComponent)” couldn’t be added to Favourites."
+        }
+    }
+
+    /// The database was unreadable and has been set aside (Catalog.open).
+    /// Rare and worth a dialog: the user should know what was lost.
+    private func reportRebuiltCatalog(_ folder: URL, setAside: URL) {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "The catalog of “\(folder.lastPathComponent)” was damaged and has been rebuilt"
+        alert.informativeText = "Ratings, keywords and edits were read back from the sidecar files. "
+            + "Choices about subfolders were kept only in the damaged catalog, so Latent will ask about "
+            + "subfolders again. The damaged file is kept as \(setAside.lastPathComponent) in the folder’s "
+            + "\(Catalog.containerName) folder."
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Show in Finder")
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSWorkspace.shared.activateFileViewerSelecting([setAside])
         }
     }
 
@@ -184,6 +297,7 @@ struct ContentView: View {
     /// Loupe and Compare's candidate pane alike.
     private func load(_ record: ImageRecord) {
         guard let url = library.fileURL(for: record) else { return }
+        let catalog = library.catalog
         library.selectedImageID = record.id
         Task {
             let stack: String?
@@ -195,13 +309,17 @@ struct ContentView: View {
                 model.reportFailure("Reading the edit for \(record.fileName)", error)
                 return
             }
+            // Another folder may have opened meanwhile. The record and its
+            // id belong to the old catalog; opened now, its edits would be
+            // saved onto whatever photo has that id in the new one.
+            guard library.catalog === catalog else { return }
             model.open(url: url, userRotation: record.userRotation,
                        catalogImageID: record.id, editStackJSON: stack)
             // History and snapshots follow, from the catalog.
             do {
                 let steps = try await library.history(for: record)
                 let snaps = try await library.snapshots(for: record)
-                if model.catalogImageID == record.id {
+                if model.catalogImageID == record.id, library.catalog === catalog {
                     model.loadHistory(steps: steps, snapshots: snaps)
                 }
             } catch {
@@ -216,9 +334,11 @@ struct ContentView: View {
         guard let url = library.fileURL(for: record) else { return }
         if compareModel == nil { compareModel = EditorModel() }
         compareRecord = record
+        let catalog = library.catalog
         Task {
             do {
                 let stack = try await library.editStack(for: record)
+                guard library.catalog === catalog else { return }
                 compareModel?.open(url: url, userRotation: record.userRotation,
                                    catalogImageID: nil, editStackJSON: stack)
             } catch {
@@ -295,19 +415,29 @@ struct ContentView: View {
 
     /// Edits settle in the editor and land in the catalog here; so do
     /// history steps and snapshots.
+    ///
+    /// Each write names the catalog open when the editor handed it over,
+    /// which is the catalog the id belongs to (the editor closes its image
+    /// before another folder opens). The write itself runs later, and by
+    /// then another folder may be open, where that id is another photo.
     private func wireEditSaving() {
         model.onEditSettled = { imageID, json in
+            guard let catalog = library.catalog else { return }
             library.perform("Saving the edit") {
                 try await library.saveEditStack(json, schemaVersion: EditStack.schemaVersion,
                                                  processVersion: EditStack.processVersion,
-                                                 forImageID: imageID)
+                                                 forImageID: imageID, in: catalog)
             }
         }
         model.onHistoryChanged = { imageID, steps in
-            library.perform("Saving history") { try await library.setHistory(steps, forImageID: imageID) }
+            guard let catalog = library.catalog else { return }
+            library.perform("Saving history") { try await library.setHistory(steps, forImageID: imageID, in: catalog) }
         }
         model.onSnapshotsChanged = { imageID, snapshots in
-            library.perform("Saving snapshots") { try await library.setSnapshots(snapshots, forImageID: imageID) }
+            guard let catalog = library.catalog else { return }
+            library.perform("Saving snapshots") {
+                try await library.setSnapshots(snapshots, forImageID: imageID, in: catalog)
+            }
         }
     }
 
@@ -495,6 +625,14 @@ struct ContentView: View {
     private func step(_ offset: Int) {
         guard let record = library.moveSelection(by: offset) else { return }
         if mode.showsImage { load(record) }
+    }
+
+    /// A click in the filmstrip: that image becomes the selection, as an
+    /// arrow key would make it, and opens in the current mode.
+    private func openFromFilmstrip(_ record: ImageRecord) {
+        guard let id = record.id else { return }
+        library.setSelection([id], primary: id)
+        if model.catalogImageID != id { load(record) }
     }
 
     private var imageArea: some View {
@@ -1007,6 +1145,13 @@ struct ContentView: View {
             .controlSize(.small)
             .disabled(library.selectedImage == nil)
             .help("Rotate the selected image (⌘[ and ⌘]). Remembered in the catalog.")
+
+            Toggle(isOn: $filmstripVisible) { Image(systemName: "film") }
+                .toggleStyle(.button)
+                .controlSize(.small)
+                .disabled(mode != .loupe && mode != .develop)
+                .help(filmstripVisible ? "Hide the filmstrip in Loupe and Develop" : "Show the filmstrip in Loupe and Develop")
+                .accessibilityLabel("Filmstrip")
 
             if let problem = model.setupError ?? library.lastError ?? model.lastError {
                 HStack(spacing: 4) {
