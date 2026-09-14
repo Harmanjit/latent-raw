@@ -264,7 +264,6 @@ struct ContentView: View {
             HStack(spacing: 10) {
                 Button("Make Select") { compareMakeSelect() }
                     .help("Promote the candidate to the left pane (⇧X)")
-                    .keyboardShortcut("x", modifiers: .shift)
                 Button("Swap") { compareSwap() }
                     .help("Exchange the two panes")
                 Text("← → step the candidate · rating and flag keys act on it · zoom and pan move both")
@@ -320,46 +319,15 @@ struct ContentView: View {
 
     /// Left/right arrows step through the catalog; in Develop that also
     /// loads the image, so you can flick through a shoot without going
-    /// back to the grid. Return opens the selection. Hidden buttons are
-    /// the least fussy way to get app-wide key handling in SwiftUI.
+    /// back to the grid. Return opens the selection. Single keys go through
+    /// BareKeyMonitor, which stands aside while a text field has the
+    /// keyboard; Command shortcuts stay hidden buttons, the least fussy way
+    /// to get app-wide key handling in SwiftUI.
     private var navigationShortcuts: some View {
         Group {
-            Button("") { step(1) }.keyboardShortcut(.rightArrow, modifiers: [])
-            Button("") { step(-1) }.keyboardShortcut(.leftArrow, modifiers: [])
-            Button("") {
-                if let selected = library.selectedImage { openInEditor(selected) }
-            }.keyboardShortcut(.return, modifiers: [])
-            Button("") { mode = .library }.keyboardShortcut("g", modifiers: [])
-            Button("") {
-                if model.hasImage || library.selectedImage != nil { mode = .develop }
-            }.keyboardShortcut("d", modifiers: [])
-            // Culling views: E for loupe, C for compare, space toggles
-            // grid ↔ loupe, Z toggles fit ↔ 100% (Lightroom's keys).
-            Button("") {
-                if library.selectedImage != nil { mode = .loupe }
-            }.keyboardShortcut("e", modifiers: [])
-            Button("") {
-                if library.selectedImage != nil { mode = .compare }
-            }.keyboardShortcut("c", modifiers: [])
-            Button("") {
-                if mode == .library, library.selectedImage != nil { mode = .loupe }
-                else if mode == .loupe { mode = .library }
-            }.keyboardShortcut(.space, modifiers: [])
-            Button("") {
-                guard mode.showsImage else { return }
-                model.toggleZoomAtCenter()
-                if mode == .compare { compareModel?.toggleZoomAtCenter() }
-            }.keyboardShortcut("z", modifiers: [])
+            BareKeyMonitor(perform: perform)
 
-            // Ratings 0-5, flags P/X/U, rotation Cmd-[ / Cmd-] — the same
-            // keys Lightroom uses, so muscle memory carries over.
-            ForEach(0...5, id: \.self) { stars in
-                Button("") { rate(stars) }
-                    .keyboardShortcut(KeyEquivalent(Character(String(stars))), modifiers: [])
-            }
-            Button("") { flag(.picked) }.keyboardShortcut("p", modifiers: [])
-            Button("") { flag(.rejected) }.keyboardShortcut("x", modifiers: [])
-            Button("") { flag(.none) }.keyboardShortcut("u", modifiers: [])
+            // Rotation Cmd-[ / Cmd-], as in Lightroom.
             Button("") { rotate(by: -1) }.keyboardShortcut("[", modifiers: .command)
             Button("") { rotate(by: 1) }.keyboardShortcut("]", modifiers: .command)
 
@@ -367,27 +335,67 @@ struct ContentView: View {
             // or to the whole Library selection.
             Button("") { copySettings() }.keyboardShortcut("c", modifiers: [.command, .shift])
             Button("") { pasteSettings() }.keyboardShortcut("v", modifiers: [.command, .shift])
-            Button("") { if model.hasImage { model.showingBefore.toggle() } }
-                .keyboardShortcut("\\", modifiers: [])
-            Button("") {
-                guard mode == .develop, model.hasImage else { return }
-                model.cropToolActive.toggle()
-                if model.cropToolActive { cropExpanded = true }
-            }.keyboardShortcut("r", modifiers: [])
-            Button("") {
-                guard mode == .develop, model.hasImage else { return }
-                model.healToolActive.toggle()
-                if model.healToolActive { healExpanded = true }
-            }.keyboardShortcut("h", modifiers: [])
-            Button("") {
-                if model.healToolActive { model.deleteSelectedHeal() }
-            }.keyboardShortcut(.delete, modifiers: [])
-            Button("") { model.disarmTools() }.keyboardShortcut(.escape, modifiers: [])
             Button("") { model.undo() }.keyboardShortcut("z", modifiers: .command)
             Button("") { model.redo() }.keyboardShortcut("z", modifiers: [.command, .shift])
         }
         .opacity(0)
         .frame(width: 0, height: 0)
+    }
+
+    /// Runs a single-key command. Returns false when the key has nothing to
+    /// do here, so it carries on to whatever else wants it.
+    private func perform(_ command: KeyCommand) -> Bool {
+        switch command {
+        case .step(let offset):
+            step(offset)
+        case .openSelection:
+            if let selected = library.selectedImage { openInEditor(selected) }
+        case .library:
+            mode = .library
+        case .develop:
+            if model.hasImage || library.selectedImage != nil { mode = .develop }
+        // Culling views: E for loupe, C for compare, space toggles
+        // grid ↔ loupe, Z toggles fit ↔ 100% (Lightroom's keys).
+        case .loupe:
+            if library.selectedImage != nil { mode = .loupe }
+        case .compare:
+            if library.selectedImage != nil { mode = .compare }
+        case .toggleLoupe:
+            if mode == .library, library.selectedImage != nil { mode = .loupe }
+            else if mode == .loupe { mode = .library }
+        case .toggleZoom:
+            guard mode.showsImage else { break }
+            model.toggleZoomAtCenter()
+            if mode == .compare { compareModel?.toggleZoomAtCenter() }
+        // Ratings 0-5 and flags P/X/U, the same keys Lightroom uses.
+        case .rate(let stars):
+            rate(stars)
+        case .pick:
+            flag(.picked)
+        case .reject:
+            flag(.rejected)
+        case .unflag:
+            flag(.none)
+        case .beforeAfter:
+            if model.hasImage { model.showingBefore.toggle() }
+        case .crop:
+            guard mode == .develop, model.hasImage else { break }
+            model.cropToolActive.toggle()
+            if model.cropToolActive { cropExpanded = true }
+        case .heal:
+            guard mode == .develop, model.hasImage else { break }
+            model.healToolActive.toggle()
+            if model.healToolActive { healExpanded = true }
+        case .deleteHeal:
+            guard model.healToolActive else { return false }
+            model.deleteSelectedHeal()
+        case .disarmTools:
+            model.disarmTools()
+        case .makeSelect:
+            guard mode == .compare else { return false }
+            compareMakeSelect()
+        }
+        return true
     }
 
     // MARK: - Settings clipboard and presets, in either mode
