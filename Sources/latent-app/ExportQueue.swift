@@ -18,7 +18,10 @@ struct ExportPreset: Codable, Equatable {
     /// File naming, see ExportNaming for the tokens.
     var template: String = ExportNaming.defaultTemplate
     var sequenceStart = 1
+    var sequenceStep = 1
     var sequencePadding = 3
+    var letterCase: ExportNaming.LetterCase = .unchanged
+    var uppercaseExtension = false
     var collision: ExportNaming.Collision = .addNumber
     /// Put each image in a yyyy-MM-dd subfolder of the destination.
     var dateSubfolders = false
@@ -42,11 +45,26 @@ struct ExportPreset: Codable, Equatable {
         template = try c.decodeIfPresent(String.self, forKey: .template) ?? ExportNaming.defaultTemplate
         if !suffix.isEmpty, !template.contains(suffix) { template += suffix; suffix = "" }
         sequenceStart = try c.decodeIfPresent(Int.self, forKey: .sequenceStart) ?? 1
+        sequenceStep = try c.decodeIfPresent(Int.self, forKey: .sequenceStep) ?? 1
         sequencePadding = try c.decodeIfPresent(Int.self, forKey: .sequencePadding) ?? 3
+        letterCase = (try? c.decodeIfPresent(ExportNaming.LetterCase.self, forKey: .letterCase)) ?? .unchanged
+        uppercaseExtension = try c.decodeIfPresent(Bool.self, forKey: .uppercaseExtension) ?? false
         collision = try c.decodeIfPresent(ExportNaming.Collision.self, forKey: .collision) ?? .addNumber
         dateSubfolders = try c.decodeIfPresent(Bool.self, forKey: .dateSubfolders) ?? false
         includeMetadata = try c.decodeIfPresent(Bool.self, forKey: .includeMetadata) ?? true
         revealWhenDone = try c.decodeIfPresent(Bool.self, forKey: .revealWhenDone) ?? true
+    }
+
+    var fileExtension: String {
+        uppercaseExtension ? settings.format.fileExtension.uppercased() : settings.format.fileExtension
+    }
+
+    /// What the batch planner needs; the sheet's preview and the queue use
+    /// the same, so the names shown are the names written.
+    func planOptions(catalogName: String) -> ExportBatchPlanner.Options {
+        ExportBatchPlanner.Options(template: template, start: sequenceStart, step: sequenceStep,
+                                   padding: sequencePadding, letterCase: letterCase, fileExtension: fileExtension,
+                                   collision: collision, dateSubfolders: dateSubfolders, catalogName: catalogName)
     }
 
     static let defaultsKey = "latent.exportPreset"
@@ -123,6 +141,13 @@ final class ExportQueue: ObservableObject {
             let catalogName = root.lastPathComponent
             var skipped = 0
             var written: [URL] = []
+            // Every name settled before the first file is written, so two
+            // images whose template gives the same name never overwrite each
+            // other, whatever the collision policy.
+            let options = preset.planOptions(catalogName: catalogName)
+            var plan = await Task.detached(priority: .userInitiated) {
+                ExportBatchPlanner.plan(records, into: destination, options: options)
+            }.value
             for (index, record) in records.enumerated() {
                 if Task.isCancelled { break }
                 let name = record.fileName
@@ -143,16 +168,27 @@ final class ExportQueue: ObservableObject {
                     }
                     continue
                 }
-                // Name, folder and collision policy.
-                let stem = ExportNaming.fileName(
-                    template: preset.template, record: record,
-                    context: .init(index: index, start: preset.sequenceStart,
-                                   padding: preset.sequencePadding, catalogName: catalogName))
-                var folder = destination
+                // The planned name, checked against the disk once more:
+                // earlier files of a long batch take a while, and something
+                // may have appeared under this name meanwhile.
+                let output = plan.recheck(index)
+                switch output.action {
+                case .write, .replace:
+                    break
+                case .skip:
+                    skipped += 1
+                    await MainActor.run { self?.done += 1 }
+                    continue
+                case .fail(let reason):
+                    await MainActor.run {
+                        self?.failures.append(Failure(name: name, reason: reason))
+                        self?.done += 1
+                    }
+                    continue
+                }
+                let target = output.url
+                let folder = target.deletingLastPathComponent()
                 if preset.dateSubfolders {
-                    let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
-                    let date = Date(timeIntervalSince1970: TimeInterval(record.captureTime ?? record.mtime / 1000))
-                    folder = destination.appendingPathComponent(df.string(from: date), isDirectory: true)
                     do {
                         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                     } catch {
@@ -162,12 +198,6 @@ final class ExportQueue: ObservableObject {
                         }
                         continue
                     }
-                }
-                let proposed = folder.appendingPathComponent(stem).appendingPathExtension(preset.settings.format.fileExtension)
-                guard let target = ExportNaming.resolve(proposed, collision: preset.collision) else {
-                    skipped += 1
-                    await MainActor.run { self?.done += 1 }
-                    continue
                 }
                 let request = ExportWorker.Request(
                     sourceURL: root.appendingPathComponent(record.relPath),
@@ -236,6 +266,8 @@ struct ExportSheet: View {
     let count: Int
     /// The first selected image, for the naming preview.
     var sample: ImageRecord?
+    /// Every image to export, in order, for planning the names.
+    var records: [ImageRecord] = []
     var catalogName: String = ""
     @State var preset = ExportPreset.load()
     @State private var destination: URL? = BookmarkStore.resolve(key: BookmarkStore.exportDestination)
@@ -243,6 +275,10 @@ struct ExportSheet: View {
     @State private var savedPresets = ExportPresetStore.load()
     @State private var newPresetName = ""
     @State private var showingSavePreset = false
+    /// The names the export would write, planned off the main thread each
+    /// time the naming or destination changes. The last plan stays shown
+    /// until the next arrives, so typing in the template doesn't flicker.
+    @State private var plan: ExportBatchPlan?
     let onExport: (ExportPreset, URL) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -314,21 +350,37 @@ struct ExportSheet: View {
             HStack {
                 Text("Sequence starts at")
                 TextField("1", value: $preset.sequenceStart, format: .number).frame(width: 60)
+                    .accessibilityLabel("Sequence starts at")
+                Text("step")
+                TextField("1", value: $preset.sequenceStep, format: .number).frame(width: 44)
+                    .accessibilityLabel("Sequence step")
                 Text("digits")
                 Stepper("\(preset.sequencePadding)", value: $preset.sequencePadding, in: 1...6).frame(width: 70)
+                    .accessibilityLabel("Sequence digits")
+                    .accessibilityValue("\(preset.sequencePadding)")
                 Spacer()
-                Picker("If the file exists", selection: $preset.collision) {
-                    ForEach(ExportNaming.Collision.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            HStack {
+                Picker("Letter case", selection: $preset.letterCase) {
+                    ForEach(ExportNaming.LetterCase.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
-                .frame(width: 230)
+                .frame(width: 210)
+                Picker("Extension", selection: $preset.uppercaseExtension) {
+                    Text(".\(preset.settings.format.fileExtension.lowercased())").tag(false)
+                    Text(".\(preset.settings.format.fileExtension.uppercased())").tag(true)
+                }
+                .frame(width: 150)
+                Spacer()
             }
-            if let sample {
-                let name = ExportNaming.fileName(template: preset.template, record: sample,
-                                                 context: .init(index: 0, start: preset.sequenceStart,
-                                                                padding: preset.sequencePadding, catalogName: catalogName))
-                Text("First file: \(name).\(preset.format.fileExtension)")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            Picker("If the file exists", selection: $preset.collision) {
+                ForEach(ExportNaming.Collision.allCases, id: \.self) { Text($0.title).tag($0) }
             }
+            .frame(width: 260)
+            namingNotes
+                .task(id: PlanRequest(options: preset.planOptions(catalogName: catalogName),
+                                      destination: destination, count: records.count)) {
+                    await updatePlan()
+                }
 
             groupLabel("Destination")
             HStack {
@@ -358,7 +410,7 @@ struct ExportSheet: View {
                     if let destination { onExport(preset, destination); dismiss() }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(destination == nil || count == 0)
+                .disabled(destination == nil || count == 0 || !unknownTokens.isEmpty)
             }
         }
         .padding(20)
@@ -383,6 +435,82 @@ struct ExportSheet: View {
             }
             .padding(20).frame(width: 320)
         }
+    }
+
+    private var unknownTokens: [String] { ExportNaming.unknownTokens(in: preset.template) }
+
+    private struct PlanRequest: Equatable {
+        var options: ExportBatchPlanner.Options
+        var destination: URL?
+        var count: Int
+    }
+
+    private func updatePlan() async {
+        // A short pause while typing, so a burst of keystrokes plans once.
+        // The first plan comes at once, so the preview is there on opening.
+        if plan != nil {
+            do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+        }
+        let options = preset.planOptions(catalogName: catalogName)
+        // Before a destination is chosen, the names alone: nothing on disk
+        // to collide with yet.
+        let folder = destination ?? URL(fileURLWithPath: "/", isDirectory: true)
+        let probe: ExportBatchPlanner.Probe = destination == nil ? .nothingOnDisk : .system
+        let records = records.isEmpty ? (sample.map { [$0] } ?? []) : records
+        let result = await Task.detached(priority: .userInitiated) {
+            ExportBatchPlanner.plan(records, into: folder, options: options, probe: probe)
+        }.value
+        if !Task.isCancelled { plan = result }
+    }
+
+    /// The first file's name, and what the plan found: unknown tokens (which
+    /// stop the export), images sharing a name, names already taken, and
+    /// images that can't be written.
+    @ViewBuilder private var namingNotes: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let first = plan?.outputs.first, let plan {
+                Text("First file: \(first.relativePath(to: plan.destination))")
+                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            let unknown = unknownTokens
+            if !unknown.isEmpty {
+                note("\(unknown.joined(separator: ", ")) \(unknown.count == 1 ? "isn’t a token" : "aren’t tokens"). "
+                     + "Fix the template to export; Insert lists the tokens.", color: .red)
+            }
+            if let plan {
+                let shared = plan.sharedNameCount
+                if shared > 0 {
+                    note("\(images(shared)) would get the same name as another image in this export, "
+                         + "so \(shared == 1 ? "it gets" : "they get") a number (-1, -2…).")
+                }
+                switch plan.collision {
+                case .addNumber where plan.existingCount > 0:
+                    note("\(images(plan.existingCount)) would take a name already in the folder, "
+                         + "so \(plan.existingCount == 1 ? "it gets" : "they get") a number.")
+                case .replace where plan.count(.replace) > 0:
+                    let n = plan.count(.replace)
+                    note("\(n) existing file\(n == 1 ? "" : "s") will be replaced.")
+                case .skip where plan.count(.skip) > 0:
+                    let n = plan.count(.skip)
+                    note("\(images(n)) will be skipped: \(n == 1 ? "its file is" : "their files are") already there.")
+                default:
+                    EmptyView()
+                }
+                let failures = plan.failures
+                if let firstFailure = failures.first, case .fail(let reason) = firstFailure.action {
+                    note("\(images(failures.count)) can’t be written: \(reason).", color: .red)
+                }
+            }
+        }
+        .font(.caption)
+    }
+
+    private func images(_ n: Int) -> String { n == 1 ? "1 image" : "\(n) images" }
+
+    private func note(_ text: String, color: Color = .orange) -> some View {
+        Label(text, systemImage: "exclamationmark.triangle.fill")
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func groupLabel(_ title: String) -> some View {
