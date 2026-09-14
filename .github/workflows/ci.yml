@@ -25,7 +25,7 @@ jobs:
 
       - name: Cache LibRaw XCFramework
         id: libraw-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor/LibRaw.xcframework
           key: libraw-${{ env.LIBRAW_COMMIT }}-arm64-v1
@@ -45,7 +45,7 @@ jobs:
       # the whole job passes, so a failing run would download again.
       - name: Restore golden-image raw
         id: golden-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: TestAssets/golden_nikon_d750_cc0.nef
           key: golden-raw-f90deb28
@@ -55,7 +55,7 @@ jobs:
 
       - name: Save golden-image raw
         if: steps.golden-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: TestAssets/golden_nikon_d750_cc0.nef
           key: golden-raw-f90deb28
