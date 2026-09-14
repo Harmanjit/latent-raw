@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "LensKit", targets: ["LensKit"]),
         .library(name: "Catalog", targets: ["Catalog"]),
         .library(name: "MLKit", targets: ["MLKit"]),
+        .library(name: "HelpKit", targets: ["HelpKit"]),
         .executable(name: "latent-cli", targets: ["latent-cli"]),
         .executable(name: "latent-app", targets: ["latent-app"]),
         .executable(name: "latent-rawdecoder", targets: ["latent-rawdecoder"]),
@@ -70,6 +71,17 @@ let package = Package(
             dependencies: ["MLKit", "PixelEngine", "RawCore"],
             path: "Tests/MLKitTests"
         ),
+        // Help > Latent Help: the wiki's Markdown as blocks, and search.
+        // No resources: scripts/make_app.sh copies docs/wiki into the app.
+        .target(
+            name: "HelpKit",
+            path: "Sources/HelpKit"
+        ),
+        .testTarget(
+            name: "HelpKitTests",
+            dependencies: ["HelpKit"],
+            path: "Tests/HelpKitTests"
+        ),
         .executableTarget(
             name: "latent-rawdecoder",
             dependencies: ["RawCore"],
@@ -107,7 +119,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "latent-app",
-            dependencies: ["RawCore", "PixelEngine", "ColorKit", "Catalog", "LensKit", "MLKit"],
+            dependencies: ["RawCore", "PixelEngine", "ColorKit", "Catalog", "LensKit", "MLKit", "HelpKit"],
             path: "Sources/latent-app"
         ),
     ]
