@@ -6,6 +6,7 @@ Drop files here with these exact names so the tests in
 
 | Filename | Source |
 |---|---|
+| `golden_nikon_d750_cc0.nef` | Downloaded by `scripts/fetch_test_assets.sh` (raw.pixls.us, CC0, checksum-verified). The golden-image tests render it |
 | `nikon_d750_sample.nef` | One of your own D750 files, or raw.pixls.us |
 | `sony_a7iii_compressed.arw` | One of your own A7 III files shot in compressed mode |
 | `sony_a7iii_uncompressed.arw` | Same camera, uncompressed mode |

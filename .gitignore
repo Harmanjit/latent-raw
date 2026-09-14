@@ -19,4 +19,6 @@ vendor/*.xcframework/
 # Rendered outputs from the CLI during development
 /out/
 *.png
+# Golden-image references are the one set of PNGs that belongs in the repo.
+!Tests/PixelEngineTests/Golden/*.png
 /build/

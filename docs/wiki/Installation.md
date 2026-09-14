@@ -46,7 +46,8 @@ This is a one-time step per Mac. The app is sandboxed and hardened regardless of
 ```bash
 swift run latent-app                       # unsigned, unsandboxed, debug
 swift run latent-app /path/to/folder       # open a folder straight away
-swift test                                 # 125 tests; GPU tests skip without a sample raw
+scripts/fetch_test_assets.sh               # downloads the public-domain raw the golden tests render
+swift test                                 # tests needing the author's own samples skip
 ```
 
 Development builds are not sandboxed, which is why they accept a path on the command line and the bundle does not. Some features are much slower in debug builds; judge speed on the bundle.

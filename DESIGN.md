@@ -528,7 +528,11 @@ The pipeline uses Swift structured concurrency throughout. Each catalog is an ac
 
 ## 12. Testing
 
-**Golden images.** Planned: every kernel has a golden-image test that renders a file with a given edit JSON and compares it against a stored reference within a tolerance. **Not done:** no golden-image comparisons exist yet. The render tests in `PixelEngineTests` check shape and sanity, not pixels against a reference.
+**Golden images.** `GoldenImageTests` renders a public-domain Nikon D750 raw (raw.pixls.us, CC0, fetched and checksum-verified by `scripts/fetch_test_assets.sh`) with twelve fixed edits, one per area of the pipeline: as shot, exposure and tone, white balance, colour grading, presence, detail, bilinear demosaic, geometry, heal and clone, local adjustments, Display P3 output and 8-bit export. Each edit is saved to edit-stack JSON and goes through `ExportPlan`, the same code `ExportWorker` calls to rebuild the parameters, choose the render scale and the rotation; the exporter's GPU pass then rotates, crops, resizes and quantises. Only ImageIO's file encode is left out. The result is compared, pixels and colour space, with 16-bit PNG references in `Tests/PixelEngineTests/Golden`: a 320-pixel overview of the frame, plus a 192-pixel full-resolution window of the in-focus detail where the edit is about fine detail.
+
+A render fails if its mean absolute difference exceeds 0.0005 of full scale or its 99.9th-percentile pixel difference exceeds 0.005. Renders on one Mac are bit-identical, so the limits only absorb floating-point differences between GPU families. Three tests keep the harness honest: renders repeat exactly whatever was rendered in between (the stage cache and texture pool), the PNG references are lossless, and a 1/50 EV exposure change fails. When tuning the limits, a vibrance made 5% stronger inside the shader passed at 4x these limits and fails at them. On failure the render and an 8x difference image are written to `.build/golden-failures/`, which CI uploads as an artifact. An intended change of look is recorded with `LATENT_UPDATE_GOLDEN=1 swift test --filter GoldenImageTests`, and the new references are committed with the change that explains them.
+
+**Not covered:** AI noise reduction (Core ML output differs between compute units, and a full run takes minutes) and on-screen EDR presentation.
 
 **Camera sample files.** The planned matrix was D750 (14- and 12-bit NEF), A7 III (uncompressed and compressed ARW), Canon CR2 and CR3, one monochrome file and one linear DNG. **Actual:** only Nikon D750 NEFs, in `TestAssets/`, which is not in the repository. Tests that need a sample skip without it.
 
@@ -600,7 +604,7 @@ Phase 0 is complete when all of the following hold:
 
 | Risk | Mitigation |
 |---|---|
-| Demosaic and color quality falls short | Port proven GPLv3 algorithms and gate every change on golden-image tests. **Open:** RCD is ported, but no golden-image tests exist yet (§12) |
+| Demosaic and color quality falls short | Port proven GPLv3 algorithms and gate every change on golden-image tests. RCD is ported, and golden-image tests pin the output of every stage except AI noise reduction (§12) |
 | LibRaw updates break decoding for a camera | **In place:** LibRaw 0.22.2 is pinned by commit and the build refuses a moved tag. **Open:** CI has no per-camera matrix; only the D750 is tested (§12) |
 | A crafted raw file exploits LibRaw | **In place:** decoding runs in a sandboxed XPC service with no file or network access (§4a) |
 | The SQLite database and XMP sidecars drift apart | Sidecars are authoritative, writes are atomic, and the database can always be rebuilt. **Exception:** subfolder modes live only in the database (§5.2) |

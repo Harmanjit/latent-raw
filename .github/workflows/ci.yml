@@ -8,10 +8,12 @@ on:
 jobs:
   build-and-test:
     # GitHub's macOS runners are Apple Silicon and have Metal, so the GPU
-    # tests run; the ones that need the sample raw (not in the repo) skip
-    # themselves. The LibRaw XCFramework is built from a pinned tag by
+    # tests run. The golden-image tests render a public-domain raw that
+    # scripts/fetch_test_assets.sh downloads and checks; tests that need
+    # the author's own sample files (not in the repo) skip themselves. The LibRaw XCFramework is built from a pinned tag by
     # scripts/build_libraw.sh and cached by that tag.
     runs-on: macos-15
+    timeout-minutes: 45
     env:
       LIBRAW_TAG: "0.22.2"
       LIBRAW_COMMIT: "b93f6e45c194f5df9b02a43b1af9a54b4f41f33f"
@@ -39,6 +41,25 @@ jobs:
             exit 1
           fi
 
+      # Restore and save separately: the plain cache action saves only when
+      # the whole job passes, so a failing run would download again.
+      - name: Restore golden-image raw
+        id: golden-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: TestAssets/golden_nikon_d750_cc0.nef
+          key: golden-raw-f90deb28
+
+      - name: Fetch golden-image raw
+        run: scripts/fetch_test_assets.sh
+
+      - name: Save golden-image raw
+        if: steps.golden-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: TestAssets/golden_nikon_d750_cc0.nef
+          key: golden-raw-f90deb28
+
       - name: Swift version
         run: swift --version
 
@@ -57,4 +78,15 @@ jobs:
             echo "::error title=swift test failed::$(grep -E 'error:|failed' test.log | head -20 | tr '\n' ' ' | cut -c1-1500)"
             exit 1
           fi
+          grep -h 'golden:' test.log || true
           grep -E 'Executed [0-9]+ tests' test.log | tail -1
+
+      # A golden-image failure writes the render and an amplified
+      # difference image; keep them so the failure can be seen.
+      - name: Upload golden-image failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-failures
+          path: .build/golden-failures
+          if-no-files-found: ignore

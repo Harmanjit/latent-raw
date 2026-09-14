@@ -3,10 +3,9 @@ import XCTest
 @testable import RawCore
 import ColorKit
 
-// Golden-image tests per DESIGN.md §12. These need real sample files, which
-// aren't committed (see TestAssets/README.md) — until they're dropped in
-// locally these tests will skip rather than fail, so CI stays green on a
-// fresh checkout but does real work once assets are present.
+// Render sanity checks on real sample files, which aren't committed (see
+// TestAssets/README.md); they skip until the files are dropped in locally.
+// Pixel-exact comparisons against references are in GoldenImageTests.
 final class RenderPipelineTests: XCTestCase {
 
     func testBayerFileRendersWithoutCrashing() throws {
@@ -24,8 +23,6 @@ final class RenderPipelineTests: XCTestCase {
 
         XCTAssertEqual(texture.width, file.summary.rawWidth)
         XCTAssertEqual(texture.height, file.summary.rawHeight)
-        // TODO once a reference render exists: compare against it within a
-        // tolerance (DESIGN.md §12 "golden images"), not just shape-check.
     }
 
     func testViewportRenderIsSmallerThanSensor() throws {

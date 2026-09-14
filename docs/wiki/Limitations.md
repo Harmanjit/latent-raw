@@ -41,6 +41,6 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 ## Development
 
-- **No golden-image tests.** Render tests check that images render with the right shape, not that pixels match a reference.
+- **Golden-image tests don't cover AI noise reduction.** Every other stage of the render is pinned against reference images; Core ML output varies between compute units, so neural denoise has only unit tests.
 - GPU tests need a sample raw that is not in the repository, so a clean clone runs only the CPU tests.
 - The editor model in the app target has grown large and would benefit from a split before the next big feature.

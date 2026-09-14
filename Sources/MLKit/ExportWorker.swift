@@ -74,16 +74,13 @@ public enum ExportWorker {
 
         // The edit, over this image's defaults — exactly as the editor
         // would reconstruct it.
-        var defaults = EditParameters()
-        defaults.whiteBalance = session.asShotWhiteBalance
-        var parameters = defaults
-        if let json = request.editStackJSON {
-            let stack: EditStack
-            do { stack = try EditStack.decode(json: json) } catch { throw ExportWorkerError.unreadableEdit(error) }
-            parameters = stack.parameters(defaults: defaults)
-            if parameters.whiteBalance.isAsShot { parameters.whiteBalance = defaults.whiteBalance }
+        let parameters: EditParameters
+        do {
+            parameters = try ExportPlan.parameters(editStackJSON: request.editStackJSON, session: session,
+                                                   colorSpace: request.colorSpace)
+        } catch {
+            throw ExportWorkerError.unreadableEdit(error)
         }
-        parameters.outputSpace = request.colorSpace
 
         // Model-generated masks are not stored; make them again.
         let masksGenerated = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
@@ -96,17 +93,10 @@ public enum ExportWorker {
             lap("denoise")
         }
 
-        // Scale: bin as far as the target allows (cheaper and a correct
-        // box filter), never below it; full resolution otherwise.
-        let sensorLong = max(file.summary.rawWidth, file.summary.rawHeight)
-        var scale = RenderScale.full
-        if let target = request.maxLongEdge, target > 0 {
-            let quads = sensorLong / (2 * target)
-            if quads >= 1 { scale = .binned(quads: quads) }
-        }
-        let texture = try pipeline.render(session, scale: scale, parameters: parameters,
-                                          output: .file(request.colorSpace))
-        let rotation = ImageRotation(libRawFlip: file.summary.orientation).rotated(by: request.userRotation)
+        let texture = try pipeline.render(session,
+                                          scale: ExportPlan.scale(for: file.summary, maxLongEdge: request.maxLongEdge),
+                                          parameters: parameters, output: .file(request.colorSpace))
+        let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
         lap("render")
 
         let s = file.summary
