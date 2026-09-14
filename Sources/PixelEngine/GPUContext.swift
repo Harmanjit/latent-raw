@@ -54,6 +54,10 @@ public final class GPUContext: @unchecked Sendable {
     let sharpenApplyPSO: MTLComputePipelineState
     let lensCorrectPSO: MTLComputePipelineState
     let packForExportPSO: MTLComputePipelineState
+    let exportSampleLinearPSO: MTLComputePipelineState
+    let exportResampleRowsPSO: MTLComputePipelineState
+    let exportResampleColumnsPSO: MTLComputePipelineState
+    let exportGainMapPSO: MTLComputePipelineState
     let healStatsPSO: MTLComputePipelineState
     let healApplyPSO: MTLComputePipelineState
     let lcPreparePSO: MTLComputePipelineState
@@ -103,6 +107,10 @@ public final class GPUContext: @unchecked Sendable {
         let sharpenPipeline = try makePipeline("sharpenApply")
         let lensPipeline = try makePipeline("lensCorrect")
         let packPipeline = try makePipeline("packForExport")
+        let sampleLinearPipeline = try makePipeline("exportSampleLinear")
+        let resampleRowsPipeline = try makePipeline("exportResampleRows")
+        let resampleColumnsPipeline = try makePipeline("exportResampleColumns")
+        let gainMapPipeline = try makePipeline("exportGainMap")
         let healStatsPipeline = try makePipeline("healStats")
         let healApplyPipeline = try makePipeline("healApply")
         let lcPrepare = try makePipeline("lcPrepare")
@@ -136,6 +144,10 @@ public final class GPUContext: @unchecked Sendable {
         self.sharpenApplyPSO = sharpenPipeline
         self.lensCorrectPSO = lensPipeline
         self.packForExportPSO = packPipeline
+        self.exportSampleLinearPSO = sampleLinearPipeline
+        self.exportResampleRowsPSO = resampleRowsPipeline
+        self.exportResampleColumnsPSO = resampleColumnsPipeline
+        self.exportGainMapPSO = gainMapPipeline
         self.healStatsPSO = healStatsPipeline
         self.healApplyPSO = healApplyPipeline
         self.lcPreparePSO = lcPrepare

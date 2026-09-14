@@ -24,8 +24,10 @@ struct ExportPreset: Codable, Equatable {
     var dateSubfolders = false
     var includeMetadata = true
     var revealWhenDone = true
+    /// JPEG/HEIC: add an HDR gain map. Off by default, and in older presets.
+    var hdrGainMap = false
 
-    var settings: ExportSettings { ExportSettings(format: format, quality: quality) }
+    var settings: ExportSettings { ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap) }
     var colorSpace: ColorKit.OutputSpace { colorSpaceIsP3 ? .displayP3 : .sRGB }
 
     // Lenient decoding: every field is optional on the way in, so a preset
@@ -47,6 +49,7 @@ struct ExportPreset: Codable, Equatable {
         dateSubfolders = try c.decodeIfPresent(Bool.self, forKey: .dateSubfolders) ?? false
         includeMetadata = try c.decodeIfPresent(Bool.self, forKey: .includeMetadata) ?? true
         revealWhenDone = try c.decodeIfPresent(Bool.self, forKey: .revealWhenDone) ?? true
+        hdrGainMap = try c.decodeIfPresent(Bool.self, forKey: .hdrGainMap) ?? false
     }
 
     static let defaultsKey = "latent.exportPreset"
@@ -265,6 +268,12 @@ struct ExportSheet: View {
                     Text(String(format: "%.0f", preset.quality * 100)).monospacedDigit().frame(width: 30)
                 }
             }
+            if preset.format.supportsGainMap {
+                Toggle("HDR gain map", isOn: $preset.hdrGainMap)
+                    .accessibilityLabel("HDR gain map")
+                    .accessibilityHint("Adds a gain map so HDR screens show highlights brighter than white. Other screens show the normal image.")
+                    .help("Highlights up to two stops brighter on HDR screens, as the editor shows them. Every other viewer shows the normal image.")
+            }
             Picker("Colour space", selection: $preset.colorSpaceIsP3) {
                 Text("sRGB (safe everywhere)").tag(false)
                 Text("Display P3 (wider, modern screens)").tag(true)
@@ -330,10 +339,6 @@ struct ExportSheet: View {
             }
             Toggle("Sort into subfolders by capture date", isOn: $preset.dateSubfolders)
             Toggle("Show in Finder when done", isOn: $preset.revealWhenDone)
-            if preset.resize && preset.format == .tiff {
-                Text("Resized exports are written at 8 bits per channel; full-size TIFF keeps 16.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
