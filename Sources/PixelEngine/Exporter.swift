@@ -177,8 +177,13 @@ public final class Exporter {
     /// is embedded as the file's ICC profile.
     public static func write(cgImage: CGImage, to url: URL, settings: ExportSettings,
                              metadata: ExportMetadata? = nil) throws {
+        // Encoded under a temporary name and moved into place only once
+        // finalised, so a failed or interrupted encode never leaves a
+        // truncated file, or costs the old one, under the real name.
+        let pending = try SafeFileWriter.begin(url)
+        defer { pending.discard() }
         guard let destination = CGImageDestinationCreateWithURL(
-                url as CFURL, settings.format.contentType.identifier as CFString, 1, nil) else {
+                pending.url as CFURL, settings.format.contentType.identifier as CFString, 1, nil) else {
             throw ExportError.destinationCreationFailed(url)
         }
         var properties: [CFString: Any] = metadata?.imageIOProperties ?? [:]
@@ -189,6 +194,7 @@ public final class Exporter {
         guard CGImageDestinationFinalize(destination) else {
             throw ExportError.writeFailed(url)
         }
+        try pending.commit()
     }
 
     /// Resamples so the long edge is `maxLongEdge` pixels (never upscales).
