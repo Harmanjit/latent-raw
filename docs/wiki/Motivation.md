@@ -22,7 +22,7 @@ An M1 Pro MacBook Pro, with its larger GPU, keeps slider re-renders under 3 ms a
 - **No master catalog.** Each folder is its own catalog, kept inside the folder in a `_latent/` directory. Move the folder and the catalog moves with it. Delete the directory and the photos are untouched.
 - **Sidecars are the truth.** An XMP sidecar per image holds ratings, keywords, the edit, history and snapshots. The database is a cache that can be rebuilt from them.
 - **Minimum compute.** Nothing runs on a timer. When you are not interacting, the app draws nothing. Only the visible scope is computed. Thumbnails come from the camera's embedded preview unless the image was edited.
-- **Everything on device.** The machine-learning models are bundled and the app has no network access at all. See [Security and Privacy](Security-and-Privacy).
+- **Everything on device.** The machine-learning models are bundled. The app has no network entitlement, so the operating system forbids it any network access. (A model-download code path exists but is dormant and not exposed in the app.) See [Security and Privacy](Security-and-Privacy).
 
 ## What it is not
 

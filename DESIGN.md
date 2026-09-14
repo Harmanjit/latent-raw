@@ -1,8 +1,8 @@
 # Latent — Design Document
 
-**Status:** Planning, v0.1. No code has been written yet.
+**Status:** Beta. All roadmap phases (§14) are implemented, except where marked dropped or not done. This document began as the pre-code plan; where the code deliberately differs, the text describes the code and a **Decision:** note gives the reason.
 **License:** GPLv3 (FOSS).
-**Platform:** macOS only, on Apple Silicon M3 or newer. Must run correctly on both **macOS 15 (Sequoia)** and **macOS 26 (Tahoe)** — that's a hard requirement, not a "latest OS only" target as originally scoped. Metal **3** is the baseline (it's what Sequoia has); Metal 4, which shipped with Tahoe, is used only for optional fast paths gated behind `if #available(macOS 26, *)`, never as a hard dependency. See `Sources/PixelEngine/GPUContext.swift` for where that boundary lives in code.
+**Platform:** macOS only, on Apple Silicon. Verified on M1 Pro and M4; the original plan said M3 or newer, but nothing in the code needs M3 features. Must run correctly on both **macOS 15 (Sequoia)** and **macOS 26 (Tahoe)** — that's a hard requirement, not a "latest OS only" target as originally scoped. Metal **3** is the baseline (it's what Sequoia has); Metal 4, which shipped with Tahoe, may only ever be used for optional fast paths gated behind `if #available(macOS 26, *)`, never as a hard dependency; today no Metal-4-only API is used (PHASE0.md §6). See `Sources/PixelEngine/GPUContext.swift` for where that boundary lives in code.
 
 ---
 
@@ -23,7 +23,7 @@ The following are explicitly out of scope:
 - Cross-platform support.
 - Monitoring external volumes for changes.
 - A single, global master catalog.
-- Distribution through the Mac App Store. The GPL is incompatible with Apple's store terms, so distribution uses notarized builds from GitHub Releases, Sparkle for updates and a Homebrew cask.
+- Distribution through the Mac App Store. The GPL is incompatible with Apple's store terms. The plan was notarized builds from GitHub Releases, Sparkle for updates and a Homebrew cask; today the app is built from source and ad hoc signed (§4a). There is no prebuilt download, no updater and no cask.
 
 ---
 
@@ -35,9 +35,9 @@ Every design decision is checked against these rules.
 2. **Never do work that isn't visible.** Interactive rendering runs at viewport resolution. Full-resolution work happens only for zoomed-in tiles and for export.
 3. **Never copy what can be shared.** Buffers live in unified memory and are passed between the CPU, GPU and ANE by reference, as `MTLBuffer`s, IOSurfaces or `CVPixelBuffer`s.
 4. **Zero cost when idle.** There is no polling and no continuous display-link loop, and nothing is written to disk while a slider is being dragged.
-5. **Read each source file once.** Import copies the file, computes its checksum, parses EXIF and extracts the embedded preview in a single pass.
-6. **Use the cheapest representation that works.** A thumbnail comes from the embedded JPEG before any raw decode. A raw decode for thumbnails uses half-size mode before any demosaic.
-7. **Background work runs on efficiency cores.** Import and thumbnail generation run at `.utility` or `.background` quality-of-service (QoS). Only interactive rendering runs at `.userInteractive`.
+5. **Read each file only as much as needed.** Opening a folder compares name, size and modification time before reading anything, and the catalog pass reads EXIF and the embedded preview without unpacking sensor data. (The original rule described the single-pass import, which was dropped; see §6.)
+6. **Use the cheapest representation that works.** A thumbnail comes from the embedded JPEG before any raw decode. An edited thumbnail bins the sensor data on the GPU instead of demosaicing (§10).
+7. **Background work runs on efficiency cores.** Thumbnail generation runs at `.utility` or `.background` quality-of-service (QoS). Only interactive rendering runs at `.userInteractive`.
 
 ---
 
@@ -47,35 +47,62 @@ Every design decision is checked against these rules.
 |---|---|---|
 | Application shell and inspector panels | Swift 6 + SwiftUI | Strict concurrency from day one |
 | Heavy views (thumbnail grid, image viewport) | AppKit (`NSCollectionView`, a custom `NSView` hosting a `CAMetalLayer`) | Precise control over scrolling and cell reuse at scale |
-| Pixel processing | Metal 3 compute kernels written in Metal Shading Language (MSL), with select Metal 4 fast paths on Tahoe | FP32 for scene-linear stages, FP16 for display-referred stages |
-| RAW unpacking and metadata | LibRaw (LGPL/CDDL) | Unpacks sensor data only; demosaicing is done by Latent on the GPU |
-| Algorithm references | darktable and RawTherapee (both GPLv3) | Source for porting the RCD, AMaZE and Markesteijn demosaicers, highlight reconstruction and sigmoid tone mapping |
-| Lens corrections | Lensfun (LGPL) | Supplemented by the lens-correction data Sony embeds in ARW files |
-| Color management | LittleCMS 2 + ColorSync | ICC transforms, soft-proofing and display profiles |
-| Camera profiles | LibRaw matrices + Adobe DNG SDK | Users can load their own DCP profiles |
-| Metadata and XMP | Exiv2 (GPL) | Full XMP read/write support, including camera MakerNotes |
-| Catalog database | SQLite via GRDB.swift | One database per catalog folder |
-| Checksums | xxHash (XXH64) | Computed while copying, at essentially no extra cost |
-| Machine learning | Core ML on the ANE, the Vision framework, and Metal 4 in-shader inference where available (Tahoe only; Core ML otherwise) | Masking, and later ML denoising |
-| Export | ImageIO (JPEG, HEIC, TIFF, PNG), libjxl (optional), DNG SDK | HEIC encoding uses the hardware HEVC encoder |
-| Updates | Sparkle | Signed and notarized builds |
+| Pixel processing | Metal 3 compute kernels written in Metal Shading Language (MSL) | `rgba16Float` intermediates throughout (§7.2); no Metal-4-only API is used |
+| RAW unpacking and metadata | LibRaw 0.22.2, pinned by commit in `scripts/build_libraw.sh`, vendored as an XCFramework | Unpacks sensor data only; demosaicing is done by Latent on the GPU. Runs in a sandboxed XPC service in the app bundle (§4a) |
+| Algorithm references | darktable and RawTherapee (both GPLv3) | Source for the RCD demosaic port, highlight reconstruction and sigmoid tone mapping |
+| Lens corrections | Lensfun XML database (copied at a pinned commit), read by a pure-Swift parser in `LensKit` | The database ships as bundle resources; no Lensfun C library or glib |
+| Color management | ColorSync through vImage | ICC transforms and soft-proofing |
+| Camera profiles | LibRaw camera matrices | No DCP support yet |
+| Metadata and XMP | LibRaw for EXIF; Foundation `XMLDocument` for XMP reads, a string template for writes | Only the properties in §5.5 |
+| Catalog database | SQLite via GRDB.swift 6.29.3 (exact version) | One database per catalog folder |
+| Checksums | xxHash (XXH64), implemented in Swift | |
+| Machine learning | Core ML (GPU by default, §8.4) and the Vision framework | Masking and AI denoise |
+| Export | ImageIO (JPEG, HEIC, TIFF, PNG) | SDR only. HEIC encoding uses the hardware HEVC encoder |
 
-C and C++ code is confined to thin wrappers around LibRaw, Lensfun, LittleCMS, Exiv2 and the DNG SDK.
+**Decision:** the planned LittleCMS, Exiv2, Lensfun C library, Adobe DNG SDK, libjxl and Sparkle were not adopted. System frameworks (ColorSync, vImage, Foundation) and small Swift code cover what Latent actually uses: its own sidecars need no MakerNote or foreign-XMP support, and Lensfun's value is its database, not its library. DNG and JPEG XL export were not built, and there is no updater. LibRaw is the only C/C++ dependency; it sits behind a narrow C shim (`Sources/RawCore/CLibRaw`).
 
 ---
 
 ## 4. Package Structure
 
-| Package | Responsibility | Depends on |
-|---|---|---|
-| `RawCore` | LibRaw wrapper, memory-mapped file input, EXIF, embedded-preview extraction | LibRaw |
-| `PixelEngine` | Metal pipeline, kernels, stage cache, heaps and residency; has no UI dependencies | Metal, `ColorKit` |
-| `ColorKit` | ICC and ColorSync handling, camera matrices, working-space math | LittleCMS |
-| `LensKit` | Lensfun lookup, embedded-correction parsing, lens-identity overrides | Lensfun |
-| `Catalog` | Folder catalogs, GRDB schema and migrations, XMP read/write, import, reconciliation | GRDB, Exiv2 |
-| `MLKit` | Vision requests, Core ML models, in-shader ML kernels | Core ML, Vision |
-| `AppUI` | SwiftUI and AppKit views, the viewport, the grid | All of the above |
-| `latent-cli` | Headless rendering, golden-image tests, benchmarks | `PixelEngine`, `RawCore` |
+One Swift package (`Package.swift`, tools 6.0, macOS 15). The only external package is GRDB.swift, pinned to an exact version.
+
+| Target | Kind | Responsibility | Depends on |
+|---|---|---|---|
+| `CLibRaw` | C target | Narrow C shim over LibRaw's C++ API | `vendor/LibRaw.xcframework` (binary target), zlib |
+| `RawCore` | Library | LibRaw wrapper, memory-mapped file input, EXIF, embedded-preview extraction, the XPC decoder client and protocol | `CLibRaw` |
+| `ColorKit` | Library | Camera matrices, white balance, working-space math | — |
+| `LensKit` | Library | Lensfun XML parser and bundled database, lens matching, correction coefficients | `RawCore` |
+| `PixelEngine` | Library | Metal pipeline and kernels, stage cache, edit stack, crop, healing, soft proof, export rendering; no UI | `RawCore`, `ColorKit`, `LensKit` |
+| `Catalog` | Library | Folder catalogs, GRDB schema and migrations, XMP read/write, reconciliation, thumbnails | GRDB, `RawCore` |
+| `MLKit` | Library | Core ML model store, SAM 2.1 and SegFormer masks, Vision masks, AI denoise, `ExportWorker` | `PixelEngine` |
+| `latent-rawdecoder` | Executable | The `LatentRawDecoder.xpc` service: decodes a file descriptor with LibRaw (§4a) | `RawCore` |
+| `latent-cli` | Executable | Headless rendering and benchmarks | `RawCore`, `PixelEngine`, `Catalog`, `ColorKit` |
+| `latent-app` | Executable | SwiftUI and AppKit views, the viewport, the grid, the export queue | `RawCore`, `PixelEngine`, `ColorKit`, `Catalog`, `LensKit`, `MLKit` |
+
+Test targets: `PixelEngineTests`, `CatalogTests`, `LensKitTests`, `MLKitTests`.
+
+`ColorKit`, `LensKit` and `Catalog` contain no C code of their own; `LensKit` and `Catalog` link LibRaw transitively through `RawCore`. **Decision:** `ExportWorker` lives in `MLKit`, not `PixelEngine`, because a faithful export must regenerate model masks (§8.4) and only `MLKit` can. The planned `AppUI` library became the `latent-app` executable target.
+
+---
+
+## 4a. Security Architecture
+
+LibRaw parses files Latent did not create, so the design assumes a crafted file can exploit it and limits what that exploit reaches.
+
+| Measure | Detail |
+|---|---|
+| App Sandbox, hardened runtime | Both the app and the decoder service are signed with `--options runtime` and sandbox entitlements (`scripts/make_app.sh`) |
+| App entitlements | `scripts/Latent.entitlements`: sandbox, user-selected files read-write, app-scope security-scoped bookmarks. No `network.client`, so the OS forbids network access |
+| Bookmarks | The last folder and the export destination are kept as security-scoped bookmarks, so they reopen on the next launch without a panel |
+| Raw decoding out of process | `LatentRawDecoder.xpc` (`scripts/LatentRawDecoder.entitlements`: sandbox only) has no file access and no network. The app opens the file and passes a file descriptor over XPC (`Sources/RawCore/RawDecoderXPC.swift`); the service returns metadata, the sensor plane and the embedded preview as `Data`. A crash invalidates the connection, the app shows an error, and the next call starts a fresh service |
+| Signing | Ad hoc (`--sign -`), not notarised: there is no Apple developer account. Gatekeeper warns once on any other Mac |
+
+`swift run` and `swift test` have no bundled service, so they decode in process; `LATENT_RAW_INPROCESS=1` forces the same in the bundle for debugging. `make_app.sh --dev` builds without sandbox entitlements.
+
+**Decision:** decoder isolation costs extra copies of the sensor plane (§7.1). Security was chosen over those copies.
+
+A dormant model-download path (`MLKit/OptionalModels.swift`, `EditorModel.downloadHighQualityModel`) exists but no view calls it; it would need the network entitlement added back.
 
 ---
 
@@ -119,7 +146,7 @@ The rules are as follows:
 - **Sidecar naming.** Sidecars and thumbnails are named with the full original filename, for example `DSC_0001.NEF.xmp`. This keeps RAW+JPEG pairs that share a base name from colliding.
 - **The container is a boundary.** A catalog never reaches into a subfolder that has its own `_latent/` container. The same logic applies to nested git repositories.
 - **Backups and indexing.** `thumbnails/` is marked with `isExcludedFromBackup` because thumbnails can be regenerated. `xmp/` and `catalog.sqlite` are always backed up. Spotlight never indexes the container, but photos and sidecars outside it are indexed normally.
-- **Optional interoperability.** A setting, off by default, also writes a minimal XMP file next to each image, containing only the rating, label and keywords. Lightroom and darktable look for sidecars in that location.
+- **Optional interoperability.** Planned: a setting, off by default, that also writes a minimal XMP file next to each image, containing only the rating, label and keywords, where Lightroom and darktable look for sidecars. **Not implemented.**
 
 ### 5.2 Subfolder modes
 
@@ -131,7 +158,11 @@ Each catalog records a mode for each of its subfolders, set per folder by the us
 | `independent` | The subfolder has its own `_latent/` container and is a separate catalog. |
 | `ask` | The user is prompted the first time Latent finds the subfolder. |
 
-Each catalog also has a default mode that applies to newly discovered subfolders. Converting a subfolder between `included` and `independent` is a single transactional operation: sidecars and thumbnails are moved with same-volume renames (no data is copied), the matching database rows are moved, and the old rows are deleted in one transaction. If the operation fails midway, the sidecars remain intact and the database can be rebuilt from them.
+Each catalog also has a default mode (stored in `settings`, `ask` if unset) that applies to newly discovered subfolders.
+
+The plan was for converting a subfolder between `included` and `independent` to be a single transactional operation: sidecars and thumbnails moved with same-volume renames, database rows moved, old rows deleted in one transaction.
+
+**Known gap:** modes are stored only in the `subfolders` table, not in any sidecar, so rebuilding the database resets them. Setting a mode writes that row and rescans; no sidecars or thumbnails are moved.
 
 ### 5.3 Source of truth and redundancy
 
@@ -155,7 +186,7 @@ Each catalog also has a default mode that applies to newly discovered subfolders
 
 **Network volumes.** SQLite's write-ahead log (WAL) journal mode does not work reliably on SMB or NFS shares. Latent detects the volume type and uses WAL on local and external drives, and the rollback journal on network shares.
 
-### 5.4 Database schema (initial)
+### 5.4 Database schema
 
 ```sql
 CREATE TABLE images (
@@ -169,7 +200,8 @@ CREATE TABLE images (
   width INTEGER, height INTEGER, orientation INTEGER,
   rating INTEGER DEFAULT 0, label TEXT, flag INTEGER DEFAULT 0,
   sidecar_mtime INTEGER,
-  thumb_key BLOB                        -- hash of the edit that produced the thumbnail
+  thumb_key BLOB,                       -- hash of the edit that produced the thumbnail
+  user_rotation INTEGER NOT NULL DEFAULT 0  -- migration v2: manual quarter turns clockwise
 );
 CREATE TABLE edits      (image_id INTEGER PRIMARY KEY REFERENCES images ON DELETE CASCADE,
                          schema_version INTEGER, process_version TEXT,
@@ -190,9 +222,11 @@ CREATE TABLE lens_overrides (camera TEXT, lens_id TEXT, lensfun_model TEXT,
 CREATE TABLE settings   (key TEXT PRIMARY KEY, value TEXT);
 ```
 
+Migrations are in `Sources/Catalog/Schema.swift` (`v1_initial`, `v2_user_rotation`). `user_rotation` is kept apart from `orientation` (what the camera recorded) so re-reading EXIF never clobbers a manual fix. The `lens_overrides` table exists but nothing reads or writes it yet.
+
 No pixel data and no absolute paths are ever stored in the database.
 
-To search across catalogs, Latent uses SQLite's `ATTACH` to query several catalog databases at once; it opens them in batches when there are many. The app itself stores only a list of recently opened folders in its preferences; that list is not a catalog.
+Search across catalogs was planned with SQLite's `ATTACH`; it is not implemented. The app's preferences hold only settings and bookmarks for the last folder and export folders (§4a); that is not a catalog.
 
 ### 5.5 XMP format
 
@@ -209,14 +243,19 @@ To search across catalogs, Latent uses SQLite's `ATTACH` to query several catalo
     xmpMM:PreservedFileName="DSC_0001.NEF"
     latent:SchemaVersion="1"
     latent:ProcessVersion="1.0"
-    latent:SourceHash="xxh64:9f2c4b...">
+    latent:SourceHash="xxh64:9f2c4b..."
+    latent:Flag="1"
+    latent:Rotation="0">
    <dc:subject><rdf:Bag><rdf:li>Yosemite</rdf:li></rdf:Bag></dc:subject>
    <latent:EditStack><![CDATA[ { ...edit JSON... } ]]></latent:EditStack>
+   <latent:Snapshots><![CDATA[ [ ... ] ]]></latent:Snapshots>
    <latent:History><![CDATA[ [ ... ] ]]></latent:History>
   </rdf:Description>
  </rdf:RDF>
 </x:xmpmeta>
 ```
+
+`latent:Flag` is -1 rejected, 0 none, 1 picked. `latent:Rotation` is the manual quarter turns clockwise (the `user_rotation` column). `latent:Snapshots` and `latent:History` are JSON, omitted when empty. Readers match properties by local name, so sidecars written before the rename with the `rawhead:` prefix still load.
 
 The namespace URI never needs to resolve to a real page, but once released it must never change. Standard XMP properties are used wherever they exist.
 
@@ -227,27 +266,40 @@ The namespace URI never needs to resolve to a real page, but once released it mu
   "schema": 1,
   "process": "1.0",
   "modules": {
-    "rawprepare":  { "enabled": true },
-    "highlights":  { "enabled": true, "method": "inpaint", "threshold": 1.0 },
-    "whitebalance":{ "enabled": true, "mode": "camera" },
-    "demosaic":    { "enabled": true, "method": "rcd" },
-    "exposure":    { "enabled": true, "ev": 0.7 },
-    "lens":        { "enabled": true,
-                     "distortion": {"source": "lensfun"},
-                     "tca":        {"source": "lensfun"},
-                     "vignetting": {"source": "embedded"},
-                     "profile": "Sony FE 24-70mm f/2.8 GM II",
-                     "lensfunDb": "2026-08-15" },
-    "tone":        { "enabled": true, "method": "sigmoid", "contrast": 1.4 },
-    "masks":       [ ]
-  },
-  "crop": { "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "angle": 0.0 }
+    "whitebalance": { "mode": "custom", "temperature": 5200, "tint": 4 },
+    "exposure":     { "ev": 0.7 },
+    "tone":         { "method": "sigmoid", "contrast": 1.4, "grey": 0.18 },
+    "highlights":   { "strength": 1.0, "threshold": 0.95 },
+    "demosaic":     { "method": "rcd" },
+    "denoise":      { "luminance": 0.2, "color": 0.3 },
+    "sharpen":      { "amount": 0.5, "radius": 1.0, "threshold": 0.02 },
+    "lens":         { "distortion": true, "tca": true, "vignetting": true,
+                      "manualDistortion": 0, "manualVignetting": 0,
+                      "profile": "Nikon AF-S Nikkor 50mm f/1.4G",
+                      "lensfunDb": "2026-09-11" },
+    "curve":        { "points": [[0, 0], [0.5, 0.55], [1, 1]] },
+    "hsl":          { "hue": [0,0,0,0,0,0,0,0], "saturation": [0,0,0,0,0,0,0,0], "luminance": [0,0,0,0,0,0,0,0] },
+    "splittoning":  { "shadowHue": 220, "shadowSaturation": 0.1,
+                      "highlightHue": 40, "highlightSaturation": 0.1, "balance": 0 },
+    "vibrance":     { "amount": 0.2 },
+    "presence":     { "texture": 0.1, "clarity": 0.2, "dehaze": 0 },
+    "defringe":     { "purple": 0.5, "green": 0 },
+    "perspective":  { "vertical": 0.1, "horizontal": 0 },
+    "aidenoise":    { "strength": 0.6, "model": "nafnet-sidd-w32" },
+    "locals":       [ ... ],
+    "heal":         [ ... ],
+    "crop":         { "cx": 0.5, "cy": 0.5, "w": 0.9, "h": 0.9, "angle": 1.5 }
+  }
 }
 ```
 
-**Process version.** Every edit records the pipeline version it was created with. When algorithms improve in a later release, existing edits keep rendering the same way until the user explicitly upgrades them. This is what makes edits reproducible over time.
+The structure is `EditStack` in `Sources/PixelEngine/EditStack.swift`. Every module key is optional: an old sidecar lacking a key gets that module's default, and a key this build does not know is ignored. There is no `enabled` flag; a module at its neutral value is the off state. `locals`, `heal`, `presence`, `vibrance`, `defringe`, `perspective`, `aidenoise` and `crop` are omitted when neutral; the rest are always written. Rotation is not in the stack (it is catalog metadata, §5.5), nor is the output color space (an export choice). Model masks store their kind or clicks plus a model version, never pixels (§8.4).
 
-**Frozen lens profiles.** Each edit records which Lensfun database version supplied its profile, so a later database update cannot silently change an edited photo.
+**Decision:** modules are keyed by name with their parameters directly inside, rather than the planned `enabled` flags, `rawprepare` and `masks` keys and a top-level `crop`. Neutral values already mean "off", and a flat module map keeps additions purely additive.
+
+**Process version.** Every edit records the pipeline version it was created with (`1.0`). The intent is that when algorithms improve, existing edits keep rendering the same way until the user explicitly upgrades them. Only one process version exists so far, and there is no pinning or upgrade flow yet.
+
+**Frozen lens profiles.** Each edit records which lens profile and Lensfun database version (the bundled copy's date) supplied its corrections. Only the bundled database is loaded, so the recorded version is provenance, not yet a selector.
 
 ---
 
@@ -287,8 +339,19 @@ Filename collisions are a real risk here, because each camera's file counter eve
 ### 7.1 From file to GPU
 
 1. Latent memory-maps the raw file read-only and passes it to LibRaw with `open_buffer`. The kernel loads only the pages that are actually read.
-2. LibRaw unpacks the sensor data. The goal is for it to unpack directly into a page-aligned, shared-storage `MTLBuffer`. How to achieve this is decided in Phase 0 (see §13).
-3. The GPU kernels read that buffer directly. No upload or staging copy is needed.
+2. LibRaw unpacks the sensor data into its own allocation.
+3. The sensor plane reaches a shared-storage `MTLBuffer` (`GPUContext.makeSharedBuffer`), which the GPU kernels read directly.
+
+The number of copies in step 3 depends on where decoding runs:
+
+| Build | Path | Copies of the sensor plane |
+|---|---|---|
+| App bundle | In `LatentRawDecoder.xpc` (§4a): LibRaw's allocation → `Data` in the service → across XPC (out of line) → host buffer owned by `RawFile` → shared `MTLBuffer` | Several; the `RawFile` host copy lives for the whole editing session alongside the `MTLBuffer` |
+| `swift run`, `swift test` | In process: LibRaw's allocation → shared `MTLBuffer` | One |
+
+**Decision (Phase 0):** keep one copy (option c in §13) rather than wrapping LibRaw's allocation with `makeBuffer(bytesNoCopy:)` or patching LibRaw. LibRaw's allocation is page-aligned but its length is not a page multiple, and the copy measured about 3 ms per image (PHASE0.md §3).
+
+**Decision (security):** the bundle's extra copies, and the extra memory held per open image, are the price of running LibRaw in a sandboxed process with no file access. Security was chosen over copies.
 
 ### 7.2 Storage-mode policy
 
@@ -296,17 +359,19 @@ Buffers are assigned a Metal storage mode depending on which processors touch th
 
 | Buffer | Storage mode | Reason |
 |---|---|---|
-| Raw sensor input | Shared | Written by the CPU (LibRaw), read by the GPU |
-| Demosaiced image and pipeline intermediates | Private | GPU-only; private storage gets lossless framebuffer compression, which saves memory bandwidth |
+| Raw sensor input | Shared | Written by the CPU, read by the GPU |
+| Demosaiced image and pipeline intermediates | Private, `rgba16Float` | GPU-only |
 | Histogram and scope results | Shared | Small, and read back by the CPU |
 | Export readback | Shared | Read by ImageIO |
-| Thumbnails, previews and ML inputs | IOSurface-backed | Shared by Core ML, Vision, Metal and ImageIO without copies |
+| Thumbnails, previews and ML inputs | `CGImage` and Core ML buffers | Built from a readback; the planned IOSurface sharing was not built |
 
-**Memory reuse.** Intermediate buffers are allocated from an `MTLHeap` with aliasing: stages whose lifetimes don't overlap reuse the same memory.
+**Precision.** Image intermediates, scene-linear stages included, are `rgba16Float`; single-channel scratch textures are `r16Float` or `rg16Float`. The one exception is the white-balanced CFA plane that feeds demosaic, which is `r32Float` because half precision flips RCD's directional decisions. **Decision:** this replaces the planned FP32-for-scene-linear rule; only demosaic showed a precision problem.
 
-**Residency.** The active image's working set is kept resident in GPU memory using `MTLResidencySet` where the runtime OS supports it, falling back to Metal 3's `useResource`/`useHeap` calls on Sequoia if `MTLResidencySet` turns out to be Tahoe-only — confirm which is the case in Phase 0, since the exact OS cutoff for this API needs checking against current documentation rather than assumed.
+**Memory reuse.** `ImageSession.texture(width:height:pixelFormat:role:)` keeps one pooled private texture per role (CFA, camera RGB, RCD scratch, denoised, healed, lens-corrected, display, presence, sharpened, and preview variants) and hands it back whenever size, format and role match. A second render with the same key overwrites the first.
 
-**On-chip memory.** Neighborhood kernels such as demosaicing, sharpening and local contrast stage their tiles in threadgroup memory. The M3's Dynamic Caching makes it practical to fuse several stages into a single kernel.
+**Decision:** no `MTLHeap` aliasing and no `MTLResidencySet`. Phase 0 deferred residency sets until they are wanted (PHASE0.md §6), and the per-role pool already reuses memory across renders, so heap aliasing was not adopted.
+
+**On-chip memory.** The planned use of threadgroup memory for neighborhood kernels was not generally adopted; threadgroup memory is used by the histogram and heal kernels. Stages run as separate kernels within one command buffer per render (§8.1).
 
 ---
 
@@ -314,29 +379,44 @@ Buffers are assigned a Metal storage mode depending on which processors touch th
 
 ### 8.1 Fixed module order
 
-The modules always run in this order:
+The modules always run in this order (`RenderPipeline.renderStages`). Every stage of one render is encoded into a single command buffer and submitted once.
 
-1. **Raw prepare:** black and white levels, then flat-field correction.
-2. **Highlight reconstruction.**
-3. **White balance.**
-4. **Demosaic:** RCD by default, with AMaZE-style as an option and bilinear for fast previews.
-5. **Camera matrix or DCP profile,** converting into the linear Rec.2020 working space.
-6. **Exposure.**
-7. **Lens corrections:** distortion, chromatic aberration (TCA) and vignetting.
-8. **Denoise:** classic GPU methods in v1, with ML denoising added later.
-9. **Tone mapping:** sigmoid, scene-referred to display-referred.
-10. **Local adjustments with masks.**
-11. **Color grading.**
-12. **Sharpening.**
-13. **Output transform:** to the display (Extended Dynamic Range, EDR) or to the export color space.
+In camera space:
 
-Stages 1 through 7 compute in FP32. Stages from tone mapping onward use FP16 wherever precision testing confirms it is adequate.
+1. **Black level and white balance,** in one kernel, producing the CFA plane.
+2. **Demosaic:** RCD, or bilinear. Binned previews replace steps 1 and 2 with one fused kernel that bins Bayer quads straight from the sensor buffer, with no demosaic. This output is cached (§8.2).
+3. **AI denoise blend:** the session's cached full-frame NAFNet result, re-binned and re-white-balanced to match the render, blended by strength (§8.4).
+4. **Classic denoise** (luminance and color).
+5. **Spot heal.**
+6. **Lens corrections:** distortion, TCA, vignetting, manual sliders and perspective.
+
+Then the `colorAndTone` kernel (`Shaders/ColorPipeline.metal`), per pixel:
+
+7. **Highlight reconstruction,** in camera space where clip levels are meaningful.
+8. **Camera matrix** to linear Rec.2020.
+9. **Exposure.**
+10. **Local adjustments with masks,** in scene-linear. Range masks evaluate the pixel before any local changes it.
+11. **Sigmoid tone map,** scene-referred to display-referred, up to the display headroom.
+12. **Grading:** tone curve, HSL, vibrance, split toning, in a perceptual domain scaled by the headroom.
+13. **Soft proof** (optional; with gamut warning).
+14. **Output transform and encode:** working space to output space, then the sRGB curve for files, or linear extended range for the EDR viewport.
+
+Display-referred, after `colorAndTone`:
+
+15. **Presence:** texture, clarity, dehaze and defringe.
+16. **Sharpening.**
+
+**Geometry.** Crop, straighten and rotation are not pipeline stages. They are applied as a sampling map from `CropFrame` (`Crop.swift`) when the result is presented (`Presenter`) or exported (`Exporter`).
+
+**Decision:** the order differs from the plan. Highlight reconstruction moved after demosaic but stays before the matrix; denoise, heal and lens corrections run in camera space before color so they see sensor-like data; local adjustments act in scene-linear before the tone map; flat-field correction, AMaZE and DCP profiles were not built. Precision is covered in §7.2.
 
 ### 8.2 Caching and resolution
 
-**Stage cache.** Each stage's output is keyed by a hash of every parameter upstream of it, together with the source checksum. When a parameter changes, only the stages downstream of it re-run. These caches live in RAM only and are never written to disk.
+**Stage cache.** Only the demosaic output (camera RGB) is cached, per `ImageSession`, keyed by the white balance multipliers, the demosaic method and the region or bin factor (`ImageSession.StageKey`). Exposure, tone, grading and detail edits hit the cache; white balance and zoom changes miss. Everything after demosaic re-runs on every render, in the one command buffer. The cache lives in GPU memory only and is never written to disk. The AI denoise result is held separately per session (§8.4).
 
-**Viewport-resolution rendering.** Interactive editing processes a downscaled linear image that matches the viewport size. A 24 MP image shown on a 5K display is processed at roughly 14 MP when zoomed to fit.
+**Decision:** the planned per-stage cache keyed by all upstream parameters was not built. Demosaic is the expensive stage; the rest re-render a fit-to-window preview in a few milliseconds.
+
+**Viewport-resolution rendering.** Fit-to-window editing renders a binned preview: Bayer quads binned by the largest factor that keeps the image at least as large as the viewport (`RenderScale.fitting` → `.binned`), with no demosaic. If no binning fits, the whole frame renders at full resolution.
 
 **Zooming in.** When the user zooms to 100%, only the visible tiles are rendered at full resolution.
 
@@ -352,7 +432,17 @@ The histogram, waveform and vectorscope are computed on the GPU using per-thread
 
 **Parametric masks.** Brush, linear gradient, radial gradient and luminance or color range masks are stored as parameters and rasterized on the GPU when needed.
 
-**AI masks.** Subject and person masks come from the Vision framework. Sky masks come from a custom Core ML model running on the ANE. AI masks are cached as IOSurfaces and can be regenerated from their inputs.
+**AI masks.** Model masks run through Core ML (`MLKit`):
+
+- **Click-to-select:** SAM 2.1 small (image encoder, prompt encoder, mask decoder, FP16). The clicks are stored; about 40 ms per click.
+- **Class masks:** SegFormer-B2 fine-tuned on ADE20K (sky, people and other classes). Without the model, sky falls back to a heuristic and people to Vision.
+- **Subject:** the Vision framework's foreground-instance request.
+
+Model masks are stored as parameters (kind or clicks, plus model version) and regenerated from a small render of the image when needed, then cached in memory; mask pixels are never stored. Export regenerates them the same way (`ExportWorker`).
+
+**Compute units.** Core ML models load with `.cpuAndGPU` by default. The Neural Engine is opt-in (a Preferences setting, or `LATENT_ML_COMPUTE=all`) because on macOS 15.7 the ANE compiler hangs at model load for SAM 2 and SegFormer (`CoreMLStore.swift`). **Decision:** a hang is not worth a few tens of milliseconds; the GPU is fast enough.
+
+**AI denoise.** Shipped, not deferred to v1.x. NAFNet trained on SIDD, width 32, bundled as Core ML, runs once per image on the full frame in 256×256 overlapping tiles, on the GPU by default. The result is cached in the session as camera RGB and blended into every render by a strength slider (§8.1 step 3). The edit stores the strength and model name. A width-64 model exists as an optional download that is not exposed (§4a).
 
 ---
 
@@ -366,11 +456,13 @@ The histogram, waveform and vectorscope are computed on the GPU using per-thread
 | Sony A7 III (ILCE-7M3) | ARW, uncompressed or lossy-compressed | Lens-correction data is embedded in each file. Pixel Shift is deferred to v1.x |
 | Canon EOS DSLR (model not specified) | CR2 and CR3 | Both formats are supported through LibRaw, so the exact model does not matter |
 
-**Tiered sensor support:**
+**Tested:** only the Nikon D750 has sample files in the test suite (`TestAssets/`). The Sony and Canon rows are LibRaw-supported but unverified in Latent.
 
-- **v1, full-quality GPU path:** Bayer sensors, monochrome sensors and linear DNG.
+**Sensor support:**
+
+- **Renders:** Bayer CFAs only. Anything else throws `unsupportedCFAForV1`.
+- **Not built:** monochrome sensors, linear DNG, and the planned CPU fallback for other formats. They open for metadata and thumbnails from the embedded preview but do not render.
 - **v1.x:** X-Trans. No current body in use has an X-Trans sensor.
-- **Fallback:** every other format LibRaw supports still opens, using LibRaw's slower CPU processing.
 
 ### 9.2 Lens correction sources
 
@@ -381,6 +473,8 @@ Latent picks a correction source separately for each correction type (distortion
 3. **Manual** sliders, which can be saved as a per-lens preset.
 
 The chosen source is recorded in the edit stack. When Nikon lens IDs are ambiguous for third-party lenses, the user's manual choice is remembered in the `lens_overrides` table.
+
+**Status:** only sources 1 and 3 exist. `LensKit` matches a Lensfun profile from the lens identity (including MakerNotes names); otherwise manual distortion and vignetting sliders apply. Embedded ARW correction data, per-lens presets and `lens_overrides` are not implemented.
 
 Coverage of the current lenses in the Lensfun database, checked in September 2026:
 
@@ -404,7 +498,9 @@ Coverage of the current lenses in the Lensfun database, checked in September 202
 
 **Unedited images.** The thumbnail is the camera's embedded JPEG preview, downscaled. No raw decoding is involved.
 
-**Edited images.** Latent decodes the raw file in LibRaw's half-size mode, which reads each 2×2 Bayer block as one pixel so no demosaicing is needed, and runs the edit pipeline at thumbnail resolution. This runs at `.background` QoS after the edit is saved, never while a slider is being dragged.
+**Edited images.** Latent does a full LibRaw unpack of the raw file, then runs the edit pipeline with GPU binning (`RenderScale.binned`) at just under 512 px, so no demosaic runs (`EditedThumbnailRenderer`). The unpack (~200 ms) dominates the cost. This runs in the background after the edit settles, never while a slider is being dragged. AI denoise is not applied to thumbnails.
+
+**Decision:** GPU binning instead of LibRaw's half-size mode. The binning kernel already exists for previews, and using the real pipeline keeps thumbnails consistent with the editor.
 
 **Staleness.** The `thumb_key` column stores the hash of the edit that produced each thumbnail. A thumbnail is regenerated only when its key no longer matches the current edit.
 
@@ -418,9 +514,12 @@ Coverage of the current lenses in the Lensfun database, checked in September 202
 |---|---|---|
 | Viewport render, slider response | `.userInteractive` | Performance cores and GPU |
 | Opening a folder, reconciliation | `.userInitiated` | Performance cores |
-| Export | `.userInitiated` (user can lower it) | GPU and media engines |
-| Import, thumbnail generation | `.utility` / `.background` | Efficiency cores |
+| Export | `.userInitiated` | GPU and media engines |
+| AI mask generation, SAM 2 session setup | `.userInitiated` | GPU |
+| Thumbnail generation | `.utility` / `.background` | Efficiency cores |
 | Sidecar writes | `.utility`, debounced | — |
+
+The planned "Import" row is gone with import (§6).
 
 The pipeline uses Swift structured concurrency throughout. Each catalog is an actor that owns its database connection.
 
@@ -428,24 +527,19 @@ The pipeline uses Swift structured concurrency throughout. Each catalog is an ac
 
 ## 12. Testing
 
-**Golden images.** Every kernel has a golden-image test. `latent-cli` renders a file with a given edit JSON and compares the result against a stored reference image, within a small numeric tolerance.
+**Golden images.** Planned: every kernel has a golden-image test that renders a file with a given edit JSON and compares it against a stored reference within a tolerance. **Not done:** no golden-image comparisons exist yet. The render tests in `PixelEngineTests` check shape and sanity, not pixels against a reference.
 
-**Camera sample files.** The test matrix includes, at minimum:
+**Camera sample files.** The planned matrix was D750 (14- and 12-bit NEF), A7 III (uncompressed and compressed ARW), Canon CR2 and CR3, one monochrome file and one linear DNG. **Actual:** only Nikon D750 NEFs, in `TestAssets/`, which is not in the repository. Tests that need a sample skip without it.
 
-- Nikon D750: 14-bit lossless NEF and 12-bit NEF.
-- Sony A7 III: uncompressed ARW and compressed ARW.
-- Canon: one CR2 file and one CR3 file.
-- One monochrome file and one linear DNG.
+**Profiling.** Timings are measured with `latent-cli --repeat` (PHASE0.md §5). A Metal System Trace pass has not been done.
 
-These come from raw.pixls.us and from the user's own photos.
-
-**Profiling.** Performance is measured with Instruments, using Metal System Trace, the Allocations instrument and the energy log.
-
-**Continuous integration.** GitHub-hosted macOS runners have limited GPU access, so GPU tests run on a self-hosted Apple Silicon Mac. CPU-only tests run on GitHub's hosted runners.
+**Continuous integration.** `.github/workflows/ci.yml` runs `swift build` and `swift test` on GitHub's hosted `macos-15` runner. **Decision:** no self-hosted runner. The hosted runners are Apple Silicon with Metal, so GPU tests run there; tests that need the sample raw skip themselves.
 
 ---
 
 ## 13. Phase 0 Spike (2–3 weeks)
+
+**Status: done.** Results are recorded in `PHASE0.md`: one copy kept (task 2, option c); correctness checked by eye against a Photoshop export of a D750 NEF, with the RawTherapee comparison and A7 III render still owed; full-frame 24 MP RCD plus color measured ~46 ms on M4, over the 30 ms target, which was accepted because the viewport renders binned previews (~3 ms) and tiles (~9 ms) rather than the full frame; LibRaw unpack (~210–250 ms) dominates file-open time; no Metal-4-only API used. The text below is the original plan.
 
 **Goal:** prove the riskiest assumptions before any UI work begins: the zero-copy ingest path, GPU demosaicing, color correctness and EDR display.
 
@@ -487,15 +581,17 @@ Phase 0 is complete when all of the following hold:
 
 | Phase | Scope | Exit criteria |
 |---|---|---|
-| 0. Spike | See §13 | See §13 |
-| 1. Core pipeline | Highlight reconstruction, sigmoid tone mapping, stage cache, viewport-resolution rendering, tiled zoom, GPU scopes | Slider-to-screen latency under 16 ms at fit-to-window |
-| 2. Catalogs | Folder catalogs, schema, XMP read/write, reconciliation, subfolder modes, grid view, ratings, flags and keywords | Scrolling a 20,000-image folder stays smooth; the catalog rebuilds from sidecars alone |
-| 3. Import | **Dropped (September 2026).** Users copy files into a folder themselves; opening that folder in Latent creates its catalog in place. §6 is kept for reference only. | — |
-| 4. Pro pipeline | Lens corrections (Lensfun, embedded data, manual), denoise, sharpening, color grading, process versions | All current lenses are corrected automatically |
-| 5. Local edits | Parametric masks; AI masks from Vision and Core ML | AI mask generated in under 1 second |
-| 6. Output | Export queue, ICC soft-proofing, HDR gain-map export, DNG export | Batch export keeps the GPU busy without stalling the UI |
-| 7. Polish | Presets, copy/paste settings, snapshots, history, keyboard workflow | Beta release |
-| v1.x | X-Trans support, ML denoising, Pixel Shift, cross-catalog search UI | — |
+| Phase | Scope | Exit criteria | Status |
+|---|---|---|---|
+| 0. Spike | See §13 | See §13 | **Done** (§13) |
+| 1. Core pipeline | Highlight reconstruction, sigmoid tone mapping, stage cache, viewport-resolution rendering, tiled zoom, GPU scopes | Slider-to-screen latency under 16 ms at fit-to-window | **Done.** Stage cache is demosaic-only (§8.2) |
+| 2. Catalogs | Folder catalogs, schema, XMP read/write, reconciliation, subfolder modes, grid view, ratings, flags and keywords | Scrolling a 20,000-image folder stays smooth; the catalog rebuilds from sidecars alone | **Done.** Subfolder modes are not in sidecars (§5.2) |
+| 3. Import | Card import (§6) | — | **Dropped (September 2026).** Users copy files into a folder themselves; opening that folder in Latent creates its catalog in place |
+| 4. Pro pipeline | Lens corrections (Lensfun, embedded data, manual), denoise, sharpening, color grading, process versions | All current lenses are corrected automatically | **Done**, except embedded ARW corrections (§9.2) and a process-version upgrade flow (§5.6) |
+| 5. Local edits | Parametric masks; AI masks from Vision and Core ML | AI mask generated in under 1 second | **Done.** Plus spot healing |
+| 6. Output | Export queue, ICC soft-proofing, HDR gain-map export, DNG export | Batch export keeps the GPU busy without stalling the UI | **Done** for export queue and soft-proofing. **Not done:** HDR gain-map export, DNG export |
+| 7. Polish | Presets, copy/paste settings, snapshots, history, keyboard workflow | Beta release | **Done** |
+| v1.x | X-Trans support, ML denoising, Pixel Shift, cross-catalog search UI | — | ML denoising **shipped** (§8.4). The rest not started |
 
 ---
 
@@ -503,17 +599,19 @@ Phase 0 is complete when all of the following hold:
 
 | Risk | Mitigation |
 |---|---|
-| Demosaic and color quality falls short | Port proven GPLv3 algorithms and gate every change on golden-image tests |
-| LibRaw updates break decoding for a camera | Pin the LibRaw version and run the per-camera test matrix in CI |
-| The SQLite database and XMP sidecars drift apart | Sidecars are authoritative, writes are atomic, and the database can always be rebuilt |
-| Metal 3/4 API boundary assumed wrong | Keep Metal code inside `PixelEngine`; verify the Sequoia/Tahoe API boundary in Phase 0 (task 6); gate anything Tahoe-only behind `#available` |
-| Network volumes corrupt the database | Detect the volume type and switch journal mode accordingly |
-| Algorithm changes alter old edits | Process versioning, plus freezing the Lensfun database version in each edit |
+| Demosaic and color quality falls short | Port proven GPLv3 algorithms and gate every change on golden-image tests. **Open:** RCD is ported, but no golden-image tests exist yet (§12) |
+| LibRaw updates break decoding for a camera | **In place:** LibRaw 0.22.2 is pinned by commit and the build refuses a moved tag. **Open:** CI has no per-camera matrix; only the D750 is tested (§12) |
+| A crafted raw file exploits LibRaw | **In place:** decoding runs in a sandboxed XPC service with no file or network access (§4a) |
+| The SQLite database and XMP sidecars drift apart | Sidecars are authoritative, writes are atomic, and the database can always be rebuilt. **Exception:** subfolder modes live only in the database (§5.2) |
+| Metal 3/4 API boundary assumed wrong | **Resolved:** checked in Phase 0 (task 6); no Metal-4-only API is used |
+| Network volumes corrupt the database | **In place:** the volume type is detected and journal mode switched accordingly |
+| Algorithm changes alter old edits | Process versioning, plus recording the Lensfun database version in each edit. **Open:** versions are recorded but not yet used to pin rendering (§5.6) |
 
 ---
 
 ## 16. Open Items
 
-- **Namespace owner.** Resolved 2026-09-13: `https://github.com/Harmanjit/latent-raw/ns/1.0/`.
-- **Name availability.** Checked 2026-09-13: no "Latent" trademark in US or EU for software. A mobile app called "Latente" exists, so the public repo is `latent-raw` and the app is described as "Latent, a catalog management and RAW editor for macOS" to keep the two apart.
-- **Tokina vignetting.** Validate the borrowed Canon EF vignetting profile against real shots from the Nikon F version.
+- **Namespace owner.** **Resolved** 2026-09-13: `https://github.com/Harmanjit/latent-raw/ns/1.0/` (`XMPSidecar.namespaceURI`).
+- **Name availability.** **Resolved**, checked 2026-09-13: no "Latent" trademark in US or EU for software. A mobile app called "Latente" exists, so the public repo is `latent-raw` and the app is described as "Latent, a catalog management and RAW editor for macOS" to keep the two apart.
+- **Tokina vignetting.** Open. Validate the borrowed Canon EF vignetting profile against real shots from the Nikon F version.
+- **RawTherapee color comparison and A7 III render.** Open, carried over from PHASE0.md §4.
