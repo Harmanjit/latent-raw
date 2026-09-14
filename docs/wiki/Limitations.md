@@ -9,7 +9,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Camera matrix colour only.** Colour comes from the camera's characterisation matrix. There are no camera-matching profiles, so the default rendering will not match the in-camera JPEG look.
 - **Lens profiles** cover the bundled Lensfun subset; a lens the matcher cannot identify gets manual sliders only.
 - **No DNG export, no HDR gain-map export.** Exports are SDR JPEG, HEIC, PNG or TIFF.
-- **EDR display is unverified.** The pipeline renders with display headroom, but it has only been run on SDR screens.
+- **HDR display** has been verified on a MacBook Pro's XDR screen, and sRGB and Display P3 output on the same machine. Other HDR displays are untested.
 
 ## Platform and distribution
 

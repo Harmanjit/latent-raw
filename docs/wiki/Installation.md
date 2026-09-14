@@ -3,8 +3,16 @@
 ## Requirements
 
 - macOS 15 (Sequoia) or 26 (Tahoe).
-- Apple Silicon. Developed and tested on an M4; the project targets M3 or newer. M1 and M2 should work and are untested.
-- Xcode 16 or newer to build from source. About 1 GB of disk for the build.
+- Apple Silicon. Verified on an M4 MacBook Air and an M1 Pro MacBook Pro; any M-series chip should work. The M1 Pro, with its larger GPU, is if anything faster in the editor.
+- **Xcode 16 or newer**, the full application from the App Store, not just the Command Line Tools. The build needs Xcode's Metal compiler and `xcodebuild`, and Xcode must be the active developer directory:
+
+```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+Without that step the build fails with errors about missing tools even though Xcode is installed. Run it once after installing Xcode.
+
+- About 1 GB of disk for the build.
 
 There is no prebuilt download yet. Building takes about ten minutes the first time.
 

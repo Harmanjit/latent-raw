@@ -14,7 +14,7 @@ Apple Silicon is different in a way these editors cannot exploit without becomin
 | Segment Anything click-to-select | ~40 ms per click |
 | Neural denoise, 24 MP | ~11 s |
 
-Every slider is live at full quality. There is no "draft mode" and no waiting for a final render. The whole pipeline, from sensor data to the screen, runs in one Metal command buffer per frame, and stage results are cached so an exposure change re-runs only the stages after demosaic.
+An M1 Pro MacBook Pro, with its larger GPU, keeps slider re-renders under 3 ms as well. Every slider is live at full quality. There is no "draft mode" and no waiting for a final render. The whole pipeline, from sensor data to the screen, runs in one Metal command buffer per frame, and stage results are cached so an exposure change re-runs only the stages after demosaic.
 
 ## Design principles
 

@@ -6,7 +6,7 @@ Latent opens a folder of raw files, keeps a catalog inside that folder, and edit
 
 - **Status:** beta. Every planned feature is implemented and tested; expect rough edges, and read [Limitations](Limitations) before relying on it.
 - **Licence:** GPLv3.
-- **Platform:** macOS 15 or newer on Apple Silicon.
+- **Platform:** macOS 15 or newer on Apple Silicon. Verified on M1 Pro and M4.
 
 ## Pages
 

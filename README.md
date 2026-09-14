@@ -3,8 +3,10 @@
 A native, Apple Silicon–first RAW photo manager and non-destructive editor for macOS.
 Repository: `Harmanjit/latent-raw`.
 
-- **Platform:** macOS 15 (Sequoia) and 26 (Tahoe), Apple Silicon M3 or newer.
-  Metal 3 is the baseline; Metal 4 only for optional fast paths on Tahoe.
+- **Platform:** macOS 15 (Sequoia) and 26 (Tahoe), Apple Silicon. Verified on
+  M1 Pro and M4; Metal 3 is the baseline. Building needs the full Xcode 16+
+  selected as the active developer directory
+  (`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`).
 - **License:** GPLv3. See `LICENSE`.
 - **Status:** beta (Phase 7). Editing, catalog, AI masks, export and soft-proofing work; expect rough edges.
 - **Name:** the project was called *rawhead* until September 2026. Folders

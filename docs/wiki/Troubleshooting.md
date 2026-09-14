@@ -27,5 +27,12 @@ Preferences moved into the app container when the sandbox was introduced. Set th
 **Build fails with a linker error after pulling.**
 Stale objects in `.build/release`. Run `rm -rf .build/release` and build again.
 
+**Build fails saying `xcodebuild` or the Metal compiler is missing, although Xcode is installed.**
+The active developer directory is pointing at the Command Line Tools. Fix it once:
+
+```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
 **Build fails at `scripts/build_libraw.sh`.**
 Install the autotools with `brew install autoconf automake libtool pkg-config`. If it says the tag resolves to an unexpected commit, LibRaw's tag has moved; that is deliberate protection, and the pin in the script needs a human to review the new commit.

@@ -41,7 +41,9 @@ Models are bundled as Core ML packages and compiled on first use into the app co
 
 125 XCTest cases across four test targets. GPU and camera-file tests skip themselves when the sample raw is absent. GitHub Actions builds LibRaw from the pinned commit, caches it, builds and runs the suite on an Apple Silicon runner on every push.
 
-## Numbers, M4 MacBook Air
+## Numbers
+
+Measured on an M4 MacBook Air. On an M1 Pro MacBook Pro the editor is at least as fast: slider re-renders stay under 3 ms, since that chip has the larger GPU.
 
 | | |
 |---|---|
