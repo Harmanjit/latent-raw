@@ -316,9 +316,9 @@ public final class Library: ObservableObject {
     /// primary — the editor made another image primary without touching
     /// the grid, or the set is left over from before — only the primary
     /// changes, so images the user can't see selected are never touched.
-    private var metadataTargets: [ImageRecord] {
+    private func metadataTargets(onlyPrimary: Bool) -> [ImageRecord] {
         guard let primary = selectedImage else { return [] }
-        guard let primaryID = primary.id, selectedImageIDs.contains(primaryID) else { return [primary] }
+        guard !onlyPrimary, let primaryID = primary.id, selectedImageIDs.contains(primaryID) else { return [primary] }
         return selectedImages
     }
 
@@ -375,12 +375,12 @@ public final class Library: ObservableObject {
         if !failures.isEmpty { throw SelectionChangeError(total: records.count, failures: failures) }
     }
 
-    public func setRating(_ rating: Int) async throws {
-        try await change(metadataTargets) { catalog, id, _ in try await catalog.setRating(rating, forImageID: id) }
+    public func setRating(_ rating: Int, onlyPrimary: Bool = false) async throws {
+        try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in try await catalog.setRating(rating, forImageID: id) }
     }
 
-    public func setFlag(_ flag: ImageFlag) async throws {
-        try await change(metadataTargets) { catalog, id, _ in try await catalog.setFlag(flag, forImageID: id) }
+    public func setFlag(_ flag: ImageFlag, onlyPrimary: Bool = false) async throws {
+        try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in try await catalog.setFlag(flag, forImageID: id) }
     }
 
     /// Keywords stay primary-only: the keyword field shows the primary's
@@ -398,8 +398,8 @@ public final class Library: ObservableObject {
 
     /// Adds quarter turns clockwise (negative for counter-clockwise) to
     /// each selected image, each from its own current rotation.
-    public func rotateSelected(by quarterTurns: Int) async throws {
-        try await change(metadataTargets) { catalog, id, record in
+    public func rotateSelected(by quarterTurns: Int, onlyPrimary: Bool = false) async throws {
+        try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, record in
             try await catalog.setUserRotation(record.userRotation + quarterTurns, forImageID: id)
         }
     }

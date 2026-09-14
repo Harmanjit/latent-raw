@@ -148,7 +148,8 @@ struct ContentView: View {
 
     private func openFolder(_ url: URL) {
         mode = .library
-        Task {
+        // Through perform, so quitting waits for the catalog it is building.
+        library.perform("Opening \(url.lastPathComponent)") {
             do {
                 try await library.open(folder: url, defaultSubfolderMode: prefs.defaultSubfolderMode)
                 BookmarkStore.save(url, key: BookmarkStore.lastFolder)
@@ -297,19 +298,22 @@ struct ContentView: View {
 
     // MARK: - Metadata shortcuts (both modes)
 
+    /// In the grid these act on the whole selection. Loupe, Compare and
+    /// Develop show one image, so they act on that image only, even when
+    /// the grid selection behind it holds more.
     private func rate(_ stars: Int) {
-        library.perform("Rating") { try await library.setRating(stars) }
+        library.perform("Rating") { try await library.setRating(stars, onlyPrimary: mode != .library) }
     }
 
     private func flag(_ flag: ImageFlag) {
-        library.perform("Flagging") { try await library.setFlag(flag) }
+        library.perform("Flagging") { try await library.setFlag(flag, onlyPrimary: mode != .library) }
     }
 
     /// Rotates the selected image in the catalog and, if it's the one in
     /// the editor, on screen too.
     private func rotate(by quarterTurns: Int) {
         library.perform("Rotating") {
-            try await library.rotateSelected(by: quarterTurns)
+            try await library.rotateSelected(by: quarterTurns, onlyPrimary: mode != .library)
             if let selected = library.selectedImage,
                model.imageTitle == selected.fileName {
                 model.setUserRotation(selected.userRotation)
@@ -435,7 +439,8 @@ struct ContentView: View {
             model.apply(stack, groups: groups)
             return
         }
-        Task {
+        // Through perform, so quitting waits for the edits being rewritten.
+        library.perform(what) {
             let outcome: Library.TransformOutcome
             do {
                 outcome = try await library.transformSelectedEdits(

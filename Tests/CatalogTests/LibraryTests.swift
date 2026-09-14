@@ -157,6 +157,28 @@ final class LibraryTests: XCTestCase {
     /// Rating, flag and rotation apply to every selected image, each
     /// rotated from its own angle, with a sidecar per image; keywords
     /// stay with the primary.
+    /// Loupe, Compare and Develop show one image, so their keys change
+    /// only the primary even when the grid selection behind them is larger.
+    func testMetadataShortcutsCanActOnPrimaryOnly() async throws {
+        let library = Library()
+        try await library.open(folder: folder)
+        try await library.decideUndecidedSubfolders(include: true)
+        func record(_ name: String) -> ImageRecord { library.images.first { $0.fileName == name }! }
+        let (a, b) = (record("A.NEF").id!, record("B.NEF").id!)
+
+        library.setSelection([a, b], primary: a)
+        try await library.setRating(3, onlyPrimary: true)
+        try await library.setFlag(.rejected, onlyPrimary: true)
+        try await library.rotateSelected(by: 1, onlyPrimary: true)
+
+        XCTAssertEqual(record("A.NEF").rating, 3)
+        XCTAssertEqual(record("A.NEF").flag, ImageFlag.rejected.rawValue)
+        XCTAssertEqual(record("A.NEF").userRotation, 1)
+        XCTAssertEqual(record("B.NEF").rating, 0)
+        XCTAssertEqual(record("B.NEF").flag, ImageFlag.none.rawValue)
+        XCTAssertEqual(record("B.NEF").userRotation, 0)
+    }
+
     func testMetadataShortcutsApplyToWholeSelection() async throws {
         let library = Library()
         try await library.open(folder: folder)
