@@ -8,8 +8,8 @@ import Foundation
 /// DESIGN.md §3) may replace the read side later for MakerNotes and
 /// arbitrary foreign XMP; for Latent's own sidecars this is enough.
 public enum XMPSidecar {
-    /// The namespace URI is fixed once released — see DESIGN.md §5.5 / §16.
-    /// TODO: fill in the real GitHub owner path before first public commit.
+    /// The namespace URI is fixed now that the repository is public
+    /// (DESIGN.md §5.5); changing it would orphan existing sidecars.
     static let namespaceURI = "https://github.com/Harmanjit/latent-raw/ns/1.0/"
 
     public struct Fields: Equatable {
@@ -169,10 +169,16 @@ public enum XMPSidecar {
             (try? description.nodes(forXPath: "*[local-name()='\(localName)']"))?
                 .first?.stringValue
         }
+        /// An attribute by local name, whatever its prefix. Sidecars from
+        /// before the rename use `rawhead:` where new ones use `latent:`;
+        /// matching the local name reads both.
+        func attributeByLocalName(_ local: String) -> String? {
+            description.attributes?.first { $0.localName == local }?.stringValue
+        }
         // Some writers put simple properties in child elements rather
         // than attributes; accept both.
         func property(_ name: String, local: String) -> String? {
-            attribute(name) ?? childText(local)
+            attribute(name) ?? attributeByLocalName(local) ?? childText(local)
         }
 
         let keywords = (try? description.nodes(forXPath:

@@ -317,10 +317,8 @@ enum RenderPlan {
 
 /// The render pipeline: raw sensor data to a display-ready image.
 ///
-/// Current stages (DESIGN.md §8.1 numbering): 1 raw levels, 2 highlight
-/// reconstruction, 3 white balance, 4 demosaic, 5 camera matrix,
-/// 6 exposure, 9 tone mapping, 13 output transform. Still missing: lens
-/// corrections, denoise, local adjustments, grading, sharpening.
+/// Stage order is documented in DESIGN.md §8.1; `renderStages` is the
+/// authoritative sequence.
 public final class RenderPipeline {
     let gpu: GPUContext
 
@@ -471,8 +469,9 @@ public final class RenderPipeline {
 
         // Stage 8: noise reduction, in camera space, before the matrix.
         if parameters.denoiseLuminance > 0 || parameters.denoiseColor > 0 {
+            // colourInput, not cameraRGB: it may already carry the AI denoise blend.
             colourInput = try applyDenoise(session: session, cmdBuffer: cmdBuffer,
-                                           input: cameraRGB, parameters: parameters,
+                                           input: colourInput, parameters: parameters,
                                            binSpan: binSpan)
         }
 

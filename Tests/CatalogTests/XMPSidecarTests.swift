@@ -42,4 +42,27 @@ final class XMPSidecarTests: XCTestCase {
         XCTAssertEqual(f.editStackJSON, "")
         XCTAssertEqual(f.sourceHash, "")
     }
+
+    /// A sidecar written before the rename uses the rawhead: prefix for
+    /// flag, rotation and hash. Rebuilding a catalog from it must keep them.
+    func testReadsPreRenamePrefix() throws {
+        let xml = """
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+         <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+          <rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+            xmlns:rawhead="https://github.com/OWNER/rawhead/ns/1.0/"
+            xmp:Rating="3" rawhead:Flag="1" rawhead:Rotation="2"
+            rawhead:SourceHash="xxh64:00ff" rawhead:SchemaVersion="1" rawhead:ProcessVersion="1.0">
+           <rawhead:EditStack>{"schema":1}</rawhead:EditStack>
+          </rdf:Description>
+         </rdf:RDF>
+        </x:xmpmeta>
+        """
+        let f = try XMPSidecar.read(xml: xml)
+        XCTAssertEqual(f.rating, 3)
+        XCTAssertEqual(f.flag, 1)
+        XCTAssertEqual(f.rotation, 2)
+        XCTAssertEqual(f.sourceHash, "xxh64:00ff")
+        XCTAssertEqual(f.editStackJSON, "{\"schema\":1}")
+    }
 }

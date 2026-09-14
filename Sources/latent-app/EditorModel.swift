@@ -439,10 +439,7 @@ final class EditorModel: ObservableObject {
         if EditStack.isDefault(parameters, relativeTo: defaultParameters) {
             onEditSettled?(id, nil)
         } else {
-            var stack = EditStack(parameters: parameters)
-            if let lens = session?.lensCorrection {
-                stack.setLensProvenance(profile: lens.profileName, databaseVersion: lens.databaseVersion)
-            }
+            let stack = stackWithProvenance()
             do {
                 onEditSettled?(id, try stack.encodeJSON())
             } catch {
@@ -1449,6 +1446,17 @@ final class EditorModel: ObservableObject {
     }
 
     /// Lets other parts of the app put a message in the status bar.
+    /// The edit as it is stored: the parameters plus which lens profile
+    /// and Lensfun database version produced the corrections (DESIGN.md
+    /// §5.6), so every save path records it, not just the debounced one.
+    private func stackWithProvenance() -> EditStack {
+        var stack = EditStack(parameters: parameters)
+        if let lens = session?.lensCorrection {
+            stack.setLensProvenance(profile: lens.profileName, databaseVersion: lens.databaseVersion)
+        }
+        return stack
+    }
+
     func reportError(_ message: String) {
         status = message
     }
@@ -1611,7 +1619,7 @@ final class EditorModel: ObservableObject {
         if let id = catalogImageID {
             let isDefault = EditStack.isDefault(parameters, relativeTo: defaultParameters)
             do {
-                onEditSettled?(id, isDefault ? nil : try EditStack(parameters: parameters).encodeJSON())
+                onEditSettled?(id, isDefault ? nil : try stackWithProvenance().encodeJSON())
             } catch {
                 reportFailure("Encoding the edit", error)
             }
