@@ -113,6 +113,9 @@ struct ContentView: View {
             if let gpu = model.gpu {
                 library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu)
             }
+            #if DEBUG
+            if SnapshotHarness.start(model: model, library: library, perform: perform, exportSheet: $showingExportSheet) { return }
+            #endif
             // Developer convenience: `swift run latent-app <folder-or-file>`
             // opens it straight away, skipping the dialogs. Defaults
             // overrides such as `-AppleLanguages (en)` are skipped.
