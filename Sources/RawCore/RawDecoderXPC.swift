@@ -91,9 +91,13 @@ public enum RawDecoderXPC {
     }
 
     /// True when this process is the app bundle and carries the service.
-    /// `LATENT_RAW_INPROCESS=1` forces in-process decoding for debugging.
+    /// `LATENT_RAW_INPROCESS=1` forces in-process decoding for debugging,
+    /// in debug builds only: a release bundle can't be told to parse raw
+    /// files outside the sandboxed decoder.
     public static var isServiceAvailable: Bool {
+        #if DEBUG
         if ProcessInfo.processInfo.environment["LATENT_RAW_INPROCESS"] == "1" { return false }
+        #endif
         let url = Bundle.main.bundleURL.appendingPathComponent("Contents/XPCServices/\(bundleName)")
         let available = FileManager.default.fileExists(atPath: url.path)
         if !loggedAvailability {
