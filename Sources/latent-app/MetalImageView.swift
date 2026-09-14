@@ -191,6 +191,9 @@ final class MetalLayerView: NSView {
         presenter.present(base: preview, tile: currentTile,
                           transform: currentTransform, frame: currentFrame,
                           to: drawable, backgroundLevel: backgroundLevel)
+        #if DEBUG
+        SnapshotHarness.noteDrawable(drawable.texture, presentedBy: self)
+        #endif
     }
 
     // MARK: - Gestures
