@@ -32,7 +32,8 @@ struct ScopePanel: View {
             switch model.scope {
             case .histogram:
                 HistogramView(histogram: model.histogram)
-                ClippingReadout(histogram: model.histogram)
+                ClippingReadout(histogram: model.histogram,
+                                showsAboveSDRWhite: model.rendersAboveSDRWhite)
             case .waveform:
                 WaveformView(waveform: model.waveform)
             case .vectorscope:

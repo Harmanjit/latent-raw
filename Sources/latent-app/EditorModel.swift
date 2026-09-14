@@ -485,17 +485,21 @@ final class EditorModel: ObservableObject {
     @Published var hdrDisplayEnabled = true {
         didSet { if hdrDisplayEnabled != oldValue { rerender() } }
     }
-    /// What the screen reports it can show above 1.0. Exactly 1.0 on an
+    /// How far above 1.0 the screen could reach with EDR on (its potential
+    /// headroom, which doesn't move with brightness). Exactly 1.0 on an
     /// SDR display, in which case the toggle has nothing to do.
     @Published private(set) var displayHeadroom: CGFloat = 1
 
-    /// The ceiling the tone curve actually gets. Capped: a display that
-    /// reports 16x headroom would otherwise render every clipped cloud as
-    /// a searchlight. 4x is already very bright.
-    private static let maximumHeadroom: CGFloat = 4
+    /// The ceiling the tone curve actually gets: the potential headroom,
+    /// capped (see `DisplayHeadroom`). The viewport fits it to whatever
+    /// the screen shows at the moment, so the look stays put as the
+    /// brightness changes.
     var effectiveHeadroom: Float {
-        hdrDisplayEnabled ? Float(min(displayHeadroom, Self.maximumHeadroom)) : 1
+        DisplayHeadroom.rendered(potential: displayHeadroom, hdrDisplayEnabled: hdrDisplayEnabled)
     }
+    /// Whether the viewport is rendered with room above SDR white, so the
+    /// histogram's "above SDR white" readout means something.
+    var rendersAboveSDRWhite: Bool { displayOutput.headroom > 1 }
     var displayHasHeadroom: Bool { displayHeadroom > 1.001 }
 
     /// What the pipeline renders for the screen: linear Display P3, so
@@ -1120,14 +1124,19 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Viewport
 
-    /// The Metal view's drawable size changed (window resize, or the view
-    /// appearing for the first time).
+    /// The Metal view moved to a screen with a different potential
+    /// headroom. Renders again only if that changes the ceiling the
+    /// pipeline uses: past the cap, or with HDR display off or proofing
+    /// on, it doesn't.
     func displayHeadroomDidChange(to headroom: CGFloat) {
         guard headroom != displayHeadroom else { return }
+        let renderedBefore = displayOutput.headroom
         displayHeadroom = headroom
-        if hasImage { rerender() }
+        if hasImage && displayOutput.headroom != renderedBefore { rerender() }
     }
 
+    /// The Metal view's drawable size changed (window resize, or the view
+    /// appearing for the first time).
     func viewportDidResize(to size: CGSize) {
         guard size != drawableSize else { return }
         drawableSize = size
@@ -1354,7 +1363,8 @@ final class EditorModel: ObservableObject {
         let rendered = try pipeline.render(session, scale: .binned(quads: quads),
                                             parameters: renderParameters, output: displayOutput,
                                             info: &info)
-        preview = PresentLayer(texture: rendered, coverage: info.sensorRect)
+        preview = PresentLayer(texture: rendered, coverage: info.sensorRect,
+                               headroom: displayOutput.headroom)
         previewQuads = quads
 
         // Scopes always describe the whole image, whatever's on screen —
@@ -1370,11 +1380,39 @@ final class EditorModel: ObservableObject {
         return "preview \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
 
+    /// Measures the selected scope, at most every `scopeInterval`. A slider
+    /// drag renders on every mouse event; the scope only has to keep up
+    /// with the eye, and each measurement is a GPU round trip plus a
+    /// redraw of the scope view. The last change of a burst is always
+    /// measured, just up to one interval late.
+    private func updateScopes() {
+        guard analysisTexture != nil else { return }
+        let now = ContinuousClock.now
+        if let last = lastScopeMeasurement, now - last < Self.scopeInterval {
+            guard pendingScopeMeasurement == nil else { return }
+            pendingScopeMeasurement = Task { [weak self] in
+                try? await Task.sleep(until: last + Self.scopeInterval, clock: .continuous)
+                guard let self, !Task.isCancelled else { return }
+                self.pendingScopeMeasurement = nil
+                self.measureScopes()
+            }
+            return
+        }
+        pendingScopeMeasurement?.cancel()
+        pendingScopeMeasurement = nil
+        measureScopes()
+    }
+
+    private static let scopeInterval: Duration = .milliseconds(100)
+    private var lastScopeMeasurement: ContinuousClock.Instant?
+    private var pendingScopeMeasurement: Task<Void, Never>?
+
     /// Measures the selected scope from the analysis texture. The texture
     /// is linear EDR; the kernels encode it so the shapes are the familiar
     /// ones and anything above 1.0 counts as SDR clipping.
-    private func updateScopes() {
+    private func measureScopes() {
         guard let analysisTexture else { return }
+        lastScopeMeasurement = .now
         switch scope {
         case .histogram:
             histogram = histogramCalculator?.compute(from: analysisTexture, inputIsLinear: true)
@@ -1393,7 +1431,8 @@ final class EditorModel: ObservableObject {
             session,
             scale: .region(x: region.x, y: region.y, width: region.width, height: region.height),
             parameters: renderParameters, output: displayOutput, info: &info)
-        tile = PresentLayer(texture: rendered, coverage: info.sensorRect, inset: Self.tileInset)
+        tile = PresentLayer(texture: rendered, coverage: info.sensorRect, inset: Self.tileInset,
+                            headroom: displayOutput.headroom)
         return "tile \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
 

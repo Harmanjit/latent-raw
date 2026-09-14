@@ -15,9 +15,17 @@ public struct Histogram: Sendable {
     public let red: [UInt32]
     public let green: [UInt32]
     public let blue: [UInt32]
+    /// Relative luminance (Display P3 weights, in linear light), encoded
+    /// with the sRGB curve like the channels: how light each pixel looks.
+    public let luminance: [UInt32]
 
-    /// The largest count in any bin of any channel, for scaling the display.
+    /// The largest count in any bin of the three colour channels, for
+    /// scaling the display.
     public let peak: UInt32
+
+    /// Pixels with any channel above SDR white (1.0 in the linear render).
+    /// Always 0 for a render with no headroom, and for encoded input.
+    public let aboveSDRWhite: Int
 
     /// Fraction of pixels sitting in the topmost bin, per channel — a rough
     /// "how much is blown" readout.
@@ -26,6 +34,19 @@ public struct Histogram: Sendable {
         return (Float(red[Self.binCount - 1]) / total,
                 Float(green[Self.binCount - 1]) / total,
                 Float(blue[Self.binCount - 1]) / total)
+    }
+
+    /// Fraction of pixels sitting in the bottom bin, per channel: shadows
+    /// crushed to black.
+    public var shadowClippedFraction: (red: Float, green: Float, blue: Float) {
+        let total = Float(max(totalPixels, 1))
+        return (Float(red[0]) / total, Float(green[0]) / total, Float(blue[0]) / total)
+    }
+
+    /// Fraction of pixels brighter than SDR white: highlights an SDR screen
+    /// or file can't show as bright as the HDR view does.
+    public var aboveSDRWhiteFraction: Float {
+        Float(aboveSDRWhite) / Float(max(totalPixels, 1))
     }
 
     public let totalPixels: Int
@@ -46,7 +67,9 @@ public struct Histogram: Sendable {
 public final class HistogramCalculator {
     private let gpu: GPUContext
     private let resultBuffer: MTLBuffer
-    private static let totalBins = Histogram.binCount * 3
+    /// Four channels of bins, then the above-white counter. Matches
+    /// Histogram.metal.
+    private static let totalBins = Histogram.binCount * 4 + 1
 
     public init(gpu: GPUContext) throws {
         self.gpu = gpu
@@ -68,7 +91,7 @@ public final class HistogramCalculator {
         guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer() else { return nil }
 
         // Clear last frame's counts. A blit fill is cheaper than a kernel
-        // launch for 3KB.
+        // launch for 4KB.
         if let blit = cmdBuffer.makeBlitCommandEncoder() {
             blit.fill(buffer: resultBuffer, range: 0..<resultBuffer.length, value: 0)
             blit.endEncoding()
@@ -101,10 +124,12 @@ public final class HistogramCalculator {
         let red = Array(UnsafeBufferPointer(start: counts, count: bins))
         let green = Array(UnsafeBufferPointer(start: counts + bins, count: bins))
         let blue = Array(UnsafeBufferPointer(start: counts + 2 * bins, count: bins))
+        let luminance = Array(UnsafeBufferPointer(start: counts + 3 * bins, count: bins))
 
         let peak = max(red.max() ?? 0, max(green.max() ?? 0, blue.max() ?? 0))
 
-        return Histogram(red: red, green: green, blue: blue, peak: peak,
+        return Histogram(red: red, green: green, blue: blue, luminance: luminance, peak: peak,
+                          aboveSDRWhite: Int(counts[4 * bins]),
                           totalPixels: texture.width * texture.height)
     }
 }
