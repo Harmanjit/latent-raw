@@ -45,43 +45,60 @@ struct BareKeyPress: Equatable {
     }
 }
 
-/// Every single-key command in the app, in one table. Lightroom's keys, so
-/// muscle memory carries over.
+/// Every command the keyboard and the menu bar can give, whatever keys
+/// (if any) reach it. The keys themselves are in `Shortcuts.all`, one
+/// table for single keys and Command shortcuts alike; Lightroom's keys, so
+/// muscle memory carries over. `ContentView.perform(_:)` runs them all.
 enum KeyCommand: Equatable {
     case step(Int), openSelection
     case library, develop, loupe, compare, toggleLoupe, toggleZoom
     case rate(Int), pick, reject, unflag
     case beforeAfter, crop, heal, deleteHeal, disarmTools
     case makeSelect
+    // Reached from the menus, most with a Command shortcut as well.
+    case openFolder, openFile, export, exportOpenImage
+    case undo, redo, copySettings, pasteSettings
+    case rotate(Int), zoomIn, zoomOut, zoomToFit, zoomToActualSize
+    case autoAdjust, clearFilter, swapCompare
+    case addMask(NewMask), toggleMaskOverlay
+    /// [ and ]: the armed brush or spot patch, a step smaller or larger.
+    case toolSize(Int)
+
+    enum NewMask: Equatable { case linear, radial, brush }
 
     static func command(for press: BareKeyPress) -> KeyCommand? {
-        if press.shift {
-            return press.key == .character("x") ? .makeSelect : nil
+        Shortcuts.command(for: press)
+    }
+}
+
+/// What has the keyboard in the window, as far as single keys care.
+enum KeyFocus: Equatable {
+    /// A field editor (any text field being typed in) or an editable text view.
+    case text
+    /// A button, checkbox, switch, pop-up or segmented control. With Full
+    /// Keyboard Access, Tab moves focus to these and Space presses them.
+    case control
+    case other
+
+    @MainActor init(_ responder: NSResponder?) {
+        switch responder {
+        case let text as NSText where text.isEditable: self = .text
+        case is NSButton, is NSSegmentedControl, is NSSwitch: self = .control
+        default: self = .other
         }
-        switch press.key {
-        case .rightArrow: return .step(1)
-        case .leftArrow: return .step(-1)
-        case .returnKey: return .openSelection
-        case .delete: return .deleteHeal
-        case .escape: return .disarmTools
-        case .character(let c):
-            switch c {
-            case "g": return .library
-            case "d": return .develop
-            case "e": return .loupe
-            case "c": return .compare
-            case " ": return .toggleLoupe
-            case "z": return .toggleZoom
-            case "p": return .pick
-            case "x": return .reject
-            case "u": return .unflag
-            case "\\": return .beforeAfter
-            case "r": return .crop
-            case "h": return .heal
-            default:
-                if let stars = c.wholeNumberValue, (0...5).contains(stars), c.isASCII { return .rate(stars) }
-                return nil
-            }
+    }
+}
+
+extension BareKeyPress {
+    /// Whether the key is for whatever has focus rather than for the
+    /// command table. Text takes every key. A focused control takes Space
+    /// and Return, which press it; the arrows still step through images,
+    /// since a control that isn't a slider does little with them.
+    func belongs(to focus: KeyFocus) -> Bool {
+        switch focus {
+        case .text: return true
+        case .control: return !shift && (key == .character(" ") || key == .returnKey)
+        case .other: return false
         }
     }
 }
@@ -96,20 +113,26 @@ enum KeyCommand: Equatable {
 /// and Return and Escape still fired the buttons, so Return in the Keywords
 /// field also opened the editor. A button can't decline a key
 /// once it matches, so a local event monitor looks first and lets the event
-/// go on untouched while text is being edited, a sheet or modal is up, or
-/// the key is for another window. `perform` returns false to let a key
-/// through as well.
+/// go on untouched while text is being edited or a control has focus (see
+/// `KeyFocus`), a sheet or modal is up, or the key is for another window.
+/// `perform` returns false to let a key through as well.
+///
+/// It also reports when typing starts and stops in the window, for the
+/// Edit menu: Undo there undoes typing while a field has the keyboard.
 struct BareKeyMonitor: NSViewRepresentable {
     let perform: @MainActor (KeyCommand) -> Bool
+    var onTextFocusChange: (@MainActor (Bool) -> Void)?
 
     func makeNSView(context: Context) -> MonitorView {
         let view = MonitorView()
         view.perform = perform
+        view.onTextFocusChange = onTextFocusChange
         return view
     }
 
     func updateNSView(_ view: MonitorView, context: Context) {
         view.perform = perform
+        view.onTextFocusChange = onTextFocusChange
     }
 
     static func dismantleNSView(_ view: MonitorView, coordinator: ()) {
@@ -118,34 +141,51 @@ struct BareKeyMonitor: NSViewRepresentable {
 
     final class MonitorView: NSView {
         var perform: (@MainActor (KeyCommand) -> Bool)?
+        var onTextFocusChange: (@MainActor (Bool) -> Void)?
         private var monitor: Any?
+        private var responderObservation: NSKeyValueObservation?
+        private var editingText = false
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             stopMonitoring()
-            guard window != nil else { return }
+            guard let window else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 let consumed = MainActor.assumeIsolated { self?.offer(event) ?? false }
                 return consumed ? nil : event
+            }
+            responderObservation = window.observe(\.firstResponder, options: [.initial, .new]) { [weak self] window, _ in
+                MainActor.assumeIsolated { self?.firstResponderChanged(window.firstResponder) }
             }
         }
 
         func stopMonitoring() {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
+            responderObservation = nil
         }
 
-        /// A field editor (any text field being typed in) or an editable
-        /// text view as first responder means the keys are for the text.
+        /// Passed on a turn later: the first responder can change in the
+        /// middle of a SwiftUI update, which must not change state itself.
+        private func firstResponderChanged(_ responder: NSResponder?) {
+            let editing = KeyFocus(responder) == .text
+            guard editing != editingText else { return }
+            editingText = editing
+            Task { @MainActor [weak self] in
+                guard let self, self.editingText == editing else { return }
+                self.onTextFocusChange?(editing)
+            }
+        }
+
         private func offer(_ event: NSEvent) -> Bool {
             guard let window, event.window === window,
                   window.attachedSheet == nil, NSApp.modalWindow == nil,
-                  (window.firstResponder as? NSText)?.isEditable != true,
                   let characters = event.charactersIgnoringModifiers else { return false }
             let flags = event.modifierFlags
             guard let press = BareKeyPress(charactersIgnoringModifiers: characters,
                                            shift: flags.contains(.shift), command: flags.contains(.command),
                                            option: flags.contains(.option), control: flags.contains(.control)),
+                  !press.belongs(to: KeyFocus(window.firstResponder)),
                   let command = KeyCommand.command(for: press) else { return false }
             return perform?(command) ?? false
         }

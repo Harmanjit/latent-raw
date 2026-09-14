@@ -6,23 +6,30 @@ import Catalog
 ///
 /// Runs as a SwiftPM executable rather than an Xcode project, so `swift run`
 /// keeps working and there's no .xcodeproj to maintain alongside
-/// Package.swift. The tradeoff is no proper .app bundle yet: no custom icon,
-/// no Dock persistence, limited menu bar. Worth adding a real bundle before
-/// any release, but it would only slow development down now.
+/// Package.swift; scripts/make_app.sh wraps the same binary in a .app.
+///
+/// One window, not a WindowGroup: each window builds its own editor and
+/// library, and two of them on the same folder would write the same
+/// catalog and sidecars over each other. There is no New Window, and the
+/// Window menu brings this one back.
 @main
 struct LatentApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     @ObservedObject private var prefs = AppPreferences.shared
 
+    static let mainWindowID = "main"
+
     var body: some Scene {
-        WindowGroup("Latent, a catalog management and RAW editor for macOS") {
+        Window("Latent, a catalog management and RAW editor for macOS", id: Self.mainWindowID) {
             ContentView()
                 .frame(minWidth: 900, minHeight: 600)
                 .tint(prefs.accent.color)
+                .background(MainWindowOpener())
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1400, height: 900)
+        .commands { LatentCommands() }
 
         Settings {
             PreferencesView()
@@ -31,12 +38,44 @@ struct LatentApp: App {
     }
 }
 
+/// Hands the app delegate a way to open the main window, which only a
+/// view's environment has.
+private struct MainWindowOpener: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onAppear {
+                let open = openWindow
+                AppDelegate.showMainWindow = { open(id: LatentApp.mainWindowID) }
+            }
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Set once the window first appears.
+    static var showMainWindow: (() -> Void)?
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Window tabs would offer a second window by another route.
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+
+    /// Clicking the Dock icon brings the window forward, or back if it was
+    /// closed while Settings stayed open (closing it alone quits). Opening
+    /// a Window scene that is already open only brings it to the front.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        Self.showMainWindow?()
+        return true
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Without a .app bundle the process launches as a background
-        // accessory and the window never comes forward. Promoting it to a
-        // regular app fixes that; unnecessary once bundled properly.
+        // Run with `swift run`, without a .app bundle, the process launches
+        // as a background accessory and the window never comes forward.
+        // Promoting it to a regular app fixes that; harmless when bundled.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         AppPreferences.shared.applyAppearance()
@@ -61,8 +100,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Held strongly on purpose: closing the last window can release the
     /// view's objects before AppKit asks whether to terminate, and an
-    /// edit still waiting for its save would go with them. The cost is
-    /// that a second window's objects outlive it until the app quits.
+    /// edit still waiting for its save would go with them. There is one
+    /// window; a second entry appears only if it is closed while Settings
+    /// stays open and then reopened, and the old objects stay so quitting
+    /// still waits for anything they were writing.
     private static var windows: [WindowWork] = []
 
     /// Called by ContentView when it appears.

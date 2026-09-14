@@ -51,8 +51,8 @@ struct PresetsPanel: View {
                 .toggleStyle(.checkbox).controlSize(.mini)
             }
             HStack {
-                Button("Copy") { model.copySettings() }.keyboardShortcut("c", modifiers: [.command, .shift])
-                Button("Paste") { model.pasteSettings() }.keyboardShortcut("v", modifiers: [.command, .shift])
+                Button("Copy") { model.copySettings() }
+                Button("Paste") { model.pasteSettings() }
                 Spacer()
                 Button(model.showingBefore ? "After" : "Before") { model.showingBefore.toggle() }
                     .help("Hold \\ to compare with the unedited image")

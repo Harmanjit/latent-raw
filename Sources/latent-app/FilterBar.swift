@@ -29,7 +29,6 @@ struct FilterBar: View {
             ThumbnailSizeControl()
             if library.filter.isActive {
                 Button("Clear") { library.filter = LibraryFilter() }
-                    .keyboardShortcut("l", modifiers: [.command, .shift])
             }
             sortMenu
         }
