@@ -105,7 +105,8 @@ public final class ImageSession {
 
     /// The neural denoiser's output for the whole frame: camera RGB at
     /// as-shot white balance, full resolution. Produced on demand by
-    /// MLKit (about 12 s for 24 MP) and kept for the life of the session;
+    /// MLKit (about 12 s for 24 MP) and kept for the life of the session
+    /// unless critical memory pressure takes it (`releaseMemory(for:)`);
     /// the pipeline blends it in per render. `aiDenoiseModel` names what
     /// produced it, so a different model invalidates it.
     public private(set) var aiDenoisedCameraRGB: MTLTexture?
@@ -267,6 +268,8 @@ public final class ImageSession {
             }
             total += key.width * key.height * bytesPerPixel
         }
+        total += brushMasks?.texture.allocatedSize ?? 0
+        total += aiDenoisedCameraRGB?.allocatedSize ?? 0
         return total
     }
 
@@ -275,5 +278,28 @@ public final class ImageSession {
     public func releasePooledTextures() {
         texturePool.removeAll()
         stageCache.removeAll()
+    }
+
+    /// Gives memory back when macOS runs short, keeping the session usable:
+    /// everything dropped is rebuilt by the next render that needs it.
+    ///
+    /// A warning drops the pooled textures and the demosaic cache, which
+    /// cost one render to rebuild. Textures the caller still holds (the
+    /// layers on screen) stay alive through their own references, so the
+    /// picture doesn't change. Critical also drops the brush mask
+    /// rasters and the neural denoise result. The latter costs about 11 s
+    /// to recompute, which is why nothing short of critical touches it;
+    /// the caller decides when to run it again. Returns whether the
+    /// denoise result was dropped.
+    @discardableResult
+    public func releaseMemory(for level: MemoryPressureLevel) -> Bool {
+        guard level >= .warning else { return false }
+        releasePooledTextures()
+        guard level == .critical else { return false }
+        brushMasks = nil
+        placeholderMasks = nil
+        let hadDenoise = aiDenoisedCameraRGB != nil
+        setAIDenoised(nil, model: nil)
+        return hadDenoise
     }
 }

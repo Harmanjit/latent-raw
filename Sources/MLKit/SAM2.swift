@@ -38,10 +38,9 @@ public final class SAM2Models: @unchecked Sendable {
         CoreMLStore.isAvailable(encoderName) && CoreMLStore.isAvailable(promptName) && CoreMLStore.isAvailable(decoderName)
     }
 
-    /// Loaded once per process; nil when the packages aren't bundled.
-    public static let shared: Task<SAM2Models?, Never> = Task.detached(priority: .utility) {
-        try? await SAM2Models.load()
-    }
+    /// Loaded on first use and shared; nil when the packages aren't
+    /// bundled. Released under memory pressure (see `SharedModel`).
+    public static let shared = SharedModel<SAM2Models> { try? await SAM2Models.load() }
 
     public static func load(computeUnits: MLComputeUnits? = nil) async throws -> SAM2Models {
         async let e = CoreMLStore.load(encoderName, computeUnits: computeUnits)

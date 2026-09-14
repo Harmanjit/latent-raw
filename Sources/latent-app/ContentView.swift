@@ -233,12 +233,18 @@ struct ContentView: View {
         }
     }
 
-    /// Links the two panes' views while Compare shows and Sync is on.
+    /// Links the two panes' views while Compare shows and Sync is on, and
+    /// tells the Select pane whether it's on screen. Leaving Compare on a
+    /// Mac with little memory closes its image straight away, since
+    /// Compare reloads it on the way back in; elsewhere it waits for the
+    /// system to ask for memory.
     private func updateCompareLink() {
         let showing = mode == .compare
         let linked = showing && compareSyncsView
         model.linkedPane = linked ? compareModel : nil
         compareModel?.linkedPane = linked ? model : nil
+        compareModel?.isOffScreen = !showing
+        if !showing, !MemoryPolicy.current.keepsIdleImages { compareModel?.closeImage() }
     }
 
     /// Turning Sync on lines the Select pane up with the candidate.
