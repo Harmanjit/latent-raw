@@ -64,4 +64,72 @@ final class ExportWorkerTests: XCTestCase {
         let props = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
         XCTAssertEqual(props[kCGImagePropertyDepth] as? Int, 16)
     }
+
+    /// The editor's "Export open image" encodes its current parameters as
+    /// a save would and hands them to the worker, where it used to render
+    /// the parameters directly. For an edit without computed state (AI
+    /// masks, neural denoise) the two must give the same pixels, or that
+    /// switch changed ordinary exports; with the worker, the file also
+    /// carries its metadata, which the direct render never wrote.
+    func testEditorEncodedEditExportsTheSamePixelsAsItsParameters() async throws {
+        let path = AIMaskTests.assetPath("golden_nikon_d750_cc0.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let gpu = try GPUContext()
+        let tmp = FileManager.default.temporaryDirectory
+        let direct = tmp.appendingPathComponent("latent-direct-\(UUID().uuidString).tif")
+        let worker = tmp.appendingPathComponent("latent-worker-\(UUID().uuidString).tif")
+        defer { for url in [direct, worker] { try? FileManager.default.removeItem(at: url) } }
+
+        // Parameters as the editor holds them: the image's defaults (a
+        // numeric as-shot white balance) with an edit over them.
+        let file = try RawFile(path: path)
+        let session = try ImageSession(file: file, gpu: gpu)
+        var p = EditParameters()
+        p.whiteBalance = session.asShotWhiteBalance
+        p.exposureEV = 0.3
+        p.crop = CropParameters(centre: [0.5, 0.52], size: [0.8, 0.8], angle: 2)
+        p.locals = [
+            LocalAdjustment(name: "ball", shape: .radial(centre: [0.5, 0.55], radii: [0.3, 0.3], feather: 0.5),
+                            exposureEV: 0.8, saturation: 0.3),
+            LocalAdjustment(name: "top", shape: .linear(start: [0.5, 0.0], end: [0.5, 0.45]),
+                            exposureEV: -1, contrast: 0.2, warmth: -0.4),
+        ]
+        var stack = EditStack(parameters: p)
+        if let lens = session.lensCorrection {
+            stack.setLensProvenance(profile: lens.profileName, databaseVersion: lens.databaseVersion)
+        }
+        let settings = ExportSettings(format: .tiff)
+
+        let texture = try RenderPipeline(gpu: gpu).render(session, scale: .full, parameters: p, output: .file(.sRGB))
+        try Exporter(gpu: gpu).write(texture, to: direct, settings: settings, colorSpace: .sRGB,
+                                     rotation: ExportPlan.rotation(for: file.summary, userRotation: 1), crop: p.crop)
+
+        let request = ExportWorker.Request(
+            sourceURL: URL(fileURLWithPath: path), destinationURL: worker,
+            editStackJSON: try stack.encodeJSON(), userRotation: 1, settings: settings,
+            colorSpace: .sRGB, maxLongEdge: nil, keywords: ["ball"], rating: 3, includeMetadata: true)
+        _ = try await ExportWorker.export(request, gpu: gpu)
+
+        let a = try Self.decodedPixels(direct), b = try Self.decodedPixels(worker)
+        XCTAssertEqual(a.width, b.width)
+        XCTAssertEqual(a.height, b.height)
+        XCTAssertEqual(a.bitsPerComponent, b.bitsPerComponent)
+        XCTAssertTrue(a.bytes == b.bytes, "the encoded edit rendered different pixels from its parameters")
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(worker as CFURL, nil))
+        let props = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        let tiff = try XCTUnwrap(props[kCGImagePropertyTIFFDictionary] as? [CFString: Any])
+        XCTAssertEqual(tiff[kCGImagePropertyTIFFModel] as? String, "D750")
+        let iptc = try XCTUnwrap(props[kCGImagePropertyIPTCDictionary] as? [CFString: Any])
+        XCTAssertEqual(iptc[kCGImagePropertyIPTCKeywords] as? [String], ["ball"])
+        XCTAssertEqual(iptc[kCGImagePropertyIPTCStarRating] as? Int, 3)
+    }
+
+    /// The stored samples of an image file, as decoded, with their layout.
+    static func decodedPixels(_ url: URL) throws -> (width: Int, height: Int, bitsPerComponent: Int, bytes: Data) {
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let data = try XCTUnwrap(image.dataProvider?.data) as Data
+        return (image.width, image.height, image.bitsPerComponent, data)
+    }
 }

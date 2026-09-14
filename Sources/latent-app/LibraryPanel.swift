@@ -127,7 +127,7 @@ struct LibraryPanel: View {
                 }
                 .controlSize(.small)
             }
-            Button("Export open image…") { model.showExportPanel() }
+            Button("Export open image…") { exportOpenImage() }
                 .controlSize(.small)
                 .disabled(!model.hasImage || model.isExporting)
             if exportQueue.isRunning {
@@ -150,6 +150,34 @@ struct LibraryPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }
+    }
+
+    /// Exports the image open in the editor, which need not be the
+    /// selection. Its keywords and rating are read from the catalog after
+    /// the Save panel closes, so the file carries the same metadata a
+    /// queued export of it would. A file opened outside this catalog has
+    /// neither, and still gets its camera metadata; the file name check
+    /// matters because the editor keeps its image when another folder is
+    /// opened, and the same id there is a different photo.
+    private func exportOpenImage() {
+        guard let destination = model.chooseExportDestination() else { return }
+        guard let id = model.catalogImageID, let catalog = library.catalog,
+              library.images.contains(where: { $0.id == id && $0.fileName == model.imageTitle }) else {
+            model.export(to: destination, keywords: [], rating: 0)
+            return
+        }
+        Task {
+            let keywords: [String]
+            do {
+                keywords = try await catalog.keywords(forImageID: id)
+            } catch {
+                // Exporting without them would silently drop metadata.
+                model.reportFailure("Reading keywords for export", error)
+                return
+            }
+            let rating = library.images.first { $0.id == id }?.rating ?? 0
+            model.export(to: destination, keywords: keywords, rating: rating)
         }
     }
 
