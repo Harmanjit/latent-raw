@@ -26,6 +26,7 @@ struct FilterBar: View {
             Spacer()
 
             countLabel
+            ThumbnailSizeControl()
             if library.filter.isActive {
                 Button("Clear") { library.filter = LibraryFilter() }
                     .keyboardShortcut("l", modifiers: [.command, .shift])
