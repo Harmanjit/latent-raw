@@ -28,7 +28,6 @@ struct FilterBar: View {
             countLabel
             if library.filter.isActive {
                 Button("Clear") { library.filter = LibraryFilter() }
-                    .keyboardShortcut("l", modifiers: [.command, .shift])
             }
             sortMenu
         }

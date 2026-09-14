@@ -46,7 +46,6 @@ struct LibraryPanel: View {
 
             Button("Open Folder…", action: onOpenFolder)
                 .controlSize(.small)
-                .keyboardShortcut("o", modifiers: [.command, .shift])
 
             if library.isBusy {
                 ProgressView().controlSize(.small)
@@ -104,7 +103,6 @@ struct LibraryPanel: View {
             let n = library.selectedImageIDs.count
             Button(n <= 1 ? "Export selection…" : "Export \(n) images…", action: onExport)
                 .controlSize(.small)
-                .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(n == 0 || exportQueue.isRunning)
 
             // The open image, straight from the editor's render.
@@ -127,7 +125,7 @@ struct LibraryPanel: View {
                 }
                 .controlSize(.small)
             }
-            Button("Export open image…") { exportOpenImage() }
+            Button("Export open image…") { Self.exportOpenImage(model: model, library: library) }
                 .controlSize(.small)
                 .disabled(!model.hasImage || model.isExporting)
             if exportQueue.isRunning {
@@ -160,7 +158,7 @@ struct LibraryPanel: View {
     /// neither, and still gets its camera metadata; the file name check
     /// matters because the editor keeps its image when another folder is
     /// opened, and the same id there is a different photo.
-    private func exportOpenImage() {
+    static func exportOpenImage(model: EditorModel, library: Library) {
         guard let destination = model.chooseExportDestination() else { return }
         guard let id = model.catalogImageID, let catalog = library.catalog,
               library.images.contains(where: { $0.id == id && $0.fileName == model.imageTitle }) else {

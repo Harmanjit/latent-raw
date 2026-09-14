@@ -54,6 +54,8 @@ struct ContentView: View {
     @State private var presenceExpanded = true
     @State private var healExpanded = false
     @State private var compareRecord: ImageRecord?
+    /// A text field in the window has the keyboard (BareKeyMonitor says).
+    @State private var editingText = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -93,6 +95,11 @@ struct ContentView: View {
             statusBar
         }
         .background(navigationShortcuts)
+        .focusedSceneValue(\.commandContext, CommandContext(state: commandState) { command in
+            // A sheet over the window has the keyboard; menus wait, as keys do.
+            guard NSApp.mainWindow?.attachedSheet == nil else { return }
+            _ = perform(command)
+        })
         .onChange(of: mode) { old, _ in modeDidChange(from: old) }
         .sheet(isPresented: $showingExportSheet) {
             ExportSheet(count: library.selectedImageIDs.count,
@@ -325,30 +332,22 @@ struct ContentView: View {
     /// loads the image, so you can flick through a shoot without going
     /// back to the grid. Return opens the selection. Single keys go through
     /// BareKeyMonitor, which stands aside while a text field has the
-    /// keyboard; Command shortcuts stay hidden buttons, the least fussy way
-    /// to get app-wide key handling in SwiftUI.
+    /// keyboard; Command shortcuts are the menu bar's (LatentCommands).
     private var navigationShortcuts: some View {
         Group {
-            BareKeyMonitor(perform: perform)
-
-            // Rotation Cmd-[ / Cmd-], as in Lightroom.
-            Button("") { rotate(by: -1) }.keyboardShortcut("[", modifiers: .command)
-            Button("") { rotate(by: 1) }.keyboardShortcut("]", modifiers: .command)
-
-            // Settings clipboard: copy from the editor, paste to the editor
-            // or to the whole Library selection.
-            Button("") { copySettings() }.keyboardShortcut("c", modifiers: [.command, .shift])
-            Button("") { pasteSettings() }.keyboardShortcut("v", modifiers: [.command, .shift])
-            Button("") { model.undo() }.keyboardShortcut("z", modifiers: .command)
-            Button("") { model.redo() }.keyboardShortcut("z", modifiers: [.command, .shift])
+            BareKeyMonitor(perform: perform, onTextFocusChange: { editingText = $0 })
         }
         .opacity(0)
         .frame(width: 0, height: 0)
     }
 
-    /// Runs a single-key command. Returns false when the key has nothing to
-    /// do here, so it carries on to whatever else wants it.
+    /// Runs a command from a key or the menu bar. Returns false when the
+    /// key has nothing to do here, so it carries on to whatever else wants it.
     private func perform(_ command: KeyCommand) -> Bool {
+        // The menus grey out what this refuses, by the same rules.
+        guard commandState.isEnabled(command) else {
+            return !CommandState.passesThroughWhenUnavailable(command)
+        }
         switch command {
         case .step(let offset):
             step(offset)
@@ -398,8 +397,80 @@ struct ContentView: View {
         case .makeSelect:
             guard mode == .compare else { return false }
             compareMakeSelect()
+        case .openFolder:
+            showOpenFolderPanel()
+        case .openFile:
+            model.showOpenPanel(); mode = .develop
+        case .export:
+            showingExportSheet = true
+        case .exportOpenImage:
+            LibraryPanel.exportOpenImage(model: model, library: library)
+        case .undo:
+            model.undo()
+        case .redo:
+            model.redo()
+        case .copySettings:
+            copySettings()
+        case .pasteSettings:
+            pasteSettings()
+        case .rotate(let quarterTurns):
+            rotate(by: quarterTurns)
+        case .zoomIn:
+            model.zoomIn(); mirrorModel?.zoomIn()
+        case .zoomOut:
+            model.zoomOut(); mirrorModel?.zoomOut()
+        case .zoomToFit:
+            model.zoomToFit(); mirrorModel?.zoomToFit()
+        case .zoomToActualSize:
+            model.zoomToActualSize(); mirrorModel?.zoomToActualSize()
+        case .autoAdjust:
+            model.autoAdjust()
+        case .clearFilter:
+            library.filter = LibraryFilter()
+        case .swapCompare:
+            compareSwap()
+        case .addMask(let shape):
+            switch shape {
+            case .linear: model.addLocal(.linear)
+            case .radial: model.addLocal(.radial)
+            case .brush: model.addLocal(.brush)
+            }
+        case .toggleMaskOverlay:
+            model.showMaskOverlay.toggle()
+        case .toolSize(let steps):
+            model.stepToolSize(by: steps)
         }
         return true
+    }
+
+    /// What the menu bar shows and `perform` allows, from the models.
+    private var commandState: CommandState {
+        var state = CommandState()
+        let selected = library.selectedImage
+        state.mode = mode
+        state.hasVisibleImages = !library.visibleImages.isEmpty
+        state.hasSelection = selected != nil
+        state.selectionCount = library.selectedImageIDs.count
+        state.primaryFlag = selected.flatMap { ImageFlag(rawValue: $0.flag) } ?? .none
+        state.hasImage = model.hasImage
+        state.editorReady = model.isReady
+        state.exportingOpenImage = model.isExporting
+        state.exportQueueRunning = exportQueue.isRunning
+        let history = model.history
+        state.undoLabel = history.canUndo ? history.steps[history.cursor].label : nil
+        state.redoLabel = history.canRedo ? history.steps[history.cursor + 1].label : nil
+        state.isEditingText = editingText
+        state.showingBefore = model.showingBefore
+        state.cropToolActive = model.cropToolActive
+        state.healToolActive = model.healToolActive
+        state.hasSelectedHeal = model.selectedHeal != nil
+        state.toolSizeAdjustable = model.toolSizeAdjustable
+        state.canAddMask = model.hasImage && model.parameters.locals.count < LocalAdjustment.maximumCount
+        state.hasSelectedMask = model.selectedLocal != nil
+        state.showMaskOverlay = model.showMaskOverlay
+        state.filterActive = library.filter.isActive
+        state.hasCompareSelect = compareRecord != nil
+        return state
     }
 
     // MARK: - Settings clipboard and presets, in either mode
@@ -1022,16 +1093,12 @@ struct ContentView: View {
             // keyboard and for people who like buttons.
             HStack(spacing: 6) {
                 Button("−") { model.zoomOut(); mirrorModel?.zoomOut() }
-                    .keyboardShortcut("-", modifiers: .command)
                 Text(model.zoomLabel)
                     .font(.system(.caption, design: .monospaced))
                     .frame(minWidth: 40)
                 Button("+") { model.zoomIn(); mirrorModel?.zoomIn() }
-                    .keyboardShortcut("=", modifiers: .command)
                 Button("Fit") { model.zoomToFit(); mirrorModel?.zoomToFit() }
-                    .keyboardShortcut("0", modifiers: .command)
                 Button("100%") { model.zoomToActualSize(); mirrorModel?.zoomToActualSize() }
-                    .keyboardShortcut("1", modifiers: .command)
             }
             .controlSize(.small)
             .disabled(!model.hasImage || !mode.showsImage)

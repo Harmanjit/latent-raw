@@ -92,6 +92,14 @@ let package = Package(
             dependencies: ["Catalog", "RawCore"],
             path: "Tests/CatalogTests"
         ),
+        // Tests the app's own logic (key and menu tables, the generated
+        // shortcuts page) through @testable import latent_app; SwiftPM links
+        // an executable target into tests on macOS.
+        .testTarget(
+            name: "LatentAppTests",
+            dependencies: ["latent-app", "Catalog"],
+            path: "Tests/LatentAppTests"
+        ),
         .binaryTarget(
             name: "CLibRawBinary",
             path: "vendor/LibRaw.xcframework"
