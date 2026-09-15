@@ -1,4 +1,5 @@
 import Foundation
+import IOSurface
 import CLibRaw
 
 /// Errors from opening or unpacking a raw file.
@@ -74,11 +75,38 @@ public struct RawSummary: Sendable {
     /// it is kept because its code talks about "sensor" pixels.
     public var rawWidth: Int { activeArea.width }
     public var rawHeight: Int { activeArea.height }
-    /// The Bayer order at the plane's (0, 0), i.e. the active area's corner.
+    /// The Bayer order at the plane's (0, 0), i.e. the active area's
+    /// corner, or `.linearRGB` for an image that is already demosaiced.
     public let cfaPattern: CFAPattern
+    /// Which kind of source this is; see `RawSourceKind`.
+    public var sourceKind: RawSourceKind { cfaPattern == .linearRGB ? .linearRGB : .bayer }
     public let cameraMultipliers: (Float, Float, Float, Float)
+    /// The black level every channel shares. The render pipeline's Bayer
+    /// stages subtract this one value.
     public let blackLevel: Float
+    /// LibRaw's `maximum`: the value a saturated photosite reads.
     public let whiteLevel: Float
+    /// The black level of each colour channel (R, G, B, and the Bayer
+    /// quad's second green), in sensor counts: `blackLevel` plus LibRaw's
+    /// per-channel offsets, with any repeating black pattern averaged in.
+    /// Merging needs these, because a channel whose black sits a few
+    /// counts higher tints every shadow once frames of different exposure
+    /// are scaled to match. Today's renders don't use them yet.
+    public let channelBlackLevels: SIMD4<Float>
+    /// The largest value actually present in the image, in the units of
+    /// `whiteLevel` (black not subtracted). Some cameras saturate below
+    /// their nominal white, so where clipping starts is
+    /// `min(whiteLevel, dataMaximum)`. 0 for metadata-only opens.
+    public let dataMaximum: Float
+    /// DNG BaselineExposure, in stops: how much brighter than its stored
+    /// values the file asks to be shown. 0 for other raws and DNGs that
+    /// don't say. The pipeline applies it only to linear sources, as a
+    /// gain at the camera-RGB seam (see `ImageSession.sourceGain`).
+    public let baselineExposure: Float
+    /// A Photo Merge result's own description (clip level, whether lens
+    /// correction is baked in), from its XMP. nil for everything else,
+    /// and for a merge whose recipe can't be read.
+    public let mergeInfo: LinearMergeInfo?
     public let cameraMake: String
     public let cameraModel: String
     public let lensModel: String
@@ -127,17 +155,30 @@ public struct LensIdentity: Sendable, Equatable {
     }
 }
 
-/// Which demosaic family a file needs. Only `.bayer` gets the full v1
-/// GPU treatment for now (DESIGN.md §9.1).
-public enum CFAPattern: Sendable {
+/// Which demosaic family a file needs. `.bayer` and `.linearRGB` get the
+/// full GPU treatment (DESIGN.md §9.1).
+public enum CFAPattern: Sendable, Equatable {
     case bayer(order: UInt8)   // packed 2x2 order, straight from LibRaw's `filters`
     case xTrans                // v1.x
     case monochrome            // no demosaic needed at all
     case other                 // four-colour CFA, Foveon, etc. — LibRaw CPU fallback
+    /// Already demosaiced: three colours at every pixel, from a LinearRaw
+    /// DNG such as a Photo Merge result. Its pixels arrive as a
+    /// `LinearPlane`, not a `SensorPlane`.
+    case linearRGB
+
+    /// The code a linear image travels under. A Bayer order byte packs a
+    /// colour index (0 red, 1 green, 2 blue, 3 second green) for each
+    /// photosite of the 2x2 quad, and every real Bayer quad contains a red,
+    /// a 0. 0xFE is 11 11 11 10 in binary, colours 2, 3, 3, 3: no red, so
+    /// no Bayer file produces it (and the shim reports the rare four-colour
+    /// filter that would as 0xFF, "other").
+    static let linearRGBCode: UInt8 = 0xFE
 
     init(rawValue: UInt8) {
         switch rawValue {
         case 0xFF: self = .other
+        case Self.linearRGBCode: self = .linearRGB
         default:   self = .bayer(order: rawValue)
         }
     }
@@ -146,9 +187,19 @@ public enum CFAPattern: Sendable {
     var rawCode: UInt8 {
         switch self {
         case .bayer(let order): order
+        case .linearRGB: Self.linearRGBCode
         default: 0xFF
         }
     }
+}
+
+/// The two kinds of image the render pipeline takes in.
+public enum RawSourceKind: String, Sendable, Codable {
+    /// A mosaic sensor readout: one colour per photosite, to be demosaiced.
+    case bayer
+    /// Linear camera RGB at unit white balance, already demosaiced (a
+    /// LinearRaw DNG, such as a Photo Merge result).
+    case linearRGB
 }
 
 /// A raw file, unpacked by LibRaw.
@@ -181,8 +232,12 @@ public final class RawFile {
     /// composes it to build the camera -> working-space transform.
     public let cameraToXYZMatrixRaw: [Float]?
 
-    /// The unpacked sensor data; nil for metadata-only opens.
+    /// The unpacked sensor data; nil for metadata-only opens and for
+    /// linear sources.
     public let sensorPlane: SensorPlane?
+    /// The pixels of a linear source (`summary.sourceKind == .linearRGB`);
+    /// nil for metadata-only opens and for Bayer raws.
+    public let linearPlane: LinearPlane?
     private let preview: Data?
     /// Diagnostic: the return code from LibRaw's thumbnail call.
     public let lastThumbnailError: Int32
@@ -231,6 +286,10 @@ public final class RawFile {
 
         if metadataOnly {
             sensorPlane = nil
+            linearPlane = nil
+        } else if summary.sourceKind == .linearRGB {
+            sensorPlane = nil
+            linearPlane = try Self.readLinearPlane(h, summary: summary)
         } else {
             var planeLength = 0
             guard let ptr = clibraw_get_raw_plane(h, &planeLength), planeLength > 0 else {
@@ -243,34 +302,96 @@ public final class RawFile {
                 throw RawFileError.planeAllocationFailed
             }
             sensorPlane = plane
+            linearPlane = nil
         }
         isMetadataOnly = metadataOnly
         decodedInService = false
     }
 
+    /// The linear image LibRaw unpacked, copied once into a `LinearPlane`
+    /// with the plane's contract applied (see `LinearPlane`).
+    private static func readLinearPlane(_ h: OpaquePointer, summary: RawSummary) throws -> LinearPlane {
+        var format = CLIBRAW_LINEAR_NONE
+        var length = 0
+        guard let pointer = clibraw_get_linear_image(h, &format, &length), length > 0 else {
+            throw RawFileError.libRawOpenFailed
+        }
+        let sourceFormat: LinearPlane.SourceFormat
+        switch format {
+        case CLIBRAW_LINEAR_FLOAT3: sourceFormat = .float3
+        case CLIBRAW_LINEAR_UINT16X3: sourceFormat = .uint16(count: 3)
+        case CLIBRAW_LINEAR_UINT16X4: sourceFormat = .uint16(count: 4)
+        default: throw RawFileError.unsupportedCFA
+        }
+        let black = summary.channelBlackLevels
+        guard let plane = LinearPlane(copying: summary.activeArea,
+                                      of: UnsafeRawBufferPointer(start: pointer, count: length),
+                                      format: sourceFormat, channelBlack: SIMD3(black.x, black.y, black.z),
+                                      white: summary.whiteLevel) else {
+            throw RawFileError.planeAllocationFailed
+        }
+        return plane
+    }
+
     /// Decoded by the service. The plane arrives as a shared surface the
     /// service filled; nothing is copied on this side.
-    private init(remoteFileDescriptor fd: Int32, metadataOnly: Bool) throws {
+    private convenience init(remoteFileDescriptor fd: Int32, metadataOnly: Bool) throws {
         let reply = try RawDecoderClient.shared.decode(fileDescriptor: fd, metadataOnly: metadataOnly)
-        let meta = reply.metadata
+        try self.init(serviceReply: reply.metadata, plane: reply.plane, preview: reply.preview,
+                      metadataOnly: metadataOnly)
+    }
+
+    /// What the app makes of the service's reply: the metadata, and the
+    /// surface adopted as the plane its metadata says it is. Separate from
+    /// the connection so tests can hand it a reply of their own.
+    init(serviceReply meta: RawSnapshotMetadata, plane surface: IOSurface?, preview: Data?,
+         metadataOnly: Bool) throws {
+        let summary = meta.summary
         if metadataOnly {
             sensorPlane = nil
+            linearPlane = nil
+        } else if summary.sourceKind == .linearRGB {
+            // Four Float16 per pixel; the same check as below, in samples.
+            guard let surface, meta.planeSampleCount == meta.width * meta.height * LinearPlane.channels,
+                  let plane = LinearPlane(surface: surface, width: meta.width, height: meta.height) else {
+                throw RawDecoderClient.ClientError.serviceFailed("no usable linear plane in reply")
+            }
+            sensorPlane = nil
+            linearPlane = plane
         } else {
             // Every stage indexes the plane as width x height, so a reply
             // whose count disagrees with its own dimensions is refused
             // here, before anything reads past what the surface holds.
-            guard let surface = reply.plane, meta.planeSampleCount == meta.width * meta.height,
+            guard let surface, meta.planeSampleCount == meta.width * meta.height,
                   let plane = SensorPlane(surface: surface, count: meta.planeSampleCount) else {
                 throw RawDecoderClient.ClientError.serviceFailed("no usable sensor plane in reply")
             }
             sensorPlane = plane
+            linearPlane = nil
         }
-        preview = reply.preview
+        self.preview = preview
         lastThumbnailError = meta.thumbnailError
         isMetadataOnly = metadataOnly
         decodedInService = true
-        summary = meta.summary
+        self.summary = summary
         cameraToXYZMatrixRaw = meta.cameraToXYZ
+    }
+
+    /// A linear source assembled in memory rather than read from a file:
+    /// the summary and colour matrix of some image, with pixels that
+    /// follow the `LinearPlane` contract. Tests use it to feed the
+    /// pipeline known linear data.
+    init(summary: RawSummary, cameraToXYZ: [Float]?, linearPlane: LinearPlane) {
+        precondition(summary.sourceKind == .linearRGB
+                        && linearPlane.width == summary.rawWidth && linearPlane.height == summary.rawHeight)
+        self.summary = summary
+        cameraToXYZMatrixRaw = cameraToXYZ
+        self.linearPlane = linearPlane
+        sensorPlane = nil
+        preview = nil
+        lastThumbnailError = 0
+        isMetadataOnly = false
+        decodedInService = false
     }
 
     private static func readSummary(_ h: OpaquePointer) -> RawSummary {
@@ -281,13 +402,25 @@ public final class RawFile {
                 $0.withMemoryRebound(to: CChar.self, capacity: capacity) { String(cString: $0) }
             }
         }
+        let isLinear = c.is_linear_rgb != 0
+        // Only a merge result carries merge info, and only a linear source
+        // can be one, so ordinary raws skip the XML parse entirely.
+        var mergeInfo: LinearMergeInfo?
+        if isLinear {
+            var xmpLength = 0
+            if let xmp = clibraw_get_xmp(h, &xmpLength), xmpLength > 0 {
+                mergeInfo = LinearMergeInfo.parse(xmpPacket: Data(bytes: xmp, count: xmpLength))
+            }
+        }
         return RawSummary(
             activeArea: SensorActiveArea(
                 left: Int(c.left_margin), top: Int(c.top_margin), width: Int(c.width), height: Int(c.height),
                 fullWidth: Int(c.raw_width), fullHeight: Int(c.raw_height)),
-            cfaPattern: CFAPattern(rawValue: c.cfa_pattern),
+            cfaPattern: isLinear ? .linearRGB : CFAPattern(rawValue: c.cfa_pattern),
             cameraMultipliers: (c.cam_mul.0, c.cam_mul.1, c.cam_mul.2, c.cam_mul.3),
             blackLevel: c.black_level, whiteLevel: c.white_level,
+            channelBlackLevels: SIMD4(c.channel_black.0, c.channel_black.1, c.channel_black.2, c.channel_black.3),
+            dataMaximum: c.data_maximum, baselineExposure: c.baseline_exposure, mergeInfo: mergeInfo,
             cameraMake: str(c.camera_make, 64), cameraModel: str(c.camera_model, 64),
             lensModel: str(c.lens_model, 64),
             iso: c.iso, shutter: c.shutter, aperture: c.aperture, focalLength: c.focal_length,
@@ -328,6 +461,7 @@ public final class RawFile {
     public var snapshotMetadata: RawSnapshotMetadata {
         RawSnapshotMetadata(summary: summary, cameraToXYZ: cameraToXYZMatrixRaw,
                             thumbnailError: lastThumbnailError, isMetadataOnly: isMetadataOnly,
-                            planeSampleCount: sensorPlane?.count ?? 0)
+                            planeSampleCount: sensorPlane?.count
+                                ?? linearPlane.map { $0.width * $0.height * LinearPlane.channels } ?? 0)
     }
 }

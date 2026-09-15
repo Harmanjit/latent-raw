@@ -5,8 +5,9 @@ import RawCore
 /// The isolated raw decoder. Lives in Latent.app/Contents/XPCServices,
 /// sandboxed with no entitlements beyond the sandbox itself: no files,
 /// no network. The host hands it an open descriptor per decode and gets
-/// back metadata, the sensor plane (as a shared IOSurface, written once
-/// here and read in place by the app's GPU) and the embedded preview. If a file
+/// back metadata, the sensor plane or a linear source's pixels (as a
+/// shared IOSurface, written once here and read in place by the app's
+/// GPU) and the embedded preview. If a file
 /// crashes LibRaw, this process dies and the host gets a connection
 /// error instead of a crash of its own.
 final class RawDecoderService: NSObject, RawDecoderProtocol {
@@ -15,7 +16,9 @@ final class RawDecoderService: NSObject, RawDecoderProtocol {
         do {
             let raw = try RawFile(fileDescriptor: file.fileDescriptor, metadataOnly: metadataOnly)
             let meta = try JSONEncoder().encode(raw.snapshotMetadata)
-            reply(meta, raw.sensorPlane?.surface, raw.embeddedJPEGPreview(), nil)
+            // One surface either way: the metadata's source kind tells the
+            // app whether it holds sensor counts or linear RGB.
+            reply(meta, raw.sensorPlane?.surface ?? raw.linearPlane?.surface, raw.embeddedJPEGPreview(), nil)
         } catch {
             reply(nil, nil, nil, String(describing: error))
         }
