@@ -688,7 +688,7 @@ public enum ImageTransfer {
 
     /// Writes a new sidecar under a hidden name, then renames it into place
     /// without overwriting.
-    private static func writeSidecarExclusively(_ fields: XMPSidecar.Fields, to destination: URL) throws {
+    static func writeSidecarExclusively(_ fields: XMPSidecar.Fields, to destination: URL) throws {
         let temporary = FileOperations.temporaryURL(beside: destination)
         do {
             try XMPSidecar.write(fields, to: temporary)

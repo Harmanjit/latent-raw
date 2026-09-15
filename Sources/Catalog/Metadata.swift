@@ -146,6 +146,63 @@ extension Catalog {
         }
     }
 
+    // MARK: Merge recipes
+
+    /// The latent:Merge recipe of a Photo Merge result, or nil for any other
+    /// image (docs/PhotoMerge.md §5).
+    public func mergeRecipe(forImageID id: Int64) throws -> String? {
+        try dbQueue.read { db in
+            try String.fetchOne(db, sql: "SELECT merge_json FROM images WHERE id = ?", arguments: [id])
+        }
+    }
+
+    /// Stores the recipe on an image already in the catalog and writes the
+    /// sidecar; nil (or empty) removes it. Like the edit stack, the catalog
+    /// keeps the JSON without reading it. Surrounding whitespace is dropped,
+    /// as reading the sidecar drops it, so the row and a database rebuilt
+    /// from the sidecar hold the same text.
+    public func setMergeRecipe(_ json: String?, forImageID id: Int64) throws {
+        let trimmed = json?.trimmingCharacters(in: .whitespacesAndNewlines)
+        try updateRow(id) { $0.mergeJSON = trimmed?.isEmpty == false ? trimmed : nil }
+    }
+
+    /// Writes the sidecar of a merge result that isn't in the catalog yet.
+    ///
+    /// A merge commits in this order (docs/PhotoMerge.md §5): this sidecar,
+    /// then the DNG, then a refresh. The refresh finds the new file and
+    /// reads this sidecar onto its new row, like any sidecar waiting beside
+    /// a new file, so the pass that catalogues the DNG also gives it its
+    /// recipe. The DNG's hash isn't known yet, so the sidecar's SourceHash
+    /// is empty until the first write from the row fills it in.
+    ///
+    /// Never overwrites: a name held by a file, a sidecar or a row (the same
+    /// test Move and Copy use, `ImageTransfer.place`) throws `.taken`, since
+    /// that sidecar's ratings and edits would be given to the merge.
+    public func writeMergeSidecar(_ json: String, forRelPath relPath: String) throws {
+        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw MergeRecipeError.empty }
+        let name = (relPath as NSString).lastPathComponent
+        let sidecar = sidecarURL(forRelPath: relPath)
+        let rowExists = try image(forRelPath: relPath) != nil
+        if rowExists || FileOperations.itemExists(fileURL(forRelPath: relPath)) || FileOperations.itemExists(sidecar) {
+            throw FileOperations.NameProblem.taken(name)
+        }
+        try FileManager.default.createDirectory(at: sidecar.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try ImageTransfer.writeSidecarExclusively(.init(sourceHash: "", mergeJSON: trimmed), to: sidecar)
+    }
+
+    /// Removes a sidecar made by `writeMergeSidecar` when the DNG never
+    /// arrived (its name was taken at the last moment, or the merge was
+    /// cancelled). Only while neither the file nor a row exists: once
+    /// either does, the sidecar belongs to a catalogued photo.
+    public func discardMergeSidecar(forRelPath relPath: String) throws {
+        guard !FileOperations.itemExists(fileURL(forRelPath: relPath)),
+              try image(forRelPath: relPath) == nil else { return }
+        let sidecar = sidecarURL(forRelPath: relPath)
+        if FileOperations.itemExists(sidecar) { try FileManager.default.removeItem(at: sidecar) }
+    }
+
     /// The stored edit stack JSON, if the image has one.
     public func editStack(forImageID id: Int64) throws -> String? {
         try dbQueue.read { db in
@@ -195,7 +252,8 @@ extension Catalog {
                 processVersion: edit?["process_version"] ?? "1.0",
                 editStackJSON: edit?["params_json"] ?? "",
                 snapshotsJSON: Self.snapshotsJSON(snapshots),
-                historyJSON: Self.historyJSON(history))
+                historyJSON: Self.historyJSON(history),
+                mergeJSON: row.mergeJSON ?? "")
         }
     }
 
@@ -212,6 +270,18 @@ extension Catalog {
         try dbQueue.write { db in
             try db.execute(sql: "UPDATE images SET sidecar_mtime = ? WHERE id = ?",
                            arguments: [mtime, id])
+        }
+    }
+}
+
+public enum MergeRecipeError: Error, CustomStringConvertible {
+    case empty
+    case noOpenCatalog
+
+    public var description: String {
+        switch self {
+        case .empty: "The merge recipe is empty."
+        case .noOpenCatalog: "No folder is open to save the merge recipe in."
         }
     }
 }
