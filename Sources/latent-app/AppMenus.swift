@@ -21,6 +21,8 @@ struct CommandState: Equatable {
     var editorReady = false
     var exportingOpenImage = false
     var exportQueueRunning = false
+    /// A print or contact sheet is rendering from the files (`OutputJobs`).
+    var outputJobRunning = false
     /// What Undo and Redo would change, nil when there is nothing to.
     var undoLabel: String?
     var redoLabel: String?
@@ -104,9 +106,12 @@ struct CommandState: Equatable {
         case .slideshow: hasVisibleImages && editorReady
         case .editExternally: (mode == .survey ? hasSelection : hasImage || hasSelection) && editorReady && !exportingOpenImage
         // Files change under the grid only: Loupe, Compare, Survey and
-        // Develop have them open. Not while exporting reads them.
+        // Develop have them open. Not while exporting, printing or a
+        // contact sheet reads them.
         case .rename: mode == .library && hasSelection && selectionCount <= 1 && !fileOperationRunning && !exportQueueRunning
+            && !outputJobRunning
         case .moveToFolder, .copyToFolder: mode == .library && selectionCount > 0 && !fileOperationRunning && !exportQueueRunning
+            && !outputJobRunning
         case .back: canGoBack
         case .forward: canGoForward
         // The grid goes to Loupe first, which needs a selection.

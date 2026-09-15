@@ -16,8 +16,7 @@ enum PrintPresenter {
     /// Gathers the pictures (reading their edits), then shows the panel.
     static func present(openImage: Bool, model: EditorModel, library: Library) {
         guard let gpu = model.gpu, let window = NSApp.mainWindow, window.attachedSheet == nil else { return }
-        let proof: SheetProfile?
-        if case .icc(let url) = model.proofTarget { proof = SheetProfile(url: url) } else { proof = nil }
+        let proof = proofProfile(for: model)
         Task {
             do {
                 let items: [SheetItem]
@@ -41,13 +40,27 @@ enum PrintPresenter {
                                                    aiDenoiseFrom: .max, profile: nil, cacheBudget: 32 << 20),
                     proofProfile: proof)
                 sessions.append(session)
-                session.run(on: window) { finished in
+                session.run(on: window) { finished, success in
                     sessions.removeAll { $0 === finished }
+                    // A photo that couldn't be rendered is an empty cell on
+                    // paper; the panel's preview, from thumbnails, showed it.
+                    if success, let message = PrintSession.unrenderedMessage(finished.job.unrenderedNames) {
+                        model.lastError = message
+                        Announcement.post(message, priority: .high)
+                    }
                 }
             } catch {
                 model.reportFailure("Reading the edits to print", error)
             }
         }
+    }
+
+    /// The printer or paper profile to print into: Soft Proof's, while
+    /// soft proofing is on. A profile proofed against earlier and turned
+    /// off since isn't what the user expects the print to look like.
+    static func proofProfile(for model: EditorModel) -> SheetProfile? {
+        guard model.proofEnabled, case .icc(let url) = model.proofTarget else { return nil }
+        return SheetProfile(url: url)
     }
 
     /// The window title of a print: the one picture's name, or "12 Photos".
@@ -63,7 +76,11 @@ final class PrintSession: NSObject {
     let view: PrintPageView
     let accessory: PrintAccessoryController
     let operation: NSPrintOperation
-    private var completion: ((PrintSession) -> Void)?
+    private var completion: ((PrintSession, Bool) -> Void)?
+    private let jobs: OutputJobs
+    /// Set while the job renders for the printer (see `OutputJobs`).
+    private(set) var runningJob: UUID?
+    private var isFinished = false
 
     /// `makeRenderer` renders for the printer, for a colour choice (the
     /// proof profile or none); `previewRenderer` renders small previews of
@@ -71,7 +88,7 @@ final class PrintSession: NSObject {
     init(items: [SheetItem], thumbnails: @escaping SheetThumbnailSource,
          makeRenderer: @escaping @Sendable (SheetProfile?) -> SheetRenderer, previewRenderer: SheetRenderer?,
          proofProfile: SheetProfile?, store: PrintLayoutStore = PrintLayoutStore(),
-         printInfo shared: NSPrintInfo = .shared) {
+         printInfo shared: NSPrintInfo = .shared, jobs: OutputJobs = .shared) {
         // A copy of the shared print info, so Page Setup's paper, scale and
         // printer apply, with its margins cleared: the layout keeps its own
         // margins, and each page rectangle is the whole printable area.
@@ -102,11 +119,16 @@ final class PrintSession: NSObject {
         panel.options.formUnion([.showsCopies, .showsPageRange, .showsPaperSize, .showsOrientation, .showsScaling,
                                  .showsPreview])
         panel.addAccessoryController(accessory)
+        self.jobs = jobs
         super.init()
     }
 
-    func run(on window: NSWindow, completion: @escaping (PrintSession) -> Void) {
+    /// `completion` gets whether the job was printed (not cancelled).
+    func run(on window: NSWindow, completion: @escaping (PrintSession, Bool) -> Void) {
         self.completion = completion
+        job.onPrintingStarted {
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.printingStarted() } }
+        }
         operation.runModal(for: window, delegate: self,
                            didRun: #selector(printOperationDidRun(_:success:contextInfo:)), contextInfo: nil)
     }
@@ -120,12 +142,35 @@ final class PrintSession: NSObject {
         }
     }
 
-    private func finish(success: Bool) {
+    /// The panel has closed and the pages are being rendered: from here
+    /// until `finish`, the job counts as running.
+    func printingStarted() {
+        guard runningJob == nil, !isFinished else { return }
+        runningJob = jobs.begin(.print, name: PrintPresenter.jobTitle(for: job.items))
+    }
+
+    func finish(success: Bool) {
         if success {
             NSPrintInfo.shared = Self.pageSetup(from: operation.printInfo, keeping: NSPrintInfo.shared)
         }
-        completion?(self)
+        isFinished = true
+        // A print cancelled in its panel never started: let go of the
+        // handler, which holds this session.
+        job.onPrintingStarted(nil)
+        if let runningJob { jobs.end(runningJob) }
+        runningJob = nil
+        completion?(self, success)
         completion = nil
+    }
+
+    /// What to tell the user about photos that printed as empty cells.
+    nonisolated static func unrenderedMessage(_ names: [String]) -> String? {
+        switch names.count {
+        case 0: nil
+        case 1: "\(names[0]) couldn’t be rendered and printed as an empty cell"
+        default: "\(names.count) photos couldn’t be rendered and printed as empty cells: "
+            + names.joined(separator: ", ")
+        }
     }
 
     /// Page Setup after a print: the printer, paper, orientation and scale

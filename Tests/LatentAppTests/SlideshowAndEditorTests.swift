@@ -2,6 +2,7 @@ import XCTest
 import SwiftUI
 import ImageIO
 import Metal
+import AVFoundation
 @testable import latent_app
 @testable import Catalog
 import PixelEngine
@@ -251,14 +252,25 @@ final class ExternalEditorHandOffTests: XCTestCase {
         let handOff = ExternalEditorHandOff()
         handOff.settings = settings
         handOff.opener = opener
+        // The folder is checked off the main thread: a share that has
+        // stopped answering must not hang the app.
+        let checks = ProfileLog()
+        handOff.folderProblem = { url in
+            checks.append(Thread.isMainThread ? "main" : url.lastPathComponent)
+            return FolderAccess.problem(opening: url)
+        }
+        let held = ExportActivity.activeCount
 
         handOff.start(model: model, library: Library(), preferOpenImage: true)
         XCTAssertTrue(model.isExporting)
+        XCTAssertEqual(ExportActivity.activeCount, held + 1, "the Mac stays awake for the render")
         let deadline = Date().addingTimeInterval(120)
         while opener.opened.isEmpty, model.lastError == nil, Date() < deadline {
             try await Task.sleep(for: .milliseconds(100))
         }
         XCTAssertNil(model.lastError)
+        XCTAssertEqual(checks.values, [folder.lastPathComponent])
+        XCTAssertEqual(ExportActivity.activeCount, held)
         let sent = try XCTUnwrap(opener.opened.first)
         XCTAssertEqual(sent.file.lastPathComponent, "golden_nikon_d750_cc0-Edit-2.tif")
         XCTAssertEqual(sent.app?.path, "/System/Applications/Preview.app")
@@ -412,5 +424,49 @@ final class SlideshowControllerTests: XCTestCase {
         fake.fail("IMG_1.NEF")
         try await until("the end") { show.hasEnded }
         XCTAssertEqual(message, "The slideshow couldn’t show any of the images")
+    }
+}
+
+@MainActor
+final class SlideshowMusicTests: XCTestCase {
+    nonisolated(unsafe) private var folder: URL!
+
+    override func setUp() {
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("latent-music-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: folder)
+    }
+
+    /// A few seconds of quiet tone, as a song.
+    private func song() throws -> SlideshowSettings.Song {
+        let url = folder.appendingPathComponent("tone.wav")
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100 * 5))
+        buffer.frameLength = buffer.frameCapacity
+        let samples = try XCTUnwrap(buffer.floatChannelData?[0])
+        for i in 0..<Int(buffer.frameLength) { samples[i] = 0.01 * sin(Float(i) * 0.06) }
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        try file.write(from: buffer)
+        return SlideshowSettings.Song(name: "tone", bookmark: try url.bookmarkData())
+    }
+
+    /// Paused while the song was still opening, the show's music fades in
+    /// when it resumes rather than playing silently to the end.
+    func testASongOpenedWhilePausedFadesInOnResume() async throws {
+        let music = SlideshowMusic(songs: [try song()])
+        music.start()
+        // Before the song can finish opening off the main thread.
+        music.pause()
+        await waitUntil("the song to open") { music.currentPlayer != nil }
+        let player = try XCTUnwrap(music.currentPlayer)
+        XCTAssertEqual(player.volume, 0)
+        XCTAssertFalse(player.isPlaying)
+        music.resume()
+        try await Task.sleep(for: .seconds(SlideshowMusic.fadeInDuration + 0.5))
+        XCTAssertEqual(player.volume, SlideshowMusic.volume, accuracy: 0.01)
+        music.finish()
     }
 }

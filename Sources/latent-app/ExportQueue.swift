@@ -161,6 +161,8 @@ final class ExportQueue: ObservableObject {
 
         task = Task { [weak self] in
             defer { activity.end() }
+            // One full-size render on the GPU at a time.
+            await ExportPreviewRenderer.waitForDiscardedRenders()
             let start = Date()
             var totalPixels = 0
             let catalogName = root.lastPathComponent
@@ -480,7 +482,12 @@ struct ExportSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Export") {
-                    if let destination { onExport(preset, destination); dismiss() }
+                    guard let destination else { return }
+                    // Stopped now rather than when the sheet has gone, so the
+                    // export waits for the estimate's render to stop.
+                    releaseRender()
+                    onExport(preset, destination)
+                    dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(destination == nil || count == 0 || !unknownTokens.isEmpty)
@@ -491,13 +498,7 @@ struct ExportSheet: View {
         .onAppear {
             if renderer == nil, let preview { renderer = ExportPreviewRenderer(source: preview) }
         }
-        .onDisappear {
-            // The render and the comparison belong to this sheet.
-            if let renderer {
-                QualityCompareWindow.close(ifUsing: renderer)
-                renderer.discard()
-            }
-        }
+        .onDisappear { releaseRender() }
         .sheet(isPresented: $showingSavePreset) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Save export preset").font(.headline)
@@ -522,6 +523,14 @@ struct ExportSheet: View {
 
     private var unknownTokens: [String] { ExportNaming.unknownTokens(in: preset.template) }
 
+    /// The render and the comparison belong to this sheet.
+    private func releaseRender() {
+        if let renderer {
+            QualityCompareWindow.close(ifUsing: renderer)
+            renderer.discard()
+        }
+    }
+
     /// The images the estimate covers, the first being the one rendered.
     private var estimateRecords: [ImageRecord] { records.isEmpty ? (sample.map { [$0] } ?? []) : records }
 
@@ -529,12 +538,14 @@ struct ExportSheet: View {
     private var estimateRequest: EstimateRequest? {
         guard let first = estimateRecords.first, renderer != nil else { return nil }
         return EstimateRequest(render: ExportPreviewRenderer.Key(record: first, preset: preset),
+                               finish: ExportPreviewRenderer.Finish(preset: preset),
                                format: preset.format, quality: preset.quality,
                                imageIDs: estimateRecords.map(\.id))
     }
 
     private struct EstimateRequest: Equatable {
         var render: ExportPreviewRenderer.Key
+        var finish: ExportPreviewRenderer.Finish
         var format: ExportSettings.Format
         var quality: Float
         var imageIDs: [Int64?]

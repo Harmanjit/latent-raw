@@ -39,6 +39,8 @@ final class FakeRenders: @unchecked Sendable {
     func renderer(budget: Int = 64 << 20) -> SheetRenderer {
         SheetRenderer(cache: SheetImageCache(byteBudget: budget)) { [self] item, longEdge in
             lock.withLock { log.append((item.name, longEdge)) }
+            // A file that went away, say.
+            guard !item.name.hasPrefix("missing") else { return nil }
             let width = aspect >= 1 ? longEdge : Int((Double(longEdge) * aspect).rounded())
             let height = aspect >= 1 ? Int((Double(longEdge) / aspect).rounded()) : longEdge
             return Self.solid(Self.colour(for: item.name), width: width, height: height)
@@ -328,6 +330,67 @@ final class PrintTests: XCTestCase {
         let image = try XCTUnwrap(context.makeImage())
         XCTAssertEqual(pixel(image, 100, 100), [255, 0, 0])
         XCTAssertNotEqual(pixel(image, 300, 100), [255, 0, 0])
+    }
+
+    /// A photo that couldn't be rendered prints as an empty cell, so once
+    /// the job is done the print names it; the panel's preview, drawn from
+    /// thumbnails, showed every photo.
+    func testPhotosPrintedAsEmptyCellsAreNamed() throws {
+        let scratch = try ScratchFolder()
+        defer { scratch.remove() }
+        let (_, session) = try printToPDF(["red", "missing-a", "blue", "missing-b"], settings: PrintLayoutSettings(),
+                                          in: scratch.url, renders: FakeRenders())
+        XCTAssertEqual(session.job.unrenderedNames, ["missing-a", "missing-b"])
+        XCTAssertEqual(PrintSession.unrenderedMessage(["missing-a"]),
+                       "missing-a couldn’t be rendered and printed as an empty cell")
+        XCTAssertEqual(PrintSession.unrenderedMessage(session.job.unrenderedNames),
+                       "2 photos couldn’t be rendered and printed as empty cells: missing-a, missing-b")
+        XCTAssertNil(PrintSession.unrenderedMessage([]))
+    }
+
+    /// A print counts as running (awake, file commands waiting, quitting
+    /// asking) from its first page for the printer until it finishes; the
+    /// panel and its preview don't count.
+    func testAPrintRunsFromItsFirstPageUntilItFinishes() throws {
+        let job = job(["red", "blue"])
+        let starts = ProfileLog()
+        job.onPrintingStarted { starts.append("started") }
+        let context = try XCTUnwrap(PageRenderer.bitmapContext(pageSize: CGSize(width: 612, height: 792), scale: 1,
+                                                               colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!))
+        job.drawPreviewPage(0, in: context)
+        XCTAssertTrue(starts.values.isEmpty)
+        job.drawPage(0, in: context)
+        job.drawPage(1, in: context)
+        XCTAssertEqual(starts.values, ["started"])
+
+        let jobs = OutputJobs()
+        let held = ExportActivity.activeCount
+        let session = PrintSession(items: FakeRenders.items(["red"]), thumbnails: FakeRenders.thumbnails,
+                                   makeRenderer: { _ in FakeRenders().renderer() }, previewRenderer: nil,
+                                   proofProfile: nil, printInfo: NSPrintInfo(), jobs: jobs)
+        session.printingStarted()
+        XCTAssertEqual(jobs.running.map(\.kind), [.print])
+        XCTAssertEqual(jobs.running.first?.name, "red")
+        XCTAssertEqual(ExportActivity.activeCount, held + 1)
+        session.finish(success: false)
+        XCTAssertFalse(jobs.isRunning)
+        XCTAssertEqual(ExportActivity.activeCount, held)
+        session.printingStarted()
+        XCTAssertFalse(jobs.isRunning, "a late start after the end doesn't count")
+    }
+
+    /// Print converts into Soft Proof's profile only while soft proofing is
+    /// on; a profile proofed against earlier and turned off isn't used.
+    func testPrintUsesTheProofProfileOnlyWhileProofing() throws {
+        let url = URL(fileURLWithPath: "/System/Library/ColorSync/Profiles/AdobeRGB1998.icc")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path))
+        let model = EditorModel()
+        model.proofTarget = .icc(url)
+        XCTAssertNil(PrintPresenter.proofProfile(for: model))
+        model.proofEnabled = true
+        XCTAssertEqual(PrintPresenter.proofProfile(for: model)?.name, "AdobeRGB1998")
+        model.proofTarget = .displayP3
+        XCTAssertNil(PrintPresenter.proofProfile(for: model))
     }
 
     /// Converting into a printer profile: RGB at 16 bits, CMYK at 8, tagged.

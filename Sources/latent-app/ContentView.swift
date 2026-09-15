@@ -468,7 +468,7 @@ struct ContentView: View {
             export: { showingExportSheet = true },
             canExport: { !exportQueue.isRunning },
             rename: beginRename,
-            canChangeFiles: { !fileOperations.isBusy && !exportQueue.isRunning },
+            canChangeFiles: { !fileOperations.isBusy && !exportQueue.isRunning && !OutputJobs.shared.isRunning },
             transfer: { fileCommands.transferSelection($0, to: $1) },
             recentDestinations: { RecentDestinations.shared.availableFolders })
     }
@@ -990,6 +990,7 @@ struct ContentView: View {
         state.editorReady = model.isReady
         state.exportingOpenImage = model.isExporting
         state.exportQueueRunning = exportQueue.isRunning
+        state.outputJobRunning = OutputJobs.shared.isRunning
         let history = model.history
         state.undoLabel = history.canUndo ? history.steps[history.cursor].label : nil
         state.redoLabel = history.canRedo ? history.steps[history.cursor + 1].label : nil
