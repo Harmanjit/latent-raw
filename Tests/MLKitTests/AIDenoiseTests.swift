@@ -134,6 +134,70 @@ final class AIDenoiseTests: XCTestCase {
         }
     }
 
+    /// HSB_6548.NEF with the user's edit (vertical perspective -0.16, lens
+    /// profile, 9443 K): the Develop view showed a yellow-green band along
+    /// the top and green and cyan wedges down the left and right edges with
+    /// AI denoise on. The perspective stage fills the part of the frame it
+    /// pulls in from outside the sensor by repeating the edge pixel, so the
+    /// outermost column and row of the denoised blend are stretched over
+    /// whole wedges. RCD leaves the frame's outermost pixel with one channel
+    /// at half its value, the network spread that over a few pixels, and the
+    /// binned preview's box average of the full-resolution result carried
+    /// it to the edge. The render with denoise must keep the colour of the
+    /// render without it there, as it does in the interior.
+    func testFrameEdgesKeepTheirColourWithPerspective() async throws {
+        let path = AIMaskTests.assetPath("HSB_6548.NEF")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        try XCTSkipUnless(AIDenoiser.isAvailable, "NAFNet package not bundled")
+        // The user's edit stack from the catalog, less the AI-mask locals
+        // (their masks are generated in the app, not here).
+        let json = #"""
+        {"modules":{"aidenoise":{"model":"nafnet-sidd-w32","strength":1},"curve":{"points":[[0,0],[1,1]]},"demosaic":{"method":"rcd"},"denoise":{"color":0,"luminance":0},"exposure":{"ev":0.52461964},"highlights":{"strength":1,"threshold":0.85},"hsl":{"hue":[0,0,0,0,0,0,0,0],"luminance":[0,0,0,0,0,0,0,0],"saturation":[-0.6845703,0,0,0,0,0,0,0]},"lens":{"distortion":true,"lensfunDb":"2026-09-11","manualDistortion":0,"manualVignetting":0,"profile":"Nikkor AF-S 50mm f\/1.4G","tca":true,"vignetting":true},"perspective":{"horizontal":0,"vertical":-0.1632744},"presence":{"clarity":-0.005859375,"dehaze":0.05910766,"texture":-0.22327304},"sharpen":{"amount":0,"radius":1,"threshold":0.01},"splittoning":{"balance":0,"highlightHue":45,"highlightSaturation":0,"shadowHue":215,"shadowSaturation":0},"tone":{"contrast":1.3529111,"grey":0.19962643,"method":"sigmoid"},"vibrance":{"amount":0.16618693},"whitebalance":{"mode":"custom","temperature":9442.879,"tint":-3.695066}},"process":"1.0","schema":1}
+        """#
+        var edit = try EditStack.decode(json: json).parameters()
+        XCTAssertEqual(edit.aiDenoise, 1); XCTAssertFalse(edit.perspective.isIdentity)
+        let gpu = try GPUContext()
+        let session = try ImageSession(file: try RawFile(path: path), gpu: gpu)
+        try XCTSkipUnless(session.lensCorrection != nil, "lens profile not in this Lensfun database")
+        let pipeline = RenderPipeline(gpu: gpu)
+
+        // The Develop view's fitted, binned render.
+        func render(_ p: EditParameters) throws -> (px: [Float16], w: Int, h: Int) {
+            let tex = try pipeline.render(session, scale: .fitting(maxDimension: 1500), parameters: p)
+            return (try TextureReadback.float16Pixels(of: tex, gpu: gpu), tex.width, tex.height)
+        }
+        edit.aiDenoise = 0
+        let off = try render(edit)
+        let denoiser = try await AIDenoiser.load(.standard)
+        try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
+        edit.aiDenoise = 1
+        let on = try render(edit)
+        XCTAssertEqual(on.w, off.w); XCTAssertEqual(on.h, off.h)
+        let w = on.w, h = on.h
+
+        // Mean signed difference per channel over a band, in encoded output
+        // units. Denoising shifts the whole frame's colour a little (about
+        // 0.005 in red here); an edge band must shift no more than that.
+        func shift(_ xs: Range<Int>, _ ys: Range<Int>) -> [Float] {
+            var d = [Float](repeating: 0, count: 3)
+            for y in ys { for x in xs { for c in 0..<3 {
+                let i = (y * w + x) * 4 + c
+                d[c] += Float(on.px[i]) - Float(off.px[i])
+            } } }
+            return d.map { $0 / Float(xs.count * ys.count) }
+        }
+        // The wedges are widest at the top: the left and right 40 px of the
+        // top third, and the top 40 px away from the corners.
+        let interior = shift((w / 4)..<(w * 3 / 4), (h / 8)..<(h / 3))
+        let bands: [(String, Range<Int>, Range<Int>)] = [
+            ("left", 0..<40, 0..<(h / 3)), ("right", (w - 40)..<w, 0..<(h / 3)), ("top", 40..<(w - 40), 0..<40),
+        ]
+        for (name, xs, ys) in bands {
+            let d = zip(shift(xs, ys), interior).map { $0 - $1 }
+            XCTAssertLessThan(d.map(abs).max()!, 0.01, "\(name) band's colour shift beyond the interior's: \(d)")
+        }
+    }
+
     /// The user's frame: every tile of the sample NEF at full resolution,
     /// as-shot white balance and the worker's white, goes through the
     /// network without diverging (138 of 486 tiles did), and the
