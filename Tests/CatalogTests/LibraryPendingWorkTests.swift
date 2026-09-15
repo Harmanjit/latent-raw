@@ -56,9 +56,12 @@ final class LibraryPendingWorkTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(100))
             finished.names.append("write")
         }
-        async let first: Void = library.waitForPendingWork()
-        async let second: Void = library.waitForPendingWork()
-        _ = await (first, second)
+        // Tasks rather than `async let`: on CI's Swift 6.1 an async-let child
+        // waiting on the main actor aborted the test process.
+        let first = Task { await library.waitForPendingWork() }
+        let second = Task { await library.waitForPendingWork() }
+        await first.value
+        await second.value
         XCTAssertEqual(finished.names, ["write"])
         XCTAssertFalse(library.hasPendingWork)
     }

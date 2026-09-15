@@ -95,6 +95,9 @@ final class FolderSidebarTests: XCTestCase {
         let menu = try XCTUnwrap(outline.menu)
         controller.menuNeedsUpdate(menu)
         XCTAssertEqual(menu.items.map(\.title), ["Add Folder…"], "No row was clicked or asked for")
+        // Popping up a menu needs a window server session that tracks
+        // menus, which GitHub's runners don't give a test process.
+        try XCTSkipIf(ProcessInfo.processInfo.environment["CI"] != nil, "menu tracking needs an interactive session")
         XCTAssertTrue(outline.accessibilityPerformShowMenu())
         // The menu pops up a turn later and tracks until cancelled.
         let cancel = Timer(timeInterval: 0.05, repeats: true) { _ in
