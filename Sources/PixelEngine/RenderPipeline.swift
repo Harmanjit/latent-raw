@@ -15,7 +15,7 @@ public enum RenderError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .unsupportedCFAForV1:
-            return "Only Bayer sensors are supported in v1 (DESIGN.md §9.1)"
+            return "Only Bayer sensors and linear DNGs are supported in v1 (DESIGN.md §9.1)"
         case .gpuBufferAllocationFailed:
             return "Failed to allocate a GPU buffer or texture"
         case .commandBufferFailed:
@@ -373,7 +373,8 @@ public final class RenderPipeline {
     /// The demosaiced, white-balanced camera-space image — the pipeline
     /// stopped before the colour matrix. Linear, camera primaries. Used by
     /// analysis that needs to reason in the sensor's own colour space,
-    /// such as grey-world white balance.
+    /// such as grey-world white balance. For a linear source this is its
+    /// pixels times the multipliers and `ImageSession.sourceGain`.
     public func renderCameraRGB(_ session: ImageSession,
                                  scale: RenderScale,
                                  parameters: EditParameters) throws -> MTLTexture {
@@ -388,8 +389,13 @@ public final class RenderPipeline {
                               cameraRGBOnly: Bool,
                               info: UnsafeMutablePointer<RenderInfo>?) throws -> MTLTexture {
         let summary = session.file.summary
-        guard case .bayer(let order) = summary.cfaPattern else {
-            throw RenderError.unsupportedCFAForV1
+        // The Bayer order, or nil for a linear source; any other layout
+        // can't be rendered.
+        let bayerOrder: UInt8?
+        switch summary.cfaPattern {
+        case .bayer(let order): bayerOrder = order
+        case .linearRGB: bayerOrder = nil
+        default: throw RenderError.unsupportedCFAForV1
         }
         guard let cameraToWorking = session.cameraToWorkingMatrix else {
             throw RenderError.noCameraProfile(camera: summary.cameraModel)
@@ -412,32 +418,52 @@ public final class RenderPipeline {
         // demosaiced result for exactly these inputs, skip straight to the
         // colour stage. Exposure and tone edits hit this every time; white
         // balance and zoom changes miss.
-        let stageKey = Self.stageKey(plan: plan, multipliers: multipliers,
+        let stageKey = Self.stageKey(plan: plan, source: summary.sourceKind, multipliers: multipliers,
                                      demosaic: parameters.demosaic)
         let cached = session.cachedCameraRGB(for: stageKey)
 
+        // THE CAMERA-RGB SEAM. Whatever the source, what comes out of this
+        // switch is the same thing: an rgba16Float texture of linear camera
+        // RGB, black subtracted, scaled so the sensor's white is 1.0 and
+        // multiplied by the white balance multipliers. A Bayer raw gets
+        // there by demosaicing (or binning) its sensor plane; a linear
+        // source is already demosaiced and only needs the multipliers, and
+        // its BaselineExposure gain. Every stage after this point works on
+        // that texture alone and never asks which kind of source made it.
         let cameraRGB: MTLTexture
         let renderInfo: RenderInfo
         let displayRole: ImageSession.TextureRole
         switch plan {
         case .fullResolution(let origin, let size):
             displayRole = .display
-            cameraRGB = try cached ?? renderFullResolution(
-                session: session, cmdBuffer: cmdBuffer, order: order,
-                multipliers: multipliers, method: parameters.demosaic,
-                origin: origin, size: size)
+            if let bayerOrder {
+                cameraRGB = try cached ?? renderFullResolution(
+                    session: session, cmdBuffer: cmdBuffer, order: bayerOrder,
+                    multipliers: multipliers, method: parameters.demosaic,
+                    origin: origin, size: size)
+            } else {
+                cameraRGB = try cached ?? renderLinearUpload(
+                    session: session, cmdBuffer: cmdBuffer, multipliers: multipliers,
+                    origin: origin, size: size)
+            }
             renderInfo = RenderInfo(outputWidth: cameraRGB.width,
                                      outputHeight: cameraRGB.height,
                                      binQuads: 1, isFullResolution: true,
-                                     demosaicUsed: parameters.demosaic,
+                                     // Nothing to demosaic in a linear source.
+                                     demosaicUsed: bayerOrder == nil ? nil : parameters.demosaic,
                                      sensorRect: CGRect(x: origin.x, y: origin.y,
                                                         width: size.width, height: size.height),
                                      demosaicWasCached: cached != nil)
         case .binned(let quads):
             displayRole = .displayPreview
-            cameraRGB = try cached ?? renderBinned(
-                session: session, cmdBuffer: cmdBuffer, order: order,
-                binQuads: quads, multipliers: multipliers)
+            if let bayerOrder {
+                cameraRGB = try cached ?? renderBinned(
+                    session: session, cmdBuffer: cmdBuffer, order: bayerOrder,
+                    binQuads: quads, multipliers: multipliers)
+            } else {
+                cameraRGB = try cached ?? renderLinearBinned(
+                    session: session, cmdBuffer: cmdBuffer, binQuads: quads, multipliers: multipliers)
+            }
             let span = quads * 2
             renderInfo = RenderInfo(outputWidth: cameraRGB.width,
                                      outputHeight: cameraRGB.height,
@@ -468,7 +494,9 @@ public final class RenderPipeline {
 
         // Neural denoise: blend the session's cached full-frame result in,
         // re-binned and re-white-balanced to match this render.
-        if parameters.aiDenoise > 0, let denoised = session.aiDenoisedCameraRGB {
+        // Never for a linear source (`ImageSession.supportsAIDenoise`): an
+        // edit copied from a raw may carry a strength, but no result exists.
+        if parameters.aiDenoise > 0, session.supportsAIDenoise, let denoised = session.aiDenoisedCameraRGB {
             colourInput = try applyAIDenoise(session: session, cmdBuffer: cmdBuffer, input: cameraRGB,
                                              denoised: denoised, strength: parameters.aiDenoise,
                                              multipliers: multipliers, renderInfo: renderInfo,
@@ -841,17 +869,21 @@ public final class RenderPipeline {
         return result
     }
 
-    static func stageKey(plan: RenderPlan, multipliers: SIMD4<Float>,
+    static func stageKey(plan: RenderPlan, source: RawSourceKind, multipliers: SIMD4<Float>,
                          demosaic: DemosaicMethod) -> ImageSession.StageKey {
+        // A linear source is never demosaiced, so the method can't change
+        // its pixels; normalized, like binning below, so a method change
+        // doesn't needlessly miss the cache.
+        let method = source == .linearRGB ? .bilinear : demosaic
         switch plan {
         case .fullResolution(let origin, let size):
-            return .init(isFullResolution: true, originX: origin.x, originY: origin.y,
+            return .init(source: source, isFullResolution: true, originX: origin.x, originY: origin.y,
                          width: size.width, height: size.height, quads: 0,
-                         multipliers: multipliers, demosaic: demosaic)
+                         multipliers: multipliers, demosaic: method)
         case .binned(let quads):
             // Demosaic method is irrelevant to binning; normalize it so a
             // method change doesn't needlessly miss the cache.
-            return .init(isFullResolution: false, originX: 0, originY: 0,
+            return .init(source: source, isFullResolution: false, originX: 0, originY: 0,
                          width: 0, height: 0, quads: quads,
                          multipliers: multipliers, demosaic: .bilinear)
         }
@@ -920,7 +952,10 @@ public final class RenderPipeline {
         // Each channel saturates at its white balance multiplier, so these
         // move when the user changes temperature — using as-shot values
         // would break highlight recovery the moment the slider was touched.
-        var clipLevel = SIMD3<Float>(multipliers.x, multipliers.y, multipliers.z)
+        // A linear source scales them by its own clip level and gain
+        // (`ImageSession.highlightClipLevel`); for a Bayer raw that factor
+        // is 1 and this is the multipliers themselves.
+        var clipLevel = session.highlightClipLevel(multipliers: multipliers)
         var highlightThreshold = parameters.highlightThreshold
         var highlightStrength = parameters.highlightRecovery
 
@@ -1185,6 +1220,73 @@ public final class RenderPipeline {
         encoder.setBytes(&quads, length: 4, index: 7)
         encoder.setTexture(rgbTex, index: 0)
         dispatch(encoder, pso: gpu.demosaicBinnedPSO, width: outW, height: outH)
+        encoder.endEncoding()
+        return rgbTex
+    }
+
+    // MARK: - Linear sources
+
+    /// The multipliers a linear source's kernels apply: the white balance,
+    /// times the session's BaselineExposure gain. One factor per channel,
+    /// so a kernel multiplies once.
+    private static func linearMultipliers(_ multipliers: SIMD4<Float>, session: ImageSession) -> SIMD4<Float> {
+        multipliers * session.sourceGain
+    }
+
+    /// Full resolution for a linear source: the plane's pixels in the
+    /// requested rectangle, times the multipliers. What `renderFullResolution`
+    /// produces for a Bayer raw, without the demosaic (see LinearSource.metal).
+    private func renderLinearUpload(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                                    multipliers: SIMD4<Float>,
+                                    origin: (x: Int, y: Int),
+                                    size: (width: Int, height: Int)) throws -> MTLTexture {
+        let pso = try gpu.lazyPipeline(.linearUpload)
+        let rgbTex = try session.texture(width: size.width, height: size.height,
+                                         pixelFormat: .rgba16Float, role: .cameraRGB)
+        guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+            throw RenderError.commandBufferFailed
+        }
+        encoder.setComputePipelineState(pso)
+        encoder.setBuffer(session.sensorBuffer, offset: 0, index: 0)
+        var planeWidth = UInt32(session.file.summary.rawWidth)
+        var mul = Self.linearMultipliers(multipliers, session: session)
+        var originXY = SIMD2<UInt32>(UInt32(origin.x), UInt32(origin.y))
+        encoder.setBytes(&planeWidth, length: 4, index: 1)
+        encoder.setBytes(&mul, length: 16, index: 2)
+        encoder.setBytes(&originXY, length: 8, index: 3)
+        encoder.setTexture(rgbTex, index: 0)
+        dispatch(encoder, pso: pso, width: size.width, height: size.height)
+        encoder.endEncoding()
+        return rgbTex
+    }
+
+    /// Reduced resolution for a linear source: a box average over the same
+    /// `2 x binQuads` span, and so the same output size and sensor
+    /// coverage, as the Bayer `renderBinned`.
+    private func renderLinearBinned(session: ImageSession, cmdBuffer: MTLCommandBuffer,
+                                    binQuads: Int, multipliers: SIMD4<Float>) throws -> MTLTexture {
+        let pso = try gpu.lazyPipeline(.linearBinned)
+        let summary = session.file.summary
+        let span = binQuads * 2
+        let outW = max(1, summary.rawWidth / span)
+        let outH = max(1, summary.rawHeight / span)
+        let rgbTex = try session.texture(width: outW, height: outH,
+                                         pixelFormat: .rgba16Float, role: .cameraRGB)
+        guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+            throw RenderError.commandBufferFailed
+        }
+        encoder.setComputePipelineState(pso)
+        encoder.setBuffer(session.sensorBuffer, offset: 0, index: 0)
+        var planeWidth = UInt32(summary.rawWidth)
+        var planeHeight = UInt32(summary.rawHeight)
+        var mul = Self.linearMultipliers(multipliers, session: session)
+        var spanValue = UInt32(span)
+        encoder.setBytes(&planeWidth, length: 4, index: 1)
+        encoder.setBytes(&planeHeight, length: 4, index: 2)
+        encoder.setBytes(&mul, length: 16, index: 3)
+        encoder.setBytes(&spanValue, length: 4, index: 4)
+        encoder.setTexture(rgbTex, index: 0)
+        dispatch(encoder, pso: pso, width: outW, height: outH)
         encoder.endEncoding()
         return rgbTex
     }

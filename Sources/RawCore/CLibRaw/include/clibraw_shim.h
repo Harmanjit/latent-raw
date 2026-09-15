@@ -53,7 +53,36 @@ typedef struct {
     float    lens_min_focal, lens_max_focal;
     float    lens_max_ap_min_focal, lens_max_ap_max_focal;
     float    crop_factor;          // vs 35mm full frame; 0 if unknown
+
+    // Black level per colour channel, in the same units as black_level:
+    // LibRaw's common `black` plus its per-channel `cblack[0..3]`, with any
+    // repeating black pattern (`cblack[4]` x `cblack[5]` values from
+    // `cblack[6]` on) averaged into the channel each position belongs to.
+    // Index 3 is the Bayer quad's second green. Today's renders still use
+    // black_level; merges need these so unequal channel offsets don't tint
+    // the shadows.
+    float    channel_black[4];
+    // The largest value actually present in the unpacked image, in the
+    // units of white_level (sensor counts for Bayer, the stored value for
+    // linear data). LibRaw only fills its own `data_maximum` during
+    // processing steps this shim never runs, so the shim measures it.
+    // 0 for metadata-only opens.
+    float    data_maximum;
+    // DNG BaselineExposure in stops: how much brighter than its stored
+    // values the file asks to be shown. 0 when the file doesn't say.
+    float    baseline_exposure;
+    // 1 when the image is already demosaiced: a DNG with 3 colour samples
+    // per pixel (LinearRaw), which Latent opens as a linear source.
+    uint8_t  is_linear_rgb;
 } CLibRawSummary;
+
+// How the samples behind clibraw_get_linear_image are stored.
+typedef enum {
+    CLIBRAW_LINEAR_NONE    = 0,
+    CLIBRAW_LINEAR_FLOAT3  = 1, // 3 x float32 per pixel (float DNGs)
+    CLIBRAW_LINEAR_UINT16X3 = 2, // 3 x uint16 per pixel
+    CLIBRAW_LINEAR_UINT16X4 = 3, // 4 x uint16 per pixel, the 4th unused
+} CLibRawLinearFormat;
 
 // Opens and unpacks a raw file from an already-mapped read-only buffer
 // (the caller mmap()s the file; LibRaw never needs its own file handle).
@@ -88,6 +117,22 @@ int clibraw_get_cam_xyz(CLibRawHandle *handle, float *out12);
 // the active area out of it (see CLibRawSummary). The pointer is owned
 // by `handle` and is valid until clibraw_close is called.
 const uint16_t *clibraw_get_raw_plane(CLibRawHandle *handle, size_t *out_length);
+
+// For a linear (already demosaiced, 3-colour) image: a pointer to
+// LibRaw's unpacked pixels, the whole raw_width x raw_height readout row
+// by row, without copying, with its storage in *out_format and its byte
+// length in *out_length. Float DNGs arrive as float32 because
+// clibraw_open_buffer clears LibRaw's option that would otherwise turn
+// them into 16-bit integers (and clip everything above white). NULL, with
+// CLIBRAW_LINEAR_NONE, for Bayer and every other layout. Owned by
+// `handle`, valid until clibraw_close.
+const void *clibraw_get_linear_image(CLibRawHandle *handle, CLibRawLinearFormat *out_format,
+                                     size_t *out_length);
+
+// The file's XMP packet (the text of TIFF tag 700) without copying it,
+// or NULL with *out_length 0 when there is none. Not NUL-terminated.
+// Owned by `handle`, valid until clibraw_close.
+const char *clibraw_get_xmp(CLibRawHandle *handle, size_t *out_length);
 
 // Extracts the embedded JPEG preview (for instant thumbnails) into a
 // caller-provided buffer. Call once with buffer=NULL to get the required

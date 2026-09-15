@@ -4,11 +4,13 @@ import os
 
 /// What a decode produces, in a form that crosses a process boundary.
 ///
-/// The service sends three payloads: this metadata as JSON, the sensor
-/// plane as an IOSurface (shared memory: XPC passes a reference, and the
-/// app's GPU reads the very pages the service wrote), and the embedded
-/// preview as `Data`. IOSurface is the only non-plist class on the wire,
-/// and the interface whitelists exactly that.
+/// The service sends three payloads: this metadata as JSON, the pixels as
+/// an IOSurface (shared memory: XPC passes a reference, and the app's GPU
+/// reads the very pages the service wrote), and the embedded preview as
+/// `Data`. The surface holds a `SensorPlane` for a Bayer raw or a
+/// `LinearPlane` for a linear source; `cfaCode` says which, and the app
+/// checks the surface's size against it either way. IOSurface is the only
+/// non-plist class on the wire, and the interface whitelists exactly that.
 ///
 /// The service and the app are built together and ship in one bundle, so
 /// the two ends always agree on this shape; no older payload can arrive.
@@ -17,10 +19,16 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
     /// `rawWidth x rawHeight` readout; see `SensorActiveArea`.
     public var width, height, leftMargin, topMargin: Int
     public var rawWidth, rawHeight: Int
-    /// 0xFF for non-Bayer, else the packed 2x2 order.
+    /// 0xFF for non-Bayer, 0xFE for a linear source (`CFAPattern.linearRGB`),
+    /// else the packed 2x2 order.
     public var cfaCode: UInt8
     public var cameraMultipliers: [Float]
     public var blackLevel, whiteLevel: Float
+    /// Four values: R, G, B, second green.
+    public var channelBlackLevels: [Float]
+    public var dataMaximum: Float
+    public var baselineExposure: Float
+    public var mergeInfo: LinearMergeInfo?
     public var cameraMake, cameraModel, lensModel: String
     public var iso, shutter, aperture, focalLength: Double
     public var timestamp: Int64
@@ -32,8 +40,9 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
     public var cameraToXYZ: [Float]?
     public var thumbnailError: Int32
     public var isMetadataOnly: Bool
-    /// UInt16 samples in the plane; checked against `width x height` and
-    /// the surface's size.
+    /// Samples in the plane, checked against the surface's size: UInt16
+    /// photosites for a Bayer raw (`width x height`), Float16 channel
+    /// values for a linear source (`width x height x 4`).
     public var planeSampleCount: Int
 
     public init(summary s: RawSummary, cameraToXYZ: [Float]?, thumbnailError: Int32, isMetadataOnly: Bool,
@@ -44,6 +53,9 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
         cfaCode = s.cfaPattern.rawCode
         cameraMultipliers = [s.cameraMultipliers.0, s.cameraMultipliers.1, s.cameraMultipliers.2, s.cameraMultipliers.3]
         blackLevel = s.blackLevel; whiteLevel = s.whiteLevel
+        let black = s.channelBlackLevels
+        channelBlackLevels = [black[0], black[1], black[2], black[3]]
+        dataMaximum = s.dataMaximum; baselineExposure = s.baselineExposure; mergeInfo = s.mergeInfo
         cameraMake = s.cameraMake; cameraModel = s.cameraModel; lensModel = s.lensModel
         iso = s.iso; shutter = s.shutter; aperture = s.aperture; focalLength = s.focalLength
         timestamp = Int64(s.captureTime.timeIntervalSince1970)
@@ -66,6 +78,12 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
             cfaPattern: CFAPattern(rawValue: cfaCode),
             cameraMultipliers: (cameraMultipliers[0], cameraMultipliers[1], cameraMultipliers[2], cameraMultipliers[3]),
             blackLevel: blackLevel, whiteLevel: whiteLevel,
+            // Four values from a well-behaved service; anything else is
+            // read as "no per-channel offsets" rather than trusted.
+            channelBlackLevels: channelBlackLevels.count == 4
+                ? SIMD4(channelBlackLevels[0], channelBlackLevels[1], channelBlackLevels[2], channelBlackLevels[3])
+                : SIMD4(repeating: blackLevel),
+            dataMaximum: dataMaximum, baselineExposure: baselineExposure, mergeInfo: mergeInfo,
             cameraMake: cameraMake, cameraModel: cameraModel, lensModel: lensModel,
             iso: iso, shutter: shutter, aperture: aperture, focalLength: focalLength,
             captureTime: Date(timeIntervalSince1970: TimeInterval(timestamp)),

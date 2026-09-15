@@ -20,9 +20,46 @@ public final class ImageSession {
     public let file: RawFile
     let gpu: GPUContext
 
-    /// The sensor plane, uploaded once (DESIGN.md §7.2: shared storage,
-    /// because the CPU writes it and the GPU reads it).
+    /// The source pixels, uploaded once (DESIGN.md §7.2: shared storage,
+    /// because the CPU writes it and the GPU reads it): the sensor plane
+    /// for a Bayer raw, the `LinearPlane` for a linear source.
     let sensorBuffer: MTLBuffer
+
+    /// Which kind of image this is, and so which kernels start its renders.
+    public var sourceKind: RawSourceKind { file.summary.sourceKind }
+
+    /// A factor every pixel is multiplied by at the camera-RGB seam, on
+    /// top of the white balance. For a linear source it is
+    /// 2^BaselineExposure: a merge stores its pixels relative to its
+    /// brightest frame and records in BaselineExposure how much to brighten
+    /// them, so applying it here makes Exposure 0 look like the reference
+    /// frame, as Adobe Camera Raw shows the same file. Always 1 for a Bayer
+    /// raw, whose BaselineExposure (DNGs from cameras have one) the
+    /// pipeline has never applied; starting now would move every existing
+    /// edit.
+    public let sourceGain: Float
+
+    /// Where highlight reconstruction treats a channel as clipped, as a
+    /// factor of that channel's white balance multiplier, in the seam's
+    /// units. For a Bayer raw the sensor clips at 1.0 before white balance,
+    /// so this is 1. A merge's pixels can go far above 1.0 (the darker
+    /// frames' highlights) and it records its own clip level; that level
+    /// is in stored values, before `sourceGain`, so the gain scales it too.
+    public let highlightClipScale: Float
+
+    /// True when lens correction profiles are never looked up for this
+    /// image, because the file says its pixels are already corrected
+    /// (a panorama). Its EXIF may still name the lens, copied from the
+    /// source frames; matching on that would correct the lens twice.
+    /// Manual lens sliders still apply.
+    public let lensCorrectionAlreadyApplied: Bool
+
+    /// Whether the neural denoiser can run on this image. Not for linear
+    /// sources: the network only accepts values up to white and fades
+    /// back to the noisy original near it (`AIDenoiser`), which on a
+    /// merge's values far above 1.0 would do nothing useful over most of
+    /// the highlights and leave a visible boundary where the fade ends.
+    public var supportsAIDenoise: Bool { sourceKind == .bayer }
 
     /// The camera's as-shot multipliers, normalized against green.
     public let asShotMultipliers: SIMD4<Float>
@@ -171,7 +208,12 @@ public final class ImageSession {
     ///
     /// What's deliberately *not* in here: exposure, contrast, grey point,
     /// highlight settings, output space — those all act after this stage.
+    ///
+    /// The source kind is: a session holds one kind, but keys are compared
+    /// as plain values, and a Bayer render and a linear render of the same
+    /// shape mean different pixels.
     struct StageKey: Hashable {
+        let source: RawSourceKind
         let isFullResolution: Bool
         let originX: Int, originY: Int
         let width: Int, height: Int
@@ -196,13 +238,23 @@ public final class ImageSession {
     }
 
     public init(file: RawFile, gpu: GPUContext) throws {
-        guard let plane = file.sensorPlane,
-              let buffer = gpu.makeSharedBuffer(wrapping: plane) else {
+        let buffer: MTLBuffer?
+        switch file.summary.sourceKind {
+        case .bayer: buffer = file.sensorPlane.flatMap { gpu.makeSharedBuffer(wrapping: $0) }
+        case .linearRGB: buffer = file.linearPlane.flatMap { gpu.makeSharedBuffer(wrapping: $0) }
+        }
+        guard let buffer else {
             throw RenderError.gpuBufferAllocationFailed
         }
         self.file = file
         self.gpu = gpu
         self.sensorBuffer = buffer
+
+        let isLinear = file.summary.sourceKind == .linearRGB
+        let gain = isLinear ? powf(2, file.summary.baselineExposure) : 1
+        self.sourceGain = gain
+        self.highlightClipScale = isLinear ? (file.summary.mergeInfo?.clipLevel ?? 1) * gain : 1
+        self.lensCorrectionAlreadyApplied = isLinear && file.summary.mergeInfo?.lensApplied == true
 
         let asShot = ColorKit.normalizedWhiteBalance(file.summary.cameraMultipliers)
         self.asShotMultipliers = asShot
@@ -215,7 +267,9 @@ public final class ImageSession {
 
         let summary = file.summary
         let db = LensfunDatabase.shared
-        if let match = LensMatcher.match(cameraMake: summary.cameraMake, cameraModel: summary.cameraModel,
+        if lensCorrectionAlreadyApplied {
+            self.lensCorrection = nil
+        } else if let match = LensMatcher.match(cameraMake: summary.cameraMake, cameraModel: summary.cameraModel,
                                          lensName: summary.lensModel, identity: summary.lens,
                                          focal: summary.focalLength, in: db) {
             self.lensCorrection = LensCorrection.resolve(
@@ -245,6 +299,16 @@ public final class ImageSession {
         return profile.multipliers(for: whiteBalance)
     }
 
+    /// Where highlight reconstruction takes each channel to be clipped, in
+    /// the camera-RGB seam's units, for a render with these multipliers.
+    /// The order matters: the seam holds stored value x multiplier x
+    /// `sourceGain`, so a stored value at the file's clip level lands at
+    /// clip level x multiplier x gain, which is what `highlightClipScale`
+    /// already folds together.
+    public func highlightClipLevel(multipliers: SIMD4<Float>) -> SIMD3<Float> {
+        SIMD3(multipliers.x, multipliers.y, multipliers.z) * highlightClipScale
+    }
+
     /// Returns a texture of the requested shape and role, reusing a pooled
     /// one when both match a previous request in the current pool.
     ///
@@ -268,7 +332,7 @@ public final class ImageSession {
         return created
     }
 
-    /// Frees the RCD intermediates while keeping the sensor buffer and the
+    /// Frees the RCD intermediates while keeping the source buffer and the
     /// viewport textures. Worth calling after an export, since those
     /// buffers are the largest thing the session holds and won't be needed
     /// again until the next full-resolution render.

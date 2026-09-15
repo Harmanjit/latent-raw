@@ -171,7 +171,9 @@ public enum ExportWorker {
         try Task.checkCancellation()
 
         // Neural denoise is computed, not stored: run it for the export.
-        if parameters.aiDenoise > 0, AIDenoiser.isAvailable {
+        // Not for linear sources, which the denoiser refuses; the pipeline
+        // doesn't blend a strength in for them either.
+        if parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
             let denoiser = try await AIDenoiser.load()
             try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
             lap("denoise")

@@ -9,6 +9,9 @@ extension EditorModel {
     /// What the lens panel says about the open image.
     var lensProfileDescription: String {
         guard hasImage else { return "" }
+        if session?.lensCorrectionAlreadyApplied == true {
+            return "Lens corrections are already applied in this merged image, so no profile is used. Manual sliders still work."
+        }
         guard let c = session?.lensCorrection else {
             let lens = session?.file.summary.lens
             let spec = lens.map { l -> String in
