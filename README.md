@@ -11,7 +11,7 @@ Repository: `Harmanjit/latent-raw`.
   `xcodebuild -downloadComponent MetalToolchain`) the shaders compile at first
   launch.
 - **License:** GPLv3. See `LICENSE`.
-- **Status:** beta (Phase 7). Editing, catalog with a folder sidebar, AI masks, export (with optional HDR gain maps) and soft-proofing work; DNG export does not exist. Expect rough edges.
+- **Status:** beta (Phase 7). Editing (with red-eye and brush healing), a catalog with a folder sidebar, Custom sort, Finder tags, moving and renaming images with their edits, undo in the Library, AI masks, Loupe, Compare and Survey, full-screen and second-display viewing, export (with optional HDR gain maps and a watermark), soft-proofing, printing, contact sheets, a slideshow and hand-off to an external editor work; DNG export does not exist. Expect rough edges.
 - **Name:** the project was called *rawhead* until September 2026. Folders
   catalogued by those builds have a `_rawhead/` container; opening them in
   Latent renames it to `_latent/` in place, keeping every edit and sidecar.
@@ -27,14 +27,14 @@ under **Help > Latent Help**.
 Sources/
   RawCore/            LibRaw wrapper: unpacking, EXIF, embedded previews, the XPC decoder client, export metadata
   latent-rawdecoder/  The sandboxed XPC service that runs LibRaw
-  PixelEngine/        Metal pipeline: kernels, stage cache, heal, tone ranges, presenter, exporter, gain maps
+  PixelEngine/        Metal pipeline: kernels, stage cache, heal, red-eye, tone ranges, presenter, exporter, watermark, gain maps, page layout, slideshow transitions
   ColorKit/           Camera matrices, white balance, working space
   LensKit/            Lensfun database and lens matching
-  Catalog/            Per-folder catalogs: GRDB schema, XMP read/write, reconciliation, thumbnails, export naming
-  MLKit/              Core ML and Vision: masks, AI denoise, the export worker
+  Catalog/            Per-folder catalogs: GRDB schema, XMP read/write, reconciliation, thumbnails, sorting and Finder tags, moving and renaming images, undo, export naming
+  MLKit/              Core ML and Vision: masks, AI denoise, red-eye detection, the export worker
   HelpKit/            The Help window's content: the wiki's Markdown, links and search
   latent-cli/         Headless renderer for benchmarks
-  latent-app/         The SwiftUI/AppKit app (viewport, grid, sidebar, adjustments, export, menus)
+  latent-app/         The SwiftUI/AppKit app (viewport, grid, sidebar, adjustments, export, print, slideshow, menus)
 Tests/                Unit, golden-image, help-page and app-logic tests
 docs/wiki/            The user guide (GitHub wiki and in-app Help)
 vendor/               Vendored C/C++ dependencies (LibRaw) built as XCFrameworks
@@ -50,7 +50,9 @@ app can reach only the folders you choose in an open panel or add to the
 sidebar's favourites, and everything inside those (remembered between
 launches by security-scoped bookmark), its own container under
 `~/Library/Containers/com.latent.app`, and nothing on the network, since
-the network entitlement is deliberately absent.
+the network entitlement is deliberately absent. The one entitlement beyond
+files and bookmarks is `com.apple.security.print`, which the sandbox
+requires before it lets File > Print reach the printing system.
 
 Raw decoding runs in a separate XPC service, `LatentRawDecoder.xpc`,
 signed with the sandbox and nothing else: no file access (it is handed
@@ -88,12 +90,19 @@ checksum before installing anything.
 What it writes, and where:
 
 - `_latent/` inside each photo folder you open: the catalog database,
-  one XMP sidecar per image (ratings, keywords, edits, history) and
-  thumbnails. Nothing is written elsewhere in your photo folders.
+  one XMP sidecar per image (ratings, keywords, edits, history),
+  thumbnails and, once you arrange a Custom sort, `custom-order.json`.
+  Nothing else is written in your photo folders unless you ask: Move
+  and Copy to Folder and Rename change files (never overwriting one, and
+  undoing a copy puts it in the Trash), and Edit in External Editor
+  writes a TIFF to the folder set for it. Finder tags are read, never
+  written.
 - `~/Library/Application Support/latent/`: compiled Core ML models and
   your saved presets.
 - Settings in the app's UserDefaults, including bookmarks for the last
-  folder, the export folder and the sidebar's favourite folders.
+  folder, the export folder, the sidebar's favourite folders, the last
+  five Move/Copy destinations, the external editor's folder and
+  applications, and slideshow songs.
 - Exported files go only where you choose. By default they carry the
   photo's own metadata (artist, copyright, camera details) plus Latent's
   keywords and rating, but not its **GPS location**, place names or the
@@ -108,10 +117,13 @@ unless you opt in.
 ## Settings (⌘,)
 
 Theme (system/light/dark), accent colour, image surround grey, render
-timings, default export folder, subfolder policy for new catalogs, and
-the Core ML compute choice. Export naming templates, sequence numbers,
-letter case, collision policy, date subfolders, the HDR gain map and saved
-export presets live in the export sheet (⇧⌘E).
+timings, default export folder, subfolder policy for new catalogs, whether
+the arrow keys pan a zoomed-in image, the Core ML compute choice, the
+slideshow (timing, transition, captions, music) and the external editor
+(application and folder). Export naming templates, sequence numbers,
+letter case, collision policy, date subfolders, the HDR gain map, the
+watermark and saved export presets live in the export sheet (⇧⌘E); the
+print layout lives in the print panel (⌘P).
 
 ## Building (on macOS, Apple Silicon, Xcode 16+)
 

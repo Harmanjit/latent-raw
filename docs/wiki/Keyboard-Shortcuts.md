@@ -5,7 +5,7 @@
 
 Single keys do nothing while you type in a text field, such as search, keywords or a slider's value; click the grid or the image to get them back. The menu bar lists these commands too, with a single key after the name, as in Pick (P).
 
-In the Library grid, stars, flags and rotation apply to every selected image. In Loupe, Compare and Develop they apply to the image shown.
+In the Library grid, stars, flags and rotation apply to every selected image. In Loupe, Compare and Develop they apply to the image shown, and in Survey to the focused pane.
 
 ## Views and navigation
 
@@ -45,7 +45,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 
 | Keys | Action |
 |---|---|
-| ⌘Z, ⇧⌘Z | Undo, redo |
+| ⌘Z, ⇧⌘Z | Undo, redo (in Develop, the image's edit history; elsewhere, what you did in the Library, moves and renames included) |
 | `\` | Before / after |
 | ⌘U | Auto adjust |
 | R | Crop and straighten tool |
