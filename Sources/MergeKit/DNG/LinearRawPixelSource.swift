@@ -30,8 +30,8 @@ public struct PixelRegion: Sendable, Equatable, CustomStringConvertible {
 /// to fit under 1.0 (see `ExposureNormalisation`).
 ///
 /// Asking by rectangle is what keeps memory flat: a 45 MP image in half
-/// floats is 270 MB, and the writer only ever holds one tile (512 x 512
-/// pixels, 1.5 MB) of it. Throwing from `fill` stops the write, and the
+/// floats is 270 MB, and the writer only ever holds a tile of it (512 x 512
+/// pixels, 1.5 MB, plus working copies). Throwing from `fill` stops the write, and the
 /// half-written file is deleted.
 ///
 /// Not Sendable: a source may hold a Metal texture. Use it on one thread.

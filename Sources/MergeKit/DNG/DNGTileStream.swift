@@ -4,14 +4,24 @@ import Accelerate
 import Foundation
 import os
 
+#if !_endian(little)
+#error("DNGTileStream writes half floats in memory order, which must be little-endian")
+#endif
+
 /// Produces the main image's tiles in the order the directory lists them:
 /// left to right, top to bottom.
 ///
 /// For each tile it asks the source for the part inside the image, lays it
 /// into a full-size tile buffer (whatever the image doesn't reach stays 0),
 /// divides by the normalisation, checks every sample, and hands the bytes
-/// on, compressed or not. The buffer is reused, so memory stays at one tile
-/// (one row of tiles when compressing, which is done in parallel).
+/// on, compressed or not. The buffers are reused, so memory stays at a few
+/// tiles' worth, about 6 MB (a row of tiles more when compressing, which is
+/// done in parallel).
+///
+/// The tile's bytes are the half floats exactly as they sit in memory. That
+/// is little-endian on every Mac Latent runs on, which is the byte order the
+/// file declares ("II"); the check above turns any other platform into a
+/// build error rather than a file of scrambled pixels.
 struct DNGTileStream {
     let pixels: LinearRawPixelSource
     let tileSize: Int
