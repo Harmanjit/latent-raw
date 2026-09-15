@@ -72,7 +72,9 @@ final class DeghostTests: XCTestCase {
             }
 
             XCTAssertEqual(report.ghostMaskedFractions.count, 3)
-            XCTAssertEqual(report.ghostMaskedFractions[1], 0, "the reference is never masked")
+            // The squares' moving area comes from the reference frame, so
+            // nothing of it is masked.
+            XCTAssertEqual(report.ghostMaskedFractions[1], 0, "the reference is the squares' source")
             for i in [0, 2] {
                 XCTAssertGreaterThan(report.ghostFlaggedFractions[i], 0)
                 XCTAssertLessThan(report.ghostMaskedFractions[i], 0.05, "\(amount): only around the squares")

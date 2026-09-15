@@ -104,11 +104,11 @@ final class DeghostRealBracketTests: XCTestCase {
 
     /// People walking through a market, 5 frames 1 stop apart, handheld
     /// (frames up to 28 px apart at the corners). Auto Align makes the
-    /// region far sharper; deghosting at medium adds a little more, not a
-    /// lot: the walking people are about as bright as the sunlit street
-    /// behind them, so brightness alone finds only part of their movement
-    /// (docs/wiki/Photo-Merge.md, Deghost). Aligned, it leaves out under a
-    /// fifth of any frame; unaligned it was nearly half.
+    /// region far sharper, and deghosting at medium sharper again (by 7.5%
+    /// in September 2026): the two women walking through it come from one
+    /// frame each, whole, where brightness alone and a source chosen block
+    /// by block had left them translucent, one with two heads. Aligned, it
+    /// leaves out under a fifth of any frame; unaligned it was nearly half.
     func testMarketMiresPeopleComeFromOneExposure() async throws {
         let urls = try Self.bracket("empa-market-mires-2", extension: "NEF")
         let region: Region = (900, 1400, 900, 600)
@@ -120,7 +120,7 @@ final class DeghostRealBracketTests: XCTestCase {
         print("Market Mires: sharpness unaligned \(unalignedSharpness), aligned \(outcome.none.sharpness), "
               + "aligned at medium \(outcome.medium.sharpness), masked \(outcome.medium.report.ghostMaskedFractions)")
         XCTAssertGreaterThan(outcome.none.sharpness, 1.1 * unalignedSharpness, "alignment sharpens")
-        XCTAssertGreaterThan(outcome.medium.sharpness, outcome.none.sharpness, "deghosting doesn't soften")
+        XCTAssertGreaterThan(outcome.medium.sharpness, 1.04 * outcome.none.sharpness, "deghosting sharpens")
         Self.checkShares(outcome, most: 0.2)
     }
 
@@ -160,12 +160,12 @@ final class DeghostRealBracketTests: XCTestCase {
         Self.checkShares(outcome, most: 0.3)
     }
 
-    /// Every frame but the reference has a share masked, none too much; the
-    /// reference none; and deghosting costs no GPU memory to speak of.
+    /// No frame has too much masked, and deghosting costs no GPU memory to
+    /// speak of. The reference frame is masked too, where a moving area
+    /// comes from another frame (its reference is clipped there, say).
     static func checkShares(_ outcome: Outcome, most: Double, file: StaticString = #filePath, line: UInt = #line) {
         let masked = outcome.medium.report.ghostMaskedFractions
-        XCTAssertEqual(masked[outcome.reference], 0, file: file, line: line)
-        for (i, share) in masked.enumerated() where i != outcome.reference {
+        for (i, share) in masked.enumerated() {
             XCTAssertLessThan(share, most, "frame \(i)", file: file, line: line)
         }
         XCTAssertLessThan(Double(outcome.medium.report.peakGPUBytes), 1.1 * Double(outcome.none.report.peakGPUBytes),
