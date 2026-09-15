@@ -105,6 +105,10 @@ public final class GPUContext: @unchecked Sendable {
         case mergeHDRAccumulate
         case mergeHDRResolve
         case mergeHDRDownsample
+        // Photo Merge's frame alignment (MergeWarp.metal, MergeWarpKernels.swift).
+        case mergeAlignReduce
+        case mergeWarpRGBA
+        case mergeWarpMask
     }
 
     /// Built pipelines, by kernel. A Mutex because renders run on several
