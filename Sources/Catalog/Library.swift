@@ -275,6 +275,12 @@ public final class Library: ObservableObject {
     /// next.
     public var willReplaceCatalog: (@MainActor () -> Void)?
 
+    /// Where library actions (ratings, flags, rotation, keywords, pasted
+    /// settings, file moves and renames) register their undo. The app sets
+    /// it to the window's undo manager; nil means those actions can't be
+    /// undone, as in tests that don't set one.
+    public weak var undoManager: UndoManager?
+
     /// Tests only: runs after a folder's list is read and before it is
     /// shown, so a test can hold one open or refresh while another finishes.
     var willPublishList: (@MainActor (Catalog) async throws -> Void)?
