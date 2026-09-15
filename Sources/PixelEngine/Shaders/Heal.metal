@@ -41,6 +41,10 @@ using namespace metal;
 // the surroundings mask and the feathered edge, so both follow the whole
 // stroke as one shape, and a piece writes only the pixels nearer its own
 // segment than any other, so the pieces tile the stroke without overlap.
+// Every piece reads the image as it was before the stroke (`before`, a
+// copy HealStage makes), as a circle reads the image before it, so the
+// pieces are independent of each other and a tile holds only the pieces
+// it shows, however far the stroke runs.
 // A circle has no list and takes the original path through every kernel.
 
 struct HealPatchGPU {
@@ -91,7 +95,8 @@ inline float healFillWeight(float dist, float radius, float feather) {
 
 // One thread per cell: the weighted means of the k x k texels under it,
 // around the target and at the same offsets around the source. Alpha
-// holds the mean weight, which the ratio divides back out.
+// holds the mean weight, which the ratio divides back out. `state` is the
+// image before the patch: for a stroke's pieces, before the stroke.
 kernel void healGather(
     texture2d<float, access::sample> state   [[texture(0)]],
     texture2d<float, access::write>  target  [[texture(1)]],
@@ -176,6 +181,7 @@ kernel void healApply(
     texture2d<float, access::read>   fieldT  [[texture(1)]],
     texture2d<float, access::read>   fieldS  [[texture(2)]],
     texture2d<float, access::write>  scratch [[texture(3)]],
+    texture2d<float, access::sample> before  [[texture(4)]],   // the source is read from this
     constant HealPatchGPU &p                 [[buffer(0)]],
     constant HealGridGPU &g                  [[buffer(1)]],
     constant float2 &sensorSize              [[buffer(2)]],
@@ -214,8 +220,8 @@ kernel void healApply(
         dist = length(d);
         src = healSensorToTexture(p.geometry.zw * sensorSize + d, tileOrigin, binSpan);
     }
-    if (owned && dist < r && healInsideTexture(src, state)) {
-        float4 v = state.sample(s, src);
+    if (owned && dist < r && healInsideTexture(src, before)) {
+        float4 v = before.sample(s, src);
         if (p.params.z < 0.5) {
             // Heal. A ratio in linear light, because texture is mostly
             // reflectance times illumination: pores copied from a lit
