@@ -282,7 +282,7 @@ Every decision is made on a **1/8-scale** copy. Only the final warp and blend ru
 | 8a | **Panorama geometry:** camera solve, projections, CPU twin, gains, crop | 2 wk | `MergeKit/Pano/Geometry/*` | ⇉ with 8b (agree the `PanoCameras` struct first) |
 | 8b | **Panorama GPU:** `mergeLensPrep`, warp, Voronoi, tiled blend, scratch files | 2–3 wk | `MergeKit/Pano/Blend/*`, `Shaders/MergePano.metal` | ⇉ with 8a |
 | 8c | Panorama CLI + app (⌃M), `PanoramaOutputSizer` + downsample warning | 1 wk | CLI, app | after 8a+8b |
-| 9 | HDR Panorama: bracket grouping, per-position HDR → panorama | 1–2 wk | `MergeKit/HDRPano/*`, app | — |
+| 9 | HDR Panorama (**experimental**): bracket grouping, per-position HDR → panorama. No real HDR panorama test set exists (none are freely licensed and Harman hasn't shot one), so tests build synthetic ones: overlapping windows cut from the real Ihrke and Empa brackets, warped by known camera rotations. The menu item and docs say "Experimental" until a real set has been checked. | 1–2 wk | `MergeKit/HDRPano/*`, app | — |
 | 10 | Later: own FAST/BRIEF matcher + bundle adjustment (multi-row/360), spherical projection, graph-cut seams, tiled editor/export, deflate, Find Bracket Sets, stacks | large | — | — |
 
 **Timeline:** first user-visible release (tripod HDR) at the end of phase 5b, about 8–11 weeks. That is realistic for step-by-step work; the earlier "preliminary step" framing undersold phases 1–2.
