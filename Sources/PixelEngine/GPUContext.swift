@@ -99,6 +99,12 @@ public final class GPUContext: @unchecked Sendable {
     enum LazyKernel: String, CaseIterable, Sendable {
         case linearUpload
         case linearBinned
+        // Photo Merge's HDR merge (MergeHDR.metal, HDRMergeKernels.swift).
+        case mergeHDRBinnedAnalysis
+        case mergeHDRRawPrepare
+        case mergeHDRAccumulate
+        case mergeHDRResolve
+        case mergeHDRDownsample
     }
 
     /// Built pipelines, by kernel. A Mutex because renders run on several
@@ -255,7 +261,7 @@ public final class GPUContext: @unchecked Sendable {
         // won't exist in the runtime-compiled library.
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
                             "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye", "Slideshow",
-                            "LinearSource"]
+                            "LinearSource", "MergeHDR"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound
