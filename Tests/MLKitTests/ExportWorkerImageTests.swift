@@ -42,6 +42,33 @@ final class ExportWorkerImageTests: XCTestCase {
         XCTAssertEqual(page.width < page.height, wide.width > wide.height, "a quarter turn swaps the sides")
     }
 
+    /// A cropped photo still reaches the size asked for: the render bins
+    /// for the crop, not for the whole frame, which cropped would come out
+    /// smaller (the exporter never enlarges), for a file and a page alike.
+    func testACroppedRenderReachesTheRequestedSize() async throws {
+        let path = AIMaskTests.assetPath("golden_nikon_d750_cc0.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let gpu = try GPUContext()
+        var edit = EditParameters()
+        edit.crop = CropParameters(size: [0.5, 0.5])
+        let json = try EditStack(parameters: edit).encodeJSON()
+        let source = URL(fileURLWithPath: path)
+
+        let page = try await ExportWorker.renderImage(ExportWorker.ImageRequest(
+            sourceURL: source, editStackJSON: json, userRotation: 0, colorSpace: .sRGB, maxLongEdge: 700,
+            bitsPerComponent: 8, runsAIDenoise: false), gpu: gpu).cgImage
+        XCTAssertEqual(max(page.width, page.height), 700)
+
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("latent-crop-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: out) }
+        _ = try await ExportWorker.export(ExportWorker.Request(
+            sourceURL: source, destinationURL: out, editStackJSON: json, userRotation: 0,
+            settings: ExportSettings(format: .png), colorSpace: .sRGB, maxLongEdge: 700, includeMetadata: false), gpu: gpu)
+        let exported = try XCTUnwrap(CGImageSourceCreateImageAtIndex(
+            try XCTUnwrap(CGImageSourceCreateWithURL(out as CFURL, nil)), 0, nil))
+        XCTAssertEqual(max(exported.width, exported.height), 700)
+    }
+
     func testAnUnreadableEditIsAnErrorNotAnUneditedPhoto() async throws {
         let path = AIMaskTests.assetPath("golden_nikon_d750_cc0.nef")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path))

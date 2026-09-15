@@ -161,4 +161,25 @@ final class CropTests: XCTestCase {
         let right = try pixel(CropParameters(centre: [0.75, 0.5], size: [0.5, 1]))
         XCTAssertGreaterThan(right.g, 200); XCTAssertLessThan(right.r, 50)
     }
+
+    /// A resized export bins for the cropped image's size, not the whole
+    /// frame's: the exporter never enlarges, so a crop of a frame binned to
+    /// the target would come out smaller than asked.
+    func testExportScaleBinsForTheCroppedImage() {
+        func quads(_ width: Int, _ height: Int, _ crop: CropParameters, _ target: Int?) -> Int {
+            switch ExportPlan.scale(rawWidth: width, rawHeight: height, crop: crop, maxLongEdge: target) {
+            case .full: return 0
+            case .binned(let quads): return quads
+            default: return -1
+            }
+        }
+        let half = CropParameters(size: [0.5, 0.5])
+        XCTAssertEqual(quads(6000, 4000, .none, 1000), 3, "uncropped: 6000 / (2 x 1000)")
+        XCTAssertEqual(quads(6000, 4000, half, 1000), 1, "half the frame is 3000 px")
+        XCTAssertEqual(quads(6000, 4000, half, 2048), 0, "3000 px can't be binned for 2048")
+        XCTAssertEqual(quads(6000, 4000, half, nil), 0)
+        // A binned render's size rounds down, which can cost the crop its
+        // last pixel: 1000 x 0.8993 is 899. Bin less.
+        XCTAssertEqual(quads(4003, 3000, CropParameters(size: [0.8993, 0.8993]), 900), 1)
+    }
 }
