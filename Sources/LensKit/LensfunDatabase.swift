@@ -106,6 +106,8 @@ final class LensfunXMLParser: NSObject, XMLParserDelegate {
     private var distortion: [LensfunLens.DistortionPoint] = []
     private var tca: [LensfunLens.TCAPoint] = []
     private var vignetting: [LensfunLens.VignettingPoint] = []
+    private var focalElement: ClosedRange<Float>?
+    private var apertureElement: Float?
 
     func parse(url: URL) throws {
         guard let parser = XMLParser(contentsOf: url) else { throw LensfunError.parseFailed(url.path) }
@@ -122,6 +124,7 @@ final class LensfunXMLParser: NSObject, XMLParserDelegate {
         maker = ""; modelDefault = ""; modelNames = []; mounts = []
         cropFactor = 1; aspectRatio = 1.5
         distortion = []; tca = []; vignetting = []
+        focalElement = nil; apertureElement = nil
     }
 
     private func f(_ attrs: [String: String], _ key: String, _ fallback: Float) -> Float {
@@ -136,6 +139,16 @@ final class LensfunXMLParser: NSObject, XMLParserDelegate {
         switch name {
         case "mount": mountName = ""; mountCompat = []
         case "camera", "lens": reset()
+        case "focal" where path.count >= 2 && path[path.count - 2] == "lens":
+            // <focal min="18" max="70"/> or <focal value="50"/>.
+            if let v = attrs["value"].flatMap(Float.init) { focalElement = v...v }
+            else if let lo = attrs["min"].flatMap(Float.init), let hi = attrs["max"].flatMap(Float.init), lo <= hi {
+                focalElement = lo...hi
+            }
+        case "aperture" where path.count >= 2 && path[path.count - 2] == "lens":
+            // <aperture min="3.5" max="22"/>: min is the widest (smallest
+            // f-number), max the smallest opening, which isn't needed.
+            apertureElement = attrs["min"].flatMap(Float.init) ?? attrs["value"].flatMap(Float.init)
         case "distortion":
             let focal = f(attrs, "focal", 0)
             let model: DistortionModel?
@@ -198,9 +211,12 @@ final class LensfunXMLParser: NSObject, XMLParserDelegate {
             cameras.append(LensfunCamera(maker: maker, model: modelDefault, modelNames: modelNames,
                                          mount: mounts.first ?? "", cropFactor: cropFactor))
         case (_, "lens"):
+            let spec = LensSpec.resolve(names: [modelDefault] + modelNames,
+                                        focalElement: focalElement, apertureElement: apertureElement)
             lenses.append(LensfunLens(maker: maker, model: modelDefault, modelNames: modelNames,
                                       mounts: mounts, cropFactor: cropFactor, aspectRatio: aspectRatio,
-                                      distortion: distortion, tca: tca, vignetting: vignetting))
+                                      distortion: distortion, tca: tca, vignetting: vignetting,
+                                      spec: spec))
         default: break
         }
         currentLang = nil
