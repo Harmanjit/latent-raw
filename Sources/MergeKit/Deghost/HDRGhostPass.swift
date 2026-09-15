@@ -10,8 +10,9 @@ import RawCore
 extension HDRMerger {
     /// What the deghosting pass hands the merge.
     struct GhostPass {
-        /// One per frame, in the analysis's order; nil for the reference
-        /// frame, which is never masked, and for frames left out of the merge.
+        /// One per frame, in the analysis's order, the reference frame's too
+        /// (it is left out of a moving area another frame is the source of);
+        /// nil for frames left out of the merge.
         let masks: [HDRGhostMask?]
         /// Each frame's levels (`HDRMerger.levels`), so the merge needn't
         /// work them out again; nil for frames left out of the merge.
@@ -21,7 +22,7 @@ extension HDRMerger {
     /// Finds every frame's ghost mask (`HDRGhostDetector` has the steps).
     ///
     /// Memory stays flat however many frames there are: each frame is
-    /// opened, measured at quarter size and let go, keeping only 4 bytes per
+    /// opened, measured at quarter size and let go, keeping only 11 bytes per
     /// quarter-size pixel on the CPU until its movement is found; what
     /// reaches the merge is 1 byte per quarter-size pixel per frame. The
     /// detector's GPU textures are freed when this returns, before the merge
@@ -29,8 +30,8 @@ extension HDRMerger {
     ///
     /// **With Auto Align** every frame's measurement is warped onto the
     /// reference frame before it is compared (`HDRGhostDetector.measure`), so
-    /// a frame's brightness is compared with the same part of the scene in
-    /// the others, not with whatever sits at the same pixel. Frames Auto
+    /// a frame's brightness and colour are compared with the same part of the
+    /// scene in the others, not with whatever sits at the same pixel. Frames Auto
     /// Align left out aren't looked at.
     ///
     /// - Parameters:
@@ -64,7 +65,8 @@ extension HDRMerger {
                 let measurement = try report.time("Measure \(name) for deghosting") {
                     try Self.gpuStep {
                         try detector.measure(file, index: index, levels: frameLevels, relativeEV: frame.relativeEV,
-                                             movingToReference: alignment?.homographies[index])
+                                             movingToReference: alignment?.homographies[index],
+                                             isDarkest: index == merged.last)
                     }
                 }
                 report.sampleMemory(gpu.device)
@@ -93,7 +95,7 @@ extension HDRMerger {
         var fractions: [Double] = []
         for (index, frame) in frames.enumerated() {
             try Task.checkCancellation()
-            guard index != reference, merged.contains(index) else {
+            guard merged.contains(index) else {
                 masks.append(nil)
                 fractions.append(0)
                 continue
