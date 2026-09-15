@@ -141,6 +141,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// because one full-size render with AI noise reduction can take tens
     /// of seconds, and stopping short would leave that file half-written.
     static let exportWaitLimit: Duration = .seconds(60)
+    /// How long quitting waits while images are being moved or copied: the
+    /// image under way finishes, and one raw copied whole to a slow disk or
+    /// network volume can take tens of seconds.
+    static let fileOperationWaitLimit: Duration = .seconds(60)
 
     /// Quitting must not lose work. Three things can be at risk:
     ///
@@ -185,8 +189,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             for library in libraries {
-                if await !Self.finishes(within: Self.catalogWaitLimit, library.waitForPendingWork) {
-                    Log.catalog.error("Quit: catalog writes did not finish within \(Self.catalogWaitLimit, privacy: .public); quitting anyway")
+                let limit = library.fileOperations.isBusy ? Self.fileOperationWaitLimit : Self.catalogWaitLimit
+                if await !Self.finishes(within: limit, library.waitForPendingWork) {
+                    Log.catalog.error("Quit: catalog writes did not finish within \(limit, privacy: .public); quitting anyway")
                 }
             }
             // An export still writing is cut short by the exit: remove its
@@ -194,6 +199,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let abandoned = SafeFileWriter.abandonPendingWrites()
             if abandoned > 0 {
                 Log.export.error("Quit: removed \(abandoned, privacy: .public) unfinished export file(s)")
+            }
+            // Likewise the hidden copy of an image being moved or copied,
+            // which then stays where it was.
+            let transfers = ImageTransfer.abandonTemporaryCopies()
+            if transfers > 0 {
+                Log.catalog.error("Quit: removed \(transfers, privacy: .public) unfinished copies of images being moved or copied")
             }
             sender.reply(toApplicationShouldTerminate: true)
         }

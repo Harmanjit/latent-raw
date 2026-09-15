@@ -4,8 +4,8 @@ import os
 /// Undo and redo for what the Library changes: ratings, flags, rotation,
 /// keywords, and settings pasted or presets applied to stored edits.
 ///
-/// Actions are filed on `undoManager` (the window's) with their catalog as
-/// the target. Image ids belong to a catalog, so a catalog that is replaced
+/// Actions are filed on `undoManager` (the Library's own) with their
+/// catalog as the target. Image ids belong to a catalog, so a catalog that is replaced
 /// takes its actions with it (`dropUndo(for:)`), and an undo never runs on
 /// another catalog's ids.
 ///

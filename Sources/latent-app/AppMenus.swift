@@ -24,6 +24,9 @@ struct CommandState: Equatable {
     /// What Undo and Redo would change, nil when there is nothing to.
     var undoLabel: String?
     var redoLabel: String?
+    /// Undo or Redo would move, copy or rename files.
+    var undoChangesFiles = false
+    var redoChangesFiles = false
     /// A text field in the window has the keyboard.
     var isEditingText = false
     var showingBefore = false
@@ -89,9 +92,10 @@ struct CommandState: Equatable {
         case .contactSheet: editorReady && selectionCount > 0
         // Edits are undone in Develop, library actions in the other modes
         // (the labels are those of the mode). Typing is undone by the Edit
-        // menu itself (see LatentCommands).
-        case .undo: (mode != .develop || hasImage) && undoLabel != nil
-        case .redo: (mode != .develop || hasImage) && redoLabel != nil
+        // menu itself (see LatentCommands). Undoing a move, copy or rename
+        // is refused while an export reads the files, as Move is.
+        case .undo: (mode != .develop || hasImage) && undoLabel != nil && !(undoChangesFiles && exportQueueRunning)
+        case .redo: (mode != .develop || hasImage) && redoLabel != nil && !(redoChangesFiles && exportQueueRunning)
         case .copySettings: hasImage || hasSelection
         case .pasteSettings: hasImage || selectionCount > 0
         case .clearFilter: filterActive

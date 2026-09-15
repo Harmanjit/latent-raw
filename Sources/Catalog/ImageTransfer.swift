@@ -229,6 +229,25 @@ public enum ImageTransfer {
         return report
     }
 
+    /// For quitting when a move or copy can't be waited for any longer:
+    /// deletes every hidden whole copy still being made or waiting to be
+    /// placed, and makes placing it fail, so the exit leaves no hidden file
+    /// that nothing would ever find. Returns how many.
+    @discardableResult
+    public static func abandonTemporaryCopies() -> Int {
+        temporaryCopies.withLock { copies in
+            let abandoned = copies
+            for url in abandoned { try? FileManager.default.removeItem(at: url) }
+            copies.removeAll()
+            return abandoned.count
+        }
+    }
+
+    /// The hidden whole copies of transfers under way (`abandonTemporaryCopies`).
+    /// Placing one and abandoning them take the lock, so neither sees the
+    /// other half done.
+    private static let temporaryCopies = OSAllocatedUnfairLock<Set<URL>>(initialState: [])
+
     static let logger = Logger(subsystem: "com.latent.app", category: "catalog")
 
     enum TransferError: Error, CustomStringConvertible {
@@ -236,6 +255,7 @@ public enum ImageTransfer {
         case insideCatalogContainer
         case destinationMissing
         case changedSinceCopied
+        case abandoned
         case originalNotRemoved(copy: URL, reason: String)
 
         var description: String {
@@ -244,6 +264,7 @@ public enum ImageTransfer {
             case .insideCatalogContainer: "Images can’t go inside a catalog’s \(Catalog.containerName) folder."
             case .destinationMissing: "The destination folder can’t be found."
             case .changedSinceCopied: "The copy has changed or been replaced since it was made, so it was left where it is."
+            case .abandoned: "Latent quit before it was in place, so it was left where it was."
             case .originalNotRemoved(let copy, let reason):
                 "It was copied to “\(copy.deletingLastPathComponent().lastPathComponent)”, but the original couldn’t be removed: \(reason)"
             }
@@ -355,15 +376,17 @@ public enum ImageTransfer {
         // The slow part, outside any actor: a copy, or a move to another
         // volume, first makes a whole copy under a hidden name.
         var temporary: URL?
+        defer {
+            if let temporary {
+                temporaryCopies.withLock { _ = $0.remove(temporary) }
+                if FileOperations.itemExists(temporary) { try? FileManager.default.removeItem(at: temporary) }
+            }
+        }
         if mode == .copy || faults.treatAsOtherVolume || FileOperations.device(ofFolder: folder) != sourceIdentity.device {
             let hidden = FileOperations.temporaryURL(beside: folder.appendingPathComponent(source.lastPathComponent))
-            try FileManager.default.copyItem(at: source, to: hidden)
+            temporaryCopies.withLock { _ = $0.insert(hidden) }
             temporary = hidden
-        }
-        defer {
-            if let temporary, FileOperations.itemExists(temporary) {
-                try? FileManager.default.removeItem(at: temporary)
-            }
+            try FileManager.default.copyItem(at: source, to: hidden)
         }
         try faults.beforePlacing?(source)
 
@@ -412,6 +435,16 @@ public enum ImageTransfer {
         }
         let sourceSidecarIdentity = FileOperations.identity(sourceSidecar)
         let hasSidecar = sourceSidecarIdentity != nil
+        if !sameCatalog {
+            // An old `_rawhead` becomes `_latent` before any path inside it
+            // is worked out, or the sidecar would go into a folder the
+            // catalog no longer reads. The container is read again for every
+            // image, since an earlier one in the batch may have renamed it.
+            if hasSidecar, destination.container.lastPathComponent == Catalog.legacyContainerName {
+                try ensureContainer(for: destination)
+            }
+            destination = CatalogLocation(root: destination.root, prefix: destination.prefix)
+        }
 
         // A name is taken by a file, by a sidecar a file left behind (it would
         // be applied to this image), or by a row whose file has gone (whose
@@ -547,10 +580,14 @@ public enum ImageTransfer {
     }
 
     /// The file itself: the hidden copy renamed into place, or the original
-    /// renamed (a change of case allowed).
+    /// renamed (a change of case allowed). A copy abandoned by quitting is
+    /// never placed.
     private static func placeFile(_ plan: Plan, at destination: URL) throws {
         if let temporary = plan.temporaryCopy {
-            try FileOperations.renameExclusively(temporary, to: destination)
+            try temporaryCopies.withLock { copies in
+                guard copies.contains(temporary) else { throw TransferError.abandoned }
+                try FileOperations.renameExclusively(temporary, to: destination)
+            }
         } else {
             try FileOperations.renameAllowingCaseChange(plan.source, to: destination)
         }
@@ -723,18 +760,53 @@ extension Catalog {
     /// Whether reconciling reaches the subfolder `relPath`: by each folder's
     /// recorded mode on the way down, or the catalog's default.
     func includesSubfolder(_ relPath: String) throws -> Bool {
+        FolderAccess.isIncluded(relPath, defaultMode: try defaultSubfolderMode(), modes: try recordedSubfolderModes())
+    }
+
+    /// The subfolders on the way down to `relPath` that nobody has decided
+    /// about yet (`ask`, recorded or by default), outermost first. Images
+    /// put in `relPath` belong to this catalog or another depending on the
+    /// answer, so it is asked before they go. The list stops at a folder
+    /// that is already a catalog of its own, by its mode or its container.
+    func undecidedSubfolders(onTheWayTo relPath: String) throws -> [String] {
         let defaultMode = try defaultSubfolderMode()
-        let modes = try dbQueue.read { db in
+        let modes = try recordedSubfolderModes()
+        var undecided: [String] = []
+        var prefix = ""
+        for part in relPath.split(separator: "/") {
+            prefix = prefix.isEmpty ? String(part) : prefix + "/" + part
+            guard !FolderAccess.hasCatalog(rootPath.appendingPathComponent(prefix, isDirectory: true)) else { break }
+            switch modes[prefix] ?? defaultMode {
+            case .included: continue
+            case .independent: return undecided
+            case .ask: undecided.append(prefix)
+            }
+        }
+        return undecided
+    }
+
+    private func recordedSubfolderModes() throws -> [String: SubfolderMode] {
+        try dbQueue.read { db in
             try Row.fetchAll(db, sql: "SELECT rel_path, mode FROM subfolders").reduce(into: [String: SubfolderMode]()) { result, row in
                 if let mode = SubfolderMode(rawValue: row["mode"]) { result[row["rel_path"]] = mode }
             }
         }
-        return FolderAccess.isIncluded(relPath, defaultMode: defaultMode, modes: modes)
     }
 
-    /// One image's placement as one step on this actor.
+    /// One image's placement as one step on this actor. A move within this
+    /// catalog, a rename included, takes the image's place in the Custom
+    /// order with it: the row already has the new path, so reconcile sees
+    /// no rename to follow.
     func placeTransfer(_ plan: ImageTransfer.Plan) throws -> CompletedTransfer {
-        try ImageTransfer.place(plan, rows: transferRows())
+        let done = try ImageTransfer.place(plan, rows: transferRows())
+        if done.kind == .move, plan.destinationIsOpen, ImageTransfer.isSameFolder(plan.sourceLocation.root, rootPath) {
+            let from = plan.sourceLocation.relPath(done.source.lastPathComponent)
+            let to = plan.destination.relPath(done.destination.lastPathComponent)
+            do { try renameInCustomOrder([(from, to)]) } catch {
+                Self.logger.error("Following a move in the custom order failed: \(String(describing: error), privacy: .private)")
+            }
+        }
+        return done
     }
 
     /// Removes the row (and thumbnail) of a copy that has gone to the Trash.

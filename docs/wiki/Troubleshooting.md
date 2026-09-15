@@ -37,7 +37,7 @@ They work in the Library grid, not in Loupe, Compare, Survey or Develop, and not
 The destination already had a file of that name, or a sidecar a file had left behind, and Latent never writes over one. The name the image had is kept in its sidecar.
 
 **A hidden `.latent-transfer-…` file is in a folder.**
-Quitting cut short a copy into that folder, or a move into it from another disk. The original is where it was; the hidden file is an incomplete copy and can be deleted.
+Latent crashed or was force-quit during a copy into that folder, or a move into it from another disk. The original is where it was; the hidden file is an incomplete copy and can be deleted.
 
 **Undoing a copy says the copy "was left where it is".**
 The copy had changed or been replaced since Latent made it, so Latent didn't put it in the Trash. Remove it yourself if you don't want it.

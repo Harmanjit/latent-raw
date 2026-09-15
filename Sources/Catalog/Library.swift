@@ -304,10 +304,12 @@ public final class Library: ObservableObject {
     public var willReplaceCatalog: (@MainActor () -> Void)?
 
     /// Where library actions (ratings, flags, rotation, keywords, pasted
-    /// settings, file moves and renames) register their undo. The app sets
-    /// it to the window's undo manager; nil means those actions can't be
-    /// undone, as in tests that don't set one.
-    public weak var undoManager: UndoManager?
+    /// settings, rearrangements, file moves and renames) register their
+    /// undo: the Library's own, never the window's, which text fields file
+    /// their typing on, so undoing typing can't run on into a rating or a
+    /// move. The app undoes it from the Edit menu and ⌘Z outside Develop.
+    /// Nil means those actions can't be undone.
+    public var undoManager: UndoManager? = UndoManager()
 
     /// Move to Folder, Copy to Folder and Rename (LibraryFileOperations).
     public private(set) lazy var fileOperations = LibraryFileOperations(library: self)

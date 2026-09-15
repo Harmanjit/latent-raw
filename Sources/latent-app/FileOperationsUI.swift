@@ -8,6 +8,9 @@ import Catalog
 @MainActor
 struct LibraryFileCommands {
     let library: Library
+    /// Whether files may change now: not while another operation runs or
+    /// an export reads them, as the menus and the context menu say.
+    var canChangeFiles: @MainActor () -> Bool = { true }
 
     /// What a file command acts on: the grid selection, or the lead alone.
     var targets: [ImageRecord] {
@@ -26,6 +29,7 @@ struct LibraryFileCommands {
 
     /// Images dragged from the grid onto a sidebar folder.
     func dropImages(_ urls: [URL], on folder: URL, mode: TransferMode) {
+        guard canChangeFiles() else { return }
         let paths = Set(urls.map(\.standardizedFileURL.path))
         let records = library.images.filter { record in
             library.fileURL(for: record).map { paths.contains($0.standardizedFileURL.path) } ?? false
@@ -35,22 +39,54 @@ struct LibraryFileCommands {
     }
 
     /// Whether every URL is an image of the open catalog, so a drag is the
-    /// grid's rather than folders from Finder.
+    /// grid's rather than folders from Finder. False while files can't
+    /// change, so the sidebar refuses the drop.
     func areLibraryImages(_ urls: [URL]) -> Bool {
-        guard !urls.isEmpty, library.folderURL != nil else { return false }
+        guard canChangeFiles(), !urls.isEmpty, library.folderURL != nil else { return false }
         let paths = Set(library.images.lazy.compactMap { library.fileURL(for: $0)?.standardizedFileURL.path })
         return urls.allSatisfy { paths.contains($0.standardizedFileURL.path) }
     }
 
     private func transfer(_ records: [ImageRecord], to folder: URL, mode: TransferMode) {
-        RecentDestinations.shared.add(folder)
         let library = library
         Task {
+            // A subfolder the catalog asks about is asked about now, before
+            // images decide it by arriving (DESIGN.md §5.2).
+            let undecided = await library.fileOperations.undecidedSubfolders(toward: folder)
+            if !undecided.isEmpty {
+                guard let include = Self.askToInclude(folder, count: records.count, mode: mode) else { return }
+                do {
+                    try await library.fileOperations.decide(undecided, include: include)
+                } catch {
+                    library.lastError = "Recording whether to include “\(folder.lastPathComponent)” failed: \(error)"
+                    return
+                }
+            }
+            RecentDestinations.shared.add(folder)
             let report = await library.fileOperations.transfer(records, to: folder, mode: mode)
             if !report.failures.isEmpty {
                 library.lastError = Self.failureSummary(report, mode: mode)
             }
             Announcement.post(Self.summary(report, mode: mode, folder: folder))
+        }
+    }
+
+    /// Whether `folder`, a subfolder of the open catalog it hasn't decided
+    /// about, is included in it; nil to leave the images where they are.
+    private static func askToInclude(_ folder: URL, count: Int, mode: TransferMode) -> Bool? {
+        let alert = NSAlert()
+        alert.messageText = "Include “\(folder.lastPathComponent)” in this catalog?"
+        alert.informativeText = "Included, its images belong to this catalog, with their ratings, keywords and edits. "
+            + "Kept separate, it becomes a catalog of its own. "
+            + "The \(count == 1 ? "image is" : "images are") \(mode == .move ? "moved" : "copied") either way."
+        alert.addButton(withTitle: "Include")
+        alert.addButton(withTitle: "Keep Separate")
+        let cancel = alert.addButton(withTitle: "Cancel")
+        cancel.keyEquivalent = "\u{1b}"
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return true
+        case .alertSecondButtonReturn: return false
+        default: return nil
         }
     }
 
@@ -94,6 +130,10 @@ enum TransferDestinationPanel {
 /// menu. Security-scoped bookmarks, like the sidebar's favourites: under the
 /// sandbox a remembered path could name a folder chosen last week but not
 /// write into it. Adapted from minivu.
+///
+/// Whether each folder is still there is checked off the main thread and
+/// remembered, never while a menu is being built: a folder on a network
+/// volume that is mounted but no longer answering would hold the whole app.
 @MainActor
 final class RecentDestinations {
     static let shared = RecentDestinations()
@@ -103,10 +143,22 @@ final class RecentDestinations {
     private let key: String
     private(set) var folders: [URL] = []
     private var bookmarks: [Data] = []
+    /// Reads the disk for one folder: whether it is there, and its name as
+    /// Finder shows it. Tests pass their own.
+    private let probe: @Sendable (URL) -> (isFolder: Bool, name: String)
+    /// What the last check found, by path.
+    private var gone: Set<String> = []
+    private var names: [String: String] = [:]
+    /// One check at a time, so a volume that never answers holds one thread
+    /// rather than one per right-click.
+    private var check: Task<Void, Never>?
+    private var checkAgain = false
 
-    init(defaults: UserDefaults = .standard, key: String = "latent.recentTransferDestinations") {
+    init(defaults: UserDefaults = .standard, key: String = "latent.recentTransferDestinations",
+         probe: @escaping @Sendable (URL) -> (isFolder: Bool, name: String) = RecentDestinations.probe) {
         self.defaults = defaults
         self.key = key
+        self.probe = probe
         for data in defaults.array(forKey: key) as? [Data] ?? [] {
             // Never mount a volume or ask anything to find a folder that has gone.
             guard let resolved = BookmarkStore.resolveQuietly(data) else { continue }
@@ -114,14 +166,53 @@ final class RecentDestinations {
             folders.append(resolved.url)
             bookmarks.append(resolved.stale ? (BookmarkStore.bookmark(for: resolved.url) ?? data) : data)
         }
+        recheck()
     }
 
-    /// The folders that are still there, newest first.
+    /// The disk read behind a check, run off the main thread.
+    nonisolated static func probe(_ url: URL) -> (isFolder: Bool, name: String) {
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        return (exists && isDirectory.boolValue, FileManager.default.displayName(atPath: url.path))
+    }
+
+    /// The folders the last check didn't find gone, newest first, without
+    /// touching the disk. Each call starts another check for next time.
     var availableFolders: [URL] {
-        folders.filter { url in
-            var isDirectory: ObjCBool = false
-            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        recheck()
+        return folders.filter { !gone.contains($0.standardizedFileURL.path) }
+    }
+
+    /// `folder`'s name as Finder shows it, from the last check.
+    func name(of folder: URL) -> String {
+        names[folder.standardizedFileURL.path] ?? folder.lastPathComponent
+    }
+
+    /// Checks every folder off the main thread, then remembers what it found.
+    /// Returns the check, for tests to wait on.
+    @discardableResult
+    func recheck() -> Task<Void, Never> {
+        if let check {
+            checkAgain = true
+            return check
         }
+        let urls = folders
+        let probe = probe
+        let task = Task { [weak self] in
+            let found = await Task.detached(priority: .utility) {
+                urls.map { (path: $0.standardizedFileURL.path, result: probe($0)) }
+            }.value
+            guard let self else { return }
+            self.gone = Set(found.filter { !$0.result.isFolder }.map(\.path))
+            for item in found { self.names[item.path] = item.result.name }
+            self.check = nil
+            if self.checkAgain {
+                self.checkAgain = false
+                await self.recheck().value
+            }
+        }
+        check = task
+        return task
     }
 
     /// Puts `folder` first, dropping the oldest past the limit.
@@ -144,6 +235,9 @@ final class RecentDestinations {
             bookmarks.removeLast()
         }
         defaults.set(bookmarks, forKey: key)
+        // Just used, so there; its name comes with the next check.
+        gone.remove(folder.standardizedFileURL.path)
+        recheck()
     }
 }
 

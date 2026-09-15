@@ -46,14 +46,16 @@ extension Library {
 
     /// Shows and saves `order`, registering the way back to `previous`.
     /// The inverse is registered here, synchronously, so that during an
-    /// undo it lands on the redo stack as UndoManager expects.
+    /// undo it lands on the redo stack as UndoManager expects. Its target is
+    /// the catalog, so another folder opening drops it (`dropUndo(for:)`)
+    /// rather than leaving an Undo Rearrange that does nothing.
     func replaceCustomOrder(with order: [String], previous: [String], in catalog: Catalog) {
         guard catalog === self.catalog else { return }
         customOrder = order
         if let undoManager {
-            undoManager.registerUndo(withTarget: self) { library in
+            undoManager.registerUndo(withTarget: catalog) { [weak self] catalog in
                 MainActor.assumeIsolated {
-                    library.replaceCustomOrder(with: previous, previous: order, in: catalog)
+                    self?.replaceCustomOrder(with: previous, previous: order, in: catalog)
                 }
             }
             undoManager.setActionName("Rearrange")

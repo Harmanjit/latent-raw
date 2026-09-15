@@ -83,7 +83,7 @@ enum GridContextMenu {
     private static func destinationMenu(_ title: String, mode: TransferMode, enabled: Bool,
                                         actions: GridActions) -> NSMenuItem {
         var items: [NSMenuItem] = actions.recentDestinations().map { folder in
-            let item = ClosureMenuItem(FileManager.default.displayName(atPath: folder.path), enabled: enabled) {
+            let item = ClosureMenuItem(RecentDestinations.shared.name(of: folder), enabled: enabled) {
                 actions.transfer(mode, folder)
             }
             item.toolTip = folder.path

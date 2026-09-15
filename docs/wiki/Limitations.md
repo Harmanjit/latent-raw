@@ -29,12 +29,12 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **No video, no plugins.**
 - **Metadata editing** is limited to rating, label, flag and keywords. Title, caption and copyright are not editable. Keywords apply to one image at a time, not to a multiple selection.
 - **Finder tags are read, never written,** and a tag changed in Finder while the folder is open shows only when the folder is opened again.
-- **Undo in the Library has edges.** It covers ratings, flags, rotation, keywords, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames; a Custom sort rearrangement can't be undone once you have left its folder, although Undo Rearrange can linger in the Edit menu and then does nothing.
+- **Undo in the Library has edges.** It covers ratings, flags, rotation, keywords, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export is running.
 - **Rename is one image at a time.** There is no batch rename.
 - **Rename, Move and Copy work only in the Library grid,** and not while an export is running.
 - **A move takes only the raw file.** A JPEG shot alongside it (RAW+JPEG) and an `.xmp` sidecar another application put beside the raw stay where they were.
-- **A move to another disk copies, then deletes the original.** If quitting cuts a long copy short, a hidden `.latent-transfer-…` file can be left in the destination. The original is still in place, and the hidden file can be deleted.
-- **The Custom order doesn't follow Latent's own Rename yet.** A file renamed in Finder keeps its place the next time the folder opens; one renamed with Latent goes after the arrangement, like a new file. Arranging needs dragging; there are no keys for it.
+- **A move to another disk copies, then deletes the original.** If Latent crashes or is force-quit during a long copy, a hidden `.latent-transfer-…` file can be left in the destination. The original is still in place, and the hidden file can be deleted.
+- **Arranging the Custom order needs dragging.** There are no keys for it.
 - **Typed values aren't on every slider.** Temperature, Highlights, Shadows, Whites and Blacks, HSL, Split Toning and export quality show their value but can't be typed into.
 - **Export open image… is always full size in sRGB.** Use the export sheet for anything else.
 - **Compare's and Survey's Sync aren't remembered;** they are on again at every launch.

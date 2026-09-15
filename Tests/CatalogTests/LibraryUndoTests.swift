@@ -1,7 +1,7 @@
 import XCTest
 @testable import Catalog
 
-/// Undo and redo of Library actions on the window's undo manager: every
+/// Undo and redo of Library actions on the Library's undo manager: every
 /// image goes back to its own previous value, in the row and the sidecar,
 /// and nothing is ever undone in a catalog other than the one it was done in.
 @MainActor
@@ -273,10 +273,38 @@ final class LibraryUndoTests: XCTestCase {
         XCTAssertEqual(oldRow?.rating, 4, "dropped, not applied later")
     }
 
-    /// Without an undo manager (tests, or before the window is up) the
-    /// actions still work and nothing is filed.
+    /// A Custom order rearrangement goes with its catalog too, rather than
+    /// leaving an Undo Rearrange in the next folder that does nothing.
+    func testSwitchingFolderDropsARearrangement() async throws {
+        let manager = UndoManager()
+        manager.groupsByEvent = false
+        let library = try await openLibrary(manager)
+        library.chooseSortKey(.custom)
+        manager.beginUndoGrouping()
+        library.moveInCustomOrder(["B.NEF"], before: "A.NEF")
+        manager.endUndoGrouping()
+        XCTAssertEqual(manager.undoActionName, "Rearrange")
+        await library.waitForPendingWork()
+
+        try await library.open(folder: other)
+        XCTAssertFalse(manager.canUndo, "the rearrangement went with its catalog")
+    }
+
+    /// The Library files on an undo manager of its own, not the window's,
+    /// where text fields file their typing.
+    func testTheLibraryHasItsOwnUndoManager() async throws {
+        let library = Library()
+        let manager = try XCTUnwrap(library.undoManager)
+        try await library.open(folder: folder)
+        library.selectAllVisible()
+        try await library.setRating(5)
+        XCTAssertEqual(manager.undoActionName, "Rating (2 Images)")
+    }
+
+    /// Without an undo manager the actions still work and nothing is filed.
     func testWorksWithoutAnUndoManager() async throws {
         let library = Library()
+        library.undoManager = nil
         try await library.open(folder: folder)
         library.selectAllVisible()
         try await library.setRating(5)

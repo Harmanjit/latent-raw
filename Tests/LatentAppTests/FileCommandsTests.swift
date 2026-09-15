@@ -1,4 +1,5 @@
 import XCTest
+import os
 import AppKit
 import Catalog
 @testable import latent_app
@@ -26,6 +27,47 @@ final class FileCommandsTests: XCTestCase {
         XCTAssertFalse(library { $0.hasSelection = false; $0.selectionCount = 0 }.isEnabled(.copyToFolder))
         XCTAssertFalse(library { $0.fileOperationRunning = true }.isEnabled(.rename))
         XCTAssertFalse(library { $0.exportQueueRunning = true }.isEnabled(.moveToFolder), "an export is reading them")
+    }
+
+    /// Undoing or redoing a move, copy or rename changes files, which an
+    /// export reading them must not see; a rating's undo carries on.
+    func testUndoThatChangesFilesWaitsForTheExport() {
+        let exporting: (inout CommandState) -> Void = {
+            $0.exportQueueRunning = true
+            $0.undoLabel = "Move “A.NEF”"
+            $0.redoLabel = "Rating"
+        }
+        XCTAssertTrue(library { $0.undoLabel = "Move “A.NEF”"; $0.undoChangesFiles = true }.isEnabled(.undo))
+        XCTAssertFalse(library { exporting(&$0); $0.undoChangesFiles = true }.isEnabled(.undo))
+        XCTAssertTrue(library(exporting).isEnabled(.undo), "an undo that changes no files")
+        XCTAssertTrue(library(exporting).isEnabled(.redo))
+        XCTAssertFalse(library { exporting(&$0); $0.redoChangesFiles = true }.isEnabled(.redo))
+    }
+
+    /// Images dropped on a sidebar folder follow the menus' rule: not while
+    /// files are being changed or read by an export.
+    func testDropsAreRefusedWhileFilesCantChange() async throws {
+        let sample = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("TestAssets/golden_nikon_d750_cc0.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: sample.path))
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("latent-drop-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let picks = base.appendingPathComponent("Picks", isDirectory: true)
+        try FileManager.default.createDirectory(at: picks, withIntermediateDirectories: true)
+        let image = base.appendingPathComponent("A.NEF")
+        try FileManager.default.copyItem(at: sample, to: image)
+        let library = Library()
+        try await library.open(folder: base, defaultSubfolderMode: .independent)
+
+        let refusing = LibraryFileCommands(library: library, canChangeFiles: { false })
+        XCTAssertFalse(refusing.areLibraryImages([image]), "the sidebar refuses the drag")
+        refusing.dropImages([image], on: picks, mode: .move)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertFalse(library.fileOperations.isBusy)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: image.path), "nothing moved")
+
+        XCTAssertTrue(LibraryFileCommands(library: library, canChangeFiles: { true }).areLibraryImages([image]))
     }
 
     func testBackAndForwardFollowTheHistory() {
@@ -83,7 +125,32 @@ final class FileCommandsTests: XCTestCase {
                        "Copying failed for 1 of 2: B.NEF (The disk is full.)")
     }
 
-    func testRecentDestinationsKeepTheLastFive() throws {
+    /// Building the context menu never reads the disk: a folder on a volume
+    /// that has stopped answering would hold the whole app. What is there,
+    /// and what it is called, comes from a check made off the main thread.
+    func testRecentDestinationsAreCheckedOffTheMainThread() async throws {
+        let suite = "latent.tests.recent.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("latent-recent-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let (nas, local) = (base.appendingPathComponent("NAS", isDirectory: true), base.appendingPathComponent("Local", isDirectory: true))
+        for url in [nas, local] { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
+        let onMain = OSAllocatedUnfairLock(initialState: 0)
+        let recent = RecentDestinations(defaults: defaults, key: "recent") { url in
+            if Thread.isMainThread { onMain.withLock { $0 += 1 } }
+            return (url.lastPathComponent != "NAS", "Shown \(url.lastPathComponent)")
+        }
+        recent.add(nas)
+        recent.add(local)
+        XCTAssertEqual(recent.availableFolders.map(\.lastPathComponent), ["Local", "NAS"], "not yet checked")
+        await recent.recheck().value
+        XCTAssertEqual(recent.availableFolders.map(\.lastPathComponent), ["Local"])
+        XCTAssertEqual(recent.name(of: local), "Shown Local")
+        XCTAssertEqual(onMain.withLock { $0 }, 0)
+    }
+
+    func testRecentDestinationsKeepTheLastFive() async throws {
         let suite = "latent.tests.recent.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -100,6 +167,7 @@ final class FileCommandsTests: XCTestCase {
         XCTAssertEqual(recent.folders.map(\.lastPathComponent), ["F3", "F6", "F5", "F4", "F2"])
 
         try FileManager.default.removeItem(at: folders[5])
+        await recent.recheck().value
         XCTAssertEqual(recent.availableFolders.map(\.lastPathComponent), ["F3", "F6", "F4", "F2"])
 
         let reloaded = RecentDestinations(defaults: defaults, key: "recent")

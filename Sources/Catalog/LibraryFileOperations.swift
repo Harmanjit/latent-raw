@@ -79,6 +79,38 @@ public final class LibraryFileOperations: ObservableObject {
         registerUndo(report.completed, actionName: "Rename")
     }
 
+    /// The open catalog's subfolders on the way to `folder` that it hasn't
+    /// been told whether to include (DESIGN.md §5.2 `ask`), outermost first.
+    /// Images put there with a sidecar would otherwise make the folder a
+    /// catalog of its own without the question ever being asked, so the app
+    /// asks before transferring (`decide`).
+    public func undecidedSubfolders(toward folder: URL) async -> [String] {
+        guard let catalog = library?.catalog else { return [] }
+        let root = catalog.rootPath
+        guard let chain = FolderAccess.chain(from: root, to: folder)
+                ?? FolderAccess.chain(from: root.resolvingSymlinksInPath(), to: folder.resolvingSymlinksInPath())
+        else { return [] }
+        let relPath = chain.dropFirst().map(\.lastPathComponent).joined(separator: "/")
+        guard !relPath.isEmpty else { return [] }
+        do {
+            return try await catalog.undecidedSubfolders(onTheWayTo: relPath)
+        } catch {
+            Self.logger.error("Reading subfolder modes failed: \(String(describing: error), privacy: .private)")
+            return []
+        }
+    }
+
+    /// Records the answer about `undecided` (from `undecidedSubfolders`):
+    /// every one included, or the outermost a catalog of its own.
+    public func decide(_ undecided: [String], include: Bool) async throws {
+        guard let catalog = library?.catalog else { return }
+        if include {
+            for relPath in undecided { try await catalog.setSubfolderMode(.included, forRelPath: relPath) }
+        } else if let outermost = undecided.first {
+            try await catalog.setSubfolderMode(.independent, forRelPath: outermost)
+        }
+    }
+
     /// Stops every operation asked for after the image it is on.
     public func cancel() {
         for cancellation in cancellations { cancellation.cancel() }
@@ -240,6 +272,7 @@ public final class LibraryFileOperations: ObservableObject {
             MainActor.assumeIsolated { operations.revert(ledger, actionName: actionName) }
         }
         undoManager.setActionName(actionName)
+        undoManager.setActionUserInfoValue(true, forKey: .changesFiles)
     }
 
     /// Undoes (or redoes) `ledger`, registering the opposite straight away:
@@ -252,6 +285,7 @@ public final class LibraryFileOperations: ObservableObject {
                 MainActor.assumeIsolated { operations.revert(opposite, actionName: actionName) }
             }
             undoManager.setActionName(actionName)
+            undoManager.setActionUserInfoValue(true, forKey: .changesFiles)
         }
         let title = (library?.undoManager?.isRedoing == true ? "Redoing " : "Undoing ") + actionName
         let task = enqueue(.revert(ledger), title: title, ledger: opposite)
@@ -262,6 +296,12 @@ public final class LibraryFileOperations: ObservableObject {
             }
         }
     }
+}
+
+extension UndoManager.UserInfoKey {
+    /// True on the undo and redo of a move, copy or rename: running them
+    /// changes files, so the app refuses them while an export reads them.
+    public static let changesFiles = UndoManager.UserInfoKey(rawValue: "latent.changesFiles")
 }
 
 /// What one operation did, filled in when it finishes and read by the undo

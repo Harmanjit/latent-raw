@@ -360,7 +360,9 @@ struct ContentView: View {
 
     // MARK: - Files
 
-    private var fileCommands: LibraryFileCommands { LibraryFileCommands(library: library) }
+    private var fileCommands: LibraryFileCommands {
+        LibraryFileCommands(library: library, canChangeFiles: { !fileOperations.isBusy && !exportQueue.isRunning })
+    }
 
     /// Once: undoing a copy uses the Trash, and an image about to move or be
     /// renamed is saved and closed in the editor (its path is changing).
@@ -748,7 +750,7 @@ struct ContentView: View {
         Group {
             BareKeyMonitor(perform: { perform($0.panningImage(commandState.arrowKeysPan)) },
                            onTextFocusChange: { editingText = $0 })
-            WindowUndoManagerReader { libraryUndo.attach($0, to: library) }
+            Color.clear.onAppear { libraryUndo.attach(to: library) }
         }
         .opacity(0)
         .frame(width: 0, height: 0)
@@ -946,7 +948,10 @@ struct ContentView: View {
         let history = model.history
         state.undoLabel = history.canUndo ? history.steps[history.cursor].label : nil
         state.redoLabel = history.canRedo ? history.steps[history.cursor + 1].label : nil
-        if mode != .develop { (state.undoLabel, state.redoLabel) = (libraryUndo.labels.undo, libraryUndo.labels.redo) }
+        if mode != .develop {
+            (state.undoLabel, state.redoLabel) = (libraryUndo.labels.undo, libraryUndo.labels.redo)
+            (state.undoChangesFiles, state.redoChangesFiles) = (libraryUndo.labels.undoChangesFiles, libraryUndo.labels.redoChangesFiles)
+        }
         state.isEditingText = editingText
         state.arrowKeysPanImage = prefs.arrowKeysPanImage
         state.imageZoomedIn = model.hasImage && !model.fitMode

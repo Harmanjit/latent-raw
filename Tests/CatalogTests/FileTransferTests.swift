@@ -1,4 +1,5 @@
 import XCTest
+import os
 @testable import Catalog
 
 /// Move to Folder, Copy to Folder and Rename against real raw files: the
@@ -26,7 +27,9 @@ final class FileTransferTests: XCTestCase {
     }
 
     /// A second, different raw file, so two images never share a hash.
-    static var otherNEF: String {
+    /// Nonisolated: `setUpWithError` reads it, and XCTest doesn't run that
+    /// on the main actor.
+    nonisolated static var otherNEF: String {
         let golden = URL(fileURLWithPath: ReconcileTests.sampleNEF).deletingLastPathComponent()
             .appendingPathComponent("golden_nikon_d750_cc0.nef").path
         return FileManager.default.fileExists(atPath: golden) ? golden : ReconcileTests.sampleNEF
@@ -122,6 +125,33 @@ final class FileTransferTests: XCTestCase {
         XCTAssertTrue(exists(root.appendingPathComponent("B.NEF")))
     }
 
+    /// A rename or a move within the catalog keeps the image's place in the
+    /// Custom order (the row already has the new path, so reconcile sees no
+    /// rename), and moving it back gives the place back. A copy is new.
+    func testMovesWithinTheCatalogKeepTheirPlaceInTheCustomOrder() async throws {
+        let catalog = try await preparedCatalog()
+        try await catalog.setCustomOrder(["B.NEF", "A.NEF"])
+        let day2 = root.appendingPathComponent("Day 2")
+
+        var report = await ImageTransfer.run([request("A.NEF", to: root, as: "Hero.NEF")], mode: .move, openCatalog: catalog)
+        XCTAssertEqual(report.completed.count, 1, report.failureDescription)
+        var order = await catalog.customOrder()
+        XCTAssertEqual(order, ["B.NEF", "Hero.NEF"])
+
+        report = await ImageTransfer.run([request("Hero.NEF", to: day2)], mode: .move, openCatalog: catalog)
+        XCTAssertEqual(report.completed.count, 1, report.failureDescription)
+        order = await catalog.customOrder()
+        XCTAssertEqual(order, ["B.NEF", "Day 2/Hero.NEF"])
+
+        report = await ImageTransfer.run([TransferRequest(source: day2.appendingPathComponent("Hero.NEF"), folder: root, name: "A.NEF")],
+                                         mode: .move, openCatalog: catalog)
+        XCTAssertEqual(report.completed.count, 1, report.failureDescription)
+        report = await ImageTransfer.run([request("B.NEF", to: day2)], mode: .copy, openCatalog: catalog)
+        XCTAssertEqual(report.completed.count, 1, report.failureDescription)
+        order = await catalog.customOrder()
+        XCTAssertEqual(order, ["B.NEF", "A.NEF"])
+    }
+
     /// A sidecar whose file has gone would be applied to anything given its
     /// name, so it takes the name as surely as a file does.
     func testALeftoverSidecarTakesItsName() async throws {
@@ -187,6 +217,75 @@ final class FileTransferTests: XCTestCase {
 
         let sourceReconcile = try await catalog.reconcile()
         XCTAssertEqual(sourceReconcile.removed, 0, "the row went with the file")
+    }
+
+    /// A folder catalogued before the rename still has `_rawhead`: it is
+    /// renamed `_latent` and the sidecars go in it, for every image of the
+    /// batch, so the catalog reads them when it opens.
+    func testMoveIntoACatalogWithAnOldContainer() async throws {
+        let catalog = try await preparedCatalog()
+        let b = try await XCTUnwrapAsync(await catalog.image(forRelPath: "B.NEF"))
+        try await catalog.setRating(2, forImageID: b.id!)
+        let other = base.appendingPathComponent("Archive", isDirectory: true)
+        try fm.createDirectory(at: other, withIntermediateDirectories: true)
+        _ = try await Catalog.open(at: other).reconcile()
+        try fm.moveItem(at: other.appendingPathComponent("_latent"), to: other.appendingPathComponent("_rawhead"))
+
+        let report = await ImageTransfer.run([request("A.NEF", to: other), request("B.NEF", to: other)],
+                                             mode: .move, openCatalog: catalog)
+        XCTAssertEqual(report.completed.count, 2, report.failureDescription)
+        XCTAssertFalse(exists(other.appendingPathComponent("_rawhead")), "renamed, not made again")
+        XCTAssertTrue(exists(other.appendingPathComponent("_latent/catalog.sqlite")))
+        XCTAssertTrue(exists(other.appendingPathComponent("_latent/xmp/A.NEF.xmp")))
+        XCTAssertTrue(exists(other.appendingPathComponent("_latent/xmp/B.NEF.xmp")))
+        XCTAssertTrue(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.heic")))
+
+        let archive = try Catalog.open(at: other)
+        _ = try await archive.reconcile()
+        let arrivedA = try await archive.image(forRelPath: "A.NEF")
+        let arrivedB = try await archive.image(forRelPath: "B.NEF")
+        XCTAssertEqual(arrivedA?.rating, 4)
+        XCTAssertEqual(arrivedB?.rating, 2)
+    }
+
+    /// A subfolder of the open catalog nobody has decided about is asked
+    /// about before images arrive, and the answer decides where their
+    /// sidecars go: the catalog's own _latent, or a catalog of its own.
+    func testUndecidedSubfoldersOnTheWayToADestination() async throws {
+        let catalog = try await preparedCatalog()
+        let picks = root.appendingPathComponent("Picks", isDirectory: true)
+        let best = picks.appendingPathComponent("Best", isDirectory: true)
+        try fm.createDirectory(at: best, withIntermediateDirectories: true)
+
+        var undecided = try await catalog.undecidedSubfolders(onTheWayTo: "Picks/Best")
+        XCTAssertEqual(undecided, ["Picks", "Picks/Best"], "unrecorded, under the default ask")
+        undecided = try await catalog.undecidedSubfolders(onTheWayTo: "Day 2")
+        XCTAssertEqual(undecided, [], "included")
+        try await catalog.setSubfolderMode(.independent, forRelPath: "Picks")
+        undecided = try await catalog.undecidedSubfolders(onTheWayTo: "Picks/Best")
+        XCTAssertEqual(undecided, [], "a catalog of its own already")
+
+        try await catalog.setSubfolderMode(.ask, forRelPath: "Picks")
+        let library = Library()
+        try await library.open(folder: root)
+        undecided = await library.fileOperations.undecidedSubfolders(toward: best)
+        XCTAssertEqual(undecided, ["Picks", "Picks/Best"])
+        try await library.fileOperations.decide(undecided, include: true)
+        let includes = try await library.catalog!.includesSubfolder("Picks/Best")
+        XCTAssertTrue(includes)
+        let a = try XCTUnwrap(library.images.first { $0.relPath == "A.NEF" })
+        let report = await library.fileOperations.transfer([a], to: best, mode: .move)
+        XCTAssertEqual(report.completed.count, 1, report.failureDescription)
+        XCTAssertTrue(exists(sidecar("Picks/Best/A.NEF")))
+        XCTAssertFalse(exists(picks.appendingPathComponent("_latent")), "no catalog of its own")
+        XCTAssertEqual(library.images.first { $0.relPath == "Picks/Best/A.NEF" }?.rating, 4)
+
+        let other = root.appendingPathComponent("Others", isDirectory: true)
+        try fm.createDirectory(at: other, withIntermediateDirectories: true)
+        undecided = await library.fileOperations.undecidedSubfolders(toward: other)
+        try await library.fileOperations.decide(undecided, include: false)
+        undecided = await library.fileOperations.undecidedSubfolders(toward: other)
+        XCTAssertEqual(undecided, [], "kept separate")
     }
 
     /// A folder inside another catalog that includes it: the sidecar goes to
@@ -359,6 +458,34 @@ final class FileTransferTests: XCTestCase {
         XCTAssertFalse(exists(other.appendingPathComponent("A.NEF")))
     }
 
+    /// Quitting while an image's whole copy is being made removes the hidden
+    /// copy and leaves the image where it was.
+    func testQuittingAbandonsTheHiddenCopy() async throws {
+        let catalog = try await preparedCatalog()
+        let other = base.appendingPathComponent("Archive", isDirectory: true)
+        try fm.createDirectory(at: other, withIntermediateDirectories: true)
+        let abandoned = OSAllocatedUnfairLock(initialState: -1)
+        let hiddenWhileCopying = OSAllocatedUnfairLock(initialState: [String]())
+        let folderPath = other.path
+
+        let report = await ImageTransfer.run([request("A.NEF", to: other)], mode: .move, openCatalog: catalog,
+                                             faults: TransferFaults(beforePlacing: { _ in
+                                                 let hidden = (try? FileManager.default.contentsOfDirectory(atPath: folderPath)) ?? []
+                                                 hiddenWhileCopying.withLock { $0 = hidden.filter { $0.hasPrefix(".latent-transfer-") } }
+                                                 let count = ImageTransfer.abandonTemporaryCopies()
+                                                 abandoned.withLock { $0 = count }
+                                             }, treatAsOtherVolume: true))
+        XCTAssertEqual(hiddenWhileCopying.withLock { $0.count }, 1, "the copy was there to abandon")
+        XCTAssertEqual(abandoned.withLock { $0 }, 1)
+        XCTAssertEqual(report.failures.count, 1, "never placed once abandoned")
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: other.path).filter { $0.hasPrefix(".latent-") }, [])
+        XCTAssertFalse(exists(other.appendingPathComponent("A.NEF")))
+        XCTAssertFalse(exists(other.appendingPathComponent("_latent/xmp/A.NEF.xmp")))
+        XCTAssertTrue(exists(root.appendingPathComponent("A.NEF")))
+        XCTAssertTrue(exists(sidecar("A.NEF")))
+        XCTAssertEqual(ImageTransfer.abandonTemporaryCopies(), 0, "nothing left to abandon")
+    }
+
     func testCancellingStopsBetweenImages() async throws {
         let catalog = try await preparedCatalog()
         let other = base.appendingPathComponent("Archive", isDirectory: true)
@@ -417,8 +544,10 @@ final class FileTransferTests: XCTestCase {
         XCTAssertNil(record(library, "A.NEF"), "the grid no longer lists it")
         XCTAssertTrue(undo.canUndo)
         XCTAssertEqual(undo.undoActionName, "Move “A.NEF”")
+        XCTAssertEqual(undo.undoActionUserInfoValue(forKey: .changesFiles) as? Bool, true, "refused while exporting")
 
         await undoing(undo, library)
+        XCTAssertEqual(undo.redoActionUserInfoValue(forKey: .changesFiles) as? Bool, true)
         XCTAssertTrue(exists(root.appendingPathComponent("A.NEF")))
         XCTAssertFalse(exists(other.appendingPathComponent("A.NEF")))
         XCTAssertFalse(exists(other.appendingPathComponent("_latent/xmp/A.NEF.xmp")))
