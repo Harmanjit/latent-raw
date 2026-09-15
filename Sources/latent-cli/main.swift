@@ -5,6 +5,7 @@ import RawCore
 import ColorKit
 import PixelEngine
 import Catalog
+import MergeKit
 
 // Phase-1 harness:
 //   latent-cli render <raw-file> [options]
@@ -71,11 +72,118 @@ if args.count >= 3, args[1] == "catalog" {
     exit(0)
 }
 
+// `merge-hdr` subcommand: analyse a bracket, merge it and write the DNG,
+// printing what the analysis found and what each stage cost. The command-
+// line way to watch Photo Merge's HDR engine (docs/PhotoMerge.md section 3)
+// before the app has a dialog for it.
+if args.count >= 2, args[1] == "merge-hdr" {
+    var positional: [String] = []
+    var referenceOverride: Int?
+    var index = 2
+    while index < args.count {
+        if args[index] == "--reference", index + 1 < args.count, let n = Int(args[index + 1]) {
+            referenceOverride = n
+            index += 2
+        } else {
+            positional.append(args[index])
+            index += 1
+        }
+    }
+    guard positional.count >= 3 else {
+        print("Usage: latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N]")
+        exit(1)
+    }
+    let output = URL(fileURLWithPath: positional[0])
+    let inputs = positional.dropFirst().map { URL(fileURLWithPath: $0) }
+
+    /// `text` cut or padded with spaces to `width` characters (String(format:)
+    /// can't pad a %@).
+    func column(_ text: String, _ width: Int) -> String {
+        text.count >= width ? String(text.prefix(width)) : text.padding(toLength: width, withPad: " ", startingAt: 0)
+    }
+    func printReport(_ report: HDRMergeReport, title: String) {
+        print("  \(title):")
+        for stage in report.stages {
+            print("    " + column(stage.name, 40) + String(format: "%7.3f s", stage.seconds))
+        }
+        print("    " + column("total", 40) + String(format: "%7.3f s", report.totalSeconds))
+    }
+    /// "1/250" for short shutter speeds, "2.5s" for long ones.
+    func shutterText(_ seconds: Double) -> String {
+        guard seconds > 0 else { return "?" }
+        return seconds >= 1 ? String(format: "%gs", seconds) : "1/\(Int((1 / seconds).rounded()))"
+    }
+    /// `url` relative to `folder`, as a merge recipe records its sources.
+    func relativePath(of url: URL, from folder: URL) -> String {
+        let target = url.standardizedFileURL.pathComponents, base = folder.standardizedFileURL.pathComponents
+        var shared = 0
+        while shared < min(target.count, base.count), target[shared] == base[shared] { shared += 1 }
+        return (Array(repeating: "..", count: base.count - shared) + target[shared...]).joined(separator: "/")
+    }
+
+    do {
+        let gpu = try GPUContext()
+        let merger = HDRMerger(gpu: gpu)
+        let (analysis, analysisReport) = try await merger.analyseWithReport(inputs)
+        let reference = referenceOverride ?? analysis.referenceIndex
+        print(String(format: "Analysed %d photos in %.2f s", analysis.frames.count, analysisReport.totalSeconds))
+        print("   #  " + column("File", 28) + " Shutter    ISO     f  EXIF EV  Measured EV  Clipped")
+        for (i, frame) in analysis.frames.enumerated() {
+            print(String(format: "  %2d", i) + (i == reference ? "* " : "  ") + column(frame.url.lastPathComponent, 28)
+                  + " " + column(shutterText(frame.exposureSeconds), 7)
+                  + String(format: " %6.0f %5.1f  %+7.2f  %+11.2f  %6.2f%%", frame.iso, frame.aperture,
+                           frame.exifRelativeEV, frame.relativeEV, frame.clippedFraction * 100))
+        }
+        print(String(format: "  * reference. Range %.2f EV, %d x %d px, DNG about %.0f MB",
+                     analysis.exposureRangeStops, analysis.width, analysis.height,
+                     Double(analysis.estimatedOutputBytes) / 1_000_000))
+        if analysis.warnings.isEmpty { print("Warnings: none") }
+        for warning in analysis.warnings {
+            switch warning {
+            case .framesLookMisaligned(let pixels):
+                print(String(format: "Warning: the frames look misaligned by up to %.1f px; v1 doesn't align them", pixels))
+            case .exposureMetadataDisagrees(let frame, let exif, let measured):
+                print(String(format: "Warning: photo %d measures %+.2f EV but its EXIF says %+.2f EV; using the measurement",
+                             frame, measured, exif))
+            case .smallExposureRange(let stops):
+                print(String(format: "Warning: the bracket spans only %.2f EV", stops))
+            }
+        }
+
+        var sources: [MergeRecipe.Source] = []
+        for frame in analysis.frames {
+            let captured = try RawFile(path: frame.url.path, metadataOnly: true).summary.captureTime
+            sources.append(MergeRecipe.Source(
+                path: relativePath(of: frame.url, from: output.deletingLastPathComponent()),
+                hash: FileHash.hexString(try FileHash.xxh64(ofFileAt: frame.url)),
+                captureTime: Int64(captured.timeIntervalSince1970)))
+        }
+        let (result, mergeReport) = try await merger.mergeWithReport(
+            analysis, options: HDRMergeOptions(referenceIndex: referenceOverride), sources: sources, to: output,
+            prepareSidecar: { _ in }, progress: { _ in })
+        print("Timings:")
+        printReport(analysisReport, title: "analysis")
+        printReport(mergeReport, title: "merge")
+        let peak = max(analysisReport.peakGPUBytes, mergeReport.peakGPUBytes)
+        print(String(format: "Peak GPU memory: %.2f GB (device allocations while merging)", Double(peak) / 1_073_741_824))
+        print(String(format: "Wrote %@ (%.1f MB, BaselineExposure %+.2f, clip level %g)", result.url.path as NSString,
+                     Double(result.byteCount) / 1_000_000, result.baselineExposure, result.recipe.clipLevel))
+    } catch let error as HDRMergeError {
+        print("Failed: \(error.errorDescription ?? String(describing: error))")
+        exit(1)
+    } catch {
+        print("Failed: \(error)")
+        exit(1)
+    }
+    exit(0)
+}
+
 guard args.count >= 3, args[1] == "render" else {
     print("""
     Usage:
       latent-cli render <path-to-raw-file> [options]
       latent-cli catalog <folder> [--include-subfolders]
+      latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N]
 
     Options:
       --out <path.png>       write the result as a PNG
