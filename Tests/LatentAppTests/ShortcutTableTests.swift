@@ -2,6 +2,7 @@ import XCTest
 import SwiftUI
 @testable import latent_app
 
+@MainActor
 final class ShortcutTableTests: XCTestCase {
     private struct Binding {
         let name: String

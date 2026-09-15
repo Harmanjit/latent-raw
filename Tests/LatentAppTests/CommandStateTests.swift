@@ -2,6 +2,7 @@ import XCTest
 import Catalog
 @testable import latent_app
 
+@MainActor
 final class CommandStateTests: XCTestCase {
     private func develop(_ change: (inout CommandState) -> Void = { _ in }) -> CommandState {
         var state = CommandState()

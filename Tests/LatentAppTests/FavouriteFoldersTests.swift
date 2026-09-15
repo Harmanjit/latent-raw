@@ -2,6 +2,7 @@ import XCTest
 @testable import latent_app
 @testable import Catalog
 
+@MainActor
 /// Bringing back a favourite whose disk was away, in the order the App
 /// Sandbox needs, with the sandbox played by the stand-in steps.
 final class FavouriteFoldersTests: XCTestCase {

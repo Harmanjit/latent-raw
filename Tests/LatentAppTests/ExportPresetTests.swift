@@ -1,6 +1,7 @@
 import XCTest
 @testable import latent_app
 
+@MainActor
 final class ExportPresetTests: XCTestCase {
     /// Presets saved before "Include location" existed were agreed to as
     /// camera metadata, keywords and rating: they must not start writing

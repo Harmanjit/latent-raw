@@ -276,6 +276,7 @@ final class ThumbnailLoaderTests: XCTestCase {
     }
 }
 
+@MainActor
 final class ByteBoundedCacheTests: XCTestCase {
     func testEvictsLeastRecentlyUsedToStayWithinBudget() {
         let cache = ByteBoundedCache<String, Int>(budget: 30)

@@ -2,6 +2,7 @@ import XCTest
 import AppKit
 @testable import latent_app
 
+@MainActor
 /// The single-key table and the monitor's decisions, without a window.
 final class BareKeyTests: XCTestCase {
     private func press(_ characters: String, shift: Bool = false, command: Bool = false,

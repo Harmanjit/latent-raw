@@ -1,6 +1,7 @@
 import XCTest
 @testable import Catalog
 
+@MainActor
 final class GridSelectionTests: XCTestCase {
     func testPlainClickLeads() {
         XCTAssertEqual(GridSelection.lead(previous: 3, added: [7], selected: [7]), 7)

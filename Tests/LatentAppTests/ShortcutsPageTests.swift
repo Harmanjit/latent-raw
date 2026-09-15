@@ -1,6 +1,7 @@
 import XCTest
 @testable import latent_app
 
+@MainActor
 /// docs/wiki/Keyboard-Shortcuts.md is generated from `Shortcuts`. To
 /// update it after changing the table:
 ///

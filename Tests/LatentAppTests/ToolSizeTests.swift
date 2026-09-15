@@ -1,6 +1,7 @@
 import XCTest
 @testable import latent_app
 
+@MainActor
 final class ToolSizeTests: XCTestCase {
     func testStepsScaleAndUndoEachOther() {
         let range = ToolSizeStep.brushRadius
@@ -19,6 +20,7 @@ final class ToolSizeTests: XCTestCase {
     }
 }
 
+@MainActor
 final class LocalSliderResetTests: XCTestCase {
     /// Double-click reset used to put 0 into every Local Adjustments row,
     /// below the ranges of brush Size and Flow, luminance Feather and
