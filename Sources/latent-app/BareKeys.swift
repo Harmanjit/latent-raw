@@ -59,6 +59,7 @@ enum KeyCommand: Equatable {
     // Reached from the menus, most with a Command shortcut as well.
     case openFolder, openFile, export, exportOpenImage
     case print, contactSheet
+    case slideshow, editExternally
     case undo, redo, copySettings, pasteSettings
     case rotate(Int), zoomIn, zoomOut, zoomToFit, zoomToActualSize
     case autoAdjust, clearFilter, swapCompare, revealInFinder

@@ -43,6 +43,7 @@ struct ContentView: View {
     @ObservedObject private var library = MainWindowModels.shared.library
     @ObservedObject private var exportQueue = MainWindowModels.shared.exportQueue
     @ObservedObject private var prefs = AppPreferences.shared
+    @ObservedObject private var handOff = ExternalEditorHandOff.shared
     @State private var mode: AppMode = .library
     @State private var showingExportSheet = false
     /// Compare's left pane ("Select"): its own render, created the first
@@ -649,6 +650,10 @@ struct ContentView: View {
             PrintPresenter.present(openImage: mode != .library && model.hasImage, model: model, library: library)
         case .contactSheet:
             ContactSheetPresenter.present(model: model, library: library)
+        case .slideshow:
+            SlideshowController.start(model: model, library: library)
+        case .editExternally:
+            ExternalEditorHandOff.shared.start(model: model, library: library, preferOpenImage: mode.showsImage)
         case .undo:
             model.undo()
         case .redo:
@@ -1398,7 +1403,7 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(Color.red)
             } else {
-                Text(mode == .library ? library.statusText : model.status)
+                Text(mode == .library ? handOff.notice ?? library.statusText : model.status)
                     .font(.caption)
                     .foregroundStyle(Color.secondary)
                     .lineLimit(1)

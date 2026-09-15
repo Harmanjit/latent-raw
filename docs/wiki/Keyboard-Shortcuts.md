@@ -19,6 +19,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | ⌘0, ⌘1, ⌘=, ⌘- | Fit, 100%, zoom in, zoom out (in the grid, ⌘= and ⌘- size the thumbnails) |
 | ⇧X | Compare: make the candidate the Select |
 | ⇧⌘O | Open folder |
+| ⌘Return | Slideshow of the selection, or of every image the filter shows (in the show: ← and → step, Space pauses, Esc ends) |
 | ⌘, | Settings |
 | ⌘? | Latent Help (these pages) |
 
@@ -55,3 +56,4 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | ⇧⌘E | Export the selection |
 | ⌥⌘R | Reveal the selection in Finder |
 | ⌘P | Print the selection (in Library) or the image shown |
+| ⌘E | Edit in External Editor: a 16-bit TIFF of the open or selected image, opened in the app chosen in Settings |

@@ -71,6 +71,8 @@ struct CommandState: Equatable {
         case .copySettings: hasImage || hasSelection
         case .pasteSettings: hasImage || selectionCount > 0
         case .clearFilter: filterActive
+        case .slideshow: hasVisibleImages && editorReady
+        case .editExternally: (hasImage || hasSelection) && editorReady && !exportingOpenImage
         }
     }
 
@@ -152,6 +154,7 @@ extension FocusedValues {
 struct LatentCommands: Commands {
     @FocusedValue(\.commandContext) private var context
     @ObservedObject private var keyWindowText = KeyWindowTextFocus.shared
+    @ObservedObject private var externalEditors = ExternalEditorSettings.shared
 
     private var state: CommandState {
         var state = context?.state ?? CommandState()
@@ -168,6 +171,7 @@ struct LatentCommands: Commands {
             Divider()
             item(state.exportTitle, .export)
             item("Export Open Image…", .exportOpenImage)
+            item("Edit in \(externalEditors.chosen?.name ?? "External Editor")…", .editExternally)
             item("Reveal in Finder", .revealInFinder)
             Divider()
             item("Contact Sheet…", .contactSheet)
@@ -195,6 +199,7 @@ struct LatentCommands: Commands {
             item("Previous Image", .step(-1))
             item("Next Image", .step(1))
             item("Open in Develop", .openSelection)
+            item("Slideshow", .slideshow)
             Divider()
             item(state.zoomInTitle, .zoomIn)
             item(state.zoomOutTitle, .zoomOut)

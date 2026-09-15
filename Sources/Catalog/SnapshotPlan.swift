@@ -44,6 +44,9 @@ public struct SnapshotPlan: Equatable, Sendable {
         case contactSheetFile = "contactsheetfile"
         /// The print panel over the window (Print, ⌘P).
         case print
+        /// A slideshow of the visible images, its first slide at rest with
+        /// the caption and controls showing. Not in the default steps.
+        case slideshow
     }
 
     public enum Problem: Error, Equatable, CustomStringConvertible {
