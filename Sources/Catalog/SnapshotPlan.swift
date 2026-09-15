@@ -29,6 +29,9 @@ public struct SnapshotPlan: Equatable, Sendable {
         case redEye = "redeye"
         /// Compare, on the selection and the image after it.
         case compare
+        /// Survey, on the selection and the images after it, four in all
+        /// where the folder has them.
+        case survey
         /// The export sheet over the window.
         case export
         /// The rename sheet over the window, for the selected image.
@@ -85,7 +88,7 @@ public struct SnapshotPlan: Equatable, Sendable {
 
     /// The app's own default window size (LatentApp's `defaultSize`).
     public static let defaultWindowSize = CGSize(width: 1400, height: 900)
-    public static let defaultSteps: [Step] = [.library, .loupe, .develop, .crop, .heal, .compare, .export, .settings]
+    public static let defaultSteps: [Step] = [.library, .loupe, .develop, .crop, .heal, .compare, .survey, .export, .settings]
 
     /// Nil unless LATENT_SNAPSHOT_DIR is set. Throws for a value that is
     /// set but can't be used, so a typo fails the run instead of quietly

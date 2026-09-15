@@ -59,6 +59,8 @@ enum KeyCommand: Equatable {
     case beforeAfter, crop, heal, deleteHeal, disarmTools
     case redEye
     case makeSelect
+    /// Survey (N), and taking its focused pane away.
+    case survey, removeFromSurvey
     // Reached from the menus, most with a Command shortcut as well.
     case openFolder, openFile, export, exportOpenImage
     case print, contactSheet

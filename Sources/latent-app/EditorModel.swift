@@ -351,6 +351,14 @@ final class EditorModel: ObservableObject {
     /// when their crops, rotations or pixel sizes differ.
     weak var linkedPane: EditorModel?
 
+    /// Survey's panes while its Sync is on: `linkedPane` for any number of
+    /// panes. Each zoom and pan made here reaches every other member.
+    weak var linkedGroup: (any LinkedPaneGroup)?
+
+    /// Whether renders measure the scopes. Off for Survey's panes, which
+    /// show no histogram, so their renders don't measure one.
+    var measuresScopes = true
+
     /// Set when this pane has just taken the linked pane's view, until the
     /// main queue next turns. Compare's zoom buttons and Z key send each
     /// command to both panes; once the first has carried it over, the copy

@@ -9,6 +9,7 @@ struct GridActions {
     var openLoupe: () -> Void = {}
     var openDevelop: () -> Void = {}
     var openCompare: () -> Void = {}
+    var openSurvey: () -> Void = {}
     var rate: (Int) -> Void = { _ in }
     var flag: (ImageFlag) -> Void = { _ in }
     var rotate: (Int) -> Void = { _ in }
@@ -42,6 +43,8 @@ enum GridContextMenu {
         menu.addItem(ClosureMenuItem("Open in Loupe", enabled: hasLead, actions.openLoupe))
         menu.addItem(ClosureMenuItem("Open in Develop", enabled: hasLead, actions.openDevelop))
         menu.addItem(ClosureMenuItem("Compare Selected", enabled: count == 2, actions.openCompare))
+        menu.addItem(ClosureMenuItem("Survey Selected", enabled: SurveyPanes.canSurvey(selectionCount: count),
+                                     actions.openSurvey))
         menu.addItem(.separator())
 
         let targets = library.selectedImages

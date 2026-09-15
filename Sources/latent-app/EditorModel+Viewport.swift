@@ -154,13 +154,18 @@ extension EditorModel {
 
     private func carryViewToLinkedPane() {
         linkedPane?.takeLinkedView(relativeView)
+        if let group = linkedGroup {
+            let view = relativeView
+            for pane in group.linkedPanes where pane !== self { pane.takeLinkedView(view) }
+        }
     }
 
     /// An image that opens (or is first laid out) while the other pane is
     /// zoomed in joins it, so stepping the candidate keeps the same detail
     /// in view. A fitted pane has nothing to share: images open fitted.
     func joinLinkedPane() {
-        guard let other = linkedPane, other.hasImage, !other.fitMode else { return }
+        let peer = linkedGroup?.linkedPanes.first { $0 !== self && $0.hasImage && !$0.fitMode }
+        guard let other = linkedPane ?? peer, other.hasImage, !other.fitMode else { return }
         show(other.relativeView)
     }
 }

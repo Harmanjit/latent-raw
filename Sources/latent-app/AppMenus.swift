@@ -44,6 +44,8 @@ struct CommandState: Equatable {
     var canGoForward = false
     /// Images are being moved, copied or renamed.
     var fileOperationRunning = false
+    /// Survey's focused pane has its image open.
+    var surveyHasImage = false
 
     func isEnabled(_ command: KeyCommand) -> Bool {
         switch command {
@@ -52,16 +54,18 @@ struct CommandState: Equatable {
         case .library, .openFolder, .disarmTools: true
         case .develop: hasImage || hasSelection
         case .toggleLoupe: (mode == .library && hasSelection) || mode == .loupe
-        case .zoomIn, .zoomOut: mode == .library || (mode.showsImage && hasImage)
-        case .toggleZoom, .zoomToFit, .zoomToActualSize: mode.showsImage && hasImage
+        case .zoomIn, .zoomOut: mode == .library || (mode.showsImage && viewedImageIsOpen)
+        case .toggleZoom, .zoomToFit, .zoomToActualSize: mode.showsImage && viewedImageIsOpen
         case .revealInFinder: hasSelection || hasVisibleImages
-        case .beforeAfter: mode.showsImage && hasImage
+        case .beforeAfter: mode.showsImage && mode != .survey && hasImage
         case .crop, .heal, .redEye, .autoAdjust: mode == .develop && hasImage
         case .deleteHeal: mode == .develop && ((healToolActive && hasSelectedHeal) || (redEyeToolActive && hasSelectedRedEye))
         case .toolSize: mode == .develop && toolSizeAdjustable
         case .addMask: mode == .develop && canAddMask
         case .toggleMaskOverlay: mode == .develop && hasSelectedMask
         case .makeSelect: mode == .compare && hasSelection
+        case .survey: mode == .survey || (hasSelection && SurveyPanes.canSurvey(selectionCount: selectionCount))
+        case .removeFromSurvey: mode == .survey && hasSelection
         case .swapCompare: mode == .compare && hasSelection && hasCompareSelect
         case .openFile: editorReady
         case .export: selectionCount > 0 && !exportQueueRunning
@@ -87,6 +91,10 @@ struct CommandState: Equatable {
         case .forward: canGoForward
         }
     }
+
+    /// The image zoom commands act on is open: Survey's focused pane, else
+    /// the editor's.
+    private var viewedImageIsOpen: Bool { mode == .survey ? surveyHasImage : hasImage }
 
     /// Keys that carry on to the rest of the app when their command can't
     /// run: Delete, Shift-X and the brackets mean something elsewhere. The
@@ -208,6 +216,7 @@ struct LatentCommands: Commands {
             modeToggle(.library)
             modeToggle(.loupe)
             modeToggle(.compare)
+            modeToggle(.survey)
             modeToggle(.develop)
             Divider()
             item("Grid ↔ Loupe", .toggleLoupe)
@@ -230,6 +239,7 @@ struct LatentCommands: Commands {
             // Before/After is.
             item("Make Select", .makeSelect)
             item("Swap Select and Candidate", .swapCompare)
+            item("Remove from Survey", .removeFromSurvey)
             Divider()
             item("Clear Filters", .clearFilter)
             Divider()
@@ -291,6 +301,7 @@ struct LatentCommands: Commands {
         case .library: .library
         case .loupe: .loupe
         case .compare: .compare
+        case .survey: .survey
         case .develop: .develop
         }
         return toolToggle(mode.title, command, isOn: context?.state.mode == mode)

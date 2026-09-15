@@ -18,6 +18,8 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | Z | Toggle fit / 100% |
 | ⌘0, ⌘1, ⌘=, ⌘- | Fit, 100%, zoom in, zoom out (in the grid, ⌘= and ⌘- size the thumbnails) |
 | ⇧X | Compare: make the candidate the Select |
+| N | Survey: the 2 to 4 selected images side by side (in Survey, ← and → move the focus) |
+| / | Survey: take the focused image out and deselect it |
 | ⇧⌘O | Open folder |
 | ⌘Return | Slideshow of the selection, or of every image the filter shows (in the show: ← and → step, Space pauses, Esc ends) |
 | ⌥⌘←, ⌥⌘→ | Back / forward through the folders opened, back to the images you had selected |
