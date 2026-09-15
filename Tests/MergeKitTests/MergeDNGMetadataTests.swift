@@ -10,6 +10,7 @@ final class MergeDNGMetadataTests: XCTestCase {
         let json: [String: Any] = [
             "width": 6048, "height": 4024, "leftMargin": 0, "topMargin": 0, "rawWidth": 6064, "rawHeight": 4040,
             "cfaCode": 0x94, "cameraMultipliers": multipliers, "blackLevel": 600, "whiteLevel": 15520,
+            "channelBlackLevels": [600, 600, 600, 600], "dataMaximum": 15000, "baselineExposure": 0,
             "cameraMake": "Nikon", "cameraModel": "Z 6_2", "lensModel": lensModel,
             "iso": 400, "shutter": 1.0 / 60, "aperture": 4, "focalLength": 24, "timestamp": timestamp,
             "orientation": flip, "lensMake": "Nikon", "lensMakerNotesName": "", "makerLensID": 0,

@@ -230,13 +230,24 @@ public struct LinearRawDNGWriter: Sendable {
             ifd.set(TIFFTag.compression, short: 8)
             ifd.set(TIFFTag.predictor, short: predictor.rawValue)
         }
-        ifd.set(TIFFTag.tileWidth, long: UInt32(tileSize))
-        ifd.set(TIFFTag.tileLength, long: UInt32(tileSize))
+        let tile = Self.tileSize(tileSize, width: pixels.width, height: pixels.height)
+        ifd.set(TIFFTag.tileWidth, long: UInt32(tile))
+        ifd.set(TIFFTag.tileLength, long: UInt32(tile))
         ifd.set(TIFFTag.tileOffsets, .imageChunkOffsets)
         ifd.set(TIFFTag.tileByteCounts, .imageChunkByteCounts)
-        ifd.imageData = DNGTileStream(pixels: pixels, tileSize: tileSize, normalisation: normalisation,
+        ifd.imageData = DNGTileStream(pixels: pixels, tileSize: tile, normalisation: normalisation,
                                       compression: compression).imageData
         return ifd
+    }
+
+    /// The tile size actually written for an image. LibRaw 0.22.2 misreads
+    /// a tiled float DNG whose width or height is smaller than one tile, so
+    /// for small images the tile shrinks to the largest multiple of 16 that
+    /// fits inside both sides (16 at the very least). Real merges are far
+    /// bigger than 512 px and always get the requested size.
+    static func tileSize(_ requested: Int, width: Int, height: Int) -> Int {
+        let fits = (min(width, height) / 16) * 16
+        return max(16, min(requested, fits))
     }
 
     /// SubIFD 1: the JPEG preview.

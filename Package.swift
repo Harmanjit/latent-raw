@@ -110,7 +110,7 @@ let package = Package(
             dependencies: ["PixelEngine", "RawCore", "Catalog"],
             path: "Tests/PixelEngineTests",
             // Reference PNGs, read by path from the test source.
-            exclude: ["Golden"]
+            exclude: ["Golden", "Fixtures"]
         ),
         .testTarget(
             name: "CatalogTests",

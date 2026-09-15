@@ -38,10 +38,13 @@ final class DNGPixelTests: XCTestCase {
     }
 
     func testOddSizesRoundTripBitForBitWithZeroPaddedEdgeTiles() throws {
-        for (width, height, tile) in [(517, 389, 512), (130, 77, 32), (1, 1, 16), (512, 513, 512)] {
+        for (width, height, requested) in [(517, 389, 512), (130, 77, 32), (1, 1, 16), (512, 513, 512), (1100, 700, 512)] {
             let pixels = Fixtures.pixels(width: width, height: height, maximum: 0.9)
             let (_, reader, raw) = try write(try .buffer(pixels, width: width, height: height), maximum: 0.9,
-                                             tileSize: tile, name: "odd-\(width)x\(height).dng")
+                                             tileSize: requested, name: "odd-\(width)x\(height).dng")
+            // Images with a side shorter than the requested tile get a
+            // smaller tile (LibRaw misreads tiles bigger than the image).
+            let tile = LinearRawDNGWriter.tileSize(requested, width: width, height: height)
             let (decoded, tiles) = try reader.tiledHalfFloats(raw)
             assertBitIdentical(decoded, pixels)
 
