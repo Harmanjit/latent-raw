@@ -32,14 +32,22 @@ public enum XMPSidecar {
         public var snapshotsJSON: String = ""
         /// JSON of the edit history, or empty (latent:History).
         public var historyJSON: String = ""
+        /// The recipe of a Photo Merge result (latent:Merge), or empty for
+        /// any other photo. Provenance only: which photos went in, how they
+        /// were merged and the values the renderer needs to read the result
+        /// back (docs/PhotoMerge.md). The catalog keeps it as written and
+        /// never interprets it.
+        public var mergeJSON: String = ""
 
         public init(rating: Int = 0, label: String? = nil, flag: Int = 0, rotation: Int = 0,
                     keywords: [String] = [],
                     preservedFileName: String? = nil, sourceHash: String,
                     schemaVersion: Int = 1, processVersion: String = "1.0",
-                    editStackJSON: String = "", snapshotsJSON: String = "", historyJSON: String = "") {
+                    editStackJSON: String = "", snapshotsJSON: String = "", historyJSON: String = "",
+                    mergeJSON: String = "") {
             self.snapshotsJSON = snapshotsJSON
             self.historyJSON = historyJSON
+            self.mergeJSON = mergeJSON
             self.rating = rating
             self.label = label
             self.flag = flag
@@ -99,14 +107,27 @@ public enum XMPSidecar {
            <dc:subject><rdf:Bag>
         \(keywordItems)
            </rdf:Bag></dc:subject>
-           <latent:EditStack><![CDATA[\(f.editStackJSON)]]></latent:EditStack>
-        \(f.snapshotsJSON.isEmpty ? "" : "   <latent:Snapshots><![CDATA[\(f.snapshotsJSON)]]></latent:Snapshots>")
-        \(f.historyJSON.isEmpty ? "" : "   <latent:History><![CDATA[\(f.historyJSON)]]></latent:History>")
+           <latent:EditStack>\(cdata(f.editStackJSON))</latent:EditStack>
+        \(f.snapshotsJSON.isEmpty ? "" : "   <latent:Snapshots>\(cdata(f.snapshotsJSON))</latent:Snapshots>")
+        \(f.historyJSON.isEmpty ? "" : "   <latent:History>\(cdata(f.historyJSON))</latent:History>")
+        \(f.mergeJSON.isEmpty ? "" : "   <latent:Merge>\(cdata(f.mergeJSON))</latent:Merge>")
           </rdf:Description>
          </rdf:RDF>
         </x:xmpmeta>
         <?xpacket end="w"?>
         """
+    }
+
+    /// Wraps text in a CDATA section, which keeps JSON readable in the file
+    /// with no escaping. The one thing CDATA can't hold is its own end
+    /// marker `]]>`, and JSON may contain it inside a string (a snapshot
+    /// named "a]]>b", a source file with it in its name); left alone it
+    /// would end the section early and make the whole sidecar unreadable.
+    /// So the section is closed between `]]` and `>` and a new one opened:
+    /// `]]]]><![CDATA[>`. A reader joins adjacent sections back together,
+    /// so the text comes back byte for byte.
+    static func cdata(_ text: String) -> String {
+        "<![CDATA[" + text.replacingOccurrences(of: "]]>", with: "]]]]><![CDATA[>") + "]]>"
     }
 
     private static func escape(_ s: String) -> String {
@@ -190,6 +211,7 @@ public enum XMPSidecar {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let snapshots = childText("Snapshots")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let history = childText("History")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let merge = childText("Merge")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         return Fields(
             rating: Int(property("xmp:Rating", local: "Rating") ?? "") ?? 0,
@@ -203,6 +225,7 @@ public enum XMPSidecar {
             processVersion: property("latent:ProcessVersion", local: "ProcessVersion") ?? "1.0",
             editStackJSON: editStack,
             snapshotsJSON: snapshots,
-            historyJSON: history)
+            historyJSON: history,
+            mergeJSON: merge)
     }
 }
