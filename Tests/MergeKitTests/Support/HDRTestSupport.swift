@@ -23,9 +23,9 @@ enum HDRTestSupport {
     /// A merger that sees plenty of disk and an unconstrained Mac.
     static func merger(memoryPolicy: MemoryPolicy = MemoryPolicy(physicalMemory: 16 << 30),
                        availableCapacity: @escaping @Sendable (URL) -> Int64? = { _ in nil },
-                       gpuMemoryBudget: Int? = nil) throws -> HDRMerger {
+                       gpuMemoryBudget: Int? = nil, clipFeather: HDRClipFeather = .standard) throws -> HDRMerger {
         HDRMerger(gpu: try gpu(), memoryPolicy: memoryPolicy, availableCapacity: availableCapacity,
-                  gpuMemoryBudget: gpuMemoryBudget)
+                  gpuMemoryBudget: gpuMemoryBudget, clipFeather: clipFeather)
     }
 
     /// The 1200 x 800 test scene, made once.
@@ -117,12 +117,12 @@ enum HDRTestSupport {
         return Merged(width: plane.width, height: plane.height, rgb: rgb, file: file)
     }
 
-    /// Analyses and merges `urls` into a new folder; returns everything a
-    /// test may check. The caller removes `folder`.
+    /// Analyses (with `options`, for Auto Align) and merges `urls` into a new
+    /// folder; returns everything a test may check. The caller removes `folder`.
     static func merge(_ urls: [URL], merger: HDRMerger? = nil, options: HDRMergeOptions = HDRMergeOptions())
     async throws -> (analysis: HDRMergeAnalysis, result: MergeDNGWriteResult, report: HDRMergeReport, folder: URL) {
         let merger = try merger ?? self.merger()
-        let analysis = try await merger.analyse(urls)
+        let analysis = try await merger.analyse(urls, options: options)
         let folder = try Fixtures.temporaryFolder()
         let destination = folder.appendingPathComponent("merged-HDR.dng")
         let (result, report) = try await merger.mergeWithReport(

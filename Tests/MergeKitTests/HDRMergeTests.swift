@@ -22,6 +22,7 @@ final class HDRMergeTests: XCTestCase {
         }
 
         let smooth = Self.smoothPixels(scene, radius: 6, step: 3)
+        let serving = Self.servingExposures(scene, exposures: HDRTestSupport.threeExposures)
         var tested = 0, worst = 0.0, failures = 0
         for (x, y) in smooth {
             let radiance = scene.radiance(x: x, y: y)
@@ -29,9 +30,11 @@ final class HDRMergeTests: XCTestCase {
             let darkestRaw = Double(radiance.max()) * 0.25 * SyntheticBracket.countsPerUnit + 640
             guard darkestRaw < 0.95 * Double(SyntheticBracket.white) else { continue }
             let want = SyntheticBracket.mergeUnits(radiance, brightest: 4)
-            // At least 200 counts in the brightest frame, so quantisation
-            // (half a count) stays well under the tolerance.
-            guard want.min() >= 200 / Double(SyntheticBracket.white - 600) else { continue }
+            // At least 200 counts in the brightest frame the merge can use
+            // here, so quantisation (half a count) stays well under the
+            // tolerance.
+            let counts = Double(radiance.min()) * serving[y * scene.width + x] * SyntheticBracket.countsPerUnit
+            guard counts >= 200 else { continue }
             let got = SIMD3<Double>(merged.pixel(x, y))
             let error = Self.relativeError(got, want)
             tested += 1
@@ -145,7 +148,22 @@ final class HDRMergeTests: XCTestCase {
             XCTAssertEqual(result.recipe.reference, reference)
             XCTAssertEqual(result.recipe.kind, .hdr)
             XCTAssertEqual(result.recipe.sources, HDRTestSupport.sources(analysis.frames.map(\.url)))
-            XCTAssertEqual(result.recipe.options, override.map { ["referenceIndex": .number(Double($0))] } ?? [:])
+            var options: [String: JSONValue] = ["deghost": .string("none"), "clipFeather": .number(1),
+                                                "autoAlign": .bool(true)]
+            if let override { options["referenceIndex"] = .number(Double(override)) }
+            var recorded = result.recipe.options
+            // A tripod bracket: Auto Align measured every frame within a
+            // tenth of a pixel of where it belongs, the reference at 0.
+            guard case .array(let shifts)? = recorded.removeValue(forKey: "alignmentShifts") else {
+                return XCTFail("no alignment shifts in \(result.recipe.options)")
+            }
+            XCTAssertEqual(recorded, options)
+            XCTAssertEqual(shifts.count, 3)
+            XCTAssertEqual(shifts[reference], .number(0))
+            for shift in shifts {
+                guard case .number(let pixels) = shift else { return XCTFail("\(shifts)") }
+                XCTAssertLessThan(pixels, 0.1)
+            }
             // Clipped in every frame at 98% of the darkest frame's white, on
             // the brightest frame's scale, then divided as the pixels were.
             XCTAssertEqual(Double(info.clipLevel), 0.98 * pow(2, analysis.exposureRangeStops - shift), accuracy: 1e-3)
@@ -175,6 +193,47 @@ final class HDRMergeTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// For every pixel, the exposure of the brightest frame that isn't
+    /// faded out there: one with no pixel near clipping within the clip
+    /// feathering's reach (`HDRClipFeather.standard`: 3 quarter-size pixels
+    /// eroded, then a blur reaching 2 sigma further, plus a block and the
+    /// widened clip mask's ring). The darkest frame is never faded.
+    static func servingExposures(_ scene: SyntheticBracket.Scene, exposures: [Double]) -> [Double] {
+        let w = scene.width, h = scene.height
+        let feather = HDRClipFeather.standard
+        let reach = HDRMergeKernels.maskSpan * (feather.erodeRadius + Int((2 * feather.sigma).rounded(.up)) + 1) + 1
+        var serving = [Double](repeating: exposures.last ?? 1, count: w * h)
+        var decided = [Bool](repeating: false, count: w * h)
+        for exposure in exposures.dropLast() {
+            // A summed-area table of pixels near clipping at this exposure
+            // (the merge's weights start fading at 80% of the clip level).
+            let clipCounts = 0.8 * (0.98 * Double(SyntheticBracket.white) - 640)
+            var table = [Int](repeating: 0, count: (w + 1) * (h + 1))
+            for y in 0..<h {
+                var row = 0
+                for x in 0..<w {
+                    if Double(scene.radiance(x: x, y: y).max()) * exposure * SyntheticBracket.countsPerUnit >= clipCounts {
+                        row += 1
+                    }
+                    table[(y + 1) * (w + 1) + x + 1] = table[y * (w + 1) + x + 1] + row
+                }
+            }
+            for y in 0..<h {
+                let y0 = max(0, y - reach), y1 = min(h, y + reach + 1)
+                for x in 0..<w where !decided[y * w + x] {
+                    let x0 = max(0, x - reach), x1 = min(w, x + reach + 1)
+                    let near = table[y1 * (w + 1) + x1] - table[y0 * (w + 1) + x1]
+                        - table[y1 * (w + 1) + x0] + table[y0 * (w + 1) + x0]
+                    if near == 0 {
+                        serving[y * w + x] = exposure
+                        decided[y * w + x] = true
+                    }
+                }
+            }
+        }
+        return serving
+    }
 
     /// The largest of the three channels' |got - want| / want.
     static func relativeError(_ got: SIMD3<Double>, _ want: SIMD3<Double>) -> Double {

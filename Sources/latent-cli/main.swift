@@ -79,10 +79,22 @@ if args.count >= 3, args[1] == "catalog" {
 if args.count >= 2, args[1] == "merge-hdr" {
     var positional: [String] = []
     var referenceOverride: Int?
+    var deghost = DeghostAmount.none
+    var autoAlign = true
     var index = 2
     while index < args.count {
         if args[index] == "--reference", index + 1 < args.count, let n = Int(args[index + 1]) {
             referenceOverride = n
+            index += 2
+        } else if args[index] == "--no-align" {
+            autoAlign = false
+            index += 1
+        } else if args[index] == "--deghost", index + 1 < args.count {
+            guard let amount = DeghostAmount(rawValue: args[index + 1]) else {
+                print("--deghost takes none, low, medium or high")
+                exit(1)
+            }
+            deghost = amount
             index += 2
         } else {
             positional.append(args[index])
@@ -90,7 +102,8 @@ if args.count >= 2, args[1] == "merge-hdr" {
         }
     }
     guard positional.count >= 3 else {
-        print("Usage: latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N]")
+        print("Usage: latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N] [--no-align] "
+              + "[--deghost none|low|medium|high]")
         exit(1)
     }
     let output = URL(fileURLWithPath: positional[0])
@@ -124,15 +137,41 @@ if args.count >= 2, args[1] == "merge-hdr" {
     do {
         let gpu = try GPUContext()
         let merger = HDRMerger(gpu: gpu)
-        let (analysis, analysisReport) = try await merger.analyseWithReport(inputs)
+        let options = HDRMergeOptions(referenceIndex: referenceOverride, deghost: deghost, autoAlign: autoAlign)
+        let (analysis, analysisReport) = try await merger.analyseWithReport(inputs, options: options)
         let reference = referenceOverride ?? analysis.referenceIndex
+        // What Auto Align will do with each frame for the reference used.
+        let plan = analysis.alignment?.plan(reference: reference)
         print(String(format: "Analysed %d photos in %.2f s", analysis.frames.count, analysisReport.totalSeconds))
-        print("   #  " + column("File", 28) + " Shutter    ISO     f  EXIF EV  Measured EV  Clipped")
+        print("   #  " + column("File", 28) + " Shutter    ISO     f  EXIF EV  Measured EV  Clipped  Alignment")
         for (i, frame) in analysis.frames.enumerated() {
+            let alignment: String
+            switch plan?.frames[i] {
+            case nil: alignment = "off"
+            case .reference?: alignment = "reference"
+            case .aligned(let shift)?: alignment = String(format: "moved %.2f px", shift)
+            case .unaligned?: alignment = "not aligned"
+            case .leftOut?: alignment = "left out"
+            }
             print(String(format: "  %2d", i) + (i == reference ? "* " : "  ") + column(frame.url.lastPathComponent, 28)
                   + " " + column(shutterText(frame.exposureSeconds), 7)
-                  + String(format: " %6.0f %5.1f  %+7.2f  %+11.2f  %6.2f%%", frame.iso, frame.aperture,
-                           frame.exifRelativeEV, frame.relativeEV, frame.clippedFraction * 100))
+                  + String(format: " %6.0f %5.1f  %+7.2f  %+11.2f  %6.2f%%  ", frame.iso, frame.aperture,
+                           frame.exifRelativeEV, frame.relativeEV, frame.clippedFraction * 100) + alignment)
+        }
+        if let alignment = analysis.alignment {
+            // Each neighbour pair as the aligner judged it.
+            for (k, link) in alignment.links.enumerated() {
+                let (a, b) = (alignment.chainOrder[k], alignment.chainOrder[k + 1])
+                let verdict = link.accepted ? "accepted" : "rejected (\(link.rejection.map { String(describing: $0) } ?? "?"))"
+                // Where the link moves the frame's centre, and how it turns it.
+                let centre = SIMD2(Double(analysis.width), Double(analysis.height)) / 2
+                let moved = Homography.apply(link.estimatedHomography, centre) - centre
+                print(String(format: "  align %d -> %d: centre (%+.2f, %+.2f) px, rotation %+.3f deg, corners %.2f px, "
+                             + "NCC %.3f, overlap %.3f, scale %+.3f%%, ",
+                             a, b, moved.x, moved.y, Homography.rotationDegrees(link.estimatedHomography, at: centre),
+                             link.maxCornerShift, link.ncc, link.overlapFraction, link.scaleChange * 100)
+                      + verdict)
+            }
         }
         print(String(format: "  * reference. Range %.2f EV, %d x %d px, DNG about %.0f MB",
                      analysis.exposureRangeStops, analysis.width, analysis.height,
@@ -141,7 +180,9 @@ if args.count >= 2, args[1] == "merge-hdr" {
         for warning in analysis.warnings {
             switch warning {
             case .framesLookMisaligned(let pixels):
-                print(String(format: "Warning: the frames look misaligned by up to %.1f px; v1 doesn't align them", pixels))
+                print(String(format: "Warning: the frames look misaligned by up to %.1f px (Auto Align is off)", pixels))
+            case .frameCouldNotBeAligned(let frame, let leftOut):
+                print("Warning: photo \(frame) couldn't be aligned; " + (leftOut ? "it is left out" : "merged where it is"))
             case .exposureMetadataDisagrees(let frame, let exif, let measured):
                 print(String(format: "Warning: photo %d measures %+.2f EV but its EXIF says %+.2f EV; using the measurement",
                              frame, measured, exif))
@@ -159,11 +200,20 @@ if args.count >= 2, args[1] == "merge-hdr" {
                 captureTime: Int64(captured.timeIntervalSince1970)))
         }
         let (result, mergeReport) = try await merger.mergeWithReport(
-            analysis, options: HDRMergeOptions(referenceIndex: referenceOverride), sources: sources, to: output,
+            analysis, options: options,
+            sources: sources, to: output,
             prepareSidecar: { _ in }, progress: { _ in })
         print("Timings:")
         printReport(analysisReport, title: "analysis")
         printReport(mergeReport, title: "merge")
+        if !mergeReport.ghostMaskedFractions.isEmpty {
+            let shares = zip(mergeReport.ghostFlaggedFractions, mergeReport.ghostMaskedFractions).enumerated()
+                .map { i, share in
+                    i == reference ? "\(i): reference"
+                        : String(format: "%d: %.2f%% moving, %.2f%% left out", i, share.0 * 100, share.1 * 100)
+                }
+            print("Deghosting (\(deghost.rawValue)): " + shares.joined(separator: "; "))
+        }
         let peak = max(analysisReport.peakGPUBytes, mergeReport.peakGPUBytes)
         print(String(format: "Peak GPU memory: %.2f GB (device allocations while merging)", Double(peak) / 1_073_741_824))
         print(String(format: "Wrote %@ (%.1f MB, BaselineExposure %+.2f, clip level %g)", result.url.path as NSString,
@@ -184,6 +234,7 @@ guard args.count >= 3, args[1] == "render" else {
       latent-cli render <path-to-raw-file> [options]
       latent-cli catalog <folder> [--include-subfolders]
       latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N]
+                           [--no-align] [--deghost none|low|medium|high]
 
     Options:
       --out <path.png>       write the result as a PNG

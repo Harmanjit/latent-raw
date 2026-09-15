@@ -4,6 +4,7 @@
 import Accelerate
 import Foundation
 import PixelEngine
+import simd
 
 /// One frame's reduced image, as the analysis measures it
 /// (`HDRMergeKernels.analysisImage`): the mean of each block of photosites
@@ -39,6 +40,49 @@ struct HDRAnalysisFrame {
         var sum = 0.0
         for i in 0..<(width * height) { sum += Double(pixels[i * 4 + 3]) }
         return sum / Double(width * height)
+    }
+
+    /// This frame moved onto another frame's grid of blocks (the same size),
+    /// for measuring exposure once Auto Align has found how it moved.
+    ///
+    /// - Parameter movingToReference: where this frame's pixels belong on
+    ///   the other frame, in full-resolution pixels (see `Homography`).
+    ///
+    /// Each block's colours are blended from the four blocks nearest to
+    /// where it came from; its clipped share is the largest of theirs, so a
+    /// block that took anything from a clipped one stays out of the
+    /// measurement. Blocks that came from outside the frame count as
+    /// clipped, which keeps them out too.
+    func moved(by movingToReference: simd_double3x3) -> HDRAnalysisFrame {
+        let referenceToMoving = movingToReference.inverse
+        let blockSize = Double(span)
+        var out = [Float](repeating: 0, count: pixels.count)
+        for y in 0..<height {
+            for x in 0..<width {
+                let o = (y * width + x) * 4
+                // The block's centre in full-resolution pixels, then in the
+                // moving frame's blocks, with centres on whole numbers.
+                let centre = SIMD2((Double(x) + 0.5) * blockSize, (Double(y) + 0.5) * blockSize)
+                let source = Homography.apply(referenceToMoving, centre) / blockSize - SIMD2(0.5, 0.5)
+                guard source.x >= 0, source.y >= 0, source.x <= Double(width - 1), source.y <= Double(height - 1) else {
+                    out[o + 3] = 1
+                    continue
+                }
+                let x0 = min(Int(source.x), width - 2), y0 = min(Int(source.y), height - 2)
+                let fx = Float(source.x - Double(x0)), fy = Float(source.y - Double(y0))
+                for ty in 0...1 {
+                    for tx in 0...1 {
+                        let weight = (tx == 0 ? 1 - fx : fx) * (ty == 0 ? 1 - fy : fy)
+                        let p = ((y0 + ty) * width + x0 + tx) * 4
+                        out[o] += weight * pixels[p]
+                        out[o + 1] += weight * pixels[p + 1]
+                        out[o + 2] += weight * pixels[p + 2]
+                        if weight > 0 { out[o + 3] = max(out[o + 3], pixels[p + 3]) }
+                    }
+                }
+            }
+        }
+        return HDRAnalysisFrame(width: width, height: height, span: span, pixels: out, channelClip: channelClip)
     }
 
     /// The share of blocks so dark that read noise swamps them: every
