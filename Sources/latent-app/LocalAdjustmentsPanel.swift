@@ -207,10 +207,10 @@ struct LocalAdjustmentsPanel: View {
             HStack {
                 Text(title).font(.caption)
                 Spacer()
-                Text(String(format: format, value.wrappedValue))
-                    .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+                SliderValueField(value: value, in: range, format: SliderValueFormat(printf: format), label: title)
             }
-            ResettableSlider(value: value, in: range) { value.wrappedValue = 0 }
+            ResettableSlider(value: value, in: range, label: title,
+                             format: SliderValueFormat(printf: format)) { value.wrappedValue = 0 }
         }
     }
 }

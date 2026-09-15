@@ -1218,11 +1218,10 @@ struct ContentView: View {
             HStack {
                 Text(title).font(.subheadline)
                 Spacer()
-                Text(String(format: format, value.wrappedValue))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                SliderValueField(value: value, in: range, format: SliderValueFormat(printf: format), label: title)
             }
-            ResettableSlider(value: value, in: range) { value.wrappedValue = defaultValue }
+            ResettableSlider(value: value, in: range, label: title,
+                             format: SliderValueFormat(printf: format)) { value.wrappedValue = defaultValue }
                 .help("Double-click to reset")
         }
         .disabled(!model.hasImage)

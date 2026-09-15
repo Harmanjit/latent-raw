@@ -4,124 +4,202 @@ using namespace metal;
 // Spot removal, in camera-linear space (before the lens stage so every
 // coordinate is a sensor coordinate).
 //
-// Two kernels. `healStats` measures, per patch, the mean colour of a ring
-// just inside the target circle's edge and of the matching ring at the
-// source: the rim is where a seam would show, so matching it is what
-// makes a heal invisible. `healApply` then copies source pixels over the
-// target, scaled by targetRim/sourceRim in heal mode, feathered at the
-// edge. Both run on whatever texture the pipeline has — full frame,
-// binned preview or a tile — using `tileOrigin` and `binSpan` to map
-// sensor pixels onto it, exactly as the local-adjustment masks do.
+// Patches apply in order, each reading the image as the earlier ones left
+// it, so a heal next to (or over) an earlier patch matches that patch
+// rather than the blemish underneath. The pipeline copies the input into
+// a working texture, then per patch:
+//
+//   healGather  weighted box averages of the surroundings of target and
+//               source onto a coarse grid (heal only)
+//   healBlur    separable Gaussian on both grids, once per axis (heal only)
+//   healApply   the patch over its bounding box, into a scratch texture
+//   healPaste   the scratch back into the working texture
+//
+// Clone copies the source pixels. Heal multiplies them by a ratio field,
+// the target's surroundings over the source's, where "surroundings" is a
+// Gaussian blur that leaves the patch itself out and renormalises
+// (blur(image x w) / blur(w), w zero under the patch). Where the patch
+// meets unpatched pixels the ratio is exactly what turns the source into
+// the target, so tone and colour match along the whole edge, and inside
+// it follows the surroundings from every side: a sky gradient, a cheek
+// turning into shadow, a horizon crossing the patch. One rim-mean ratio
+// for the whole patch (the previous method) is wrong on both sides of a
+// horizon and leaves a blotch worse than the blemish; HealQualityTests
+// has the numbers.
+//
+// Sigma is half the radius. The surroundings are smooth at that scale, so
+// they are gathered onto cells of up to a quarter sigma and blurred there
+// (about 40 x 40 cells per patch, whatever its size) instead of blurring
+// every full-resolution pixel. Radius, sigma and cell size are in texture
+// pixels (sensor pixels / binSpan), so a binned preview, a tile and an
+// export agree.
 
 struct HealPatchGPU {
     float4 geometry;   // target.xy, source.xy, normalized sensor
     float4 params;     // radius (fraction of short side), feather, mode (0 heal, 1 clone), unused
 };
 
-constant int kMaxHeals = 32;
-constant int kStatsThreads = 256;
+// Where one patch lands on the texture being rendered (HealStage.swift).
+struct HealGridGPU {
+    float2 target;       // target centre, texture pixels
+    float2 offset;       // source centre minus target centre, texture pixels
+    float radius;        // texture pixels
+    float feather;
+    float cell;          // texels per grid cell, a whole number
+    float sigma;         // Gaussian sigma, in cells
+    float2 gridOrigin;   // texture position of cell (0, 0)'s top-left corner
+    int2 gridSize;       // cells
+    int2 boxOrigin;      // texel at the scratch's top-left
+    int2 boxSize;        // texels
+};
 
-inline float2 sensorToTexture(float2 sensorPx, float2 tileOrigin, float binSpan) {
+inline float2 healSensorToTexture(float2 sensorPx, float2 tileOrigin, float binSpan) {
     return (sensorPx - tileOrigin) / binSpan;
 }
 
-inline bool insideTexture(float2 t, texture2d<float, access::sample> tex) {
+inline bool healInsideTexture(float2 t, texture2d<float, access::sample> tex) {
     return t.x >= 0.0 && t.y >= 0.0 && t.x < float(tex.get_width()) && t.y < float(tex.get_height());
 }
 
-// One threadgroup per patch. Each thread samples a strided subset of a
-// 16x16 grid over the circle's bounding square, keeping the samples that
-// fall in the outer ring (0.7r…r) and whose source counterpart is on the
-// texture. Sums are reduced across the group and the means written out.
-kernel void healStats(
-    texture2d<float, access::sample> input   [[texture(0)]],
-    constant HealPatchGPU *patches           [[buffer(0)]],
-    device float4 *stats                     [[buffer(1)]],   // [2 * kMaxHeals]: target means, then source means
-    constant float2 &sensorSize              [[buffer(2)]],
-    constant float2 &tileOrigin              [[buffer(3)]],
-    constant float &binSpan                  [[buffer(4)]],
-    uint patch                               [[threadgroup_position_in_grid]],
-    uint tid                                 [[thread_index_in_threadgroup]],
-    uint simdLane                            [[thread_index_in_simdgroup]],
-    uint simdIndex                           [[simdgroup_index_in_threadgroup]])
+// How much a pixel may inform the surroundings: none where the patch
+// covers it by a third or more (the blemish and most of the feathered
+// edge), fully where the patch doesn't reach.
+inline float healFillWeight(float dist, float radius, float feather) {
+    if (dist >= radius) return 1.0;
+    float inner = (1.0 - feather) * radius;
+    float coverage = dist <= inner ? 1.0 : 1.0 - smoothstep(inner, radius, dist);
+    return 1.0 - smoothstep(0.0, 0.33, coverage);
+}
+
+// One thread per cell: the weighted means of the k x k texels under it,
+// around the target and at the same offsets around the source. Alpha
+// holds the mean weight, which the ratio divides back out.
+kernel void healGather(
+    texture2d<float, access::sample> state   [[texture(0)]],
+    texture2d<float, access::write>  target  [[texture(1)]],
+    texture2d<float, access::write>  source  [[texture(2)]],
+    constant HealGridGPU &g                  [[buffer(0)]],
+    uint2 gid                                [[thread_position_in_grid]])
 {
+    if (int(gid.x) >= g.gridSize.x || int(gid.y) >= g.gridSize.y) return;
     constexpr sampler s(coord::pixel, address::clamp_to_edge, filter::linear);
-    threadgroup float4 partialT[8];
-    threadgroup float4 partialS[8];
-    threadgroup float partialN[8];
+    int k = int(g.cell);
+    float2 corner = g.gridOrigin + float2(gid) * g.cell;
+    float3 sumT = 0.0, sumS = 0.0;
+    float sumW = 0.0;
+    for (int j = 0; j < k; j++) {
+        for (int i = 0; i < k; i++) {
+            float2 q = corner + float2(i, j) + 0.5;
+            float w = healFillWeight(length(q - g.target), g.radius, g.feather);
+            if (w <= 0.0) continue;
+            sumT += w * state.sample(s, q).rgb;
+            sumS += w * state.sample(s, q + g.offset).rgb;
+            sumW += w;
+        }
+    }
+    float inv = 1.0 / float(k * k);
+    target.write(float4(sumT * inv, sumW * inv), gid);
+    source.write(float4(sumS * inv, sumW * inv), gid);
+}
 
-    HealPatchGPU p = patches[patch];
-    float shortSide = min(sensorSize.x, sensorSize.y);
-    float r = p.params.x * shortSide;
-    float2 target = p.geometry.xy * sensorSize;
-    float2 source = p.geometry.zw * sensorSize;
-
+// Normalised Gaussian along one axis, on both grids at once. The grid
+// textures are sized for the largest patch, so the edge clamps to this
+// patch's own grid.
+kernel void healBlur(
+    texture2d<float, access::read>  inT     [[texture(0)]],
+    texture2d<float, access::read>  inS     [[texture(1)]],
+    texture2d<float, access::write> outT    [[texture(2)]],
+    texture2d<float, access::write> outS    [[texture(3)]],
+    constant HealGridGPU &g                 [[buffer(0)]],
+    constant int &vertical                  [[buffer(1)]],
+    uint2 gid                               [[thread_position_in_grid]])
+{
+    if (int(gid.x) >= g.gridSize.x || int(gid.y) >= g.gridSize.y) return;
+    int reach = min(int(ceil(3.0 * g.sigma)), 16);
+    int2 axis = vertical != 0 ? int2(0, 1) : int2(1, 0);
+    float twoSigmaSq = 2.0 * g.sigma * g.sigma;
     float4 sumT = 0.0, sumS = 0.0;
-    float n = 0.0;
-    for (int i = int(tid); i < 32 * 32; i += kStatsThreads) {
-        float2 g = float2(float(i % 32) + 0.5, float(i / 32) + 0.5) / 32.0;   // 0…1 across the square
-        float2 d = (g * 2.0 - 1.0) * r;
-        float dist = length(d);
-        if (dist < 0.7 * r || dist > r) continue;
-        float2 tT = sensorToTexture(target + d, tileOrigin, binSpan);
-        float2 tS = sensorToTexture(source + d, tileOrigin, binSpan);
-        if (!insideTexture(tT, input) || !insideTexture(tS, input)) continue;
-        sumT += input.sample(s, tT);
-        sumS += input.sample(s, tS);
-        n += 1.0;
+    float total = 0.0;
+    for (int i = -reach; i <= reach; i++) {
+        int2 p = clamp(int2(gid) + axis * i, int2(0), g.gridSize - 1);
+        float w = exp(-float(i * i) / twoSigmaSq);
+        sumT += w * inT.read(uint2(p));
+        sumS += w * inS.read(uint2(p));
+        total += w;
     }
-    sumT = simd_sum(sumT); sumS = simd_sum(sumS); n = simd_sum(n);
-    if (simdLane == 0) { partialT[simdIndex] = sumT; partialS[simdIndex] = sumS; partialN[simdIndex] = n; }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (tid == 0) {
-        float4 T = 0.0, S = 0.0; float N = 0.0;
-        for (int i = 0; i < 8; i++) { T += partialT[i]; S += partialS[i]; N += partialN[i]; }
-        float inv = N > 0.0 ? 1.0 / N : 0.0;
-        stats[patch] = T * inv;
-        stats[kMaxHeals + int(patch)] = S * inv;
-    }
+    outT.write(sumT / total, gid);
+    outS.write(sumS / total, gid);
+}
+
+// Bilinear read of a grid at a texture position. Float32 textures aren't
+// filterable on every GPU, so this interpolates by hand.
+inline float4 healField(texture2d<float, access::read> grid, float2 texturePos, constant HealGridGPU &g) {
+    float2 u = (texturePos - g.gridOrigin) / g.cell - 0.5;
+    float2 base = floor(u);
+    float2 f = u - base;
+    int2 hi = g.gridSize - 1;
+    int2 p0 = clamp(int2(base), int2(0), hi);
+    int2 p1 = clamp(int2(base) + 1, int2(0), hi);
+    float4 top = mix(grid.read(uint2(p0.x, p0.y)), grid.read(uint2(p1.x, p0.y)), f.x);
+    float4 bottom = mix(grid.read(uint2(p0.x, p1.y)), grid.read(uint2(p1.x, p1.y)), f.x);
+    return mix(top, bottom, f.y);
 }
 
 kernel void healApply(
-    texture2d<float, access::sample> input   [[texture(0)]],
-    texture2d<float, access::write>  output  [[texture(1)]],
-    constant HealPatchGPU *patches           [[buffer(0)]],
-    constant float4 *stats                   [[buffer(1)]],
-    constant int &patchCount                 [[buffer(2)]],
-    constant float2 &sensorSize              [[buffer(3)]],
-    constant float2 &tileOrigin              [[buffer(4)]],
-    constant float &binSpan                  [[buffer(5)]],
+    texture2d<float, access::sample> state   [[texture(0)]],
+    texture2d<float, access::read>   fieldT  [[texture(1)]],
+    texture2d<float, access::read>   fieldS  [[texture(2)]],
+    texture2d<float, access::write>  scratch [[texture(3)]],
+    constant HealPatchGPU &p                 [[buffer(0)]],
+    constant HealGridGPU &g                  [[buffer(1)]],
+    constant float2 &sensorSize              [[buffer(2)]],
+    constant float2 &tileOrigin              [[buffer(3)]],
+    constant float &binSpan                  [[buffer(4)]],
     uint2 gid                                [[thread_position_in_grid]])
 {
-    if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
+    if (int(gid.x) >= g.boxSize.x || int(gid.y) >= g.boxSize.y) return;
     constexpr sampler s(coord::pixel, address::clamp_to_edge, filter::linear);
 
-    float2 here = float2(gid) + 0.5;
-    float4 c = input.sample(s, here);
+    float2 here = float2(int2(gid) + g.boxOrigin) + 0.5;
+    float4 c = state.sample(s, here);
     float2 sensorPx = tileOrigin + here * binSpan;
     float shortSide = min(sensorSize.x, sensorSize.y);
-
-    for (int i = 0; i < min(patchCount, kMaxHeals); i++) {
-        HealPatchGPU p = patches[i];
-        float r = p.params.x * shortSide;
-        float2 d = sensorPx - p.geometry.xy * sensorSize;
-        float dist = length(d);
-        if (dist >= r) continue;
-        float2 src = sensorToTexture(p.geometry.zw * sensorSize + d, tileOrigin, binSpan);
-        if (!insideTexture(src, input)) continue;
-        float4 v = input.sample(s, src);
+    float r = p.params.x * shortSide;
+    float2 d = sensorPx - p.geometry.xy * sensorSize;
+    float dist = length(d);
+    float2 src = healSensorToTexture(p.geometry.zw * sensorSize + d, tileOrigin, binSpan);
+    if (dist < r && healInsideTexture(src, state)) {
+        float4 v = state.sample(s, src);
         if (p.params.z < 0.5) {
-            // Heal: match the rim. Ratios in linear light keep texture and
-            // fix both brightness and colour cast; clamped so a black rim
-            // can't blow the patch up.
-            float4 t = stats[i], sm = stats[kMaxHeals + i];
-            float3 ratio = clamp(t.rgb / max(sm.rgb, 1e-4), 0.25, 4.0);
-            v.rgb *= ratio;
+            // Heal. A ratio in linear light, because texture is mostly
+            // reflectance times illumination: pores copied from a lit
+            // cheek into a shaded one keep the shaded contrast. Where
+            // either side is near zero or negative a ratio means nothing
+            // and the difference is added instead; with no surroundings
+            // at all the source is copied as it is.
+            float4 ft = healField(fieldT, here, g), fs = healField(fieldS, here, g);
+            float support = max(ft.a, 1e-4);
+            float3 ld = ft.rgb / support, ls = fs.rgb / support;
+            float3 added = v.rgb + ld - ls;
+            float3 ratio = v.rgb * (ld / max(ls, float3(1e-4)));
+            float3 useRatio = smoothstep(0.002, 0.008, min(ls, ld));
+            float3 healed = mix(added, ratio, useRatio);
+            v.rgb = mix(v.rgb, healed, smoothstep(0.002, 0.02, ft.a));
         }
         // Feather: full inside (1 - feather) * r, fading to nothing at r.
         float inner = (1.0 - p.params.y) * r;
         float w = 1.0 - smoothstep(inner, r, dist);
         c.rgb = mix(c.rgb, v.rgb, w);
     }
-    output.write(c, gid);
+    scratch.write(c, gid);
+}
+
+kernel void healPaste(
+    texture2d<float, access::read>  scratch [[texture(0)]],
+    texture2d<float, access::write> state   [[texture(1)]],
+    constant HealGridGPU &g                 [[buffer(0)]],
+    uint2 gid                               [[thread_position_in_grid]])
+{
+    if (int(gid.x) >= g.boxSize.x || int(gid.y) >= g.boxSize.y) return;
+    state.write(scratch.read(gid), uint2(int2(gid) + g.boxOrigin));
 }

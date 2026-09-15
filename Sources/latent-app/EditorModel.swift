@@ -1432,11 +1432,10 @@ final class EditorModel: ObservableObject {
             visible = parameters.perspective.sourceRect(forSensorRect: visible, sensorSize: sensorSize)
                 .insetBy(dx: -4, dy: -4)
         }
-        // A patch on screen must be able to read its source, which may lie
-        // outside the visible area: widen the tile to include it.
-        for p in parameters.heals where p.targetBounds(sensorSize: sensorSize).intersects(visible) {
-            visible = visible.union(p.sourceBounds(sensorSize: sensorSize).insetBy(dx: -2, dy: -2))
-        }
+        // A patch on screen must be able to read its source and, for a heal,
+        // the surroundings, which may lie outside the visible area: widen
+        // the tile to include them.
+        visible = HealPatch.regionIncludingSources(visible, patches: parameters.heals, sensorSize: sensorSize)
         let width = min(Int(visible.width.rounded(.up)), Int(sensorSize.width))
         let height = min(Int(visible.height.rounded(.up)), Int(sensorSize.height))
         return (Int(visible.origin.x.rounded(.down)), Int(visible.origin.y.rounded(.down)),
