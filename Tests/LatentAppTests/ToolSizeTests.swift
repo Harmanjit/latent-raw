@@ -18,3 +18,15 @@ final class ToolSizeTests: XCTestCase {
         XCTAssertEqual(ToolSizeStep.stepped(0, by: 1, within: ToolSizeStep.healRadiusPixels), 4)
     }
 }
+
+final class LocalSliderResetTests: XCTestCase {
+    /// Double-click reset used to put 0 into every Local Adjustments row,
+    /// below the ranges of brush Size and Flow, luminance Feather and
+    /// colour Width.
+    func testResetStaysInsideTheSliderRange() {
+        XCTAssertEqual(LocalAdjustmentsPanel.resetValue(0, in: 5...90), 5)
+        XCTAssertEqual(LocalAdjustmentsPanel.resetValue(0, in: ToolSizeStep.brushRadius), 0.005)
+        XCTAssertEqual(LocalAdjustmentsPanel.resetValue(0.04, in: ToolSizeStep.brushRadius), 0.04)
+        XCTAssertEqual(LocalAdjustmentsPanel.resetValue(2, in: 0...1), 1)
+    }
+}

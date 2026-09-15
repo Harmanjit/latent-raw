@@ -4,7 +4,8 @@ import Catalog
 
 /// The collapsible left sidebar: favourite folders, each expanding into its
 /// folder tree. Clicking a folder opens it as the catalog, exactly as Open
-/// Folder does.
+/// Folder does; so do Return and Space once Tab or VoiceOver has given the
+/// tree the keyboard, and VoiceOver's press.
 ///
 /// The tree is only ever read with `readdir`; no catalog is touched until a
 /// folder is opened. Under the sandbox the app may read inside a favourite
@@ -161,14 +162,95 @@ private struct FoundFolder: Sendable {
     }
 }
 
-/// Clicks select rows but the outline never takes the keyboard, so the
-/// arrow keys keep stepping through images (BareKeyMonitor) and arrowing
-/// through the tree can't open one catalog after another.
-private final class FolderOutlineView: NSOutlineView {
-    override var acceptsFirstResponder: Bool { false }
+/// When the folder outline takes the keyboard and which keys open the
+/// selected folder, apart from AppKit so the rules can be tested.
+enum FolderOutlineKeyboard {
+    /// Tab and Shift-Tab move focus here (with any modifier: Control-Tab
+    /// under Full Keyboard Access too), and VoiceOver moves it without any
+    /// event reaching the app. A click doesn't give the outline the
+    /// keyboard, nor does a window choosing a first key view as it opens,
+    /// so after clicking a folder the arrow keys still step through its
+    /// images (BareKeyMonitor).
+    static func takesFocus(during event: NSEvent.EventType?, characters: String?, voiceOver: Bool) -> Bool {
+        voiceOver || (event == .keyDown && ["\t", "\u{19}"].contains(characters ?? ""))
+    }
+
+    /// Return, Enter or Space, without Command, Option or Control.
+    static func opensSelection(characters: String, modifiers: NSEvent.ModifierFlags) -> Bool {
+        modifiers.isDisjoint(with: [.command, .option, .control]) && ["\r", "\u{3}", " "].contains(characters)
+    }
 }
 
-private final class FolderOutlineController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
+/// Clicks select rows without taking the keyboard (`FolderOutlineKeyboard`).
+/// With the keyboard, the arrows move through the tree and expand it, and
+/// typing jumps to a folder, all without opening anything, so arrowing
+/// through the tree can't open one catalog after another; Return or Space
+/// opens the selected folder.
+private final class FolderOutlineView: NSOutlineView {
+    /// Opens the folder on a row.
+    var onOpenRow: ((Int) -> Void)?
+    /// The keyboard went elsewhere.
+    var onResign: (() -> Void)?
+    private(set) var hasKeyboard = false
+    /// The row a context menu opened without a click is for.
+    private(set) var menuRow: Int?
+
+    override var acceptsFirstResponder: Bool {
+        let event = NSApp.currentEvent
+        return FolderOutlineKeyboard.takesFocus(during: event?.type,
+                                                characters: event?.type == .keyDown ? event?.charactersIgnoringModifiers : nil,
+                                                voiceOver: NSWorkspace.shared.isVoiceOverEnabled)
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became { hasKeyboard = true }
+        return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            hasKeyboard = false
+            onResign?()
+        }
+        return resigned
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if selectedRow >= 0,
+           FolderOutlineKeyboard.opensSelection(characters: event.charactersIgnoringModifiers ?? "",
+                                                modifiers: event.modifierFlags) {
+            onOpenRow?(selectedRow)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    /// VoiceOver's and Full Keyboard Access's menu command on the tree: the
+    /// selected row's menu. The menu is built from `clickedRow`, which only
+    /// a click sets.
+    override func accessibilityPerformShowMenu() -> Bool {
+        showMenu(forRow: selectedRow)
+    }
+
+    /// Pops up the context menu for `row` a turn later, out of the
+    /// accessibility call.
+    func showMenu(forRow row: Int) -> Bool {
+        guard let menu else { return false }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let rect = row >= 0 && row < self.numberOfRows ? self.rect(ofRow: row) : self.visibleRect
+            self.menuRow = row
+            menu.popUp(positioning: nil, at: NSPoint(x: rect.minX + 20, y: rect.maxY), in: self)
+            self.menuRow = nil
+        }
+        return true
+    }
+}
+
+/// Internal rather than private so tests can drive it.
+final class FolderOutlineController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
     var onOpen: ((URL) -> Bool)?
     var onAdd: (([URL]) -> Void)?
     var onRemove: ((URL) -> Void)?
@@ -202,6 +284,11 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
         outlineView.delegate = self
         outlineView.target = self
         outlineView.action = #selector(rowClicked(_:))
+        outlineView.onOpenRow = { [weak self] row in self?.open(row: row) }
+        outlineView.onResign = { [weak self] in
+            guard let self else { return }
+            self.select(self.node(for: self.currentFolder))
+        }
         outlineView.menu = NSMenu()
         outlineView.menu?.delegate = self
         outlineView.registerForDraggedTypes([.fileURL])
@@ -393,9 +480,13 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
         return node
     }
 
+    /// While the tree has the keyboard the selection is the user's: a
+    /// listing arriving or a reveal doesn't move it, until the keyboard
+    /// goes elsewhere.
     private func select(_ node: FolderNode?) {
         let row = node.map { outlineView.row(forItem: $0) } ?? -1
-        guard row != outlineView.selectedRow else { return }
+        guard row != outlineView.selectedRow,
+              !(outlineView.hasKeyboard && outlineView.selectedRow >= 0) else { return }
         isChangingInCode = true
         if row >= 0 {
             outlineView.selectRowIndexes([row], byExtendingSelection: false)
@@ -474,6 +565,12 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
         return true
     }
 
+    /// Typing a folder's first letters selects it.
+    func outlineView(_ outlineView: NSOutlineView, typeSelectStringFor tableColumn: NSTableColumn?, item: Any) -> String? {
+        guard let node = item as? FolderNode, node.kind != .header else { return nil }
+        return node.title
+    }
+
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
         (item as? FolderNode)?.kind == .header ? nil : FolderRowView()
     }
@@ -535,16 +632,23 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
 
     /// A click opens the folder: on the click itself, not on a selection
     /// change, so dragging across rows doesn't open each one and a click on
-    /// a disclosure triangle only expands. The highlight follows the folder
-    /// being opened (ContentView passes it as current) and goes back if the
-    /// folder is refused.
+    /// a disclosure triangle only expands.
     @objc private func rowClicked(_ sender: Any?) {
         let row = outlineView.clickedRow
-        guard row >= 0, let node = outlineView.item(atRow: row) as? FolderNode, let url = node.url else { return }
+        guard row >= 0 else { return }
         if let event = NSApp.currentEvent,
            outlineView.frameOfOutlineCell(atRow: row).contains(outlineView.convert(event.locationInWindow, from: nil)) {
             return
         }
+        open(row: row)
+    }
+
+    /// Opens the folder on `row` (clicked, pressed, or selected when Return
+    /// was pressed). The highlight follows the folder being opened
+    /// (ContentView passes it as current) and goes back if the folder is
+    /// refused.
+    private func open(row: Int) {
+        guard row >= 0, let node = outlineView.item(atRow: row) as? FolderNode, let url = node.url else { return }
         if let currentFolder, FolderAccess.samePath(currentFolder, url) { return }
         guard onOpen?(url) == false else { return }
         select(self.node(for: currentFolder))
@@ -554,7 +658,8 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        guard let node = outlineView.item(atRow: outlineView.clickedRow) as? FolderNode, let url = node.url else {
+        let row = outlineView.menuRow ?? outlineView.clickedRow
+        guard let node = outlineView.item(atRow: row) as? FolderNode, let url = node.url else {
             menu.addItem(item("Add Folder…", #selector(chooseFolderClicked(_:)), nil))
             return
         }
@@ -606,6 +711,26 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
 /// Increase Contrast is on: the source list's own highlight is a pale fill.
 private final class FolderRowView: NSTableRowView {
     private var displayOptionsObserver: NSObjectProtocol?
+
+    private var outline: FolderOutlineView? {
+        var view = superview
+        while let current = view, !(current is FolderOutlineView) { view = current.superview }
+        return view as? FolderOutlineView
+    }
+
+    /// VoiceOver's press opens the folder, as a click does; selecting the
+    /// row only moves through the tree.
+    override func accessibilityPerformPress() -> Bool {
+        guard let outline, case let row = outline.row(for: self), row >= 0 else { return false }
+        outline.onOpenRow?(row)
+        return true
+    }
+
+    /// The row's own context menu, which a click would have opened.
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard let outline, case let row = outline.row(for: self), row >= 0 else { return false }
+        return outline.showMenu(forRow: row)
+    }
 
     override func drawSelection(in dirtyRect: NSRect) {
         super.drawSelection(in: dirtyRect)

@@ -89,7 +89,12 @@ final class BareKeyTests: XCTestCase {
         XCTAssertEqual(KeyFocus(NSPopUpButton()), .control)
         XCTAssertEqual(KeyFocus(NSSegmentedControl()), .control)
         XCTAssertEqual(KeyFocus(NSSwitch()), .control)
-        XCTAssertEqual(KeyFocus(NSSlider()), .other)
+        XCTAssertEqual(KeyFocus(NSSlider()), .slider)
+        XCTAssertEqual(KeyFocus(DoubleClickSlider()), .slider)
+        XCTAssertEqual(KeyFocus(NSTableView()), .list)
+        XCTAssertEqual(KeyFocus(NSOutlineView()), .list)
+        // The thumbnail grid and filmstrip: single keys stay commands.
+        XCTAssertEqual(KeyFocus(NSCollectionView()), .other)
         XCTAssertEqual(KeyFocus(NSView()), .other)
         XCTAssertEqual(KeyFocus(nil), .other)
     }
@@ -110,9 +115,32 @@ final class BareKeyTests: XCTestCase {
         XCTAssertFalse(press("\u{1B}")!.belongs(to: .control))
     }
 
+    /// The folder sidebar with the keyboard: arrows move and expand, Return
+    /// and Space open, letters and digits jump to a folder, instead of
+    /// stepping, switching modes or rating.
+    func testFocusedListsTakeTheirKeys() {
+        for characters in ["\u{F702}", "\u{F703}", "\r", " ", "g", "d", "2"] {
+            XCTAssertTrue(press(characters)!.belongs(to: .list), characters)
+        }
+        XCTAssertTrue(press("G", shift: true)!.belongs(to: .list))
+        XCTAssertFalse(press("\u{1B}")!.belongs(to: .list), "Escape still disarms tools")
+        XCTAssertFalse(press("\u{7F}")!.belongs(to: .list))
+    }
+
+    /// With Full Keyboard Access a focused slider moves with ← and →
+    /// instead of loading another image; its other keys stay commands.
+    func testFocusedSlidersTakeLeftAndRight() {
+        XCTAssertTrue(press("\u{F702}")!.belongs(to: .slider))
+        XCTAssertTrue(press("\u{F703}", shift: true)!.belongs(to: .slider))
+        XCTAssertFalse(press("\r")!.belongs(to: .slider))
+        XCTAssertFalse(press(" ")!.belongs(to: .slider))
+        XCTAssertFalse(press("g")!.belongs(to: .slider))
+    }
+
     func testNothingElseTakesKeys() {
         XCTAssertFalse(press(" ")!.belongs(to: .other))
         XCTAssertFalse(press("\r")!.belongs(to: .other))
+        XCTAssertFalse(press("\u{F703}")!.belongs(to: .other))
     }
 
     /// The Edit menu learns that typing started from key-value observing

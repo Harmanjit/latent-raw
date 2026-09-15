@@ -1049,6 +1049,8 @@ struct ContentView: View {
             }
             .padding(16)
         }
+        // A number typed for one photo must not land on the next.
+        .sliderFieldSubject(model.sourceURL)
     }
 
     /// Temperature gets its own row because the slider travels in mired

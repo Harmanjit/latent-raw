@@ -263,22 +263,47 @@ private struct NumberField: NSViewRepresentable {
     }
 
     func updateNSView(_ field: NSTextField, context: Context) {
-        context.coordinator.parent = self
+        let coordinator = context.coordinator
+        coordinator.parent = self
         field.isEnabled = context.environment.isEnabled
         if field.accessibilityLabel() != label { field.setAccessibilityLabel(label) }
-        // Never overwrite what is being typed.
-        if field.currentEditor() == nil {
-            let shown = format.number(value)
-            if field.stringValue != shown { field.stringValue = shown }
+        let editor = field.currentEditor()
+        switch coordinator.editing.update(text: format.number(value), subject: context.environment.sliderFieldSubject,
+                                          isEditing: editor != nil) {
+        case .keep:
+            break
+        case .show(let text):
+            // While editing, the field editor holds the text; the field's
+            // own value is put back when editing ends.
+            if let editor {
+                if editor.string != text {
+                    editor.string = text
+                    editor.selectAll(nil)
+                }
+            } else if field.stringValue != text {
+                field.stringValue = text
+            }
+        case .abandon:
+            coordinator.endEditingLater()
         }
+    }
+
+    /// A row going away mid-edit applies nothing: its binding may already
+    /// point at another mask.
+    static func dismantleNSView(_ field: NSTextField, coordinator: Coordinator) {
+        coordinator.editing.abandon()
     }
 
     @MainActor final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: NumberField
         weak var field: NSTextField?
+        var editing: NumberFieldEditing
         private var cancelling = false
 
-        init(_ parent: NumberField) { self.parent = parent }
+        init(_ parent: NumberField) {
+            self.parent = parent
+            editing = NumberFieldEditing(shown: parent.format.number(parent.value))
+        }
 
         func controlTextDidBeginEditing(_ obj: Notification) {
             guard let field else { return }
@@ -286,9 +311,13 @@ private struct NumberField: NSViewRepresentable {
             field.textColor = .labelColor
         }
 
+        func controlTextDidChange(_ obj: Notification) {
+            editing.typed()
+        }
+
         func controlTextDidEndEditing(_ obj: Notification) {
             guard let field else { return }
-            if !cancelling { commit(field.stringValue) }
+            if let typed = editing.ended(text: field.stringValue, cancelled: cancelling) { commit(typed) }
             cancelling = false
             field.stringValue = parent.format.number(parent.value)
             field.drawsBackground = false
@@ -321,13 +350,124 @@ private struct NumberField: NSViewRepresentable {
             if typed != parent.value { parent.value = typed }
         }
 
+        /// Ends editing a turn later, applying nothing: the first responder
+        /// must not change in the middle of a SwiftUI update.
+        func endEditingLater() {
+            Task { @MainActor [weak self] in
+                guard let field = self?.field, let editor = field.currentEditor(),
+                      field.window?.firstResponder === editor else { return }
+                field.window?.makeFirstResponder(nil)
+            }
+        }
+
         private func nudge(_ textView: NSTextView, by steps: Float) {
+            // Editing is about to end over a value that changed under it.
+            guard !editing.isAbandoned else { return }
             let format = parent.format, range = parent.range
             let start = format.value(from: textView.string, in: range) ?? parent.value
             let next = min(max(start + steps * format.step, range.lowerBound), range.upperBound)
             parent.value = next
             textView.string = format.number(next)
             textView.selectAll(nil)
+            editing.stepped(to: textView.string)
         }
+    }
+}
+
+/// When a number field shows the value and when it applies what's in it,
+/// apart from AppKit so the rules can be tested.
+///
+/// Only text the user typed is applied, on Return, Tab or a click
+/// elsewhere. The value can change while the field still has the keyboard:
+/// with Full Keyboard Access off a click on the slider beside it, on Auto,
+/// or on another photo in the filmstrip leaves the field editing. Text
+/// nobody typed follows the value then; typed text is dropped and editing
+/// ends, as it does whenever the photo or mask being edited changes
+/// (`sliderFieldSubject`). Otherwise the old number, still showing, was
+/// written back on the next click: undoing the slider, or landing on the
+/// newly opened photo.
+struct NumberFieldEditing: Equatable {
+    enum Update: Equatable {
+        case keep
+        /// Show this text: in the field, or in its editor while editing.
+        case show(String)
+        /// End editing without applying anything.
+        case abandon
+    }
+
+    /// The value's text as last put in the field.
+    private(set) var shown: String
+    /// What the field was editing when that text was put in.
+    private(set) var subject: [AnyHashable]
+    /// Typed into since the value was last put in.
+    private(set) var isDirty = false
+    /// Editing is to end without applying; typing meanwhile doesn't count.
+    private(set) var isAbandoned = false
+
+    init(shown: String, subject: [AnyHashable] = []) {
+        self.shown = shown
+        self.subject = subject
+    }
+
+    /// The bound value reads `text` now, for `subject`.
+    mutating func update(text: String, subject: [AnyHashable], isEditing: Bool) -> Update {
+        guard isEditing else {
+            self = NumberFieldEditing(shown: text, subject: subject)
+            return .show(text)
+        }
+        if isAbandoned { return .keep }
+        if subject != self.subject || (isDirty && text != shown) {
+            isAbandoned = true
+            return .abandon
+        }
+        guard text != shown else { return .keep }
+        shown = text
+        return .show(text)
+    }
+
+    mutating func typed() {
+        if !isAbandoned { isDirty = true }
+    }
+
+    /// The arrow keys applied a value and put `text` in the field.
+    mutating func stepped(to text: String) {
+        shown = text
+        isDirty = false
+    }
+
+    mutating func abandon() {
+        isAbandoned = true
+    }
+
+    /// Editing ended with `text` in the field: the text to apply, if any.
+    /// Nothing when Escape ended it, when it was abandoned, or when nothing
+    /// was typed.
+    mutating func ended(text: String, cancelled: Bool) -> String? {
+        let apply = isDirty && !isAbandoned && !cancelled
+        isDirty = false
+        isAbandoned = false
+        return apply ? text : nil
+    }
+}
+
+private struct SliderFieldSubjectKey: EnvironmentKey {
+    static var defaultValue: [AnyHashable] { [] }
+}
+
+extension EnvironmentValues {
+    /// What the slider value fields below are editing, outermost first.
+    var sliderFieldSubject: [AnyHashable] {
+        get { self[SliderFieldSubjectKey.self] }
+        set { self[SliderFieldSubjectKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Names what the slider value fields inside edit (the open photo, a
+    /// mask on it), after anything an enclosing view named. A field being
+    /// typed in when it changes stops and applies nothing, even when both
+    /// read the same number.
+    func sliderFieldSubject<Subject: Hashable & Sendable>(_ subject: Subject) -> some View {
+        transformEnvironment(\.sliderFieldSubject) { $0.append(AnyHashable(subject)) }
     }
 }
