@@ -48,18 +48,23 @@ struct FolderSidebar: View {
         return FolderAccess.bestRoot(for: currentFolder, among: favourites.folders.map(\.url)) != nil
     }
 
+    /// The notes wrap without `fixedSize(vertical:)`. That modifier makes a
+    /// text's minimum height its wrapped height at the proposed width, and
+    /// the split view measures a column's minimum at zero width, where this
+    /// text is one character a line: about 1300 pt, which made the whole
+    /// window's content taller than the window, cut off at top and bottom.
+    /// The outline above gives up its space first, so they still show in
+    /// full at any window height.
     @ViewBuilder private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
             if favourites.folders.isEmpty {
                 Text("Add the folders you keep photos in. Latent can open any folder inside them from here; for anywhere else, use Open Folder….")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             } else if !isInsideAFavourite, let currentFolder {
                 Text("“\(currentFolder.lastPathComponent)” isn’t in a favourite, so its neighbours can’t be shown here.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
                 Button("Add “\(currentFolder.lastPathComponent)”") { favourites.add(currentFolder) }
                     .controlSize(.small)
                     .accessibilityLabel("Add \(currentFolder.lastPathComponent) to Favourites")

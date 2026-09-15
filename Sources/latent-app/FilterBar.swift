@@ -8,7 +8,20 @@ import Catalog
 struct FilterBar: View {
     @ObservedObject var library: Library
 
+    /// The controls need about 900 pt. In a column narrower than that (a
+    /// small window with the sidebar showing) the bar scrolls sideways
+    /// instead: a row that can't shrink would make the whole window's
+    /// content wider than the window, cutting off the sidebar and grid.
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            bar
+            ScrollView(.horizontal, showsIndicators: false) { bar }
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var bar: some View {
         HStack(spacing: 10) {
             ratingThreshold
             flagToggles
@@ -38,7 +51,6 @@ struct FilterBar: View {
         .font(.caption)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     /// Five stars; clicking the n-th means "n stars or better", clicking
