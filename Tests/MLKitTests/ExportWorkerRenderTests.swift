@@ -53,6 +53,45 @@ final class ExportWorkerRenderTests: XCTestCase {
         XCTAssertGreaterThan(changedBottomLeft, 100)
     }
 
+    /// The export sheet renders once without the watermark and with the
+    /// metadata read, then finishes copies with its settings: each must be
+    /// the render those settings would have made, pixels, gain map and
+    /// metadata alike.
+    func testFinishingAPlainRenderIsRenderingWithTheSettings() async throws {
+        let path = AIMaskTests.assetPath("golden_nikon_d750_cc0.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let gpu = try GPUContext()
+        let mark = ExportWatermark(text: "© {year} {name}", corner: .topRight, size: 0.06, opacity: 0.7)
+        for (format, gainMap, space) in [(ExportSettings.Format.jpeg, true, ColorKit.OutputSpace.sRGB),
+                                          (.tiff, false, .displayP3)] {
+            let plainRequest = ExportWorker.Request(
+                sourceURL: URL(fileURLWithPath: path), destinationURL: URL(fileURLWithPath: "/dev/null"),
+                editStackJSON: nil, userRotation: 0, settings: ExportSettings(format: format, hdrGainMap: gainMap),
+                colorSpace: space, maxLongEdge: 500, keywords: ["k"], rating: 3,
+                includeMetadata: true, includeLocation: true)
+            let plain = try await ExportWorker.render(plainRequest, gpu: gpu)
+            for (watermark, metadata, location) in [(mark, true, false), (nil, false, false), (mark, false, false)] {
+                var request = plainRequest
+                request.settings.watermark = watermark
+                request.includeMetadata = metadata
+                request.includeLocation = location
+                let direct = try await ExportWorker.render(request, gpu: gpu)
+                let finished = try plain.finished(watermark: watermark, includeMetadata: metadata,
+                                                  includeLocation: location)
+                let label = "\(format) watermark \(watermark != nil) metadata \(metadata)"
+                XCTAssertEqual(finished.settings.watermark, direct.settings.watermark, label)
+                XCTAssertEqual(finished.image.image.bitsPerComponent, direct.image.image.bitsPerComponent, label)
+                XCTAssertEqual(try XCTUnwrap(finished.image.image.dataProvider?.data) as Data,
+                               try XCTUnwrap(direct.image.image.dataProvider?.data) as Data, label)
+                XCTAssertEqual(finished.image.gainMap?.pixels, direct.image.gainMap?.pixels, label)
+                XCTAssertEqual(finished.metadata == nil, direct.metadata == nil, label)
+                XCTAssertEqual(finished.metadata?.includeLocation, direct.metadata?.includeLocation, label)
+                XCTAssertEqual(try finished.encoded(with: finished.settings), try direct.encoded(with: direct.settings),
+                               label)
+            }
+        }
+    }
+
     func testRenderStopsWhenCancelled() async throws {
         let path = AIMaskTests.assetPath("golden_nikon_d750_cc0.nef")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path))

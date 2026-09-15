@@ -52,7 +52,11 @@ extension EditorModel {
             return
         }
         let run = beginAIDenoiseRun()
+        // Seconds to minutes of GPU work, often left to run: held off sleep
+        // as an export is.
+        let activity = ExportActivity(reason: "Reducing noise")
         aiDenoiseTask = Task { [weak self] in
+            defer { activity.end() }
             do {
                 let variant = AIDenoiser.preferredVariant
                 let denoiser: AIDenoiser

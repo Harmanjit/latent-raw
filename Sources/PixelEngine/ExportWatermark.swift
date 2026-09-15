@@ -14,7 +14,9 @@ import ColorKit
 /// stamp from `Exporter`. Only the text's bounding box is rasterised (Core
 /// Text, on the CPU) and blended, into the bytes the encoder is about to
 /// read anyway: no extra copy of the picture, and work in proportion to
-/// the text, not the image.
+/// the text, not the image. (The export sheet alone stamps a copy of a
+/// render made without one, `EncodableImage.watermarked`, so trying another
+/// watermark doesn't render the photo again.)
 ///
 /// Tokens, in any letter case: `{year}` is the capture year, `{name}` the
 /// original file name without its extension (as in `ExportNaming`).
@@ -267,5 +269,38 @@ struct PlacedWatermark {
         }
         return GainMap(width: map.width, height: map.height, pixels: pixels, headroom: map.headroom,
                        minimumLog2: map.minimumLog2, maximumLog2: map.maximumLog2)
+    }
+}
+
+extension Exporter.EncodableImage {
+    /// These pixels with `watermark` stamped in (its tokens already filled
+    /// in), exactly as `Exporter.encodableImage` stamps it, gain map
+    /// included; `colorSpace` is the one they were packed in. For the export
+    /// sheet, which keeps one render made without a watermark and stamps a
+    /// copy of it for each watermark tried, rather than rendering again.
+    public func watermarked(_ watermark: ExportWatermark?, colorSpace: ColorKit.OutputSpace) throws -> Self {
+        let w = image.width, h = image.height, bitsPerComponent = image.bitsPerComponent
+        guard let watermark,
+              let placed = PlacedWatermark(watermark, imageWidth: w, imageHeight: h, colorSpace: colorSpace)
+        else { return self }
+        guard image.bitsPerPixel == bitsPerComponent * 4, image.bytesPerRow == w * bitsPerComponent / 2,
+              let space = image.colorSpace, let source = image.dataProvider?.data else {
+            throw ExportError.imageCreationFailed
+        }
+        // A copy made here: the provider's data can be the render's own
+        // buffer, which bridging to `Data` doesn't copy before writing.
+        guard let bytes = CFDataGetBytePtr(source) else { throw ExportError.imageCreationFailed }
+        var data = Data(bytes: bytes, count: CFDataGetLength(source))
+        data.withUnsafeMutableBytes { bytes in
+            placed.composite(into: bytes, imageWidth: w, imageHeight: h, bitsPerComponent: bitsPerComponent)
+        }
+        guard let provider = CGDataProvider(data: data as CFData),
+              let stamped = CGImage(width: w, height: h, bitsPerComponent: bitsPerComponent,
+                                    bitsPerPixel: image.bitsPerPixel, bytesPerRow: image.bytesPerRow, space: space,
+                                    bitmapInfo: image.bitmapInfo, provider: provider, decode: nil,
+                                    shouldInterpolate: false, intent: .defaultIntent) else {
+            throw ExportError.imageCreationFailed
+        }
+        return Self(image: stamped, gainMap: gainMap.map { placed.neutralising($0, imageWidth: w, imageHeight: h) })
     }
 }

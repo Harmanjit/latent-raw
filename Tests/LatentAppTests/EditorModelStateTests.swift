@@ -1,6 +1,7 @@
 import XCTest
 import AppKit
 import PixelEngine
+import MLKit
 @testable import latent_app
 
 /// The editor's state across opening, closing and background work.
@@ -65,6 +66,24 @@ final class EditorModelStateTests: XCTestCase {
         XCTAssertTrue(model.endAIDenoiseRun(second, status: "Denoised"))
         XCTAssertFalse(model.aiDenoiseRunning)
         XCTAssertEqual(model.aiDenoiseStatus, "Denoised")
+    }
+
+    /// Noise reduction takes seconds to minutes and is often left to run:
+    /// the Mac stays awake for it, as for an export.
+    func testDenoiseKeepsTheMacAwakeWhileItRuns() async throws {
+        let url = Self.asset("golden_nikon_d750_cc0.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path) && AIDenoiser.isAvailable)
+        _ = try await GPUContext.shared()
+        let model = EditorModel()
+        model.open(url: url)
+        XCTAssertTrue(model.hasImage)
+        let held = ExportActivity.activeCount
+        model.runAIDenoise()
+        XCTAssertTrue(model.aiDenoiseRunning)
+        XCTAssertEqual(ExportActivity.activeCount, held + 1)
+        model.cancelAIDenoise()
+        await waitUntil("the run to stop", seconds: 60) { !model.aiDenoiseRunning }
+        XCTAssertEqual(ExportActivity.activeCount, held)
     }
 
     /// Paste and presets outside the grid go to the image shown only.

@@ -141,8 +141,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// because one full-size render with AI noise reduction can take tens
     /// of seconds, and stopping short would leave that file half-written.
     static let exportWaitLimit: Duration = .seconds(60)
+    /// How long quitting waits for prints to reach the printing system and
+    /// contact sheets to stop. A print renders every page at the printer's
+    /// resolution, which can take minutes; its progress panel can cancel it.
+    static let outputWaitLimit: Duration = .seconds(300)
 
-    /// Quitting must not lose work. Three things can be at risk:
+    /// Quitting must not lose work. Four things can be at risk:
     ///
     /// 1. An edit made less than a second ago, not yet saved: saved now.
     /// 2. Catalog writes still running (that save, a rating, keywords,
@@ -151,6 +155,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 3. An export under way: ask whether to stop after the current file
     ///    and quit, or keep exporting and not quit. Export Open Image is one
     ///    file, so for it the choice is to let it finish and quit.
+    /// 4. A print rendering or a contact sheet being written (`OutputJobs`):
+    ///    ask too; a contact sheet stops unsaved, a print is waited for.
     ///
     /// `.terminateLater` keeps the app alive until `reply` is called.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -161,6 +167,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            !confirmStoppingExports(exporting, openImage: !exportingOpenImage.isEmpty) {
             return .terminateCancel
         }
+        // Prints and contact sheets: asked about too, then contact sheets stop.
+        let outputs = OutputJobs.shared
+        if outputs.isRunning {
+            let text = OutputJobs.quitAlert(for: outputs.running)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = text.message
+            alert.informativeText = text.information
+            alert.addButton(withTitle: text.button)
+            alert.addButton(withTitle: "Keep Working").keyEquivalent = "\u{1b}"
+            guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+            outputs.cancelAll()
+        }
         // Saving goes through Library.perform, so from here on the flushed
         // edit counts as pending work below.
         for window in windows { window.model.flushPendingSave() }
@@ -168,7 +187,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // waited for below); the rest stay where they are.
         for window in windows { window.library.fileOperations.cancel() }
         let libraries = windows.map(\.library)
-        guard !exporting.isEmpty || !exportingOpenImage.isEmpty || libraries.contains(where: \.hasPendingWork) else {
+        guard !exporting.isEmpty || !exportingOpenImage.isEmpty || libraries.contains(where: \.hasPendingWork)
+                || outputs.isRunning else {
+            SafeFileWriter.abandonPendingWrites()
             return .terminateNow
         }
         Task {
@@ -183,6 +204,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if await !Self.finishes(within: Self.exportWaitLimit, model.waitForExport) {
                     Log.export.error("Quit: Export Open Image did not finish within \(Self.exportWaitLimit, privacy: .public); quitting anyway")
                 }
+            }
+            if await !Self.finishes(within: Self.outputWaitLimit, outputs.waitUntilDone) {
+                Log.export.error("Quit: prints or contact sheets did not finish within \(Self.outputWaitLimit, privacy: .public); quitting anyway")
             }
             for library in libraries {
                 if await !Self.finishes(within: Self.catalogWaitLimit, library.waitForPendingWork) {

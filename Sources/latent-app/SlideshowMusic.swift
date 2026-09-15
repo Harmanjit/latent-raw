@@ -44,8 +44,18 @@ final class SlideshowMusic: NSObject, AVAudioPlayerDelegate {
 
     func resume() {
         isPaused = false
-        if let player { player.play() } else if !hasFinished { playCurrent() }
+        if let player {
+            player.play()
+            // A song that finished opening while paused never faded in and
+            // is still silent; one paused mid-song is already at volume.
+            player.setVolume(Self.volume, fadeDuration: Self.fadeInDuration)
+        } else if !hasFinished {
+            playCurrent()
+        }
     }
+
+    /// The song playing or paused now; for tests.
+    var currentPlayer: AVAudioPlayer? { player }
 
     /// Fades out and lets go of the file.
     func finish() {

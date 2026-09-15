@@ -88,6 +88,12 @@ public enum ExportWorker {
         public let masksGenerated: Int
         public let phases: [(String, TimeInterval)]
         let start: Date
+        /// What `finished` needs: the space the pixels are in, the source's
+        /// name for the watermark's tokens, and the metadata as read,
+        /// whether or not the file carries it.
+        let colorSpace: ColorKit.OutputSpace
+        let sourceName: String
+        let readMetadata: ExportMetadata
 
         public var pixelWidth: Int { image.image.width }
         public var pixelHeight: Int { image.image.height }
@@ -96,6 +102,25 @@ public enum ExportWorker {
         /// in memory.
         public func encoded(with settings: ExportSettings) throws -> Data {
             try Exporter.encode(image, settings: settings, metadata: metadata)
+        }
+
+        /// This render as it would have come out with `watermark` (tokens
+        /// not yet filled in) and these metadata switches, from one made
+        /// without a watermark and with metadata on. The export sheet
+        /// renders once that way and tries its settings on copies, since
+        /// neither changes what the GPU renders.
+        public func finished(watermark: ExportWatermark?, includeMetadata: Bool,
+                             includeLocation: Bool) throws -> Rendered {
+            var settings = self.settings
+            settings.watermark = watermark?.resolved(fileName: sourceName,
+                                                     captureDate: readMetadata.captureDate ?? Date())
+            if settings.watermark?.isEmpty == true { settings.watermark = nil }
+            var carried = readMetadata
+            carried.includeLocation = includeLocation
+            return Rendered(image: try image.watermarked(settings.watermark, colorSpace: colorSpace),
+                            metadata: includeMetadata ? carried : nil, settings: settings,
+                            masksGenerated: masksGenerated, phases: phases, start: start, colorSpace: colorSpace,
+                            sourceName: sourceName, readMetadata: readMetadata)
         }
     }
 
@@ -158,6 +183,7 @@ public enum ExportWorker {
                                           parameters: parameters, output: .file(request.colorSpace))
         let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
         lap("render")
+        try Task.checkCancellation()
 
         let s = file.summary
         var metadata = ExportMetadata()
@@ -204,7 +230,9 @@ public enum ExportWorker {
             })
         lap("pack")
         return Rendered(image: image, metadata: request.includeMetadata ? metadata : nil, settings: settings,
-                        masksGenerated: masksGenerated, phases: phases, start: start)
+                        masksGenerated: masksGenerated, phases: phases, start: start, colorSpace: request.colorSpace,
+                        sourceName: request.sourceURL.deletingPathExtension().lastPathComponent,
+                        readMetadata: metadata)
     }
 
     /// Generates pixels for every AI and prompted local, the same way the

@@ -147,6 +147,9 @@ final class ContactSheetModel: ObservableObject {
         stopPreview()
         let items = items, settings = settings.validated, title = title, preview = previewImages!
         let renderer = makeRenderer(settings)
+        // Held until the save ends: keeps the Mac awake, and quitting asks.
+        let jobs = OutputJobs.shared
+        let job = jobs.begin(.contactSheet, name: url.lastPathComponent, cancel: { cancel.cancel() })
         DispatchQueue.global(qos: .userInitiated).async { @Sendable in
             var failure: Error?
             do {
@@ -161,6 +164,7 @@ final class ContactSheetModel: ObservableObject {
             let unrendered = renderer.failedNames
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { [weak self] in
+                    jobs.end(job)
                     self?.unrenderedNames = unrendered
                     self?.isSaving = false
                     self?.cancel = nil

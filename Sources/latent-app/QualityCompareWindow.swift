@@ -57,6 +57,8 @@ final class QualityCompareModel: ObservableObject {
     private var exactCenter: CGPoint = .zero
     private var renderTask: Task<Void, Never>?
     private var sizeTask: Task<Void, Never>?
+    /// A whole-file encode's byte count; a fake in tests.
+    var encodedSize: @Sendable (ExportWorker.Rendered, ExportSettings) throws -> Int = { try $0.encoded(with: $1).count }
     private var tileTask: Task<Void, Never>?
 
     init(renderer: ExportPreviewRenderer, record: ImageRecord, preset: ExportPreset,
@@ -99,6 +101,11 @@ final class QualityCompareModel: ObservableObject {
                 refreshSizes()
                 refreshTiles(after: 0)
             } catch is CancellationError {
+                // Stopped by the sheet rather than by closing this window
+                // (the render was let go): ask for it again.
+                guard !Task.isCancelled else { return }
+                renderTask = nil
+                start()
             } catch {
                 phase = .failed("\(error)")
             }
@@ -185,25 +192,34 @@ final class QualityCompareModel: ObservableObject {
         if uncovered { refreshTiles(after: 0.06) }
     }
 
-    /// Whole-file encodes for qualities without a size yet, one at a time.
+    /// Whole-file encodes for qualities without a size yet, one at a time,
+    /// also across calls: an encode can't be stopped once started, so a new
+    /// round waits for the one under way before starting its own, rather
+    /// than piling whole-image encodes up while a slider moves.
     private func refreshSizes(after delay: Double = 0) {
         guard let rendered else { return }
-        sizeTask?.cancel()
-        let wanted = panes.map(\.quality).filter { sizes[Self.key($0)] == nil }
-        guard !wanted.isEmpty else { return }
-        let settings = rendered.settings, format = format
+        let previous = sizeTask
+        previous?.cancel()
+        guard panes.contains(where: { sizes[Self.key($0.quality)] == nil }) else { return }
+        let settings = rendered.settings, format = format, encodedSize = encodedSize
         sizeTask = Task {
             if delay > 0 { do { try await Task.sleep(for: .seconds(delay)) } catch { return } }
-            for quality in wanted {
+            await previous?.value
+            // The panes as they are now; an encode that finished meanwhile
+            // still counts.
+            for quality in panes.map(\.quality) where sizes[Self.key(quality)] == nil {
+                guard !Task.isCancelled else { return }
                 var s = settings
                 s.format = format; s.quality = quality
                 let encodeSettings = s
-                let encode = Task.detached(priority: .userInitiated) { try rendered.encoded(with: encodeSettings).count }
-                guard let bytes = try? await encode.value, !Task.isCancelled else { return }
+                let encode = Task.detached(priority: .userInitiated) { try encodedSize(rendered, encodeSettings) }
+                // Its size is right whether or not this round was cancelled.
+                guard let bytes = try? await encode.value else { return }
                 sizes[Self.key(quality)] = bytes
             }
         }
     }
+
 
     /// Tiles for the current view at every pane's quality: cut, encoded and
     /// decoded off the main thread. Old tiles stay up until new ones land.

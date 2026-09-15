@@ -41,11 +41,11 @@ Every file name is planned before anything is written. A line shows the first fi
 
 ## The queue
 
-Exports run one at a time in the background, since a full-resolution render already saturates the GPU. While the queue or Export open image… runs, the Mac doesn't go to sleep on its own; the display still can. Progress and any failures show in the left panel; each failure names the file and the reason. A file whose stored edit cannot be read is not exported unedited; it is reported.
+Exports run one at a time in the background, since a full-resolution render already saturates the GPU. While the queue, Export open image…, Edit in External Editor, a print, a contact sheet or AI noise reduction runs, the Mac doesn't go to sleep on its own; the display still can. Progress and any failures show in the left panel; each failure names the file and the reason. A file whose stored edit cannot be read is not exported unedited; it is reported.
 
 Each file is written under a hidden temporary name and moved into place only when complete, so a crash, a full disk or a cancelled export never leaves a half-written file, and a file being replaced stays intact until the new one is ready. A replaced file keeps its Finder tags.
 
-Quitting during an export asks whether to finish the image being written and quit, or keep exporting. An export stopped this way doesn't bring Finder forward. Quitting during Export open image… asks too: let the file finish and quit, or keep working. If a file still isn't done after a minute, quitting goes ahead and removes the unfinished temporary file.
+Quitting during an export asks whether to finish the image being written and quit, or keep exporting. An export stopped this way doesn't bring Finder forward. Quitting during Export open image… asks too: let the file finish and quit, or keep working. If a file still isn't done after a minute, quitting goes ahead and removes the unfinished temporary file. Quitting while a contact sheet is being saved asks whether to stop it (it isn't saved); while a print is rendering, whether to let it reach the printing system and then quit.
 
 Model-generated masks and AI denoise are recomputed at export time, for the queue and for Export open image alike, so the file matches the screen.
 
@@ -55,7 +55,7 @@ Model-generated masks and AI denoise are recomputed at export time, for the queu
 
 The print panel's **Photo Layout** section sets photos per page (1, 2, 4, 6, 9, 12, 20 or 30), Fit or Fill, whether to rotate photos to fill their cells, margins, spacing, captions (file name, and optionally date and camera) and colour. The panel's preview updates as you change them, drawn from thumbnails.
 
-Photos are rendered for the printer as an export is: model masks regenerated and AI noise reduction included, at the printer's resolution (150 to 360 dpi) in 16-bit Display P3. If Soft Proof in Develop is set to an ICC profile, Colour starts at that profile and photos are converted into it (perceptual intent), so the print matches the proof. The layout settings are remembered, and the paper, orientation, scale and printer carry over to the next print.
+Photos are rendered for the printer as an export is: model masks regenerated and AI noise reduction included, at the printer's resolution (150 to 360 dpi) in 16-bit Display P3. If Soft Proof is on in Develop with an ICC profile, Colour starts at that profile and photos are converted into it (perceptual intent), so the print matches the proof. A photo that can't be rendered (its file was moved or can't be read) prints as an empty cell, and Latent names it once the print is done; Rename, Move and Copy wait while a print or contact sheet renders. The layout settings are remembered, and the paper, orientation, scale and printer carry over to the next print.
 
 ## Contact sheets
 

@@ -17,6 +17,7 @@ final class PrintJob: @unchecked Sendable {
     private let makeRenderer: @Sendable (SheetProfile?) -> SheetRenderer
     private(set) var preview: SheetPreviewImages!
     private var previewReady: (@MainActor @Sendable () -> Void)?
+    private var printingStarted: (@Sendable () -> Void)?
 
     /// `makeRenderer` builds the renderer for a colour choice (the proof
     /// profile or none); `preview` supplies the panel's small pictures.
@@ -43,6 +44,17 @@ final class PrintJob: @unchecked Sendable {
     @MainActor func previewDidChange() {
         lock.withLock { previewReady }?()
     }
+
+    /// Called once, on the print thread, as the first page is drawn for
+    /// the printer: the panel has closed and the job is rendering. Nil
+    /// lets go of the handler.
+    func onPrintingStarted(_ handler: (@Sendable () -> Void)?) {
+        lock.withLock { printingStarted = handler }
+    }
+
+    /// Photos that couldn't be rendered for the printer, and so printed as
+    /// empty cells.
+    var unrenderedNames: [String] { lock.withLock { renderer }.failedNames }
 
     var currentSettings: PrintLayoutSettings { lock.withLock { settings } }
     var currentLayout: PageLayout { lock.withLock { layout } }
@@ -79,7 +91,11 @@ final class PrintJob: @unchecked Sendable {
     /// printer's resolution. Blocks the calling thread, which is the print
     /// operation's own.
     func drawPage(_ page: Int, in context: CGContext) {
-        let (layout, settings, paper, renderer) = lock.withLock { (self.layout, self.settings, self.paper, self.renderer) }
+        let (layout, settings, paper, renderer, started) = lock.withLock {
+            defer { printingStarted = nil }
+            return (self.layout, self.settings, self.paper, self.renderer, printingStarted)
+        }
+        started?()
         SheetPageDrawer.drawPage(page, items: items, layout: layout, style: settings.style,
                                  pixelsPerUnit: paper.pixelsPerUnit, maxLongEdge: PrintRenderPolicy.maxLongEdge,
                                  renderer: renderer, preview: preview, in: context)

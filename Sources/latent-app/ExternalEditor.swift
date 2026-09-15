@@ -183,6 +183,9 @@ final class ExternalEditorHandOff: ObservableObject {
 
     var opener: ApplicationOpening = WorkspaceOpener()
     var settings: ExternalEditorSettings = .shared
+    /// Whether a folder can be written to; off the main thread, since a
+    /// folder on a network share that has stopped answering blocks.
+    var folderProblem: @Sendable (URL) -> FolderAccess.Trouble? = { FolderAccess.problem(opening: $0) }
 
     /// What to render.
     struct Source {
@@ -250,12 +253,15 @@ final class ExternalEditorHandOff: ObservableObject {
     }
 
     /// The folder to write to: the one chosen for hand-offs, else the
-    /// default export folder, else asked for once and remembered.
-    func destinationFolder() -> URL? {
-        for folder in [settings.folder, AppPreferences.shared.defaultExportFolder].compactMap({ $0 })
-        where FolderAccess.problem(opening: folder) == nil {
-            return folder
-        }
+    /// default export folder (both checked off the main thread), else
+    /// asked for once and remembered.
+    func destinationFolder() async -> URL? {
+        let candidates = [settings.folder, AppPreferences.shared.defaultExportFolder].compactMap { $0 }
+        let problem = folderProblem
+        let usable = await Task.detached(priority: .userInitiated) {
+            candidates.first { problem($0) == nil }
+        }.value
+        if let usable { return usable }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -268,13 +274,20 @@ final class ExternalEditorHandOff: ObservableObject {
     }
 
     private func send(_ source: Source, name: String, model: EditorModel) {
-        guard let gpu = model.gpu, !model.isExporting, let folder = destinationFolder() else { return }
-        let app = settings.chosen
+        guard let gpu = model.gpu, !model.isExporting else { return }
         let options = OpenImageExportOptions.load()
         model.isExporting = true
-        model.status = "Rendering \(name) for \(app?.name ?? "the external editor")…"
+        // Held until the file is written, as for Export Open Image.
+        let activity = ExportActivity(reason: "Rendering \(name) for an external editor")
 
         Task {
+            defer { activity.end() }
+            guard let folder = await destinationFolder() else {
+                model.isExporting = false
+                return
+            }
+            let app = settings.chosen
+            model.status = "Rendering \(name) for \(app?.name ?? "the external editor")…"
             var keywords: [String] = []
             if options.includeMetadata, let read = source.readKeywords {
                 do {
@@ -292,26 +305,37 @@ final class ExternalEditorHandOff: ObservableObject {
             // A file that appears under the name during the render is kept,
             // and the next number is tried.
             while written == nil, failure == nil, attempt < 20 {
-                let free = ExternalEditorNaming.freeName(forSourceNamed: name, from: attempt) {
-                    FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path)
-                }
-                let destination = folder.appendingPathComponent(free.name)
                 let request = ExportWorker.Request(
-                    sourceURL: source.url, destinationURL: destination, editStackJSON: source.editStackJSON,
+                    sourceURL: source.url,
+                    destinationURL: folder.appendingPathComponent(ExternalEditorNaming.fileName(forSourceNamed: name,
+                                                                                               attempt: attempt)),
+                    editStackJSON: source.editStackJSON,
                     userRotation: source.userRotation, settings: ExportSettings(format: .tiff),
                     colorSpace: .displayP3, maxLongEdge: nil, keywords: keywords,
                     rating: options.includeMetadata ? source.rating : 0,
                     includeMetadata: options.includeMetadata,
                     includeLocation: options.includeMetadata && options.includeLocation,
                     replacesExisting: false)
-                let gpuContext = gpu
-                let outcome: Result<Void, Error> = await Task.detached(priority: .userInitiated) {
-                    do { _ = try await ExportWorker.export(request, gpu: gpuContext); return .success(()) }
-                    catch { return .failure(error) }
+                let gpuContext = gpu, from = attempt
+                // The first free name from `attempt` on, looked for off the
+                // main thread like the render: the folder may be on a slow share.
+                let (destination, tried, outcome) = await Task.detached(priority: .userInitiated) {
+                    () -> (URL, Int, Result<Void, Error>) in
+                    let free = ExternalEditorNaming.freeName(forSourceNamed: name, from: from) {
+                        FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path)
+                    }
+                    var named = request
+                    named.destinationURL = folder.appendingPathComponent(free.name)
+                    do {
+                        _ = try await ExportWorker.export(named, gpu: gpuContext)
+                        return (named.destinationURL, free.attempt, .success(()))
+                    } catch {
+                        return (named.destinationURL, free.attempt, .failure(error))
+                    }
                 }.value
                 switch outcome {
                 case .success: written = destination
-                case .failure(let error) where error is SafeFileWriter.DestinationExists: attempt = free.attempt + 1
+                case .failure(let error) where error is SafeFileWriter.DestinationExists: attempt = tried + 1
                 case .failure(let error): failure = error
                 }
             }
