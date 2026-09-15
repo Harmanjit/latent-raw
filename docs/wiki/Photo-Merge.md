@@ -24,17 +24,28 @@ A *bracket* is the answer: the same scene shot several times, each at a differen
 
 1. In the Library grid, select the photos of one bracket (click the first, Shift-click the last).
 2. Choose **Photo › Photo Merge › HDR…**, or press **⌃H**. It needs two or more selected photos. In Loupe, Compare, Survey and Develop it merges the photos you selected in the grid, as Export does.
-3. The **HDR Merge** dialog reads the photos for a moment, then lists them brightest first. Each row shows the shutter speed, aperture and ISO, and how many stops brighter or darker it is than the **Reference** photo. The reference is the frame with the fewest clipped and black pixels, chosen for you; the merged photo opens looking like it.
-4. Below the list are the merged photo's size in pixels and megapixels, roughly how large the file will be, and its name.
-5. Choose the options: **Auto Align** (on unless you turned it off) and **Deghost** (None unless you chose a level). The dialog remembers both for next time. Turning Auto Align on or off reads the photos again.
-6. Read any note or warning. When Auto Align moved the photos by a pixel or more, a note says by how much ("Photo Merge aligned these photos (up to 17 px)"). A warning says when a photo couldn't be aligned.
-7. Press **Merge** (Return). The dialog closes and the merge runs in the background. Its progress shows in the left panel's **Export** section, with a **Cancel** button. Esc or **Cancel** in the dialog closes it without merging.
+3. The **HDR Merge** dialog reads the photos for a moment, then shows a **preview** of the merged photo at the top and lists the photos below it, brightest first. Each row shows the shutter speed, aperture and ISO, and how many stops brighter or darker it is than the **Reference** photo. The reference is the frame with the fewest clipped and black pixels, chosen for you; the merged photo opens looking like it.
+4. Beside the list are the options and the merged photo's size in pixels and megapixels, roughly how large the file will be, and its name.
+5. Choose the options: **Auto Align** (on unless you turned it off), **Deghost** (None unless you chose a level) with **Show Deghost Overlay**, and **Auto Settings** (off unless you turned it on). The dialog remembers Auto Align, Deghost and Auto Settings for next time. Turning Auto Align on or off reads the photos again.
+6. To use another photo as the reference, **click its row**. The stops, the preview and the file name follow. (With VoiceOver, the row's **Use as reference** action does the same.) The choice is for this merge only.
+7. Read any note or warning. When Auto Align moved the photos by a pixel or more, a note says by how much ("Photo Merge aligned these photos (up to 17 px)"). A warning says when a photo couldn't be aligned. If there are several, they scroll.
+8. Press **Merge** (Return). The dialog closes and the merge runs in the background. Its progress shows in the left panel's **Export** section, with a **Cancel** button. Esc or **Cancel** in the dialog closes it without merging.
 
 If the photos can't be merged (they are from different cameras, different sizes, or all the same exposure, say) the dialog says why and offers only **Close**.
 
 When the merge finishes, the new photo is selected in the grid, and VoiceOver says "HDR merge finished" with its name. If a filter would hide it, the filter is cleared. If something goes wrong, the reason shows in the status bar and nothing is left behind.
 
 A merge takes turns with exports: Export waits while a merge runs, and a merge can't start during an export. Quitting during a merge asks first; quitting stops the merge, and neither a half-made photo nor its sidecar is left.
+
+### The preview
+
+The preview is the merge itself, made small: the same exposures, alignment, deghosting and weighting, opened as the merged photo will open, with default settings. It is made from reduced copies of the photos that Latent keeps in memory while the dialog is open (about 80 MB for six 21 MP photos, freed when the dialog closes), so changing Deghost, the reference or the overlay updates it in about a tenth of a second, a moment after you stop clicking. Changing Auto Align reads the photos again first; the old preview stays, dimmed, until the new one is ready.
+
+Because it is small, fine detail differs a little from the full-size merge, and on cameras over about 36 MP deghosting in the preview is a rougher guide to what the merge will take from one shot.
+
+### HDR Merge Without Dialog
+
+**Photo › Photo Merge › HDR Merge Without Dialog** (**⌃⇧H**) merges the selected photos straight away, with the options the dialog was last left with (Auto Align, Deghost, Auto Settings) and the reference chosen automatically. The photos are read and merged in the background; progress shows in the Export section as usual. If the photos can't be merged, the reason shows in the status bar. When it finishes, any warning the dialog would have shown (a photo that couldn't be aligned or was left out, say) shows in the status bar too.
 
 ## Auto Align
 
@@ -67,6 +78,12 @@ What to expect:
 - **Deghost takes a little longer**: each shot is read once more to look for movement.
 - **Use Auto Align with it.** Without alignment, a shot that moved differs from the reference everywhere, and Deghost would take almost the whole picture from one shot.
 
+### Show Deghost Overlay
+
+With a Deghost level chosen, **Show Deghost Overlay** marks the preview where deghosting took the picture from a single shot. Each such area is **outlined** (a white line with a black line inside it, visible on bright skies and dark streets alike) and **tinted** in the colour of the shot it now comes from; the same colour shows as a dot beside that shot in the list, and VoiceOver reads it with the row ("overlay colour orange"). Where two such areas meet, the line between them is drawn too.
+
+The colours are orange, sky blue, bluish green, yellow, blue, vermillion and reddish purple, in that order down the list (starting again after the seventh). They are the Okabe–Ito colours, chosen to stay distinguishable for the common kinds of colour blindness, and since every area is outlined, the shapes read even without telling the colours apart. The tint is translucent, so the picture shows through.
+
 ## The merged photo
 
 **Where it goes.** Into the reference photo's folder, named after it: `DSC_0107.NEF` gives `DSC_0107-HDR.dng`. If that name is taken, by a file or by a sidecar left behind by one, the next free name is used: `DSC_0107-HDR-2.dng`, `-HDR-3` and so on. Nothing is ever overwritten.
@@ -74,6 +91,8 @@ What to expect:
 **What it is.** A DNG, the open raw format. It holds the merged light itself, not a finished picture: white balance, exposure, highlights and every other adjustment still work on it as on a camera raw, with the extra range to use. It opens in Latent like any photo, and in Lightroom and Apple Photos too.
 
 **Your edits.** The merge starts from the original raw files; edits you made to the bracket's photos aren't used. The merged photo starts unedited, at the reference photo's exposure and white balance, and the original photos are left as they were.
+
+**Auto Settings.** With **Auto Settings** on, the merged photo opens with Develop's **Auto Adjust** (⌘U) already applied: the same exposure, contrast and white balance you would get by opening it and pressing ⌘U. It is stored as the photo's first edit, in its sidecar beside the merge's record, so Develop's history starts at "Original" and **Undo** takes it back to the merge as it came out.
 
 **Lens corrections.** They are not baked in. The merged photo keeps the lens's identity, so Develop's lens corrections (distortion, vignetting, chromatic aberration) apply to it once, as they would to the reference photo.
 
@@ -84,10 +103,10 @@ What to expect:
 ## Current limits
 
 - **Auto Align moves whole shots.** Near and far things that shifted against each other in a handheld bracket (parallax) still show slightly doubled edges, and a shot it can't align is merged as it is or left out.
-- **Deghost compares brightness only,** so movement against an equally bright background can slip through, and deghosted parts come from one shot, with that shot's noise. There is no overlay yet showing which parts it took from one shot.
+- **Deghost compares brightness only,** so movement against an equally bright background can slip through, and deghosted parts come from one shot, with that shot's noise.
 - **HDR only.** Panorama and HDR Panorama are coming.
 - **Raw files only,** from Bayer sensors. X-Trans, monochrome and already-merged files can't be merged, and all photos must come from the same camera at the same size and orientation.
-- **The reference is chosen automatically;** you can't pick another yet, and the merge can't be previewed before it runs.
+- **The preview is small,** about 1,000 pixels across; to judge fine detail, merge and look at the result.
 - **On Macs with 8 GB of memory,** a merge takes at most 5 photos.
 
 See also [Limitations](Limitations) and [Keyboard Shortcuts](Keyboard-Shortcuts).

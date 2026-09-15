@@ -394,6 +394,21 @@ public final class RawFile {
         decodedInService = false
     }
 
+    /// A Bayer raw assembled in memory rather than read from a file (see
+    /// `bayerSource`): the summary of some raw, with a sensor plane that
+    /// matches it.
+    init(summary: RawSummary, cameraToXYZ: [Float]?, sensorPlane: SensorPlane) {
+        precondition(summary.sourceKind == .bayer && sensorPlane.count == summary.rawWidth * summary.rawHeight)
+        self.summary = summary
+        cameraToXYZMatrixRaw = cameraToXYZ
+        self.sensorPlane = sensorPlane
+        linearPlane = nil
+        preview = nil
+        lastThumbnailError = 0
+        isMetadataOnly = false
+        decodedInService = false
+    }
+
     private static func readSummary(_ h: OpaquePointer) -> RawSummary {
         var c = CLibRawSummary()
         clibraw_get_summary(h, &c)

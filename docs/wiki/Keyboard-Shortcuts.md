@@ -79,3 +79,4 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | Keys | Action |
 |---|---|
 | ⌃H | HDR merge of the selected photos into one DNG beside them (see [Photo Merge](Photo-Merge)); not while typing in a text field, where ⌃H deletes backward |
+| ⌃⇧H | HDR merge without the dialog, with the options it was last left with; problems show in the status bar |

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 // The HDR merge's public contract: what the app asks for and what it gets
@@ -86,6 +87,41 @@ public struct HDRMergeAnalysis: Sendable, Equatable {
         self.exposureRangeStops = exposureRangeStops; self.warnings = warnings
         self.estimatedOutputBytes = estimatedOutputBytes
         self.alignment = alignment
+    }
+}
+
+extension HDRMergeAnalysis {
+    /// Each frame's `alignmentShiftPixels` with `reference` as the reference
+    /// frame (the dialog lets the user pick another): how far Auto Align
+    /// moves it onto that frame, 0 for that frame, nil where it can't be
+    /// lined up or Auto Align was off.
+    public func alignmentShifts(reference: Int) -> [Double?] {
+        guard reference != referenceIndex, frames.indices.contains(reference), let alignment else {
+            return frames.map(\.alignmentShiftPixels)
+        }
+        return alignment.plan(reference: reference).frames.map { frame in
+            switch frame {
+            case .reference: 0
+            case .aligned(let shift): shift
+            case .unaligned, .leftOut: nil
+            }
+        }
+    }
+
+    /// `warnings` with `reference` as the reference frame: which frames
+    /// can't be lined up, and which of those are left out, depends on the
+    /// frame they are lined up with, so those warnings are worked out again.
+    public func warnings(reference: Int) -> [HDRMergeWarning] {
+        guard reference != referenceIndex, frames.indices.contains(reference), let alignment else { return warnings }
+        let kept = warnings.filter { if case .frameCouldNotBeAligned = $0 { false } else { true } }
+        let plan = alignment.plan(reference: reference)
+        return kept + plan.frames.enumerated().compactMap { index, frame in
+            switch frame {
+            case .unaligned: .frameCouldNotBeAligned(frameIndex: index, leftOut: false)
+            case .leftOut: .frameCouldNotBeAligned(frameIndex: index, leftOut: true)
+            default: nil
+            }
+        }
     }
 }
 
@@ -189,6 +225,26 @@ public protocol HDRMerging: Sendable {
                to destination: URL,
                prepareSidecar: @escaping @Sendable (MergeRecipe) async throws -> Void,
                progress: @escaping @Sendable (HDRMergeProgress) -> Void) async throws -> MergeDNGWriteResult
+
+    /// What `merge` would make of `analysis` with `options`, small, for the
+    /// dialog (Phase 7): the same weights, clip feathering, deghosting and
+    /// alignment on reduced copies of the frames, rendered as the DNG will
+    /// open, with default settings, upright. Throws `HDRMergeError`, or
+    /// `CancellationError` when the task is cancelled (a newer option
+    /// change) or the previews were released meanwhile.
+    ///
+    /// - Parameters:
+    ///   - longEdge: the picture's long edge at most, in pixels; the engine
+    ///     may return a smaller picture (the real one stops at about 3,000).
+    ///   - showDeghostOverlay: draws where deghosting left photos out and
+    ///     which photo each such area comes from (`HDRDeghostOverlay`). Does
+    ///     nothing with `options.deghost` at none.
+    func preview(_ analysis: HDRMergeAnalysis, options: HDRMergeOptions, longEdge: Int,
+                 showDeghostOverlay: Bool) async throws -> CGImage
+
+    /// Lets go of what the engine keeps in memory for previews (the dialog
+    /// has closed). A later `preview` starts again, slower.
+    func releasePreviews()
 }
 
 extension HDRMerging {
@@ -196,4 +252,7 @@ extension HDRMerging {
     public func analyse(_ urls: [URL]) async throws -> HDRMergeAnalysis {
         try await analyse(urls, options: HDRMergeOptions())
     }
+
+    /// An engine that keeps nothing for previews has nothing to let go of.
+    public func releasePreviews() {}
 }

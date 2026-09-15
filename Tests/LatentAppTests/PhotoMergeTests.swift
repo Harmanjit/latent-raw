@@ -36,6 +36,10 @@ final class FakeHDREngine: HDRMerging, @unchecked Sendable {
     private var _destinations: [URL] = []
     private var _sources: [[MergeRecipe.Source]] = []
     private var _mergeOptions: [HDRMergeOptions] = []
+    private var _analyseOptions: [HDRMergeOptions] = []
+    private var _previews: [(options: HDRMergeOptions, overlay: Bool, longEdge: Int)] = []
+    private var _releases = 0
+    private var _previewError: Error?
     private var merges = 0
     let script: Script
     let reports: [HDRMergeProgress]
@@ -52,6 +56,14 @@ final class FakeHDREngine: HDRMerging, @unchecked Sendable {
     var sources: [[MergeRecipe.Source]] { lock.withLock { _sources } }
     /// The options each merge was given.
     var mergeOptions: [HDRMergeOptions] { lock.withLock { _mergeOptions } }
+    /// The options each analysis was given.
+    var analyseOptions: [HDRMergeOptions] { lock.withLock { _analyseOptions } }
+    /// Each preview finished, in order, with what it was asked for.
+    var previews: [(options: HDRMergeOptions, overlay: Bool, longEdge: Int)] { lock.withLock { _previews } }
+    /// How many times the previews were released.
+    var releases: Int { lock.withLock { _releases } }
+    /// Makes every later preview throw `error` (nil: succeed).
+    func failPreviews(with error: Error?) { lock.withLock { _previewError = error } }
 
     /// Holds `analyse` until `openGate`.
     func closeGate() { lock.withLock { _gateOpen = false } }
@@ -64,6 +76,7 @@ final class FakeHDREngine: HDRMerging, @unchecked Sendable {
 
     func analyse(_ urls: [URL], options: HDRMergeOptions) async throws -> HDRMergeAnalysis {
         note("analyse \(urls.count)" + (options.autoAlign ? "" : " without aligning"))
+        lock.withLock { _analyseOptions.append(options) }
         while !lock.withLock({ _gateOpen }) {
             try Task.checkCancellation()
             try await Task.sleep(for: .milliseconds(5))
@@ -114,6 +127,18 @@ final class FakeHDREngine: HDRMerging, @unchecked Sendable {
         note("wrote \(destination.lastPathComponent)")
         return result
     }
+
+    /// A 3 x 2 picture after a moment's work (so a newer request can cancel
+    /// it); records what it was asked for once done.
+    func preview(_ analysis: HDRMergeAnalysis, options: HDRMergeOptions, longEdge: Int,
+                 showDeghostOverlay: Bool) async throws -> CGImage {
+        try await Task.sleep(for: .milliseconds(20))
+        if let error = lock.withLock({ _previewError }) { throw error }
+        lock.withLock { _previews.append((options, showDeghostOverlay, longEdge)) }
+        return FakeRenders.solid((0.5, 0.5, 0.5), width: 3, height: 2)
+    }
+
+    func releasePreviews() { lock.withLock { _releases += 1 } }
 
     /// Where the catalog keeps the sidecar of a photo at the folder's top.
     static func sidecar(for photo: URL) -> URL {

@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import Metal
 import simd
 import RawCore
@@ -76,16 +77,36 @@ if args.count >= 3, args[1] == "catalog" {
 // printing what the analysis found and what each stage cost. The command-
 // line way to watch Photo Merge's HDR engine (docs/PhotoMerge.md section 3)
 // before the app has a dialog for it.
+//
+// With --preview it writes the dialog's preview as a JPEG instead of
+// merging, and times it twice: the first preview and one more, which is
+// what every option change in the dialog costs.
 if args.count >= 2, args[1] == "merge-hdr" {
     var positional: [String] = []
     var referenceOverride: Int?
     var deghost = DeghostAmount.none
     var autoAlign = true
+    var previewOutput: URL?
+    var previewLongEdge = 1024
+    var overlay = false
+    var autoSettings = false
     var index = 2
     while index < args.count {
         if args[index] == "--reference", index + 1 < args.count, let n = Int(args[index + 1]) {
             referenceOverride = n
             index += 2
+        } else if args[index] == "--preview", index + 1 < args.count {
+            previewOutput = URL(fileURLWithPath: args[index + 1])
+            index += 2
+        } else if args[index] == "--long-edge", index + 1 < args.count, let n = Int(args[index + 1]), n > 0 {
+            previewLongEdge = n
+            index += 2
+        } else if args[index] == "--overlay" {
+            overlay = true
+            index += 1
+        } else if args[index] == "--auto-settings" {
+            autoSettings = true
+            index += 1
         } else if args[index] == "--no-align" {
             autoAlign = false
             index += 1
@@ -101,13 +122,16 @@ if args.count >= 2, args[1] == "merge-hdr" {
             index += 1
         }
     }
-    guard positional.count >= 3 else {
+    // With --preview there is no DNG: every path given is a photo.
+    guard positional.count >= (previewOutput == nil ? 3 : 2) else {
         print("Usage: latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N] [--no-align] "
-              + "[--deghost none|low|medium|high]")
+              + "[--deghost none|low|medium|high] [--auto-settings]\n"
+              + "       latent-cli merge-hdr --preview <out.jpg> <raw> <raw> [...] [--long-edge N] [--overlay] "
+              + "[--reference N] [--no-align] [--deghost none|low|medium|high]")
         exit(1)
     }
-    let output = URL(fileURLWithPath: positional[0])
-    let inputs = positional.dropFirst().map { URL(fileURLWithPath: $0) }
+    let output = URL(fileURLWithPath: previewOutput == nil ? positional[0] : "")
+    let inputs = (previewOutput == nil ? positional.dropFirst() : positional[...]).map { URL(fileURLWithPath: $0) }
 
     /// `text` cut or padded with spaces to `width` characters (String(format:)
     /// can't pad a %@).
@@ -136,7 +160,8 @@ if args.count >= 2, args[1] == "merge-hdr" {
 
     do {
         let gpu = try GPUContext()
-        let merger = HDRMerger(gpu: gpu)
+        // A preview wants the frames kept while they are read for the analysis.
+        let merger = HDRMerger(gpu: gpu, keepsPreviewFrames: previewOutput != nil)
         let options = HDRMergeOptions(referenceIndex: referenceOverride, deghost: deghost, autoAlign: autoAlign)
         let (analysis, analysisReport) = try await merger.analyseWithReport(inputs, options: options)
         let reference = referenceOverride ?? analysis.referenceIndex
@@ -191,6 +216,48 @@ if args.count >= 2, args[1] == "merge-hdr" {
             }
         }
 
+        if let previewOutput {
+            let started = ContinuousClock.now
+            let (image, report) = try await merger.previewWithReport(analysis, options: options,
+                                                                     longEdge: previewLongEdge,
+                                                                     showDeghostOverlay: overlay)
+            let first = ContinuousClock.now - started
+            // Once more with the frames already kept and the GPU's pipelines
+            // built: what each option change in the dialog costs.
+            let again = ContinuousClock.now
+            _ = try await merger.preview(analysis, options: options, longEdge: previewLongEdge,
+                                         showDeghostOverlay: overlay)
+            let second = ContinuousClock.now - again
+            guard let destination = CGImageDestinationCreateWithURL(previewOutput as CFURL, "public.jpeg" as CFString,
+                                                                    1, nil) else {
+                print("Failed: can't write \(previewOutput.path)")
+                exit(1)
+            }
+            CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+            guard CGImageDestinationFinalize(destination) else {
+                print("Failed: can't write \(previewOutput.path)")
+                exit(1)
+            }
+            print("Timings:")
+            printReport(analysisReport, title: "analysis")
+            printReport(report, title: "first preview")
+            func seconds(_ duration: Duration) -> Double {
+                Double(duration.components.seconds) + Double(duration.components.attoseconds) * 1e-18
+            }
+            if !report.ghostMaskedFractions.isEmpty {
+                let shares = zip(report.ghostFlaggedFractions, report.ghostMaskedFractions).enumerated()
+                    .map { i, share in
+                        i == reference ? "\(i): reference"
+                            : String(format: "%d: %.2f%% moving, %.2f%% left out", i, share.0 * 100, share.1 * 100)
+                    }
+                print("Deghosting (\(deghost.rawValue)) at preview size: " + shares.joined(separator: "; "))
+            }
+            print(String(format: "Preview %d x %d px: first %.3f s, again %.3f s", image.width, image.height,
+                         seconds(first), seconds(second)))
+            print("Wrote \(previewOutput.path)")
+            exit(0)
+        }
+
         var sources: [MergeRecipe.Source] = []
         for frame in analysis.frames {
             let captured = try RawFile(path: frame.url.path, metadataOnly: true).summary.captureTime
@@ -218,6 +285,33 @@ if args.count >= 2, args[1] == "merge-hdr" {
         print(String(format: "Peak GPU memory: %.2f GB (device allocations while merging)", Double(peak) / 1_073_741_824))
         print(String(format: "Wrote %@ (%.1f MB, BaselineExposure %+.2f, clip level %g)", result.url.path as NSString,
                      Double(result.byteCount) / 1_000_000, result.baselineExposure, result.recipe.clipLevel))
+        if autoSettings {
+            // What ⌘U makes of the result, as the app's Auto Settings stores it.
+            let edit = try HDRAutoSettings.edit(forPhotoAt: result.url, gpu: gpu)
+            let wb = edit.suggestion.whiteBalance.map { String(format: ", white balance %.0f K tint %+.0f", $0.temperature, $0.tint) } ?? ""
+            print(String(format: "Auto Settings: exposure %+.2f EV, contrast %.2f", edit.suggestion.exposureEV,
+                         edit.suggestion.contrast) + wb)
+            let folder = result.url.deletingLastPathComponent()
+            let root = FolderAccess.hasCatalog(folder) ? folder : FolderAccess.owningCatalog(of: folder)?.root
+            if let root, let json = edit.editStackJSON {
+                // Catalogued like any new file, then given the edit through
+                // the catalog, which writes it into the result's sidecar.
+                let catalog = try Catalog.open(at: root)
+                _ = try await catalog.reconcile()
+                let relPath = String(result.url.standardizedFileURL.path.dropFirst(root.standardizedFileURL.path.count + 1))
+                guard let id = try await catalog.image(forRelPath: relPath)?.id else {
+                    print("Failed: \(relPath) isn't in the catalog of \(root.path) after reading the folder")
+                    exit(1)
+                }
+                try await catalog.setEditStack(json, schemaVersion: EditStack.schemaVersion,
+                                               processVersion: EditStack.processVersion, forImageID: id)
+                print("Wrote the Auto Settings edit to \(relPath)'s sidecar in the catalog of \(root.path)")
+            } else if root == nil {
+                print("No catalog in \(folder.path): the Auto Settings edit isn't stored")
+            } else {
+                print("Auto Adjust leaves the result at its defaults: no edit to store")
+            }
+        }
     } catch let error as HDRMergeError {
         print("Failed: \(error.errorDescription ?? String(describing: error))")
         exit(1)
@@ -235,6 +329,10 @@ guard args.count >= 3, args[1] == "render" else {
       latent-cli catalog <folder> [--include-subfolders]
       latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N]
                            [--no-align] [--deghost none|low|medium|high]
+                           [--auto-settings]
+      latent-cli merge-hdr --preview <out.jpg> <raw> <raw> [...] [--long-edge N]
+                           [--overlay] [--reference N] [--no-align]
+                           [--deghost none|low|medium|high]
 
     Options:
       --out <path.png>       write the result as a PNG

@@ -1,6 +1,7 @@
 #if DEBUG
 import AppKit
 import Catalog
+import CoreGraphics
 import MergeKit
 
 /// The snapshot harness's `hdrmerge` step (SnapshotHarness.swift lists the
@@ -41,9 +42,9 @@ enum PhotoMergeSnapshots {
 }
 
 /// Measures nothing: says the files are a 2 EV bracket of a 24 MP camera,
-/// brightest first, shot by hand: with Auto Align, aligned by up to 17 px
-/// with the last photo left out, the longest the dialog's text gets; without
-/// it, the misalignment warning.
+/// brightest first, shot by hand, the first a little brighter than its EXIF:
+/// with Auto Align, aligned by up to 17 px with the last photo left out, the
+/// longest the dialog's text gets; without it, the misalignment warning.
 private struct StandInHDRMerger: HDRMerging {
     func analyse(_ urls: [URL], options: HDRMergeOptions) async throws -> HDRMergeAnalysis {
         // A camera's shutter speeds, 2 stops apart.
@@ -57,12 +58,54 @@ private struct StandInHDRMerger: HDRMerging {
                           alignmentShiftPixels: !options.autoAlign || index == count - 1 ? nil
                               : index == reference ? 0 : 16.6)
         }
-        let warnings: [HDRMergeWarning] = options.autoAlign
-            ? [.frameCouldNotBeAligned(frameIndex: count - 1, leftOut: true)]
-            : [.framesLookMisaligned(maximumShiftPixels: 16.6)]
+        // With the note, three lines: the most the dialog shows before its
+        // notes scroll, so the picture checks the tallest dialog.
+        let warnings: [HDRMergeWarning] = [.exposureMetadataDisagrees(frameIndex: 0, exifRelativeEV: 0,
+                                                                      measuredRelativeEV: 0.4)]
+            + (options.autoAlign ? [.frameCouldNotBeAligned(frameIndex: count - 1, leftOut: true)]
+                                 : [.framesLookMisaligned(maximumShiftPixels: 16.6)])
         return HDRMergeAnalysis(frames: frames, referenceIndex: reference, width: 6016, height: 4016,
                                 exposureRangeStops: Double(2 * max(frames.count - 1, 0)),
                                 warnings: warnings, estimatedOutputBytes: 145_000_000)
+    }
+
+    /// A made-up landscape (sky, hills, a sun) the size asked for, at the
+    /// bracket's 3:2; with the overlay, an outlined, tinted patch where a
+    /// deghosted walker might be.
+    func preview(_ analysis: HDRMergeAnalysis, options: HDRMergeOptions, longEdge: Int,
+                 showDeghostOverlay: Bool) async throws -> CGImage {
+        let width = max(3, longEdge), height = max(2, longEdge * 2 / 3)
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+        else { throw CancellationError() }
+        let w = CGFloat(width), h = CGFloat(height)
+        let sky = CGGradient(colorsSpace: space, colors: [CGColor(red: 0.35, green: 0.55, blue: 0.85, alpha: 1),
+                                                          CGColor(red: 0.95, green: 0.8, blue: 0.6, alpha: 1)] as CFArray,
+                             locations: [0, 1])!
+        context.drawLinearGradient(sky, start: CGPoint(x: 0, y: h), end: CGPoint(x: 0, y: h * 0.35), options: [])
+        context.setFillColor(CGColor(red: 1, green: 0.95, blue: 0.8, alpha: 1))
+        context.fillEllipse(in: CGRect(x: w * 0.7, y: h * 0.55, width: h * 0.16, height: h * 0.16))
+        context.setFillColor(CGColor(red: 0.2, green: 0.32, blue: 0.2, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: w, height: h * 0.36))
+        context.move(to: .zero)
+        context.addCurve(to: CGPoint(x: w, y: h * 0.3), control1: CGPoint(x: w * 0.3, y: h * 0.6),
+                         control2: CGPoint(x: w * 0.6, y: h * 0.1))
+        context.addLine(to: CGPoint(x: w, y: 0))
+        context.fillPath()
+        if showDeghostOverlay, options.deghost != .none {
+            let patch = CGRect(x: w * 0.3, y: h * 0.15, width: w * 0.12, height: h * 0.25)
+            let colour = HDRDeghostOverlay.colour(forFrame: options.referenceIndex ?? analysis.referenceIndex)
+            context.setFillColor(CGColor(red: CGFloat(colour.red) / 255, green: CGFloat(colour.green) / 255,
+                                         blue: CGFloat(colour.blue) / 255, alpha: 0.4))
+            context.fill(patch)
+            context.setStrokeColor(CGColor(gray: 1, alpha: 1))
+            context.stroke(patch, width: 2)
+            context.setStrokeColor(CGColor(gray: 0, alpha: 1))
+            context.stroke(patch.insetBy(dx: 2, dy: 2), width: 1)
+        }
+        guard let image = context.makeImage() else { throw CancellationError() }
+        return image
     }
 
     func merge(_ analysis: HDRMergeAnalysis, options: HDRMergeOptions, sources: [MergeRecipe.Source],

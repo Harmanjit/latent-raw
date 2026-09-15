@@ -93,8 +93,8 @@ struct CommandState: Equatable {
         // The whole selection, as Export takes it: from the grid, or kept
         // from the grid in the other views. One GPU job at a time, and not
         // while typing, where ⌃H is the text system's delete-backward.
-        case .photoMergeHDR: editorReady && selectionCount >= 2 && !exportQueueRunning && !photoMergeRunning
-            && !isEditingText
+        case .photoMergeHDR, .photoMergeHDRWithoutDialog:
+            editorReady && selectionCount >= 2 && !exportQueueRunning && !photoMergeRunning && !isEditingText
         // Survey's panes aren't the editor's image, which may be one from before.
         case .exportOpenImage: hasImage && !exportingOpenImage && mode != .survey
         // Library prints the selection, and so does Survey, whose selection
@@ -303,6 +303,7 @@ struct LatentCommands: Commands {
             Divider()
             Menu("Photo Merge") {
                 item("HDR…", .photoMergeHDR)
+                item("HDR Merge Without Dialog", .photoMergeHDRWithoutDialog)
             }
         }
 
