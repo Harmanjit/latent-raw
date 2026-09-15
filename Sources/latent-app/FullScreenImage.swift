@@ -99,6 +99,101 @@ enum FullScreenImagePolicy {
     ]
 }
 
+// MARK: - Following the window's own full screen
+
+/// Full-screen image mode against its window's full screen, apart from
+/// any window, so every interleaving of F, Esc, the green button and the
+/// window's animations is tested.
+///
+/// The window's notifications are the truth, and the window is asked to
+/// change only while it is still, because AppKit takes no request during
+/// an animation: a toggle on the way in is ignored (even from inside
+/// didEnter), and a toggle on the way out posts didExit at once and
+/// willEnter, then drops the enter and puts the window back with no
+/// notification (only the window's delegate, SwiftUI's, hears of it).
+/// So F on the way out waits for the window to be out and then takes it
+/// back in, and F on the way in takes it out once it has arrived.
+struct FullScreenImageState: Equatable {
+    enum Phase: Equatable {
+        case windowed, entering, fullScreen, exiting
+
+        var isAnimating: Bool { self == .entering || self == .exiting }
+    }
+
+    enum Event: Equatable {
+        /// F. `drivesWindow` is false without a window, or in a snapshot
+        /// run that pictures only the layout.
+        case enter(drivesWindow: Bool)
+        /// F again, Esc, or going to the grid or Compare.
+        case leave
+        case willEnter, didEnter
+        /// `byMode` when the mode's own request posted it.
+        case willExit(byMode: Bool)
+        case didExit
+        /// The window stopped an animation short, or ignored a request,
+        /// and is full screen or not as `isFullScreen` says.
+        case failed(isFullScreen: Bool)
+        case closed
+    }
+
+    private(set) var phase: Phase
+    /// The image alone, panels flying out.
+    private(set) var isActive = false
+    /// The mode made the window full screen, or is making it so, and
+    /// leaving takes it out again. A window full screen (or on its way)
+    /// by other means stays full screen after.
+    private(set) var ownsFullScreen = false
+
+    init(phase: Phase = .windowed) {
+        self.phase = phase
+    }
+
+    /// Whether the window is to be asked to go in or out now.
+    var needsToggle: Bool {
+        guard ownsFullScreen else { return false }
+        switch phase {
+        case .windowed: return isActive
+        case .fullScreen: return !isActive
+        case .entering, .exiting: return false
+        }
+    }
+
+    /// The mode is on and the window is where it will stay.
+    var hasArrived: Bool { isActive && !phase.isAnimating && !needsToggle }
+
+    mutating func handle(_ event: Event) {
+        switch event {
+        case .enter(let drivesWindow):
+            guard !isActive else { return }
+            isActive = true
+            if drivesWindow, phase == .windowed || phase == .exiting { ownsFullScreen = true }
+        case .leave:
+            isActive = false
+        case .willEnter:
+            phase = .entering
+        case .didEnter:
+            phase = .fullScreen
+        case .willExit(let byMode):
+            phase = .exiting
+            // Leaving full screen some other way (the green button, ⌃⌘F)
+            // brings the panels back as it starts.
+            if !byMode { isActive = false }
+        case .didExit:
+            phase = .windowed
+        case .failed(let isFullScreen):
+            phase = isFullScreen ? .fullScreen : .windowed
+            // No image alone in a window; and no asking again, which could
+            // go on failing.
+            if !isFullScreen { isActive = false }
+            if !isActive { ownsFullScreen = false }
+        case .closed:
+            phase = .windowed
+            isActive = false
+        }
+        if !isActive, phase == .windowed || phase == .exiting { ownsFullScreen = false }
+    }
+}
+
 // MARK: - The mode itself
 
 /// Full-screen image mode (F): the main window goes full screen with only
@@ -110,7 +205,8 @@ enum FullScreenImagePolicy {
 /// can't be relied on to take the keyboard. The system's full screen also
 /// keeps the image below a notch (the safe area), and it cross-fades rather
 /// than slides under Reduce Motion. A window already full screen when F is
-/// pressed only loses its panels, and stays full screen after.
+/// pressed only loses its panels, and stays full screen after. The mode
+/// follows the window's real full screen (`FullScreenImageState`).
 ///
 /// Held for the process, like `MainWindowModels`, so the snapshot harness
 /// can reach it.
@@ -125,67 +221,65 @@ final class FullScreenImageMode: ObservableObject {
     /// `FullScreenImagePolicy.keepsPanel`). A panel never shown is never built.
     @Published private(set) var builtEdges: Set<FlyoutEdge> = []
 
+    private(set) var state = FullScreenImageState()
     private weak var window: NSWindow?
-    /// Set when entering made the window full screen, so leaving undoes it.
-    private var enteredSystemFullScreen = false
-    /// Between asking the window to go full screen and its arrival, when
-    /// it can't be asked to come back.
-    private var animatingIn = false
-    private var observers: [any NSObjectProtocol] = []
+    /// Windows part way into or out of full screen, from their
+    /// notifications, watched from the start so F pressed during an
+    /// animation that began before it is not taken for a still window.
+    private var animating: [ObjectIdentifier: (phase: FullScreenImageState.Phase, since: Date)] = [:]
+    /// While the mode's own request runs, to tell its notifications from
+    /// the green button's.
+    private var isToggling = false
+    private var animationStarted = Date.distantPast
+    private var animationCheck: Timer?
+    private let observers = ObserverTokens()
+
+    /// How long an animation may go without its did notification before
+    /// the window's style mask is taken as where it ended.
+    static let animationTimeout: TimeInterval = 5
+
+    init() {
+        let center = NotificationCenter.default
+        let events: [(Notification.Name, FullScreenImageState.Event)] = [
+            (NSWindow.willEnterFullScreenNotification, .willEnter),
+            (NSWindow.didEnterFullScreenNotification, .didEnter),
+            (NSWindow.willExitFullScreenNotification, .willExit(byMode: false)),
+            (NSWindow.didExitFullScreenNotification, .didExit),
+            (NSWindow.willCloseNotification, .closed),
+        ]
+        // Delivered as posted (AppKit posts on the main thread), so the
+        // notifications of the mode's own request arrive during it.
+        observers.tokens = events.map { name, event in
+            center.addObserver(forName: name, object: nil, queue: nil) { [weak self] note in
+                guard let window = note.object as? NSWindow else { return }
+                MainActor.assumeIsolated { self?.window(window, posted: event) }
+            }
+        }
+    }
 
     /// Whether the window is where entering asked it to be, not still on
-    /// its way to full screen.
-    var hasArrived: Bool { isActive && !animatingIn }
+    /// its way to (or, first, out of) full screen.
+    var hasArrived: Bool { state.hasArrived }
 
     /// `window` goes full screen (unless it already is).
     func enter(window: NSWindow?) {
         guard !isActive else { return }
-        isActive = true
-        openEdge = nil
-        builtEdges = []
-        self.window = window
-        Announcement.post("Full-screen image. Move the pointer to the left, right or bottom edge for panels; F or Escape leaves.")
-        guard let window else { return }
-        removeObservers()
-        let center = NotificationCenter.default
-        observers = [
-            // Leaving full screen some other way (the green button, ⌃⌘F)
-            // brings the panels back.
-            center.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.systemFullScreenEnded() }
-            },
-            center.addObserver(forName: NSWindow.didEnterFullScreenNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.systemFullScreenArrived() }
-            },
-            center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.leave() }
-            },
-        ]
+        if self.window == nil || window !== self.window { track(window) }
+        var drivesWindow = window != nil
         #if DEBUG
         // A snapshot run pictures the layout without taking over the screen,
         // unless it was asked to.
-        if SnapshotHarness.isActive, !SnapshotHarness.usesSystemFullScreen { return }
+        if SnapshotHarness.isActive, !SnapshotHarness.usesSystemFullScreen { drivesWindow = false }
         #endif
-        if !window.styleMask.contains(.fullScreen) {
-            enteredSystemFullScreen = true
-            animatingIn = true
-            window.toggleFullScreen(nil)
-        }
+        Announcement.post("Full-screen image. Move the pointer to the left, right or bottom edge for panels; F or Escape leaves.")
+        apply(.enter(drivesWindow: drivesWindow))
     }
 
-    /// Back to the window as it was, panels and all.
+    /// Back to the window as it was, panels and all: at once, or once the
+    /// window has arrived if it is still on its way in.
     func leave() {
         guard isActive else { return }
-        isActive = false
-        openEdge = nil
-        builtEdges = []
-        // Still animating in: it comes back once it has arrived.
-        guard !animatingIn else { return }
-        removeObservers()
-        if enteredSystemFullScreen, let window, window.styleMask.contains(.fullScreen) {
-            window.toggleFullScreen(nil)
-        }
-        enteredSystemFullScreen = false
+        apply(.leave)
     }
 
     /// Shows the panel for `edge`, or none. Every change goes through here.
@@ -209,25 +303,118 @@ final class FullScreenImageMode: ObservableObject {
                                      thickness: FullScreenImagePolicy.thickness, available: available))
     }
 
-    private func systemFullScreenArrived() {
-        animatingIn = false
-        // F again (or Esc) while it was on its way.
-        guard !isActive else { return }
-        removeObservers()
-        if enteredSystemFullScreen, let window { window.toggleFullScreen(nil) }
-        enteredSystemFullScreen = false
+    /// Catches an animation the window gave up without a notification (it
+    /// tells only its delegate), or one whose notification never came.
+    /// Run every tenth of a second while the window animates.
+    func checkAnimation(now: Date = Date()) {
+        guard let window, state.phase.isAnimating else { return stopAnimationCheck() }
+        let isFullScreen = window.styleMask.contains(.fullScreen)
+        if isFullScreen != (state.phase == .entering) {
+            animating[ObjectIdentifier(window)] = nil
+            apply(.failed(isFullScreen: isFullScreen))
+        } else if now.timeIntervalSince(animationStarted) > Self.animationTimeout {
+            animating[ObjectIdentifier(window)] = nil
+            apply(isFullScreen ? .didEnter : .didExit, deferringToggle: true)
+        }
     }
 
-    private func systemFullScreenEnded() {
-        animatingIn = false
-        enteredSystemFullScreen = false
-        leave()
-        removeObservers()
+    // MARK: Plumbing
+
+    private func track(_ window: NSWindow?) {
+        self.window = window
+        stopAnimationCheck()
+        guard let window else { state = FullScreenImageState(); return }
+        let isFullScreen = window.styleMask.contains(.fullScreen)
+        // A recorded animation counts only while the style mask agrees:
+        // an enter AppKit dropped leaves no notification behind.
+        let recorded = animating[ObjectIdentifier(window)]
+        state = switch recorded?.phase {
+        case .entering? where isFullScreen: FullScreenImageState(phase: .entering)
+        case .exiting? where !isFullScreen: FullScreenImageState(phase: .exiting)
+        default: FullScreenImageState(phase: isFullScreen ? .fullScreen : .windowed)
+        }
+        if let recorded, state.phase.isAnimating {
+            animationStarted = recorded.since
+            startAnimationCheck()
+        }
     }
 
-    private func removeObservers() {
-        observers.forEach(NotificationCenter.default.removeObserver)
-        observers = []
+    private func window(_ window: NSWindow, posted event: FullScreenImageState.Event) {
+        let id = ObjectIdentifier(window)
+        switch event {
+        case .willEnter: animating[id] = (.entering, Date())
+        case .willExit: animating[id] = (.exiting, Date())
+        default: animating[id] = nil
+        }
+        guard window === self.window else { return }
+        switch event {
+        case .willEnter, .willExit:
+            animationStarted = Date()
+            apply(event == .willEnter ? .willEnter : .willExit(byMode: isToggling))
+        case .closed:
+            apply(.closed)
+            self.window = nil
+        default:
+            // AppKit ignores a request made inside didEnter.
+            apply(event, deferringToggle: true)
+        }
+    }
+
+    private func apply(_ event: FullScreenImageState.Event, deferringToggle: Bool = false) {
+        let wasActive = state.isActive
+        state.handle(event)
+        if state.isActive != wasActive {
+            openEdge = nil
+            builtEdges = []
+            isActive = state.isActive
+        }
+        if state.phase.isAnimating { startAnimationCheck() } else { stopAnimationCheck() }
+        guard state.needsToggle else { return }
+        if deferringToggle {
+            DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.toggleIfNeeded() } }
+        } else {
+            toggleIfNeeded()
+        }
+    }
+
+    private func toggleIfNeeded() {
+        guard state.needsToggle, let window else { return }
+        let before = state.phase
+        isToggling = true
+        window.toggleFullScreen(nil)
+        isToggling = false
+        // The request posts willEnter or willExit as it starts; none, and
+        // the window didn't take it.
+        if state.phase == before {
+            apply(.failed(isFullScreen: window.styleMask.contains(.fullScreen)))
+        }
+    }
+
+    private func startAnimationCheck() {
+        guard animationCheck == nil else { return }
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] timer in
+            let isOwned = MainActor.assumeIsolated {
+                self?.checkAnimation()
+                return self != nil
+            }
+            if !isOwned { timer.invalidate() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        animationCheck = timer
+    }
+
+    private func stopAnimationCheck() {
+        animationCheck?.invalidate()
+        animationCheck = nil
+    }
+}
+
+/// Notification observers, removed when their owner goes.
+private final class ObserverTokens: @unchecked Sendable {
+    var tokens: [any NSObjectProtocol] = []
+
+    deinit {
+        tokens.forEach(NotificationCenter.default.removeObserver)
     }
 }
 
