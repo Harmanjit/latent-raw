@@ -101,10 +101,15 @@ public struct TransferFaults: Sendable {
     /// Runs part-way through placing it: after a move's file, before its
     /// sidecar; or after a sidecar went to another catalog, before the file.
     public var midway: (@Sendable (URL) throws -> Void)?
+    /// Takes the path a move to another volume takes (a whole copy, then
+    /// the original removed) on the one volume tests have.
+    public var treatAsOtherVolume = false
 
-    public init(beforePlacing: (@Sendable (URL) throws -> Void)? = nil, midway: (@Sendable (URL) throws -> Void)? = nil) {
+    public init(beforePlacing: (@Sendable (URL) throws -> Void)? = nil, midway: (@Sendable (URL) throws -> Void)? = nil,
+                treatAsOtherVolume: Bool = false) {
         self.beforePlacing = beforePlacing
         self.midway = midway
+        self.treatAsOtherVolume = treatAsOtherVolume
     }
 }
 
@@ -350,7 +355,7 @@ public enum ImageTransfer {
         // The slow part, outside any actor: a copy, or a move to another
         // volume, first makes a whole copy under a hidden name.
         var temporary: URL?
-        if mode == .copy || FileOperations.device(ofFolder: folder) != sourceIdentity.device {
+        if mode == .copy || faults.treatAsOtherVolume || FileOperations.device(ofFolder: folder) != sourceIdentity.device {
             let hidden = FileOperations.temporaryURL(beside: folder.appendingPathComponent(source.lastPathComponent))
             try FileManager.default.copyItem(at: source, to: hidden)
             temporary = hidden

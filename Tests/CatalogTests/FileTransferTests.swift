@@ -274,6 +274,37 @@ final class FileTransferTests: XCTestCase {
         XCTAssertEqual(moved?.rating, 2, "reconcile reads the moved sidecar")
     }
 
+    /// To another volume a move is a whole copy under a hidden name, renamed
+    /// into place, and only then the original removed.
+    func testMovesThatCopyRemoveTheOriginalOnlyAtTheEnd() async throws {
+        let catalog = try await preparedCatalog()
+        let other = base.appendingPathComponent("Archive", isDirectory: true)
+        try fm.createDirectory(at: other, withIntermediateDirectories: true)
+        let day2 = root.appendingPathComponent("Day 2")
+        let otherVolume = TransferFaults(treatAsOtherVolume: true)
+
+        var report = await ImageTransfer.run([request("B.NEF", to: day2)], mode: .move, openCatalog: catalog, faults: otherVolume)
+        XCTAssertEqual(report.completed.count, 1, report.failureDescription)
+        XCTAssertFalse(exists(root.appendingPathComponent("B.NEF")))
+        XCTAssertTrue(exists(day2.appendingPathComponent("B.NEF")))
+        let moved = try await catalog.image(forRelPath: "Day 2/B.NEF")
+        XCTAssertNotNil(moved)
+
+        report = await ImageTransfer.run([request("A.NEF", to: other)], mode: .move, openCatalog: catalog, faults: otherVolume)
+        XCTAssertEqual(report.completed.count, 1, report.failureDescription)
+        XCTAssertFalse(exists(root.appendingPathComponent("A.NEF")))
+        XCTAssertTrue(exists(other.appendingPathComponent("A.NEF")))
+        XCTAssertTrue(exists(other.appendingPathComponent("_latent/xmp/A.NEF.xmp")))
+
+        // Failing part-way leaves the original and no hidden copy.
+        let failed = await ImageTransfer.run([TransferRequest(source: day2.appendingPathComponent("B.NEF"), folder: other)],
+                                             mode: .move, openCatalog: catalog,
+                                             faults: TransferFaults(midway: { _ in throw Interrupted() }, treatAsOtherVolume: true))
+        XCTAssertEqual(failed.failures.count, 1)
+        XCTAssertTrue(exists(day2.appendingPathComponent("B.NEF")))
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: other.path).filter { $0.hasPrefix(".latent-") }, [])
+    }
+
     // MARK: - Interruption and cancelling
 
     struct Interrupted: Error {}
