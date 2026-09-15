@@ -140,11 +140,12 @@ final class AIDenoiseTests: XCTestCase {
     /// AI denoise on. The perspective stage fills the part of the frame it
     /// pulls in from outside the sensor by repeating the edge pixel, so the
     /// outermost column and row of the denoised blend are stretched over
-    /// whole wedges. RCD leaves the frame's outermost pixel with one channel
-    /// at half its value, the network spread that over a few pixels, and the
-    /// binned preview's box average of the full-resolution result carried
-    /// it to the edge. The render with denoise must keep the colour of the
-    /// render without it there, as it does in the interior.
+    /// whole wedges. RCD used to leave the frame's outermost pixel with one
+    /// channel at half its value (DemosaicBorderTests), the network spread
+    /// that over a few pixels, and the binned preview's box average of the
+    /// full-resolution result carried it to the edge. The render with
+    /// denoise must keep the colour of the render without it there, as it
+    /// does in the interior.
     func testFrameEdgesKeepTheirColourWithPerspective() async throws {
         let path = AIMaskTests.assetPath("HSB_6548.NEF")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path))

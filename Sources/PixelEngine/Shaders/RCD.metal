@@ -40,20 +40,73 @@ inline float rcdIntp(float t, float a, float b) {
 
 inline float rcdSqr(float x) { return x * x; }
 
-/// Bounds-clamped read. RCD needs a 4-pixel neighbourhood; rather than
-/// excluding a border, edge reads clamp to the nearest valid pixel. The
-/// outermost few pixels are therefore slightly degraded, which is harmless
-/// here because they sit inside the sensor's masked border region anyway.
+// Frame edges.
+//
+// RCD reads up to four pixels out, and the passes stack, so a pixel up to
+// eleven in from the edge depends on reads past it. Those reads mirror
+// back into the frame about the edge photosite (reflect-101: -1 reads 1,
+// w reads w-2), which is what every stage below computes on: RCD of the
+// frame extended by its own mirror image. The mirror keeps each read on a
+// photosite of the colour the stage expects, because reflecting about a
+// photosite preserves the parity of the index. Clamping to the edge, as
+// this used to, lands odd offsets on the other colour of the edge row: at
+// a green site on the top row of an RGGB frame, "blue one row up" read the
+// same row's unfilled blue, so the outermost row and column came out with
+// one channel at half its value. The perspective and lens stages fill what
+// they pull in from outside the frame by repeating that edge pixel, which
+// turned the error into coloured wedges.
+//
+// rcdMirror hands back an index inside the frame unchanged, so a pixel
+// whose reads all stay inside comes out bit for bit as it did with the
+// clamp; on a 24 MP frame nothing more than nine pixels in changed.
+
+/// Reflect-101 index into [0, n). Exact for reads up to n-1 past either
+/// edge, far beyond RCD's reach for any real frame; the clamp only keeps a
+/// frame narrower than that reach (a few pixels) inside the texture.
+/// Branchless and division-free, because it runs on every read: an
+/// earlier version with a branch and a modulo took RCD from 33 to 53 ms
+/// on a 24 MP frame.
+inline int rcdMirror(int i, int n) {
+    int last = n - 1;
+    return clamp(last - abs(last - abs(i)), 0, last);
+}
+
+/// Whether `rcdMirror` turns the axis around for this index. Only the
+/// diagonal statistics care, because a mirror in one axis swaps the
+/// down-right diagonal for the down-left one.
+inline bool rcdMirrorFlips(int i, int n) {
+    return i < 0 || i >= n;
+}
+
 inline float rcdRead(texture2d<float, access::read> tex, int x, int y) {
     int w = int(tex.get_width());
     int h = int(tex.get_height());
-    return tex.read(uint2(clamp(x, 0, w - 1), clamp(y, 0, h - 1))).r;
+    return tex.read(uint2(rcdMirror(x, w), rcdMirror(y, h))).r;
 }
 
 inline float4 rcdRead4(texture2d<float, access::read> tex, int x, int y) {
     int w = int(tex.get_width());
     int h = int(tex.get_height());
-    return tex.read(uint2(clamp(x, 0, w - 1), clamp(y, 0, h - 1)));
+    return tex.read(uint2(rcdMirror(x, w), rcdMirror(y, h)));
+}
+
+/// True when a read at (x, y) is mirrored in exactly one axis, so a
+/// diagonal statistic read there belongs to the other diagonal.
+inline bool rcdDiagonalsSwap(texture2d<float, access::read> tex, int x, int y) {
+    return rcdMirrorFlips(x, int(tex.get_width())) != rcdMirrorFlips(y, int(tex.get_height()));
+}
+
+/// The P (red) and Q (green) diagonal statistics as seen from (x, y).
+inline float2 rcdReadPQ(texture2d<float, access::read> tex, int x, int y) {
+    float2 pq = rcdRead4(tex, x, y).rg;
+    return rcdDiagonalsSwap(tex, x, y) ? pq.yx : pq;
+}
+
+/// The P-over-Q discrimination as seen from (x, y): mirrored in one axis,
+/// P and Q trade places, so the ratio becomes its complement.
+inline float rcdReadPQDir(texture2d<float, access::read> tex, int x, int y) {
+    float v = rcdRead(tex, x, y);
+    return rcdDiagonalsSwap(tex, x, y) ? 1.0f - v : v;
 }
 
 inline float rcdChannel(texture2d<float, access::read> tex, int x, int y, uint c) {
@@ -260,11 +313,11 @@ kernel void rcdDirectionsPQ(
 
     // Each statistic is summed along its own diagonal.
     float pStat = max(kRCDEpsSq,
-                       rcdRead4(pq, x - 1, y - 1).r + rcdRead4(pq, x, y).r
-                       + rcdRead4(pq, x + 1, y + 1).r);
+                       rcdReadPQ(pq, x - 1, y - 1).x + rcdReadPQ(pq, x, y).x
+                       + rcdReadPQ(pq, x + 1, y + 1).x);
     float qStat = max(kRCDEpsSq,
-                       rcdRead4(pq, x + 1, y - 1).g + rcdRead4(pq, x, y).g
-                       + rcdRead4(pq, x - 1, y + 1).g);
+                       rcdReadPQ(pq, x + 1, y - 1).y + rcdReadPQ(pq, x, y).y
+                       + rcdReadPQ(pq, x - 1, y + 1).y);
 
     pqDir.write(float4(pStat / (pStat + qStat), 0, 0, 1), gid);
 }
@@ -300,8 +353,8 @@ kernel void rcdRedBlueAtOpposite(
     float green = centre.g;
 
     float pqCentre = rcdRead(pqDir, x, y);
-    float pqNeighbourhood = 0.25f * (rcdRead(pqDir, x - 1, y - 1) + rcdRead(pqDir, x + 1, y - 1)
-                                      + rcdRead(pqDir, x - 1, y + 1) + rcdRead(pqDir, x + 1, y + 1));
+    float pqNeighbourhood = 0.25f * (rcdReadPQDir(pqDir, x - 1, y - 1) + rcdReadPQDir(pqDir, x + 1, y - 1)
+                                      + rcdReadPQDir(pqDir, x - 1, y + 1) + rcdReadPQDir(pqDir, x + 1, y + 1));
     float pqDisc = abs(0.5f - pqCentre) < abs(0.5f - pqNeighbourhood)
                  ? pqNeighbourhood : pqCentre;
 

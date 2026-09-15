@@ -274,8 +274,7 @@ public enum AIDenoiseWorker {
         asShot.whiteBalance = session.asShotWhiteBalance
         let camera = try pipeline.renderCameraRGB(session, scale: .full, parameters: asShot)
         let width = camera.width, height = camera.height
-        var pixels = try TextureReadback.float16Pixels(of: camera, gpu: gpu)
-        replaceBorder(&pixels, width: width, height: height)
+        let pixels = try TextureReadback.float16Pixels(of: camera, gpu: gpu)
 
         let m = session.asShotMultipliers
         let white = max(m.x, m.y, m.z, 1)
@@ -296,41 +295,5 @@ public enum AIDenoiseWorker {
         }
         session.setAIDenoised(texture, model: denoiser.modelName)
         return Date().timeIntervalSince(start)
-    }
-
-    /// How many rows and columns at each edge of the frame are rebuilt
-    /// before denoising (see `replaceBorder`).
-    static let borderDepth = 2
-
-    /// Overwrites the outermost `borderDepth` rows and columns with the
-    /// first ones inside them. RCD reads its neighbourhood clamped at the
-    /// frame's edge, which leaves the outermost row and column with one
-    /// channel at half its value and the next one a few percent off (blue
-    /// along the top and left, red along the bottom and right, for this
-    /// CFA order). NAFNet takes that line for structure and spreads it
-    /// several pixels inward, so the denoised frame carries a coloured rim
-    /// the binned preview (which reads the photosites directly and has no
-    /// such rim) picks up when it box-averages the result, and which the
-    /// lens stage then stretches over every wedge that perspective or
-    /// distortion pulls in from outside the frame. Two pixels of the
-    /// frame's edge are all this costs.
-    static func replaceBorder(_ pixels: inout [Float16], width: Int, height: Int) {
-        let d = borderDepth
-        guard width > 2 * d, height > 2 * d else { return }
-        func copy(from s: Int, to t: Int) {
-            for c in 0..<3 { pixels[t * 4 + c] = pixels[s * 4 + c] }
-        }
-        for y in 0..<height {
-            for x in 0..<d {
-                copy(from: y * width + d, to: y * width + x)
-                copy(from: y * width + width - 1 - d, to: y * width + width - 1 - x)
-            }
-        }
-        for x in 0..<width {
-            for y in 0..<d {
-                copy(from: d * width + x, to: y * width + x)
-                copy(from: (height - 1 - d) * width + x, to: (height - 1 - y) * width + x)
-            }
-        }
     }
 }

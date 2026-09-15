@@ -1051,8 +1051,14 @@ public final class RenderPipeline {
     private func demosaicBilinear(session: ImageSession, cmdBuffer: MTLCommandBuffer,
                                    cfa: MTLTexture,
                                    order: UInt8) throws -> MTLTexture {
-        let rgbTex = try session.texture(width: cfa.width, height: cfa.height,
-                                          pixelFormat: .rgba16Float, role: .cameraRGB)
+        try encodeBilinear(cmdBuffer: cmdBuffer, cfa: cfa, order: order,
+                           output: try session.texture(width: cfa.width, height: cfa.height,
+                                                       pixelFormat: .rgba16Float, role: .cameraRGB))
+    }
+
+    /// The bilinear demosaic of any CFA texture into `output`.
+    func encodeBilinear(cmdBuffer: MTLCommandBuffer, cfa: MTLTexture, order: UInt8,
+                        output rgbTex: MTLTexture) throws -> MTLTexture {
         guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             throw RenderError.commandBufferFailed
         }
@@ -1082,14 +1088,23 @@ public final class RenderPipeline {
     private func demosaicRCD(session: ImageSession, cmdBuffer: MTLCommandBuffer,
                               cfa: MTLTexture,
                               order: UInt8) throws -> MTLTexture {
+        try encodeRCD(cmdBuffer: cmdBuffer, cfa: cfa, order: order) { format, role in
+            try session.texture(width: cfa.width, height: cfa.height, pixelFormat: format, role: role)
+        }
+    }
+
+    /// The RCD passes on any CFA texture, with the textures they write
+    /// handed out by `texture` (the session's pool, or a test's own).
+    func encodeRCD(cmdBuffer: MTLCommandBuffer, cfa: MTLTexture, order: UInt8,
+                   texture: (MTLPixelFormat, ImageSession.TextureRole) throws -> MTLTexture) throws -> MTLTexture {
         let w = cfa.width, h = cfa.height
 
-        let vhDir = try session.texture(width: w, height: h, pixelFormat: .r16Float, role: .rcdVHDir)
-        let lowPass = try session.texture(width: w, height: h, pixelFormat: .r32Float, role: .rcdLowPass)
-        let diagonal = try session.texture(width: w, height: h, pixelFormat: .rg32Float, role: .rcdDiagonal)
-        let pqDir = try session.texture(width: w, height: h, pixelFormat: .r16Float, role: .rcdPQDir)
-        let rgbA = try session.texture(width: w, height: h, pixelFormat: .rgba16Float, role: .cameraRGB)
-        let rgbB = try session.texture(width: w, height: h, pixelFormat: .rgba16Float, role: .rcdScratch)
+        let vhDir = try texture(.r16Float, .rcdVHDir)
+        let lowPass = try texture(.r32Float, .rcdLowPass)
+        let diagonal = try texture(.rg32Float, .rcdDiagonal)
+        let pqDir = try texture(.r16Float, .rcdPQDir)
+        let rgbA = try texture(.rgba16Float, .cameraRGB)
+        let rgbB = try texture(.rgba16Float, .rcdScratch)
 
         func pass(_ pso: MTLComputePipelineState,
                    textures: [MTLTexture],

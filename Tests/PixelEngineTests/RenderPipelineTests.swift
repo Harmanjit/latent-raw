@@ -46,7 +46,7 @@ final class RenderPipelineTests: XCTestCase {
 
     /// The region path must produce exactly the same pixels as the
     /// corresponding crop of a whole-image render, away from the region's
-    /// own border (where RCD's clamped edge reads legitimately differ).
+    /// own border (where RCD mirrors its reads instead of seeing the pixels outside).
     /// This is what makes tiled 100% zoom trustworthy: the tile isn't an
     /// approximation of the export, it *is* the export, cropped.
     func testRegionRenderMatchesFullResolutionCrop() throws {
@@ -79,7 +79,7 @@ final class RenderPipelineTests: XCTestCase {
         XCTAssertEqual(region.height, requested.h)
 
         let ox = Int(info.sensorRect.origin.x), oy = Int(info.sensorRect.origin.y)
-        let margin = 8   // RCD reaches 4 pixels out; be generous
+        let margin = 11   // how far in RCD's reads past the edge can reach
         var maxDiff: Float = 0
         for y in margin..<(region.height - margin) {
             for x in margin..<(region.width - margin) {
