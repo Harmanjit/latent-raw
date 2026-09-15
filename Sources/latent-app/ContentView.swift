@@ -1480,8 +1480,20 @@ struct ContentView: View {
     }
 
     /// Neural denoise: one run per image (cached with the session), then
-    /// the strength blends it in instantly.
+    /// the strength blends it in instantly. For a merged or linear DNG the
+    /// controls give way to a line saying why they aren't there.
+    @ViewBuilder
     private var aiDenoiseSection: some View {
+        if !model.aiDenoiseSupported {
+            Text("Not available for merged images and other linear DNGs: the model only handles brightness up to white, and these files go well beyond it. Detail › Noise Reduction still works.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            aiDenoiseControls
+        }
+    }
+
+    private var aiDenoiseControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             sliderRow(title: "Strength",
                       value: Binding(get: { model.aiDenoiseStrength }, set: { model.aiDenoiseStrength = $0 }),

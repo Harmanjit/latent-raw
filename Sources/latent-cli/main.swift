@@ -155,6 +155,18 @@ do {
           "service \(RawDecoderXPC.isServiceAvailable ? "available" : "absent"))")
     let area = file.summary.activeArea
     print("  sensor readout \(area.fullWidth)x\(area.fullHeight), active area at (\(area.left), \(area.top))")
+    switch file.summary.sourceKind {
+    case .bayer:
+        print("  source: Bayer mosaic")
+    case .linearRGB:
+        // Already demosaiced: a Photo Merge result or another LinearRaw DNG.
+        let merge = file.summary.mergeInfo.map {
+            String(format: "merge %@, clip level %g, lens %@, baseline shift %d", $0.kind, $0.clipLevel,
+                   $0.lensApplied ? "applied" : "not applied", $0.baselineShift)
+        } ?? "no merge recipe"
+        print(String(format: "  source: linear RGB, BaselineExposure %+.2f EV, %@",
+                     file.summary.baselineExposure, merge))
+    }
 
     let li = file.summary.lens
     print(String(format: "  lens: name='%@' makernotes='%@' make='%@' id=%llu nikonID=%d type=%d " +
@@ -188,6 +200,8 @@ do {
               "distortion \(lens.distortion != nil ? "yes" : "no"), CA \(lens.tca != nil ? "yes" : "no"), " +
               "vignetting \(lens.vignetting != nil ? "yes" : "no")" +
               String(format: ", autoscale %.4f, crop ratio %.3f", lens.autoScale, lens.cropRatio))
+    } else if session.lensCorrectionAlreadyApplied {
+        print("  lens profile: none (the merge already applied lens corrections)")
     } else {
         print("  lens profile: none")
     }
@@ -232,7 +246,7 @@ do {
     if info.isFullResolution {
         print(String(format: "  path: full resolution, %dx%d (%.1f MP), demosaic: %@",
                       info.outputWidth, info.outputHeight, outputMP,
-                      info.demosaicUsed?.rawValue ?? "?"))
+                      info.demosaicUsed?.rawValue ?? "none (linear source)"))
         print(String(format: "  covers sensor rect x=%.0f y=%.0f w=%.0f h=%.0f",
                       info.sensorRect.origin.x, info.sensorRect.origin.y,
                       info.sensorRect.width, info.sensorRect.height))
@@ -244,6 +258,12 @@ do {
         print("        (binning skips demosaic entirely — --demosaic has no effect here)")
     }
     print("  session holds: \(formatBytes(session.approximateBytesHeld)) of GPU memory")
+    if session.sourceKind == .linearRGB {
+        // What Photo Merge's size rule budgets per pixel (bytesPerEditPixel):
+        // the plane plus every texture this render left in the session.
+        print(String(format: "  linear source: %.1f bytes of GPU memory per source pixel after this render",
+                     Double(session.approximateBytesHeld) / Double(file.summary.rawWidth * file.summary.rawHeight)))
+    }
 
     if repeatCount > 1 {
         // With --repeat, runs 2..N hit the stage cache: same white balance,

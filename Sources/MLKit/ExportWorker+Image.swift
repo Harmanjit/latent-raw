@@ -61,7 +61,7 @@ extension ExportWorker {
             throw ExportWorkerError.unreadableEdit(error)
         }
         _ = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
-        if request.runsAIDenoise, parameters.aiDenoise > 0, AIDenoiser.isAvailable {
+        if request.runsAIDenoise, parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
             let denoiser = try await AIDenoiser.load()
             try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
         }

@@ -258,6 +258,20 @@ public final class AIDenoiser: @unchecked Sendable {
     }
 }
 
+/// Why the neural denoiser won't run on an image.
+public enum AIDenoiseError: Error, CustomStringConvertible {
+    /// The image is a linear source, such as an HDR merge (see
+    /// `ImageSession.supportsAIDenoise`).
+    case linearSource
+
+    public var description: String {
+        switch self {
+        case .linearSource:
+            "AI noise reduction isn't available for merged and linear DNG images: the model only handles values up to white"
+        }
+    }
+}
+
 /// Runs the denoiser over a whole image session and stores the result
 /// where the pipeline blends it in. Shared by the editor and the export
 /// worker so both produce identical pixels.
@@ -265,10 +279,17 @@ public enum AIDenoiseWorker {
     /// Renders the frame's camera RGB at as-shot white balance, denoises
     /// it, and hands the texture to the session. Returns the seconds it
     /// took. Cancellation is honoured between tiles.
+    ///
+    /// Throws `AIDenoiseError.linearSource` for a linear source before
+    /// doing any work. The network sees values up to white and hands back
+    /// anything near or above it unchanged (`denoise`); an HDR merge keeps
+    /// much of its picture above 1.0, where the result would be a noisy
+    /// image with a denoised patchwork below a hard-to-see threshold.
     @discardableResult
     public static func run(session: ImageSession, pipeline: RenderPipeline, gpu: GPUContext,
                            denoiser: AIDenoiser,
                            progress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> TimeInterval {
+        guard session.supportsAIDenoise else { throw AIDenoiseError.linearSource }
         let start = Date()
         var asShot = EditParameters()
         asShot.whiteBalance = session.asShotWhiteBalance

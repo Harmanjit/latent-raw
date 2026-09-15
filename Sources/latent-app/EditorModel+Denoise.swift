@@ -7,6 +7,11 @@ extension EditorModel {
 
     var aiDenoiseAvailable: Bool { AIDenoiser.isAvailable }
     var hasAIDenoiseResult: Bool { session?.aiDenoisedCameraRGB != nil }
+    /// False for a linear source (an HDR merge or another LinearRaw DNG):
+    /// the network only handles values up to white, and a merge keeps much
+    /// of its picture above it (`ImageSession.supportsAIDenoise`). True
+    /// with no image open, so the panel doesn't flash its explanation.
+    var aiDenoiseSupported: Bool { session?.supportsAIDenoise ?? true }
 
     func downloadHighQualityModel() {
         guard modelDownloadProgress == nil else { return }
@@ -47,6 +52,11 @@ extension EditorModel {
     /// the session) and re-renders. ~12 s for 24 MP on the GPU.
     func runAIDenoise() {
         guard let session, let pipeline, let gpu = gpuContext, !aiDenoiseRunning else { return }
+        // The worker would refuse too; saying so here keeps the status honest.
+        guard session.supportsAIDenoise else {
+            aiDenoiseStatus = "Not available for merged or linear DNG images."
+            return
+        }
         guard AIDenoiser.isAvailable else {
             aiDenoiseStatus = "NAFNet model not bundled — see Sources/MLKit/Resources/Models/README.md"
             return
@@ -124,8 +134,12 @@ extension EditorModel {
         if let aiDenoiseTurn { aiDenoiseTurn(self) } else { runAIDenoise() }
     }
 
-    /// Denoise is on with no result, and none is being made.
-    var needsAIDenoise: Bool { parameters.aiDenoise > 0 && !hasAIDenoiseResult && !aiDenoiseRunning }
+    /// Denoise is on with no result, and none is being made. Never for a
+    /// linear source, where a strength (pasted from a raw's edit, say) has
+    /// nothing to run.
+    var needsAIDenoise: Bool {
+        parameters.aiDenoise > 0 && !hasAIDenoiseResult && !aiDenoiseRunning && aiDenoiseSupported
+    }
 
     /// Slider binding: moving it off zero with no result yet starts the run.
     var aiDenoiseStrength: Float {
