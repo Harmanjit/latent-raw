@@ -37,6 +37,10 @@ struct CommandState: Equatable {
     var showMaskOverlay = false
     var filterActive = false
     var hasCompareSelect = false
+    var fullScreenImage = false
+    /// More than one display is connected.
+    var hasSecondDisplay = false
+    var secondaryDisplayShowing = false
 
     func isEnabled(_ command: KeyCommand) -> Bool {
         switch command {
@@ -66,6 +70,9 @@ struct CommandState: Equatable {
         case .copySettings: hasImage || hasSelection
         case .pasteSettings: hasImage || selectionCount > 0
         case .clearFilter: filterActive
+        // The grid goes to Loupe first, which needs a selection.
+        case .fullScreenImage: fullScreenImage || hasSelection || (mode == .develop && hasImage)
+        case .secondaryDisplay: secondaryDisplayShowing || hasSecondDisplay
         }
     }
 
@@ -193,6 +200,9 @@ struct LatentCommands: Commands {
             item("Zoom to Fit", .zoomToFit)
             item("Actual Size", .zoomToActualSize)
             item("Fit ↔ 100%", .toggleZoom)
+            Divider()
+            toolToggle("Full-Screen Image", .fullScreenImage, isOn: state.fullScreenImage)
+            toolToggle("Show Loupe on Second Display", .secondaryDisplay, isOn: state.secondaryDisplayShowing)
             Divider()
             item(state.beforeAfterTitle, .beforeAfter)
             // TODO(display): Show/Hide Clipping belongs here once the

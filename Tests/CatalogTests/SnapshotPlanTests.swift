@@ -62,6 +62,11 @@ final class SnapshotPlanTests: XCTestCase {
         XCTAssertNil(problem(["LATENT_SNAPSHOT_STEPS": ""]), "an empty variable is unset, not an empty plan")
     }
 
+    func testViewingModeSteps() throws {
+        XCTAssertEqual(try SnapshotPlan.parseSteps("fullscreen; Fullscreen-Right, fullscreen-left;fullscreen-bottom;second-display"),
+                       [.fullscreen, .fullscreenRight, .fullscreenLeft, .fullscreenBottom, .secondDisplay])
+    }
+
     func testSizeParsing() {
         XCTAssertEqual(SnapshotPlan.parseSize(" 1200 x 800 "), CGSize(width: 1200, height: 800))
         XCTAssertNil(SnapshotPlan.parseSize("0x900"))

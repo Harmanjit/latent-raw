@@ -17,7 +17,13 @@ import Catalog
 ///     LATENT_SNAPSHOT_STEPS="library;loupe"     states to picture, in order (default:
 ///                                               library;loupe;develop;crop;heal;compare;
 ///                                               export;settings). Also `next`, which moves
-///                                               the selection on. Each writes NN-step.png
+///                                               the selection on; `fullscreen`, and
+///                                               `fullscreen-left`, `-right` and `-bottom`
+///                                               with that edge's panel out (the layout
+///                                               only: the window stays a window); and
+///                                               `second-display`, the Loupe on a second
+///                                               display (a window of the size below when
+///                                               there is one display). Each writes NN-step.png
 ///     LATENT_SNAPSHOT_SIZE=1400x900             window content size in points (default
 ///                                               1400x900, not the size it was last left at)
 ///     LATENT_SNAPSHOT_SETTLE=1                  seconds to wait after a step's work is done
@@ -362,6 +368,29 @@ enum SnapshotHarness {
                 guard !library.selectedImageIDs.isEmpty else { fail("export: no image selected"); return nil }
                 exportSheet.wrappedValue = true
                 _ = await wait("the export sheet", upTo: 10) { window.attachedSheet?.isVisible == true }
+            case .fullscreen, .fullscreenLeft, .fullscreenRight, .fullscreenBottom:
+                guard library.selectedImage != nil else { fail("\(step.rawValue): no image selected"); return nil }
+                if step == .fullscreenRight { _ = perform(.develop) }
+                if !FullScreenImageMode.shared.isActive { _ = perform(.fullScreenImage) }
+                await waitForImage(views: 1)
+                let edge: FlyoutEdge? = switch step {
+                case .fullscreenLeft: .left
+                case .fullscreenRight: .right
+                case .fullscreenBottom: .bottom
+                default: nil
+                }
+                FullScreenImageMode.shared.show(edge)
+            case .secondDisplay:
+                guard library.selectedImage != nil else { fail("second-display: no image selected"); return nil }
+                SecondaryDisplay.shared.show(model: model, library: library, beside: window, debugSize: plan.windowSize)
+                guard let second = SecondaryDisplay.shared.debugWindow else { fail("second-display: the window did not open"); return nil }
+                let model = model, library = library
+                _ = await wait("the second display's image", upTo: 60) {
+                    guard let root = second.contentView?.superview else { return false }
+                    return model.preview != nil && model.imageTitle == library.selectedImage?.fileName
+                        && SnapshotHarness.imageViews(in: root).count >= 1
+                }
+                return second
             case .settings:
                 let before = Set(NSApp.windows.map(ObjectIdentifier.init))
                 // The menu item rather than its action: SwiftUI's handler
@@ -408,6 +437,8 @@ enum SnapshotHarness {
             switch step {
             case .export: exportSheet.wrappedValue = false
             case .settings: window.close()
+            case .fullscreen, .fullscreenLeft, .fullscreenRight, .fullscreenBottom: FullScreenImageMode.shared.leave()
+            case .secondDisplay: SecondaryDisplay.shared.close()
             case .crop, .heal:
                 _ = perform(.disarmTools)
                 scrollAdjustments(toEnd: false)

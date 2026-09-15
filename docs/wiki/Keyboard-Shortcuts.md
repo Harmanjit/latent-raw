@@ -16,6 +16,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | ←, → | Previous / next image (loads it in Loupe, Compare and Develop) |
 | Return | Open the selection in Develop |
 | Z | Toggle fit / 100% |
+| F | Full-screen image (from the grid, in Loupe): the pointer at the left, right or bottom edge brings in the library panel, Develop's adjustments or the filmstrip. F or Esc leaves |
 | ⌘0, ⌘1, ⌘=, ⌘- | Fit, 100%, zoom in, zoom out (in the grid, ⌘= and ⌘- size the thumbnails) |
 | ⇧X | Compare: make the candidate the Select |
 | ⇧⌘O | Open folder |
@@ -42,7 +43,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | H | Spot removal tool |
 | [, ] | Smaller, larger brush or spot (while the mask brush or spot removal is on) |
 | ⌫ | Delete the selected spot patch |
-| Esc | Leave any on-image tool |
+| Esc | Leave any on-image tool; with none on, leave the full-screen image |
 | ⇧⌘C, ⇧⌘V | Copy / paste settings (to the whole selection in the Library) |
 | Double-click a slider | Reset it |
 | Click a slider's value | Type a value: Return or Tab applies it, Esc cancels, ↑ and ↓ step it (with ⇧, ten steps) |

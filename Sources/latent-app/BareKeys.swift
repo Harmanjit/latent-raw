@@ -63,6 +63,8 @@ enum KeyCommand: Equatable {
     case addMask(NewMask), toggleMaskOverlay
     /// [ and ]: the armed brush or spot patch, a step smaller or larger.
     case toolSize(Int)
+    /// F: the image alone, full screen. The second display's Loupe is menu only.
+    case fullScreenImage, secondaryDisplay
 
     enum NewMask: Equatable { case linear, radial, brush }
 

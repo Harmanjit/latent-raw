@@ -43,6 +43,10 @@ struct ContentView: View {
     @ObservedObject private var library = MainWindowModels.shared.library
     @ObservedObject private var exportQueue = MainWindowModels.shared.exportQueue
     @ObservedObject private var prefs = AppPreferences.shared
+    @ObservedObject private var fullScreen = FullScreenImageMode.shared
+    @ObservedObject private var secondDisplay = SecondaryDisplay.shared
+    /// The second display's Loupe waiting to load a grid selection.
+    @State private var secondDisplayLoad: Task<Void, Never>?
     @State private var mode: AppMode = .library
     @State private var showingExportSheet = false
     /// Compare's left pane ("Select"): its own render, created the first
@@ -75,29 +79,27 @@ struct ContentView: View {
             mainArea
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbar(fullScreen.isActive ? .hidden : .automatic, for: .windowToolbar)
         .motionFollowsAccessibility()
     }
 
+    /// The full-screen image hides the sidebar without forgetting its state.
     private var sidebarVisibility: Binding<NavigationSplitViewVisibility> {
-        Binding(get: { sidebarVisible ? .all : .detailOnly },
-                set: { sidebarVisible = $0 != .detailOnly })
+        Binding(get: { sidebarVisible && !fullScreen.isActive ? .all : .detailOnly },
+                set: { if !fullScreen.isActive { sidebarVisible = $0 != .detailOnly } })
     }
 
     private var showsFilmstrip: Bool {
-        filmstripVisible && (mode == .loupe || mode == .develop) && library.folderURL != nil
+        filmstripVisible && (mode == .loupe || mode == .develop) && library.folderURL != nil && !fullScreen.isActive
     }
 
     private var mainArea: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                LibraryPanel(library: library, exportQueue: exportQueue, model: model,
-                             onOpenFolder: showOpenFolderPanel,
-                             onRate: rate, onFlag: flag,
-                             onExport: { showingExportSheet = true },
-                             presets: model.presets,
-                             onApplyPreset: { applyPresetToSelection($0) },
-                             onPaste: { pasteSettings() })
-                Divider()
+                if !fullScreen.isActive {
+                    libraryPanel
+                    Divider()
+                }
                 switch mode {
                 case .library:
                     VStack(spacing: 0) {
@@ -109,16 +111,20 @@ struct ContentView: View {
                 case .loupe:
                     VStack(spacing: 0) {
                         ImageViewport(model: model, allowsTools: false)
-                        Divider()
-                        ImageCaption(record: library.selectedImage)
+                        if !fullScreen.isActive {
+                            Divider()
+                            ImageCaption(record: library.selectedImage)
+                        }
                     }
                 case .compare:
                     compareArea
                 case .develop:
                     imageArea
-                    Divider()
-                    adjustmentPanel
-                        .frame(width: 280)
+                    if !fullScreen.isActive {
+                        Divider()
+                        adjustmentPanel
+                            .frame(width: 280)
+                    }
                 }
             }
             if showsFilmstrip {
@@ -126,9 +132,18 @@ struct ContentView: View {
                 FilmstripView(library: library, onSelect: openFromFilmstrip)
                     .frame(height: FilmstripView.height)
             }
-            Divider()
-            statusBar
+            if !fullScreen.isActive {
+                Divider()
+                statusBar
+            }
         }
+        .fullScreenFlyouts(fullScreen, available: FullScreenImagePolicy.availableEdges(mode: mode, hasFolder: library.folderURL != nil),
+                           left: { libraryPanel },
+                           right: { adjustmentPanel.frame(width: 280) },
+                           bottom: {
+                               FilmstripView(library: library, onSelect: openFromFilmstrip)
+                                   .frame(height: FilmstripView.height)
+                           })
         .background(navigationShortcuts)
         .focusedSceneValue(\.commandContext, CommandContext(state: commandState) { command in
             // A sheet over the window has the keyboard; menus wait, as keys do.
@@ -136,6 +151,8 @@ struct ContentView: View {
             _ = perform(command)
         })
         .onChange(of: mode) { old, _ in modeDidChange(from: old) }
+        .onChange(of: library.selectedImageID) { followSelectionOnSecondDisplay() }
+        .onChange(of: secondDisplay.isShowing) { followSelectionOnSecondDisplay(at: .zero) }
         // What a VoiceOver user would otherwise have to go and look for.
         .onChange(of: currentProblem) { _, problem in
             if let problem { Announcement.post(problem, priority: .high) }
@@ -201,6 +218,16 @@ struct ContentView: View {
                 model.lastError = FolderAccess.message(for: trouble, folder: stored)
             }
         }
+    }
+
+    private var libraryPanel: some View {
+        LibraryPanel(library: library, exportQueue: exportQueue, model: model,
+                     onOpenFolder: showOpenFolderPanel,
+                     onRate: rate, onFlag: flag,
+                     onExport: { showingExportSheet = true },
+                     presets: model.presets,
+                     onApplyPreset: { applyPresetToSelection($0) },
+                     onPaste: { pasteSettings() })
     }
 
     // MARK: - Library wiring
@@ -416,6 +443,7 @@ struct ContentView: View {
     /// arrow keys then walk the Candidate.
     private func modeDidChange(from old: AppMode) {
         updateCompareLink()
+        if fullScreen.isActive, !FullScreenImagePolicy.keepsFullScreen(in: mode) { fullScreen.leave() }
         if old == .develop {
             model.flushPendingSave()
             // Loupe and Compare share the viewport; a click there must
@@ -627,7 +655,12 @@ struct ContentView: View {
             guard model.healToolActive else { return false }
             model.deleteSelectedHeal()
         case .disarmTools:
-            model.disarmTools()
+            // Esc leaves the tool first, then the full-screen image.
+            if fullScreen.isActive, !model.imageToolActive, !model.cropToolActive {
+                fullScreen.leave()
+            } else {
+                model.disarmTools()
+            }
         case .makeSelect:
             guard mode == .compare else { return false }
             compareMakeSelect()
@@ -677,8 +710,36 @@ struct ContentView: View {
             model.showMaskOverlay.toggle()
         case .toolSize(let steps):
             model.stepToolSize(by: steps)
+        case .fullScreenImage:
+            if fullScreen.isActive {
+                fullScreen.leave()
+            } else {
+                mode = FullScreenImagePolicy.entryMode(from: mode)
+                fullScreen.enter(window: NSApp.keyWindow ?? NSApp.mainWindow)
+            }
+        case .secondaryDisplay:
+            if secondDisplay.isShowing {
+                secondDisplay.close()
+            } else {
+                secondDisplay.show(model: model, library: library, beside: NSApp.keyWindow ?? NSApp.mainWindow)
+            }
         }
         return true
+    }
+
+    /// The second display's Loupe shows the selection. Loupe, Compare and
+    /// Develop load it anyway; the grid doesn't, so while the Loupe shows,
+    /// a selection that settles for a moment is loaded for it.
+    private func followSelectionOnSecondDisplay(at delay: Duration = .milliseconds(150)) {
+        secondDisplayLoad?.cancel()
+        guard secondDisplay.isShowing, mode == .library, let selected = library.selectedImage,
+              model.catalogImageID != selected.id else { return }
+        secondDisplayLoad = Task {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, secondDisplay.isShowing, mode == .library,
+                  library.selectedImageID == selected.id, model.catalogImageID != selected.id else { return }
+            load(selected)
+        }
     }
 
     /// What the menu bar shows and `perform` allows, from the models.
@@ -708,6 +769,9 @@ struct ContentView: View {
         state.showMaskOverlay = model.showMaskOverlay
         state.filterActive = library.filter.isActive
         state.hasCompareSelect = compareRecord != nil
+        state.fullScreenImage = fullScreen.isActive
+        state.hasSecondDisplay = secondDisplay.hasSecondScreen
+        state.secondaryDisplayShowing = secondDisplay.isShowing
         return state
     }
 

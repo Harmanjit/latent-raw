@@ -31,6 +31,18 @@ public struct SnapshotPlan: Equatable, Sendable {
         case export
         /// The Settings window instead of the main one.
         case settings
+        /// Full-screen image mode (F), from the grid in Loupe. Only the
+        /// layout: the window isn't made full screen for the picture.
+        case fullscreen
+        /// Full-screen image mode with the library panel out from the left.
+        case fullscreenLeft = "fullscreen-left"
+        /// Full-screen Develop with its adjustments out from the right.
+        case fullscreenRight = "fullscreen-right"
+        /// Full-screen image mode with the filmstrip out from the bottom.
+        case fullscreenBottom = "fullscreen-bottom"
+        /// The Loupe on a second display, pictured alone. With one display
+        /// it opens as a window of LATENT_SNAPSHOT_SIZE on it.
+        case secondDisplay = "second-display"
     }
 
     public enum Problem: Error, Equatable, CustomStringConvertible {
