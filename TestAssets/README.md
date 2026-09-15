@@ -29,3 +29,7 @@ Fetched with `scripts/fetch_test_assets.sh --merge` (about 390 MB, checksum-veri
 | `empa-crete-seashore-1/` | Nikon D200, 7 frames 1 EV apart (1/5000 to 1/80 s), waves moving; with the EXR merge and tone-mapped JPEG | Same as above |
 
 The files are unmodified. The Canon set is also a real camera with a masked sensor border: its readout is 5792 × 3804 and the active area 5634 × 3752 at (158, 52).
+
+## Photo Merge panorama (`TestAssets/pano/`)
+
+Harman's own photos, not redistributed (tests skip without them): Nikon D750 with an AF-S Nikkor 50mm f/1.4G, 17 frames (`HSB_6554.NEF` to `HSB_6570.NEF`), handheld, portrait orientation, one row across mountains, sky and a path at dusk. Shot at 1/400 s and ISO 100, but the aperture moves between f/2.5 and f/3.5, so frames differ by up to about 1 EV. People walk through frames 6565 to 6568, one of them close to the camera. That covers gain compensation, parallax and moving people, and makes a panorama wider than 16,384 px (the downsampling case).
