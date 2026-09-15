@@ -281,6 +281,9 @@ public final class Library: ObservableObject {
     /// undone, as in tests that don't set one.
     public weak var undoManager: UndoManager?
 
+    /// Move to Folder, Copy to Folder and Rename (LibraryFileOperations).
+    public private(set) lazy var fileOperations = LibraryFileOperations(library: self)
+
     /// Tests only: runs after a folder's list is read and before it is
     /// shown, so a test can hold one open or refresh while another finishes.
     var willPublishList: (@MainActor (Catalog) async throws -> Void)?
