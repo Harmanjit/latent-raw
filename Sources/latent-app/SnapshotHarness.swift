@@ -25,7 +25,8 @@ import Catalog
 ///                                               first slide; `rename`, the rename sheet;
 ///                                               `fullscreen`, and `fullscreen-left`, `-right`
 ///                                               and `-bottom` with that edge's panel out (the
-///                                               layout only: the window stays a window); and
+///                                               layout only, the window staying a window,
+///                                               unless LATENT_SNAPSHOT_FULLSCREEN=system); and
 ///                                               `second-display`, the Loupe on a second
 ///                                               display (a window of the size below when
 ///                                               there is one display). Each writes NN-step.png
@@ -34,6 +35,11 @@ import Catalog
 ///     LATENT_SNAPSHOT_SETTLE=1                  seconds to wait after a step's work is done
 ///     LATENT_SNAPSHOT_TIMEOUT=120               seconds before the whole run gives up
 ///     LATENT_SNAPSHOT_APPEARANCE=dark           light or dark instead of the app's setting
+///     LATENT_SNAPSHOT_FULLSCREEN=system         the full-screen steps make the window really
+///                                               full screen, as F does, and picture it whole
+///                                               (default `layout`). Either way a full-screen
+///                                               step fails when the image doesn't reach the
+///                                               top of the window
 ///
 /// For example, from the package folder:
 ///
@@ -64,6 +70,9 @@ enum SnapshotHarness {
     /// Whether a run is under way. Image views only hand over their
     /// drawables while it is, so ordinary debug runs keep none alive.
     private(set) static var isActive = false
+    /// Whether full-screen image mode may really take the window full
+    /// screen during the run (LATENT_SNAPSHOT_FULLSCREEN=system).
+    private(set) static var usesSystemFullScreen = false
 
     /// Called by ContentView when it appears. Returns true when a snapshot
     /// run has started, in which case ContentView must not open a folder
@@ -81,6 +90,7 @@ enum SnapshotHarness {
             exit(1)
         }
         isActive = true
+        usesSystemFullScreen = plan.systemFullScreen
         // A stuck run must not leave a windowed app behind in an agent's
         // session, so a background timer ends the process whatever the
         // main thread is doing.
@@ -138,7 +148,9 @@ enum SnapshotHarness {
     // MARK: - Capture
 
     /// Renders the whole window (titlebar included) at its backing scale
-    /// into an sRGB bitmap, with any sheet drawn over it.
+    /// into an sRGB bitmap, with any sheet drawn over it. In full screen the
+    /// titlebar and toolbar live in a window of their own over the top of
+    /// this one, which is drawn over it too.
     static func capture(_ window: NSWindow) -> CGImage? {
         guard let content = window.contentView else { return nil }
         // The content view's superview is the window's frame view, which
@@ -157,6 +169,17 @@ enum SnapshotHarness {
         else { return nil }
         context.scaleBy(x: scale, y: scale)
         render(window, root: root, in: context)
+        if window.styleMask.contains(.fullScreen) {
+            for other in NSApp.windows where other !== window && other !== window.attachedSheet
+                && other.isVisible && other.alphaValue > 0 && other.level >= window.level
+                && other.screen == window.screen && other.frame.intersects(window.frame) {
+                guard let otherRoot = other.contentView?.superview ?? other.contentView else { continue }
+                context.saveGState()
+                context.translateBy(x: other.frame.minX - window.frame.minX, y: other.frame.minY - window.frame.minY)
+                render(other, root: otherRoot, in: context, fillsBackground: false)
+                context.restoreGState()
+            }
+        }
         if let sheet = window.attachedSheet, sheet.isVisible {
             drawSheet(sheet, over: window, in: context)
         }
@@ -168,7 +191,7 @@ enum SnapshotHarness {
     /// in a temporary sublayer of its Metal layer. Sublayers draw above
     /// their layer and below whatever sits above it, so the stacking is
     /// the screen's.
-    private static func render(_ window: NSWindow, root: NSView, in context: CGContext) {
+    private static func render(_ window: NSWindow, root: NSView, in context: CGContext, fillsBackground: Bool = true) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         var standIns: [CALayer] = []
@@ -192,7 +215,7 @@ enum SnapshotHarness {
             CATransaction.commit()
         }
         window.effectiveAppearance.performAsCurrentDrawingAppearance {
-            fillBackdrops(of: window, root: root, in: context)
+            fillBackdrops(of: window, root: root, in: context, fillsBackground: fillsBackground)
             root.layer?.render(in: context)
         }
     }
@@ -215,9 +238,11 @@ enum SnapshotHarness {
     /// Paints what a bitmap render leaves empty: the window background, and
     /// a solid stand-in for each translucent material, whose blur of the
     /// desktop behind only exists on screen.
-    private static func fillBackdrops(of window: NSWindow, root: NSView, in context: CGContext) {
-        context.setFillColor(window.backgroundColor.cgColor)
-        context.fill(root.bounds)
+    private static func fillBackdrops(of window: NSWindow, root: NSView, in context: CGContext, fillsBackground: Bool) {
+        if fillsBackground {
+            context.setFillColor(window.backgroundColor.cgColor)
+            context.fill(root.bounds)
+        }
         forEachVisibleView(in: root) { view in
             guard let effect = view as? NSVisualEffectView else { return }
             let color: NSColor = effect.material == .sidebar ? .underPageBackgroundColor : .windowBackgroundColor
@@ -289,6 +314,7 @@ enum SnapshotHarness {
                 await pause(plan.settle)
                 let url = plan.output(forStepAt: index)
                 checkContentFits(target, step: step)
+                if step.isFullScreen { checkFullScreenImageFills(target, step: step) }
                 if step == .contactSheetFile {
                     if let problem = await SheetSnapshots.pictureContactSheetFile(to: url) {
                         fail("\(step.rawValue): \(problem)")
@@ -300,7 +326,11 @@ enum SnapshotHarness {
                 } else {
                     fail("\(step.rawValue): could not capture or write \(url.path)")
                 }
-                leave(step, window: target)
+                if step.isFullScreen, target.styleMask.contains(.fullScreen) {
+                    await leaveFullScreen(step, window: target)
+                } else {
+                    leave(step, window: target)
+                }
             }
             // Opening the folder may still be writing the catalog; a
             // bounded wait, as quitting does, so the next run finds it whole.
@@ -417,6 +447,13 @@ enum SnapshotHarness {
                 case .fullscreenBottom: .bottom
                 default: nil
                 }
+                // Once there: the view moving under the pointer on the way
+                // in counts as the pointer moving, which closes a panel.
+                if plan.systemFullScreen {
+                    _ = await wait("the window to go full screen", upTo: 10) {
+                        window.styleMask.contains(.fullScreen) && FullScreenImageMode.shared.hasArrived
+                    }
+                }
                 FullScreenImageMode.shared.show(edge)
             case .secondDisplay:
                 guard library.selectedImage != nil else { fail("second-display: no image selected"); return nil }
@@ -496,6 +533,40 @@ enum SnapshotHarness {
                      + "\(Int(view.frame.width))x\(Int(view.frame.height)) pt in a "
                      + "\(Int(content.bounds.width))x\(Int(content.bounds.height)) pt window, so its edges are cut off")
             }
+        }
+
+        /// Fails a full-screen step when anything is left above the image,
+        /// such as the strip the window's (hidden) toolbar reserves: the
+        /// image must reach the top of the window, which in full screen the
+        /// system places below the menu bar or a notched display's camera
+        /// housing.
+        func checkFullScreenImageFills(_ window: NSWindow, step: SnapshotPlan.Step) {
+            guard let content = window.contentView, let root = content.superview else { return }
+            if plan.systemFullScreen, !window.styleMask.contains(.fullScreen) {
+                fail("\(step.rawValue): the window did not go full screen")
+            }
+            content.layoutSubtreeIfNeeded()
+            let top = content.convert(content.bounds, to: nil).maxY
+            guard let image = SnapshotHarness.imageViews(in: root)
+                .map({ $0.convert($0.bounds, to: nil) }).max(by: { $0.maxY < $1.maxY }) else {
+                fail("\(step.rawValue): no image showing"); return
+            }
+            if image.maxY < top - 0.5 {
+                fail("\(step.rawValue): the image starts \(Int(top - image.maxY)) pt below the top of the window")
+            }
+        }
+
+        /// Leaves a full-screen step and waits for the window to be back:
+        /// its style changes as soon as it is asked, but going full screen
+        /// again before the animation out ends does nothing.
+        func leaveFullScreen(_ step: SnapshotPlan.Step, window: NSWindow) async {
+            final class Flag: @unchecked Sendable { var isSet = false }
+            let exited = Flag()
+            let token = NotificationCenter.default.addObserver(
+                forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { _ in exited.isSet = true }
+            defer { NotificationCenter.default.removeObserver(token) }
+            leave(step, window: window)
+            _ = await wait("the window to leave full screen", upTo: 10) { exited.isSet }
         }
 
         /// Undoes what a step put over the window, so the next step

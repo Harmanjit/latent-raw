@@ -95,6 +95,42 @@ final class ViewingModesTests: XCTestCase {
         XCTAssertTrue(mode.builtEdges.isEmpty)
     }
 
+    /// The image and its panels reach the top of the window. The main
+    /// window's toolbar, which SwiftUI hides only as far as its views go,
+    /// keeps its height reserved at the top of the content, full screen
+    /// included, where the image was laid out below an empty grey strip.
+    func testTheFullScreenImageAndPanelsReachTheTopOfTheWindow() throws {
+        let mode = FullScreenImageMode()
+        let image = Measured(), panel = Measured()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+                              styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.titlebarAppearsTransparent = true
+        window.toolbar = NSToolbar(identifier: "ViewingModesTests")
+        defer { window.close() }
+        window.contentView = NSHostingView(rootView: Probe(into: image)
+            .fullScreenFlyouts(mode, available: [.left],
+                               left: { Probe(into: panel).frame(width: 220) },
+                               right: { EmptyView() }, bottom: { EmptyView() }))
+        settle { !image.top.isNaN }
+        let reserved = try XCTUnwrap(window.contentView?.safeAreaInsets.top)
+        XCTAssertGreaterThan(reserved, 28, "the titlebar and the toolbar keep a strip, as in the app")
+        XCTAssertEqual(image.top, reserved, "a window keeps clear of its titlebar and toolbar")
+
+        mode.enter(window: nil)
+        mode.show(.left, animated: false)
+        settle { image.top == 0 && panel.top == 0 && panel.inset == 0 }
+        XCTAssertEqual(image.top, 0, "nothing above the full-screen image")
+        XCTAssertEqual(image.inset, 0)
+        XCTAssertEqual(panel.top, 0, "the panels reach the top too")
+        XCTAssertEqual(panel.inset, 0, "with nothing kept clear inside them")
+
+        mode.leave()
+        settle { image.top == reserved }
+        XCTAssertEqual(image.top, reserved, "leaving puts the image back below the toolbar")
+    }
+
     func testCommandsEnable() {
         var state = CommandState()
         XCTAssertFalse(state.isEnabled(.fullScreenImage))
@@ -186,5 +222,32 @@ final class ViewingModesTests: XCTestCase {
         XCTAssertEqual(SecondaryPreview.renderPotential(main: 1, secondary: nil), 1)
         XCTAssertEqual(SecondaryPreview.renderPotential(main: 1, secondary: 16), 16)
         XCTAssertEqual(SecondaryPreview.renderPotential(main: 5, secondary: 1), 5)
+    }
+
+    /// Lets SwiftUI lay out until `done`, for up to two seconds.
+    private func settle(until done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(2)
+        repeat {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        } while !done() && Date() < deadline
+    }
+}
+
+/// Where a view sits in its window, as SwiftUI lays it out.
+@MainActor
+private final class Measured {
+    var top: CGFloat = .nan
+    var inset: CGFloat = .nan
+}
+
+private struct Probe: View {
+    let into: Measured
+
+    var body: some View {
+        GeometryReader { proxy in
+            let _ = into.top = proxy.frame(in: .global).minY
+            let _ = into.inset = proxy.safeAreaInsets.top
+            Color.black
+        }
     }
 }

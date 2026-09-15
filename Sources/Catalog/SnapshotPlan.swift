@@ -53,7 +53,7 @@ public struct SnapshotPlan: Equatable, Sendable {
         /// the caption and controls showing. Not in the default steps.
         case slideshow
         /// Full-screen image mode (F), from the grid in Loupe. Only the
-        /// layout: the window isn't made full screen for the picture.
+        /// layout, the window staying a window, unless `systemFullScreen`.
         case fullscreen
         /// Full-screen image mode with the library panel out from the left.
         case fullscreenLeft = "fullscreen-left"
@@ -64,6 +64,11 @@ public struct SnapshotPlan: Equatable, Sendable {
         /// The Loupe on a second display, pictured alone. With one display
         /// it opens as a window of LATENT_SNAPSHOT_SIZE on it.
         case secondDisplay = "second-display"
+
+        /// The steps that picture full-screen image mode.
+        public var isFullScreen: Bool {
+            [.fullscreen, .fullscreenLeft, .fullscreenRight, .fullscreenBottom].contains(self)
+        }
     }
 
     public enum Problem: Error, Equatable, CustomStringConvertible {
@@ -97,6 +102,11 @@ public struct SnapshotPlan: Equatable, Sendable {
     public var timeout: Double = 120
     /// "light" or "dark"; nil keeps the app's own setting.
     public var appearance: String?
+    /// Whether the full-screen steps really make the window full screen, as
+    /// F does, rather than only laying it out so. It takes over the screen
+    /// for a moment, so it is asked for: LATENT_SNAPSHOT_FULLSCREEN=system
+    /// (the default is `layout`).
+    public var systemFullScreen = false
 
     /// The app's own default window size (LatentApp's `defaultSize`).
     public static let defaultWindowSize = CGSize(width: 1400, height: 900)
@@ -127,6 +137,12 @@ public struct SnapshotPlan: Equatable, Sendable {
                 throw Problem.malformed(variable: "LATENT_SNAPSHOT_APPEARANCE", value: text)
             }
             appearance = text.lowercased()
+        }
+        if let text = environment["LATENT_SNAPSHOT_FULLSCREEN"], !text.isEmpty {
+            guard ["system", "layout"].contains(text.lowercased()) else {
+                throw Problem.malformed(variable: "LATENT_SNAPSHOT_FULLSCREEN", value: text)
+            }
+            systemFullScreen = text.lowercased() == "system"
         }
     }
 
