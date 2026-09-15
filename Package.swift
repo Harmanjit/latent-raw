@@ -102,7 +102,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "latent-cli",
-            dependencies: ["RawCore", "PixelEngine", "Catalog", "ColorKit"],
+            dependencies: ["RawCore", "PixelEngine", "Catalog", "ColorKit", "MergeKit"],
             path: "Sources/latent-cli"
         ),
         .testTarget(
@@ -122,7 +122,7 @@ let package = Package(
         // an executable target into tests on macOS.
         .testTarget(
             name: "LatentAppTests",
-            dependencies: ["latent-app", "Catalog"],
+            dependencies: ["latent-app", "Catalog", "MergeKit"],
             path: "Tests/LatentAppTests"
         ),
         .binaryTarget(
@@ -140,7 +140,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "latent-app",
-            dependencies: ["RawCore", "PixelEngine", "ColorKit", "Catalog", "LensKit", "MLKit", "HelpKit"],
+            dependencies: ["RawCore", "PixelEngine", "ColorKit", "Catalog", "LensKit", "MLKit", "HelpKit", "MergeKit"],
             path: "Sources/latent-app"
         ),
     ]
