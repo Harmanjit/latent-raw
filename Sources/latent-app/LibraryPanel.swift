@@ -21,6 +21,9 @@ struct LibraryPanel: View {
     let presets: [Preset]
     let onApplyPreset: (Preset) -> Void
     let onPaste: () -> Void
+    /// Export Open Image offered: not in Survey, whose panes aren't the
+    /// editor's image.
+    var exportsOpenImage = true
 
     @State private var keywordText = ""
 
@@ -148,7 +151,7 @@ struct LibraryPanel: View {
                 .help(ExportPreset.openImageWatermarkHelp)
             Button("Export open image…") { Self.exportOpenImage(model: model, library: library) }
                 .controlSize(.small)
-                .disabled(!model.hasImage || model.isExporting)
+                .disabled(!model.hasImage || model.isExporting || !exportsOpenImage)
             if exportQueue.isRunning {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {

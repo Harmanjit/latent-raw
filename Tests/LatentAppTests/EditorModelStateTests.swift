@@ -68,18 +68,19 @@ final class EditorModelStateTests: XCTestCase {
     }
 
     /// Paste and presets outside the grid go to the image shown only.
+    /// Outside Develop that is always its stored edit, whose Library undo
+    /// is what Undo there takes back, even with the editor holding it.
     func testSettingsGoToTheShownImageOutsideTheGrid() {
         typealias Target = ContentView.SettingsTarget
-        XCTAssertEqual(Target.choose(mode: .library, editorHasImage: true, editorImageID: 1, primaryID: 1), .selection)
-        XCTAssertEqual(Target.choose(mode: .loupe, editorHasImage: true, editorImageID: 1, primaryID: 1), .editor)
-        XCTAssertEqual(Target.choose(mode: .compare, editorHasImage: true, editorImageID: 1, primaryID: 1), .editor)
-        // Still loading the selection, or it failed to open: its stored edit.
-        XCTAssertEqual(Target.choose(mode: .loupe, editorHasImage: true, editorImageID: 3, primaryID: 1), .primary)
-        XCTAssertEqual(Target.choose(mode: .compare, editorHasImage: false, editorImageID: nil, primaryID: 1), .primary)
-        XCTAssertEqual(Target.choose(mode: .loupe, editorHasImage: true, editorImageID: nil, primaryID: nil), .primary)
-        // Develop pastes into whatever it shows, a file opened on its own included.
-        XCTAssertEqual(Target.choose(mode: .develop, editorHasImage: true, editorImageID: nil, primaryID: 1), .editor)
-        XCTAssertEqual(Target.choose(mode: .develop, editorHasImage: false, editorImageID: nil, primaryID: 1), .primary)
+        XCTAssertEqual(Target.choose(mode: .library, editorHasImage: true), .selection)
+        XCTAssertEqual(Target.choose(mode: .loupe, editorHasImage: true), .primary)
+        XCTAssertEqual(Target.choose(mode: .compare, editorHasImage: true), .primary)
+        XCTAssertEqual(Target.choose(mode: .survey, editorHasImage: true), .primary)
+        XCTAssertEqual(Target.choose(mode: .loupe, editorHasImage: false), .primary)
+        // Develop pastes into whatever it shows, a file opened on its own
+        // included, and undoes it in its own history.
+        XCTAssertEqual(Target.choose(mode: .develop, editorHasImage: true), .editor)
+        XCTAssertEqual(Target.choose(mode: .develop, editorHasImage: false), .primary)
     }
 
     /// Undo and Redo undo typing in any window, so they follow the key

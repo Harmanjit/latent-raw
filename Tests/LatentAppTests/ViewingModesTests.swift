@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import Catalog
 @testable import latent_app
 
 /// Full-screen image mode's fly-outs and the second display's Loupe, as
@@ -151,6 +152,25 @@ final class ViewingModesTests: XCTestCase {
                                   visibleFrame: CGRect(x: 60, y: 0, width: 1860, height: 1055))
         XCTAssertEqual(SecondaryDisplayPlacement.contentInsets(for: sideDock),
                        EdgeInsets(top: 25, leading: 60, bottom: 0, trailing: 0))
+    }
+
+    /// The Loupe draws the model it is given: in Survey the focused pane's.
+    /// The model it leaves forgets the display's size and headroom.
+    func testTheLoupeFollowsTheModelItIsGiven() throws {
+        let display = SecondaryDisplay()
+        let editor = EditorModel(), pane = EditorModel()
+        display.follow(pane)
+        XCTAssertNil(display.drawnModel, "not showing")
+        display.show(model: editor, library: Library(), beside: nil, debugSize: CGSize(width: 320, height: 200))
+        try XCTSkipUnless(display.isShowing, "no screen to open it on")
+        defer { display.close() }
+        XCTAssertTrue(display.drawnModel === editor)
+        editor.secondaryViewportDidResize(to: CGSize(width: 640, height: 400))
+        display.follow(pane)
+        XCTAssertTrue(display.drawnModel === pane)
+        XCTAssertEqual(editor.secondaryDrawableSize, .zero)
+        display.follow(editor)
+        XCTAssertTrue(display.drawnModel === editor)
     }
 
     func testThePreviewIsFineEnoughForBothScreens() {

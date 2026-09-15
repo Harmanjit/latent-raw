@@ -45,6 +45,34 @@ final class SurveyTests: XCTestCase {
         XCTAssertTrue(state { $0.mode = .loupe; $0.hasImage = true }.isEnabled(.zoomToFit))
     }
 
+    /// Print, Edit in External Editor and Export Open Image never reach an
+    /// image the editor still holds from before Survey, which nobody sees:
+    /// Survey prints its panes (the selection) and hands off the focused
+    /// one (the lead), as the grid does.
+    func testCommandsOnTheShownImageNeverTakeTheEditorsHiddenOne() {
+        XCTAssertFalse(AppMode.survey.showsEditorImage)
+        XCTAssertFalse(AppMode.library.showsEditorImage)
+        for mode in [AppMode.loupe, .compare, .develop] { XCTAssertTrue(mode.showsEditorImage) }
+        let survey = state { $0.mode = .survey; $0.selectionCount = 3; $0.hasImage = true }
+        XCTAssertFalse(survey.isEnabled(.exportOpenImage))
+        XCTAssertTrue(survey.isEnabled(.print))
+        XCTAssertTrue(survey.isEnabled(.editExternally))
+        let noSelection = state { $0.mode = .survey; $0.hasSelection = false; $0.selectionCount = 0; $0.hasImage = true }
+        XCTAssertFalse(noSelection.isEnabled(.print), "never the editor's image")
+        XCTAssertFalse(noSelection.isEnabled(.editExternally))
+        XCTAssertTrue(state { $0.mode = .loupe; $0.selectionCount = 1; $0.hasImage = true }.isEnabled(.exportOpenImage))
+    }
+
+    /// The mode picker offers Survey on the command's terms: chosen without
+    /// two to four selected, nothing changes (and nothing reloads).
+    func testThePickerChoosesSurveyOnlyWhenItCanBegin() {
+        XCTAssertFalse(state { $0.mode = .develop; $0.selectionCount = 1 }.allowsChoosing(.survey))
+        XCTAssertFalse(state { $0.mode = .compare; $0.selectionCount = 5 }.allowsChoosing(.survey))
+        XCTAssertTrue(state { $0.selectionCount = 3 }.allowsChoosing(.survey))
+        XCTAssertTrue(state { $0.selectionCount = 1 }.allowsChoosing(.develop))
+        XCTAssertTrue(CommandState().allowsChoosing(.library))
+    }
+
     func testKeys() throws {
         XCTAssertEqual(KeyCommand.command(for: BareKeyPress(.character("n"))), .survey)
         XCTAssertEqual(KeyCommand.command(for: BareKeyPress(.character("/"))), .removeFromSurvey)
@@ -143,6 +171,103 @@ final class SurveyTests: XCTestCase {
         small.end()
         XCTAssertFalse(pane.hasImage)
         XCTAssertNil(small.panes)
+    }
+
+    /// Panes whose edits have AI denoise on run it one at a time, the
+    /// focused pane first, and only while Survey shows: a run under way
+    /// when Survey is left stops, and starts again on the way back.
+    func testPanesTakeTurnsAtAIDenoiseWhileShown() async throws {
+        let url = Self.asset("nikon_d750_sample.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path))
+        _ = try await GPUContext.shared()
+        let survey = SurveyModel(policy: MemoryPolicy(physicalMemory: 32 << 30))
+        let panes = try XCTUnwrap(SurveyPanes(selected: [1, 2, 3], primary: 2, order: [1, 2, 3]))
+        survey.show(panes) { _, model in model.open(url: url) }
+        let a = try XCTUnwrap(survey.model(for: 1)), b = try XCTUnwrap(survey.model(for: 2)),
+            c = try XCTUnwrap(survey.model(for: 3))
+        var started: [EditorModel] = []
+        survey.startsAIDenoise = { model in
+            started.append(model)
+            model.aiDenoiseRunning = true
+        }
+        var denoised = a.parameters
+        denoised.aiDenoise = 1
+        let stack = try EditStack(parameters: denoised).encodeJSON()
+
+        a.showStoredEdit(stack, userRotation: 0)
+        c.showStoredEdit(stack, userRotation: 0)
+        b.showStoredEdit(stack, userRotation: 0)
+        XCTAssertEqual(started.map(ObjectIdentifier.init), [ObjectIdentifier(a)], "one at a time")
+        XCTAssertFalse(c.aiDenoiseRunning)
+
+        a.aiDenoiseRunning = false
+        await settle { started.count == 2 }
+        XCTAssertEqual(started.map(ObjectIdentifier.init), [a, b].map(ObjectIdentifier.init), "the focused pane next")
+        b.aiDenoiseRunning = false
+        await settle { started.count == 3 }
+        XCTAssertTrue(started.last === c)
+
+        survey.end()
+        XCTAssertFalse(c.aiDenoiseRunning, "nobody sees it")
+        await settle(for: 0.2) { false }
+        XCTAssertEqual(started.count, 3)
+        survey.show(panes) { _, _ in }
+        XCTAssertEqual(started.count, 4)
+        XCTAssertTrue(started.last === c, "it starts again")
+        survey.closeAll()
+    }
+
+    /// An undo or redo in the Library that put back a surveyed image's
+    /// rotation or stored edit shows on its pane, while Survey shows.
+    func testPanesShowWhatAnUndoPutBack() async throws {
+        let sample = Self.asset("nikon_d750_sample.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: sample.path))
+        _ = try await GPUContext.shared()
+        let fm = FileManager.default
+        let folder = fm.temporaryDirectory.appendingPathComponent("latent-survey-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: folder) }
+        for name in ["A.NEF", "B.NEF"] { try fm.copyItem(at: sample, to: folder.appendingPathComponent(name)) }
+        let library = Library()
+        _ = try await library.open(folder: folder)
+        let a = try XCTUnwrap(library.images.first { $0.fileName == "A.NEF" }?.id)
+        let b = try XCTUnwrap(library.images.first { $0.fileName == "B.NEF" }?.id)
+        library.setSelection([a, b], primary: a)
+        let survey = SurveyModel(policy: MemoryPolicy(physicalMemory: 32 << 30))
+        XCTAssertTrue(survey.begin(library: library, onFailure: { XCTFail("\($0): \($1)") }))
+        let paneA = try XCTUnwrap(survey.model(for: a)), paneB = try XCTUnwrap(survey.model(for: b))
+        await settle(for: 30) { paneA.hasImage && paneB.hasImage }
+        XCTAssertTrue(paneA.hasImage && paneB.hasImage)
+
+        try await library.rotateSelected(by: 1, onlyPrimary: true)
+        survey.followRestore([a, b], .rotation, library: library, onFailure: { XCTFail("\($0): \($1)") })
+        XCTAssertEqual(paneA.userRotation, 1)
+        XCTAssertEqual(paneB.userRotation, 0)
+
+        var edited = paneB.parameters
+        edited.exposureEV = 1.5
+        try await library.saveEditStack(try EditStack(parameters: edited).encodeJSON(), schemaVersion: EditStack.schemaVersion,
+                                        processVersion: EditStack.processVersion, forImageID: b)
+        survey.followRestore([b], .edits, library: library, onFailure: { XCTFail("\($0): \($1)") })
+        await settle { paneB.parameters.exposureEV == 1.5 }
+        XCTAssertEqual(paneB.parameters.exposureEV, 1.5)
+        XCTAssertNil(paneB.pendingSave, "a pane never saves")
+
+        survey.end()
+        try await library.rotateSelected(by: 1, onlyPrimary: true)
+        survey.followRestore([a], .rotation, library: library, onFailure: { XCTFail("\($0): \($1)") })
+        XCTAssertEqual(paneA.userRotation, 1, "a pane off screen isn't rendered for it")
+        try await library.saveEditStack(nil, schemaVersion: EditStack.schemaVersion,
+                                        processVersion: EditStack.processVersion, forImageID: b)
+        survey.followRestore([b], .edits, library: library, onFailure: { XCTFail("\($0): \($1)") })
+        await settle(for: 0.2) { false }
+        XCTAssertEqual(paneB.parameters.exposureEV, 1.5, "Survey reads it again on the way back in")
+        survey.closeAll()
+    }
+
+    private func settle(for seconds: Double = 2, until done: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !done(), Date() < deadline { try? await Task.sleep(for: .milliseconds(5)) }
     }
 
     /// A pane that kept its image while Survey was away shows the stored

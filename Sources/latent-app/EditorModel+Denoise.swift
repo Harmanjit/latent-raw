@@ -114,9 +114,14 @@ extension EditorModel {
     }
 
     /// A stored edit with denoise on needs the result recomputed on open.
+    /// A model that takes turns asks for its turn instead.
     func regenerateAIDenoiseIfNeeded() {
-        if parameters.aiDenoise > 0, !hasAIDenoiseResult, !aiDenoiseRunning { runAIDenoise() }
+        guard needsAIDenoise else { return }
+        if let aiDenoiseTurn { aiDenoiseTurn(self) } else { runAIDenoise() }
     }
+
+    /// Denoise is on with no result, and none is being made.
+    var needsAIDenoise: Bool { parameters.aiDenoise > 0 && !hasAIDenoiseResult && !aiDenoiseRunning }
 
     /// Slider binding: moving it off zero with no result yet starts the run.
     var aiDenoiseStrength: Float {

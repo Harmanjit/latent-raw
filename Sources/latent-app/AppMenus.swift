@@ -86,9 +86,11 @@ struct CommandState: Equatable {
         case .swapCompare: mode == .compare && hasSelection && hasCompareSelect
         case .openFile: editorReady
         case .export: selectionCount > 0 && !exportQueueRunning
-        case .exportOpenImage: hasImage && !exportingOpenImage
-        // Library prints the selection; the other modes the image shown.
-        case .print: editorReady && (mode == .library ? selectionCount > 0 : hasImage || selectionCount > 0)
+        // Survey's panes aren't the editor's image, which may be one from before.
+        case .exportOpenImage: hasImage && !exportingOpenImage && mode != .survey
+        // Library prints the selection, and so does Survey, whose selection
+        // is the images shown; the other modes the image shown.
+        case .print: editorReady && (mode.showsEditorImage ? hasImage || selectionCount > 0 : selectionCount > 0)
         case .contactSheet: editorReady && selectionCount > 0
         // Edits are undone in Develop, library actions in the other modes
         // (the labels are those of the mode). Typing is undone by the Edit
@@ -100,9 +102,9 @@ struct CommandState: Equatable {
         case .pasteSettings: hasImage || selectionCount > 0
         case .clearFilter: filterActive
         case .slideshow: hasVisibleImages && editorReady
-        case .editExternally: (hasImage || hasSelection) && editorReady && !exportingOpenImage
-        // Files change under the grid only: Loupe, Compare and Develop have
-        // one open in the editor. Not while exporting reads them.
+        case .editExternally: (mode == .survey ? hasSelection : hasImage || hasSelection) && editorReady && !exportingOpenImage
+        // Files change under the grid only: Loupe, Compare, Survey and
+        // Develop have them open. Not while exporting reads them.
         case .rename: mode == .library && hasSelection && selectionCount <= 1 && !fileOperationRunning && !exportQueueRunning
         case .moveToFolder, .copyToFolder: mode == .library && selectionCount > 0 && !fileOperationRunning && !exportQueueRunning
         case .back: canGoBack
@@ -112,6 +114,12 @@ struct CommandState: Equatable {
         case .secondaryDisplay: secondaryDisplayShowing || hasSecondDisplay
         case .panImage: arrowKeysPan
         }
+    }
+
+    /// Whether the mode picker may switch to `mode`: Survey needs what its
+    /// command needs; the others are always there.
+    func allowsChoosing(_ mode: AppMode) -> Bool {
+        mode != .survey || isEnabled(.survey)
     }
 
     /// The image zoom commands act on is open: Survey's focused pane, else
