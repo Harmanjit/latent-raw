@@ -2,7 +2,7 @@
 
 The right panel holds the modules in pipeline order. All controls are live at full quality. Double-click a slider to reset it. ⌘Z and ⇧⌘Z undo and redo; `\` shows the unedited image. The Develop menu holds Auto Adjust, the crop and spot tools, new masks and brush size; the Edit menu holds undo, redo and Copy and Paste Settings.
 
-**Typed values.** Most sliders show their value as a number you can click: type a value and press Return or Tab to apply it, or Escape to cancel. ↑ and ↓ step it by the last digit shown, ⇧↑ and ⇧↓ by ten steps. The unit can be typed or left out, and the value is clamped to the slider's range. A typed value is an ordinary edit and lands in history like a drag. Temperature, the four tone ranges, HSL, Split Toning and export quality don't take typed values yet.
+**Typed values.** Most sliders show their value as a number you can click: type a value and press Return or Tab (or click elsewhere) to apply it, or Escape to cancel. If the value changes while the field is open, because the slider moved or another image opened, the field follows it and anything typed is dropped. ↑ and ↓ step it by the last digit shown, ⇧↑ and ⇧↓ by ten steps. The unit can be typed or left out, and the value is clamped to the slider's range. A typed value is an ordinary edit and lands in history like a drag. Temperature, the four tone ranges, HSL, Split Toning and export quality don't take typed values yet.
 
 ## Modules
 
