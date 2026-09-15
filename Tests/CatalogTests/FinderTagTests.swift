@@ -85,10 +85,9 @@ final class FinderTagTests: XCTestCase {
     /// Reconcile reads tags with the listing, refreshes them when only the
     /// tags changed, keeps them through a rename, and leaves the file alone.
     func testReconcileReadsAndRefreshesTags() async throws {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
-                          "Drop a D750 NEF in TestAssets/")
+        let sample = try TestAssets.d750Path()
         let file = folder.appendingPathComponent("A.NEF")
-        try FileManager.default.copyItem(atPath: ReconcileTests.sampleNEF, toPath: file.path)
+        try FileManager.default.copyItem(atPath: sample, toPath: file.path)
         try Self.setFinderTags(["Red\n6"], on: file)
         let catalog = try Catalog.open(at: folder)
         _ = try await catalog.reconcile()

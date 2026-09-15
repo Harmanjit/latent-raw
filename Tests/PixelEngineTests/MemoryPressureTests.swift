@@ -5,11 +5,9 @@ import Darwin
 @testable import RawCore
 
 /// What a session gives back when macOS runs short of memory, and the
-/// RAM-size policy. The release tests render a real file and skip without
-/// it (see TestAssets/README.md).
+/// RAM-size policy. The release tests render a real D750 raw and skip
+/// without one (see TestAssets/README.md).
 final class MemoryPressureTests: XCTestCase {
-    static let assetName = "nikon_d750_sample.nef"
-
     func testPolicyTreatsEightGigabytesAsConstrained() {
         XCTAssertTrue(MemoryPolicy(physicalMemory: 8 << 30).isConstrained)
         XCTAssertFalse(MemoryPolicy(physicalMemory: 8 << 30).keepsIdleImages)
@@ -27,9 +25,7 @@ final class MemoryPressureTests: XCTestCase {
     }
 
     private func openSession() throws -> (ImageSession, RenderPipeline, GPUContext) {
-        let path = TestAssets.path(Self.assetName)
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
-                          "Drop a D750 NEF at \(path) — see TestAssets/README.md")
+        let path = try TestAssets.d750Path()
         let gpu = try GPUContext()
         let session = try ImageSession(file: try RawFile(path: path), gpu: gpu)
         return (session, RenderPipeline(gpu: gpu), gpu)

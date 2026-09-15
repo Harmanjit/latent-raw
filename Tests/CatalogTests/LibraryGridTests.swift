@@ -8,13 +8,12 @@ final class LibraryGridTests: XCTestCase {
     nonisolated(unsafe) var folder: URL!
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
-                          "Drop a D750 NEF in TestAssets/")
+        let sample = try TestAssets.d750Path()
         folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("latent-librarygrid-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for name in ["A.NEF", "B.NEF", "C.NEF"] {
-            try FileManager.default.copyItem(atPath: ReconcileTests.sampleNEF,
+            try FileManager.default.copyItem(atPath: sample,
                                              toPath: folder.appendingPathComponent(name).path)
         }
     }

@@ -97,10 +97,9 @@ final class CustomOrderTests: XCTestCase {
     }
 
     private func copyNEFs(_ names: [String]) throws {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
-                          "Drop a D750 NEF in TestAssets/")
+        let sample = try TestAssets.d750Path()
         for name in names {
-            try FileManager.default.copyItem(atPath: ReconcileTests.sampleNEF,
+            try FileManager.default.copyItem(atPath: sample,
                                              toPath: folder.appendingPathComponent(name).path)
         }
     }
@@ -146,7 +145,7 @@ final class CustomOrderTests: XCTestCase {
         try await library.refresh()
         XCTAssertEqual(library.visibleImages.map(\.fileName), ["C.NEF", "D.NEF", "Z.NEF", "B.NEF"])
         // A new file comes after the arrangement, even named to sort first.
-        try FileManager.default.copyItem(atPath: ReconcileTests.sampleNEF,
+        try FileManager.default.copyItem(atPath: try TestAssets.d750Path(),
                                          toPath: folder.appendingPathComponent("0.NEF").path)
         try await library.refresh()
         XCTAssertEqual(library.visibleImages.map(\.fileName), ["C.NEF", "D.NEF", "Z.NEF", "B.NEF", "0.NEF"])

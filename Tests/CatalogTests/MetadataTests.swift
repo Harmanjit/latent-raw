@@ -8,12 +8,11 @@ final class MetadataTests: XCTestCase {
     nonisolated(unsafe) var folder: URL!
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
-                          "Drop a D750 NEF in TestAssets/")
+        let sample = try TestAssets.d750Path()
         folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("latent-meta-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        try FileManager.default.copyItem(atPath: ReconcileTests.sampleNEF,
+        try FileManager.default.copyItem(atPath: sample,
                                          toPath: folder.appendingPathComponent("A.NEF").path)
     }
 

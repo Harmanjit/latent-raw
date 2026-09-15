@@ -22,14 +22,12 @@ final class MergeRecipeTests: XCTestCase {
         + #"{"captureTime":1757925601,"hash":"xxh64:fedcba9876543210","path":"odd ]]> name.NEF"}],"version":1}"#
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
-                          "Drop a D750 NEF in TestAssets/")
         let fm = FileManager.default
         base = fm.temporaryDirectory.appendingPathComponent("latent-merge-\(UUID().uuidString)", isDirectory: true)
         root = base.appendingPathComponent("Shoot", isDirectory: true)
         try fm.createDirectory(at: root.appendingPathComponent("Day 2"), withIntermediateDirectories: true)
-        try fm.copyItem(atPath: ReconcileTests.sampleNEF, toPath: root.appendingPathComponent("A.NEF").path)
-        try fm.copyItem(atPath: FileTransferTests.otherNEF, toPath: root.appendingPathComponent("B.NEF").path)
+        try TestAssets.copyD750(to: root.appendingPathComponent("A.NEF"))
+        try FileTransferTests.copyOtherNEF(to: root.appendingPathComponent("B.NEF"))
     }
 
     override func tearDownWithError() throws {

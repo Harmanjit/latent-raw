@@ -142,8 +142,7 @@ final class LinearDNGFileTests: XCTestCase {
     /// they were: still Bayer, still integer, with the new fields sensible.
     /// (That their pixels are unchanged is what the golden tests pin.)
     func testBayerRawIsStillBayer() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let path = try TestAssets.d750Path()
         let file = try RawFile(path: path)
         let s = file.summary
         XCTAssertEqual(s.sourceKind, .bayer)

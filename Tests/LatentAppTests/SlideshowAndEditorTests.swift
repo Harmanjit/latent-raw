@@ -232,9 +232,7 @@ final class ExternalEditorHandOffTests: XCTestCase {
     /// The open image with its edit becomes a 16-bit Display P3 TIFF beside
     /// the file already there, and goes to the chosen application.
     func testTheOpenImageGoesToTheChosenApplicationAsANewTIFF() async throws {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets/golden_nikon_d750_cc0.nef")
+        let url = TestAssets.url(TestAssets.goldenName)
         try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path))
         _ = try await GPUContext.shared()
         let model = EditorModel()

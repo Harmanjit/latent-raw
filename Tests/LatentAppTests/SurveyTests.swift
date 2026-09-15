@@ -6,12 +6,6 @@ import PixelEngine
 /// Survey (N): its commands, and its panes' models, linked views and memory.
 @MainActor
 final class SurveyTests: XCTestCase {
-    private static func asset(_ name: String) -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets").appendingPathComponent(name)
-    }
-
     private func state(_ change: (inout CommandState) -> Void) -> CommandState {
         var state = CommandState()
         state.hasVisibleImages = true
@@ -87,8 +81,7 @@ final class SurveyTests: XCTestCase {
     /// Three panes of different sizes: a zoom in one shows the same part of
     /// the picture in the others, until Sync is turned off.
     func testPanesZoomAndPanTogetherWhileSyncIsOn() async throws {
-        let url = Self.asset("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path))
+        let url = try TestAssets.d750URL()
         _ = try await GPUContext.shared()
         let survey = SurveyModel(policy: MemoryPolicy(physicalMemory: 32 << 30))
         let panes = try XCTUnwrap(SurveyPanes(selected: [1, 2, 3], primary: 2, order: [1, 2, 3]))
@@ -126,8 +119,7 @@ final class SurveyTests: XCTestCase {
     /// closes every pane's; with more memory they stay, off screen, and
     /// come back for the same images without opening them again.
     func testMemoryWhenPanesGoAndSurveyIsLeft() async throws {
-        let url = Self.asset("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path))
+        let url = try TestAssets.d750URL()
         _ = try await GPUContext.shared()
         let panes = try XCTUnwrap(SurveyPanes(selected: [1, 2, 3], primary: 1, order: [1, 2, 3]))
 
@@ -177,8 +169,7 @@ final class SurveyTests: XCTestCase {
     /// focused pane first, and only while Survey shows: a run under way
     /// when Survey is left stops, and starts again on the way back.
     func testPanesTakeTurnsAtAIDenoiseWhileShown() async throws {
-        let url = Self.asset("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path))
+        let url = try TestAssets.d750URL()
         _ = try await GPUContext.shared()
         let survey = SurveyModel(policy: MemoryPolicy(physicalMemory: 32 << 30))
         let panes = try XCTUnwrap(SurveyPanes(selected: [1, 2, 3], primary: 2, order: [1, 2, 3]))
@@ -220,8 +211,7 @@ final class SurveyTests: XCTestCase {
     /// An undo or redo in the Library that put back a surveyed image's
     /// rotation or stored edit shows on its pane, while Survey shows.
     func testPanesShowWhatAnUndoPutBack() async throws {
-        let sample = Self.asset("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: sample.path))
+        let sample = try TestAssets.d750URL()
         _ = try await GPUContext.shared()
         let fm = FileManager.default
         let folder = fm.temporaryDirectory.appendingPathComponent("latent-survey-\(UUID().uuidString)", isDirectory: true)
@@ -273,8 +263,7 @@ final class SurveyTests: XCTestCase {
     /// A pane that kept its image while Survey was away shows the stored
     /// edit and rotation as they are now.
     func testAKeptPaneShowsTheStoredEditAsItIsNow() async throws {
-        let url = Self.asset("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path))
+        let url = try TestAssets.d750URL()
         _ = try await GPUContext.shared()
         let model = EditorModel()
         model.open(url: url)

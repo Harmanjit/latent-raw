@@ -1,24 +1,17 @@
 import XCTest
 @testable import Catalog
 
-/// End-to-end reconciliation against a real raw file. Skips without the
-/// D750 sample (see TestAssets/README.md).
+/// End-to-end reconciliation against a real raw file. Skips without a
+/// D750 raw (see TestAssets/README.md).
 final class ReconcileTests: XCTestCase {
     var folder: URL!
 
-    static var sampleNEF: String {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets/nikon_d750_sample.nef").path
-    }
-
     override func setUpWithError() throws {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: Self.sampleNEF),
-                          "Drop a D750 NEF in TestAssets/")
+        let sample = try TestAssets.d750Path()
         folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("latent-reconcile-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        try FileManager.default.copyItem(atPath: Self.sampleNEF,
+        try FileManager.default.copyItem(atPath: sample,
                                          toPath: folder.appendingPathComponent("A.NEF").path)
     }
 
@@ -89,7 +82,7 @@ final class ReconcileTests: XCTestCase {
     func testSubfolderModes() async throws {
         let sub = folder.appendingPathComponent("Day 2", isDirectory: true)
         try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
-        try FileManager.default.copyItem(atPath: Self.sampleNEF,
+        try FileManager.default.copyItem(atPath: try TestAssets.d750Path(),
                                          toPath: sub.appendingPathComponent("C.NEF").path)
 
         let catalog = try Catalog.open(at: folder)
@@ -146,7 +139,7 @@ final class ReconcileTests: XCTestCase {
         let fm = FileManager.default
         let outside = fm.temporaryDirectory.appendingPathComponent("latent-outside-\(UUID().uuidString)")
         try fm.createDirectory(at: outside, withIntermediateDirectories: true)
-        try fm.copyItem(atPath: Self.sampleNEF, toPath: outside.appendingPathComponent("Elsewhere.NEF").path)
+        try fm.copyItem(atPath: try TestAssets.d750Path(), toPath: outside.appendingPathComponent("Elsewhere.NEF").path)
         defer { try? fm.removeItem(at: outside) }
         try fm.createSymbolicLink(at: folder.appendingPathComponent("linked-dir"), withDestinationURL: outside)
         try fm.createSymbolicLink(at: folder.appendingPathComponent("Linked.NEF"),

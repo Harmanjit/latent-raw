@@ -7,8 +7,7 @@ final class AutoAdjustTests: XCTestCase {
     /// brightness near the grey point — that's the definition of what
     /// the exposure estimate does — and the other outputs must be sane.
     func testSuggestionCentresTheSceneOnGrey() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let path = try TestAssets.d750Path()
 
         let file = try RawFile(path: path)
         let gpu = try GPUContext()

@@ -19,8 +19,7 @@ final class DetailTests: XCTestCase {
     }
 
     func testSharpenRaisesAndDenoiseLowersLocalContrast() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let path = try TestAssets.d750Path()
 
         let gpu = try GPUContext()
         let file = try RawFile(path: path)

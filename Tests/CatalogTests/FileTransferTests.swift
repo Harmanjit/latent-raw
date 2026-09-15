@@ -12,27 +12,23 @@ final class FileTransferTests: XCTestCase {
     nonisolated(unsafe) var root: URL!
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
-                          "Drop a D750 NEF in TestAssets/")
         let fm = FileManager.default
         base = fm.temporaryDirectory.appendingPathComponent("latent-transfer-\(UUID().uuidString)", isDirectory: true)
         root = base.appendingPathComponent("Shoot", isDirectory: true)
         try fm.createDirectory(at: root.appendingPathComponent("Day 2"), withIntermediateDirectories: true)
-        try fm.copyItem(atPath: ReconcileTests.sampleNEF, toPath: root.appendingPathComponent("A.NEF").path)
-        try fm.copyItem(atPath: Self.otherNEF, toPath: root.appendingPathComponent("B.NEF").path)
+        try TestAssets.copyD750(to: root.appendingPathComponent("A.NEF"))
+        try Self.copyOtherNEF(to: root.appendingPathComponent("B.NEF"))
     }
 
     override func tearDownWithError() throws {
         if let base { try? FileManager.default.removeItem(at: base) }
     }
 
-    /// A second, different raw file, so two images never share a hash.
-    /// Nonisolated: `setUpWithError` reads it, and XCTest doesn't run that
-    /// on the main actor.
-    nonisolated static var otherNEF: String {
-        let golden = URL(fileURLWithPath: ReconcileTests.sampleNEF).deletingLastPathComponent()
-            .appendingPathComponent("golden_nikon_d750_cc0.nef").path
-        return FileManager.default.fileExists(atPath: golden) ? golden : ReconcileTests.sampleNEF
+    /// Copies in a second, different raw file, so two images never share
+    /// a hash. Nonisolated: `setUpWithError` calls it, and XCTest doesn't
+    /// run that on the main actor.
+    nonisolated static func copyOtherNEF(to destination: URL) throws {
+        try TestAssets.copyD750(to: destination, variant: 1)
     }
 
     private let fm = FileManager.default
@@ -104,7 +100,7 @@ final class FileTransferTests: XCTestCase {
         let catalog = try await preparedCatalog()
         let day2 = root.appendingPathComponent("Day 2")
         // A different file already called A.NEF in Day 2.
-        try fm.copyItem(atPath: Self.otherNEF, toPath: day2.appendingPathComponent("A.NEF").path)
+        try Self.copyOtherNEF(to: day2.appendingPathComponent("A.NEF"))
         _ = try await catalog.reconcile()
         let occupant = try FileOperations.identity(XCTUnwrap(day2.appendingPathComponent("A.NEF")))
 

@@ -10,17 +10,16 @@ final class LibraryUndoTests: XCTestCase {
     nonisolated(unsafe) var other: URL!
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
-                          "Drop a D750 NEF in TestAssets/")
+        let sample = try TestAssets.d750Path()
         let fm = FileManager.default
         folder = fm.temporaryDirectory.appendingPathComponent("latent-undo-\(UUID().uuidString)", isDirectory: true)
         other = fm.temporaryDirectory.appendingPathComponent("latent-undo-other-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
         try fm.createDirectory(at: other, withIntermediateDirectories: true)
         for name in ["A.NEF", "B.NEF"] {
-            try fm.copyItem(atPath: ReconcileTests.sampleNEF, toPath: folder.appendingPathComponent(name).path)
+            try fm.copyItem(atPath: sample, toPath: folder.appendingPathComponent(name).path)
         }
-        try fm.copyItem(atPath: ReconcileTests.sampleNEF, toPath: other.appendingPathComponent("Z.NEF").path)
+        try fm.copyItem(atPath: sample, toPath: other.appendingPathComponent("Z.NEF").path)
     }
 
     override func tearDownWithError() throws {

@@ -5,11 +5,7 @@ import CoreGraphics
 @testable import RawCore
 
 final class AIMaskTests: XCTestCase {
-    static func assetPath(_ name: String) -> String {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets").appendingPathComponent(name).path
-    }
+    static func assetPath(_ name: String) -> String { TestAssets.path(name) }
 
     /// A ~1000px sRGB CGImage of a sample, the way the app feeds the models.
     func smallImage(_ name: String) throws -> CGImage {
@@ -109,8 +105,7 @@ final class AIMaskTests: XCTestCase {
     }
 
     func testAIMaskDrivesALocalAdjustment() throws {
-        let path = Self.assetPath("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let path = try TestAssets.d750Path()
         let gpu = try GPUContext()
         let session = try ImageSession(file: try RawFile(path: path), gpu: gpu)
         let pipeline = RenderPipeline(gpu: gpu)
