@@ -104,6 +104,8 @@ struct LocalAdjustmentsPanel: View {
 
             rangeControls(binding)
         }
+        // The rows stay when another mask is selected, bound to it instead.
+        .sliderFieldSubject(model.parameters.locals[i].id)
         .padding(8)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
     }
@@ -120,7 +122,7 @@ struct LocalAdjustmentsPanel: View {
                 slider("Feather", Binding(
                     get: { feather },
                     set: { model.parameters.locals[i].shape = .radial(centre: c, radii: r, feather: $0) }),
-                       0...1, "%.2f")
+                       0...1, "%.2f", 0.5)
             }
         case .brush:
             VStack(alignment: .leading, spacing: 6) {
@@ -130,9 +132,10 @@ struct LocalAdjustmentsPanel: View {
                     Text("Pan").tag(EditorModel.MaskTool.none)
                 }
                 .pickerStyle(.segmented).labelsHidden().controlSize(.small)
-                slider("Size", $model.brushRadius, 0.005...0.2, "%.3f")
-                slider("Feather", $model.brushFeather, 0...1, "%.2f")
-                slider("Flow", $model.brushFlow, 0.1...1, "%.2f")
+                // What a new window starts the brush at.
+                slider("Size", $model.brushRadius, 0.005...0.2, "%.3f", 0.04)
+                slider("Feather", $model.brushFeather, 0...1, "%.2f", 0.5)
+                slider("Flow", $model.brushFlow, 0.1...1, "%.2f", 1)
             }
         case .whole:
             Text("Whole image — use the ranges below to limit it.")
@@ -188,9 +191,10 @@ struct LocalAdjustmentsPanel: View {
         if binding.wrappedValue.luminanceRange != nil {
             let lr = Binding(get: { binding.wrappedValue.luminanceRange ?? LuminanceRange() },
                              set: { binding.wrappedValue.luminanceRange = $0 })
-            slider("Low", lr.low, 0...1, "%.2f")
-            slider("High", lr.high, 0...1, "%.2f")
-            slider("Feather", lr.feather, 0.01...0.5, "%.2f")
+            let lrDefault = LuminanceRange()
+            slider("Low", lr.low, 0...1, "%.2f", lrDefault.low)
+            slider("High", lr.high, 0...1, "%.2f", lrDefault.high)
+            slider("Feather", lr.feather, 0.01...0.5, "%.2f", lrDefault.feather)
         }
         Toggle("Colour range", isOn: hueOn).toggleStyle(.checkbox).controlSize(.small)
         if binding.wrappedValue.hueRange != nil {
@@ -200,15 +204,16 @@ struct LocalAdjustmentsPanel: View {
                 Circle().fill(Color(hue: Double(hr.centre.wrappedValue) / 360, saturation: 1, brightness: 1))
                     .frame(width: 10, height: 10)
                     .accessibilityHidden(true)
-                slider("Hue", hr.centre, 0...360, "%.0f°")
+                slider("Hue", hr.centre, 0...360, "%.0f°", HueRange().centre)
             }
-            slider("Width", hr.width, 5...90, "%.0f°")
-            slider("Min. sat.", hr.minimumSaturation, 0...1, "%.2f")
+            slider("Width", hr.width, 5...90, "%.0f°", HueRange().width)
+            slider("Min. sat.", hr.minimumSaturation, 0...1, "%.2f", HueRange().minimumSaturation)
         }
     }
 
+    /// `defaultValue` is what a double-click puts back.
     private func slider(_ title: String, _ value: Binding<Float>, _ range: ClosedRange<Float>,
-                        _ format: String) -> some View {
+                        _ format: String, _ defaultValue: Float = 0) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(title).font(.caption).accessibilityHidden(true)
@@ -216,7 +221,16 @@ struct LocalAdjustmentsPanel: View {
                 SliderValueField(value: value, in: range, format: SliderValueFormat(printf: format), label: title)
             }
             ResettableSlider(value: value, in: range, label: title,
-                             format: SliderValueFormat(printf: format)) { value.wrappedValue = 0 }
+                             format: SliderValueFormat(printf: format)) {
+                value.wrappedValue = Self.resetValue(defaultValue, in: range)
+            }
         }
+    }
+
+    /// A row's default, kept inside its range. Every row used to reset to
+    /// 0, below several of their ranges: a brush of size 0 has no spacing
+    /// between dabs, and a colour range of width 0 no edge to smooth.
+    static func resetValue(_ defaultValue: Float, in range: ClosedRange<Float>) -> Float {
+        min(max(defaultValue, range.lowerBound), range.upperBound)
     }
 }

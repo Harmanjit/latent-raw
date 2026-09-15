@@ -268,7 +268,8 @@ extension EditorModel {
             let from = lastDab ?? p
             let delta = (p - from) * scale
             let dist = (delta.x * delta.x + delta.y * delta.y).squareRoot()
-            if dist >= spacing {
+            // A zero size would make the dab count infinite, which traps.
+            if spacing > 0, dist >= spacing {
                 let steps = Int(dist / spacing)
                 for k in 1...steps {
                     last.points.append(from + (p - from) * (Float(k) / Float(steps)))
