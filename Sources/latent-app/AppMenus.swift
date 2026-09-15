@@ -37,6 +37,16 @@ struct CommandState: Equatable {
     var showMaskOverlay = false
     var filterActive = false
     var hasCompareSelect = false
+    /// Settings has the arrow keys pan a zoomed-in image.
+    var arrowKeysPanImage = false
+    /// The image shown is zoomed in past fit.
+    var imageZoomedIn = false
+
+    /// Whether the arrow keys pan the image rather than step through images
+    /// (Loupe and Develop only; Compare keeps them for the candidate).
+    var arrowKeysPan: Bool {
+        arrowKeysPanImage && (mode == .loupe || mode == .develop) && hasImage && imageZoomedIn
+    }
 
     func isEnabled(_ command: KeyCommand) -> Bool {
         switch command {
@@ -66,6 +76,7 @@ struct CommandState: Equatable {
         case .copySettings: hasImage || hasSelection
         case .pasteSettings: hasImage || selectionCount > 0
         case .clearFilter: filterActive
+        case .panImage: arrowKeysPan
         }
     }
 
@@ -75,7 +86,7 @@ struct CommandState: Equatable {
     /// doesn't beep.
     static func passesThroughWhenUnavailable(_ command: KeyCommand) -> Bool {
         switch command {
-        case .deleteHeal, .makeSelect, .toolSize: true
+        case .deleteHeal, .makeSelect, .toolSize, .panImage: true
         default: false
         }
     }

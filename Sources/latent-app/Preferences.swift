@@ -92,6 +92,10 @@ final class AppPreferences: ObservableObject {
     @Published var mlCompute: MLCompute { didSet { defaults.set(mlCompute.rawValue, forKey: CoreMLStore.computePreferenceKey) } }
     /// Side of a grid thumbnail in points: the Library's size slider, ⌘= and ⌘-.
     @Published var thumbnailSize: Double { didSet { defaults.set(thumbnailSize, forKey: "latent.thumbnailSize") } }
+    /// ← → ↑ ↓ pan a zoomed-in image in Loupe and Develop instead of
+    /// stepping images (at fit they still step). Off by default, since
+    /// Lightroom-style culling steps with the arrows at any zoom.
+    @Published var arrowKeysPanImage: Bool { didSet { defaults.set(arrowKeysPanImage, forKey: "latent.arrowKeysPanImage") } }
 
     private init() {
         appearance = Appearance(rawValue: defaults.string(forKey: "latent.appearance") ?? "") ?? .system
@@ -103,6 +107,7 @@ final class AppPreferences: ObservableObject {
         mlCompute = MLCompute(rawValue: defaults.string(forKey: CoreMLStore.computePreferenceKey) ?? "") ?? .gpu
         thumbnailSize = ThumbnailGridLayout.clamped(defaults.object(forKey: "latent.thumbnailSize") as? Double
                                                     ?? ThumbnailGridLayout.defaultSide)
+        arrowKeysPanImage = defaults.bool(forKey: "latent.arrowKeysPanImage")
     }
 
     func applyAppearance() {
@@ -180,6 +185,9 @@ struct PreferencesView: View {
                 Text("Keep separate").tag(SubfolderMode.independent)
             }
             Text("Applies when a folder is opened for the first time; each catalog remembers its own answer after that.")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Arrow keys pan a zoomed-in image", isOn: $prefs.arrowKeysPanImage)
+            Text("In Loupe and Develop, ← → ↑ ↓ move around an image zoomed past fit; at fit ← and → still step to the previous and next image. Off, the arrows always step, as in Lightroom.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)

@@ -10,6 +10,7 @@ struct BareKeyPress: Equatable {
         /// A printable key, lowercased; space is " ".
         case character(Character)
         case leftArrow, rightArrow, returnKey, delete, escape
+        case upArrow, downArrow
     }
 
     var key: Key
@@ -31,6 +32,8 @@ struct BareKeyPress: Equatable {
         switch scalar.value {
         case 0xF702: key = .leftArrow
         case 0xF703: key = .rightArrow
+        case 0xF700: key = .upArrow
+        case 0xF701: key = .downArrow
         case 0x0D: key = .returnKey
         case 0x1B: key = .escape
         // The Delete key reports DEL; SwiftUI's KeyEquivalent.delete is
@@ -63,8 +66,11 @@ enum KeyCommand: Equatable {
     case addMask(NewMask), toggleMaskOverlay
     /// [ and ]: the armed brush or spot patch, a step smaller or larger.
     case toolSize(Int)
+    /// Arrow keys on a zoomed-in image, when Settings has them pan.
+    case panImage(PanDirection)
 
     enum NewMask: Equatable { case linear, radial, brush }
+    enum PanDirection: Equatable { case left, right, up, down }
 
     static func command(for press: BareKeyPress) -> KeyCommand? {
         Shortcuts.command(for: press)
@@ -107,13 +113,13 @@ extension BareKeyPress {
     /// them. A list takes the arrows (← and → collapse and expand an
     /// outline), Return and Space (the sidebar opens the selected folder)
     /// and typed characters, which jump to the row they start; Escape and
-    /// Delete stay commands. A slider takes ← and →, which move it.
+    /// Delete stay commands. A slider takes the arrows, which move it.
     func belongs(to focus: KeyFocus) -> Bool {
         switch focus {
         case .text: return true
         case .control: return !shift && (key == .character(" ") || key == .returnKey)
         case .list: return key != .escape && key != .delete
-        case .slider: return key == .leftArrow || key == .rightArrow
+        case .slider: return [.leftArrow, .rightArrow, .upArrow, .downArrow].contains(key)
         case .other: return false
         }
     }

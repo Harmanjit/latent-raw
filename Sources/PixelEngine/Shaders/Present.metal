@@ -18,7 +18,12 @@ using namespace metal;
 // straight to that layer's normalized texture coordinate. Zoom, pan and
 // rotation are all folded into it on the CPU; the kernel just samples.
 // That's how the image rotates without the pipeline ever moving a pixel.
-// Bilinear filtering keeps window resizes and mid-gesture upscales smooth.
+// Bilinear filtering keeps window resizes and mid-gesture upscales smooth;
+// past 200% the tile switches to nearest-neighbour (see `composite`).
+//
+// A third, optional layer is the press-and-hold magnifier: inside a circle
+// at the pointer the same two-layer composite runs again at the loupe's
+// zoom, from a small full-resolution tile of the area under it.
 //
 // Pixel centres (+0.5) matter: at exactly 100% they make each screen pixel
 // sample exactly one texel instead of a blend of two.
@@ -62,29 +67,44 @@ inline float3 toneMapToHeadroom(float3 c, float displayHeadroom, float contentHe
     return c * (mapped / peak);
 }
 
-kernel void presentToScreen(
-    texture2d<float, access::sample> base     [[texture(0)]],
-    texture2d<float, access::sample> tile     [[texture(1)]],
-    texture2d<float, access::write>  drawable [[texture(2)]],
-    constant float3x2 &baseMap                [[buffer(0)]],  // screen px -> base uv
-    constant float3x2 &tileMap                [[buffer(1)]],  // screen px -> tile uv (inset region)
-    constant float4 &tileSource               [[buffer(2)]],  // uv origin.xy, uv size.zw
-    constant uint   &hasTile                  [[buffer(3)]],
-    constant float  &backgroundLevel          [[buffer(4)]],
-    constant float4 &headrooms                [[buffer(5)]],  // display, base content, tile content
-    uint2 gid                                 [[thread_position_in_grid]])
+// Where the press-and-hold magnifier draws, and from what. Laid out like
+// PresentLoupe in Presenter.swift.
+struct Loupe {
+    float3x2 baseMap;       // screen px -> base uv, at the loupe's zoom
+    float3x2 tileMap;       // screen px -> loupe tile uv (inset region)
+    float4   tileSource;    // uv origin.xy, uv size.zw
+    float4   circle;        // centre.xy, radius, ring width (drawable px)
+};
+
+// Bits of `flags`.
+constant uint kTileNearest      = 1u << 0;
+constant uint kMagnifier        = 1u << 1;
+constant uint kMagnifierHasTile = 1u << 2;
+constant uint kMagnifierNearest = 1u << 3;
+
+// One screen pixel of the picture: the full-resolution tile where it
+// covers, the base layer elsewhere, the surround outside the image.
+//
+// Past 200% the tile is sampled nearest-neighbour, so every sensor pixel is
+// a crisp square and demosaic, sharpening and noise artefacts show as they
+// are; bilinear there would smear exactly what the user is checking. The
+// base layer is only ever a soft stand-in and always stays bilinear.
+inline float3 composite(float3 p,
+                        texture2d<float, access::sample> base, float3x2 baseMap,
+                        texture2d<float, access::sample> tile, float3x2 tileMap, float4 tileSource,
+                        bool hasTile, bool tileNearest,
+                        float backgroundLevel, float displayHeadroom,
+                        float baseHeadroom, float tileHeadroom)
 {
-    if (gid.x >= drawable.get_width() || gid.y >= drawable.get_height()) return;
+    constexpr sampler linearSampler(coord::normalized, address::clamp_to_edge, filter::linear);
+    constexpr sampler nearestSampler(coord::normalized, address::clamp_to_edge, filter::nearest);
 
-    constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);
-    float3 p = float3(float2(gid) + 0.5, 1.0);
-
-    if (hasTile != 0) {
+    if (hasTile) {
         float2 uv = tileMap * p;
         if (uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= 1.0 && uv.y <= 1.0) {
-            float4 c = tile.sample(s, tileSource.xy + uv * tileSource.zw);
-            drawable.write(float4(toneMapToHeadroom(c.rgb, headrooms.x, headrooms.z), 1.0), gid);
-            return;
+            float2 st = tileSource.xy + uv * tileSource.zw;
+            float4 c = tileNearest ? tile.sample(nearestSampler, st) : tile.sample(linearSampler, st);
+            return toneMapToHeadroom(c.rgb, displayHeadroom, tileHeadroom);
         }
     }
 
@@ -93,9 +113,56 @@ kernel void presentToScreen(
         // Outside the image: neutral surround. A mid-dark grey rather than
         // black — pure black next to an image biases how you judge its
         // shadows, which is why Lightroom and Capture One both use grey.
-        drawable.write(float4(backgroundLevel, backgroundLevel, backgroundLevel, 1.0), gid);
-        return;
+        return float3(backgroundLevel);
     }
-    float4 c = base.sample(s, uv);
-    drawable.write(float4(toneMapToHeadroom(c.rgb, headrooms.x, headrooms.y), 1.0), gid);
+    float4 c = base.sample(linearSampler, uv);
+    return toneMapToHeadroom(c.rgb, displayHeadroom, baseHeadroom);
+}
+
+kernel void presentToScreen(
+    texture2d<float, access::sample> base     [[texture(0)]],
+    texture2d<float, access::sample> tile     [[texture(1)]],
+    texture2d<float, access::write>  drawable [[texture(2)]],
+    texture2d<float, access::sample> loupeTile [[texture(3)]],
+    constant float3x2 &baseMap                [[buffer(0)]],  // screen px -> base uv
+    constant float3x2 &tileMap                [[buffer(1)]],  // screen px -> tile uv (inset region)
+    constant float4 &tileSource               [[buffer(2)]],  // uv origin.xy, uv size.zw
+    constant uint   &hasTile                  [[buffer(3)]],
+    constant float  &backgroundLevel          [[buffer(4)]],
+    constant float4 &headrooms                [[buffer(5)]],  // display, base, tile, loupe tile content
+    constant Loupe  &loupe                    [[buffer(6)]],
+    constant uint   &flags                    [[buffer(7)]],
+    uint2 gid                                 [[thread_position_in_grid]])
+{
+    if (gid.x >= drawable.get_width() || gid.y >= drawable.get_height()) return;
+
+    float3 p = float3(float2(gid) + 0.5, 1.0);
+    bool magnifier = (flags & kMagnifier) != 0;
+    float radius = loupe.circle.z;
+    float d = magnifier ? distance(p.xy, loupe.circle.xy) : 0.0;
+    // Anti-aliased edges, one drawable pixel wide: the magnified picture,
+    // then a light ring, then a dark hairline, then the view as usual.
+    float ringWidth = loupe.circle.w;
+    float inRing = smoothstep(radius - ringWidth - 1.0, radius - ringWidth, d);
+    float inHairline = smoothstep(radius - 1.5, radius - 0.5, d);
+    float outside = magnifier ? smoothstep(radius - 0.5, radius + 0.5, d) : 1.0;
+
+    float3 color = float3(0.0);
+    if (outside > 0.0) {
+        color = composite(p, base, baseMap, tile, tileMap, tileSource,
+                          hasTile != 0, (flags & kTileNearest) != 0,
+                          backgroundLevel, headrooms.x, headrooms.y, headrooms.z);
+    }
+    if (outside < 1.0) {
+        float3 inside = float3(0.8);
+        if (inRing < 1.0) {
+            float3 magnified = composite(p, base, loupe.baseMap, loupeTile, loupe.tileMap, loupe.tileSource,
+                                         (flags & kMagnifierHasTile) != 0, (flags & kMagnifierNearest) != 0,
+                                         backgroundLevel, headrooms.x, headrooms.y, headrooms.w);
+            inside = mix(magnified, inside, inRing);
+        }
+        inside = mix(inside, float3(0.0), inHairline);
+        color = mix(inside, color, outside);
+    }
+    drawable.write(float4(color, 1.0), gid);
 }
