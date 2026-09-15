@@ -9,6 +9,7 @@
 #     Contents/Info.plist
 #     Contents/MacOS/Latent            <- the release binary
 #     Contents/Resources/*.bundle       <- shaders, Lensfun DB, Core ML models
+#     Contents/Resources/Help/*.md      <- docs/wiki, shown by Help > Latent Help
 #
 # Ad-hoc signed so Gatekeeper on this Mac runs it; a notarized build for
 # other Macs needs a Developer ID (DESIGN.md, non-goals: no App Store).
@@ -39,6 +40,43 @@ fi
 for b in .build/release/latent_*.bundle .build/release/GRDB_*.bundle; do
   [ -d "$b" ] && cp -R "$b" "$APP/Contents/Resources/"
 done
+
+# Shaders, precompiled into default.metallib when the Metal toolchain is
+# installed: GPUContext loads it in milliseconds, where compiling the
+# sources costs about 0.4 s the first time a build's shaders are seen.
+# Xcode 26 ships the toolchain as a separate component
+# (xcodebuild -downloadComponent MetalToolchain) and `xcrun -f metal`
+# finds a stub without it, so the test is whether the compiler runs.
+# Metal 3.0 and macOS 15 keep the library loadable on Sequoia; fast math
+# is the compiler's default, as it is for runtime compilation. The sources
+# stay in the bundle, so without a metallib, or with one the system
+# refuses, the app compiles them at launch as `swift run` does.
+precompile_shaders() {
+  local dir="$1" air f
+  air=$(mktemp -d)
+  for f in "$dir"/*.metal; do
+    xcrun metal -c -std=metal3.0 -mmacosx-version-min=15.0 -I "$dir" "$f" \
+      -o "$air/$(basename "$f" .metal).air" || { rm -rf "$air"; return 1; }
+  done
+  xcrun metallib "$air"/*.air -o "$dir/default.metallib" || { rm -rf "$air" "$dir/default.metallib"; return 1; }
+  rm -rf "$air"
+}
+SHADERS="$APP/Contents/Resources/latent_PixelEngine.bundle"
+if ! xcrun metal --version >/dev/null 2>&1; then
+  echo "Metal toolchain not installed: shaders will compile at first launch (to precompile on Xcode 26: xcodebuild -downloadComponent MetalToolchain)"
+elif precompile_shaders "$SHADERS"; then
+  echo "Shaders precompiled"
+else
+  echo "WARNING: precompiling shaders failed (see above); the app will compile them at launch"
+fi
+
+# Help pages, read from here by Help > Latent Help. Copied from docs/wiki
+# so the wiki stays the one copy in the repository; `swift run` reads them
+# from docs/wiki directly. _Sidebar.md orders the pages; README.md is the
+# wiki's publishing notes, not a page.
+mkdir -p "$APP/Contents/Resources/Help"
+cp docs/wiki/*.md "$APP/Contents/Resources/Help/"
+rm -f "$APP/Contents/Resources/Help/README.md"
 
 # The raw decoder XPC service: its own bundle, its own (tighter) sandbox.
 XPC="$APP/Contents/XPCServices/LatentRawDecoder.xpc"
@@ -100,7 +138,12 @@ PLIST
 # Settings > Privacy & Security (Control-click > Open no longer works
 # since macOS 15), or removes the quarantine attribute. See README.
 SCRIPTS="$(dirname "$0")"
+# Local symbols serve only the debugger; stripping them roughly halves the
+# binaries, and crash reports still name the global symbols. It has to
+# happen before signing, which seals each binary as it is.
+strip -x "$APP/Contents/MacOS/Latent" "$XPC/Contents/MacOS/LatentRawDecoder"
 if [ "$DEV" = "1" ]; then
+  strip -x "$APP/Contents/MacOS/latent-cli"
   codesign --force --options runtime --sign - "$APP/Contents/MacOS/latent-cli"
   codesign --force --options runtime --sign - "$XPC"
   codesign --force --options runtime --sign - "$APP" && echo "Signed (ad hoc, DEV: no sandbox)"
