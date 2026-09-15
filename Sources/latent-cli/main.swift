@@ -228,6 +228,152 @@ if args.count >= 2, args[1] == "merge-hdr" {
     exit(0)
 }
 
+// `pano-layout` subcommand: work out a panorama's geometry (docs/PhotoMerge.md
+// section 4, stages 1-6 and 9) and print what each step found, with an
+// optional quick stitch to check it by eye. Nothing is written but the
+// preview.
+if args.count >= 2, args[1] == "pano-layout" {
+    var positional: [String] = []
+    var projection = PanoramaProjection.automatic
+    var previewPath: String?
+    var index = 2
+    while index < args.count {
+        if args[index] == "--projection", index + 1 < args.count {
+            guard let chosen = PanoramaProjection(rawValue: args[index + 1]) else {
+                print("--projection takes automatic, perspective, cylindrical or spherical")
+                exit(1)
+            }
+            projection = chosen
+            index += 2
+        } else if args[index] == "--preview", index + 1 < args.count {
+            previewPath = args[index + 1]
+            index += 2
+        } else {
+            positional.append(args[index])
+            index += 1
+        }
+    }
+    guard positional.count >= 2 else {
+        print("Usage: latent-cli pano-layout <raw> <raw> [...] [--projection automatic|perspective|cylindrical|spherical] "
+              + "[--preview out.jpg]")
+        exit(1)
+    }
+    func padded(_ text: String, _ width: Int) -> String {
+        text.count >= width ? String(text.prefix(width)) : text.padding(toLength: width, withPad: " ", startingAt: 0)
+    }
+    func shutter(_ seconds: Double) -> String {
+        guard seconds > 0 else { return "?" }
+        return seconds >= 1 ? String(format: "%gs", seconds) : "1/\(Int((1 / seconds).rounded()))"
+    }
+    let clock = ContinuousClock()
+    func seconds(since start: ContinuousClock.Instant) -> Double {
+        let elapsed = clock.now - start
+        return Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
+    }
+    do {
+        let gpu = try GPUContext()
+        let prep = PanoramaFramePrep(gpu: gpu)
+        var start = clock.now
+        let photos = try prep.photos(positional.map { URL(fileURLWithPath: $0) })
+        let openSeconds = seconds(since: start)
+        start = clock.now
+        let inputs = try photos.map { try prep.input(for: $0) }
+        let thumbnailSeconds = seconds(since: start)
+        let first = photos[0].summary
+        print("\(photos.count) photos, \(first.cameraMake) \(first.cameraModel), \(first.lensModel.isEmpty ? "lens ?" : first.lensModel)"
+              + String(format: ", %.0f mm, crop factor %.2f", first.focalLength, photos[0].metadata.cropFactor)
+              + ", lens profile: " + (photos[0].lens?.profileName ?? "none"))
+
+        start = clock.now
+        let result: PanoramaLayoutResult
+        do {
+            result = try PanoramaLayoutSolver(options: PanoramaLayoutOptions(projection: projection)).solve(inputs)
+        } catch let error as PanoramaError {
+            print("Failed: \(error.errorDescription ?? String(describing: error))")
+            exit(1)
+        }
+        let solveSeconds = seconds(since: start)
+        let layout = result.layout, report = result.report
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        print("Frames (capture order):")
+        print("   #  " + padded("File", 16) + "Time      Shutter  ISO     f   EXIF gain  Gain     Yaw    Pitch   Roll")
+        for (i, frame) in report.frames.enumerated() {
+            let angles = frame.yawPitchRoll.map { String(format: "%+7.2f %+7.2f %+6.2f", $0.x, $0.y, $0.z) } ?? "left out"
+            print(String(format: "  %2d  ", i) + padded(frame.name, 16) + formatter.string(from: frame.captureTime)
+                  + "  " + padded(shutter(frame.exposureTime), 7)
+                  + String(format: " %4.0f %5.1f  %9.3f  ", frame.iso, frame.aperture, frame.exifGain)
+                  + (frame.gain.map { String(format: "%-7.3f", $0) } ?? "   -   ") + "  " + angles)
+        }
+        print("Pairs:")
+        for pair in report.pairs {
+            let method = pair.method?.rawValue ?? "-"
+            let detail = pair.accepted
+                ? String(format: "NCC %.3f, overlap %.2f", pair.ncc, pair.overlap)
+                    + (pair.matches > 0 ? ", \(pair.inliers)/\(pair.matches) corners agree" : "")
+                    + (pair.note.map { " (\($0))" } ?? "")
+                : "rejected: " + (pair.note ?? "?")
+            print(String(format: "  %2d-%-2d  ", pair.first, pair.second) + padded(method, 13) + detail)
+        }
+        for dropped in report.droppedPairs {
+            print("  dropped \(dropped.x)-\(dropped.y): disagrees with the other pairs")
+        }
+        if !report.leftOut.isEmpty { print("Left out (not connected): \(report.leftOut)") }
+        print("Exposure over overlaps (stops the first photo is brighter; EXIF predicts; left after gains):")
+        for m in report.exposureMeasurements {
+            print(String(format: "  %2d-%-2d  measured %+.3f  EXIF %+.3f  left %+.3f  (%d texels)", m.first, m.second,
+                         m.measuredStops, m.exifStops, m.remainingStops, m.samples))
+        }
+        print(String(format: "Cameras: %d of %d; focal length %.1f px (EXIF %.1f px, %+.2f%%); RMS error %.2f px",
+                     layout.cameras.count, photos.count, report.focalLengthPixels, report.exifFocalLengthPixels,
+                     (report.focalLengthPixels / report.exifFocalLengthPixels - 1) * 100, report.rmsErrorPixels))
+        print(String(format: "Extent: %.1f° x %.1f°; projection %@ (asked: %@)", report.widthDegrees, report.heightDegrees,
+                     layout.canvas.projection.rawValue, projection.rawValue))
+        let canvas = layout.canvas
+        print(String(format: "Canvas: %d x %d px (%.1f MP), origin (%.0f, %.0f), %.1f px/rad", canvas.width, canvas.height,
+                     Double(canvas.width) * Double(canvas.height) / 1e6, canvas.origin.x, canvas.origin.y,
+                     canvas.pixelsPerRadian))
+        let crop = layout.autoCropRect
+        print(String(format: "Auto crop: x %.0f, y %.0f, %.0f x %.0f px (%.0f%% of the canvas)", crop.minX, crop.minY,
+                     crop.width, crop.height, crop.width * crop.height / (Double(canvas.width) * Double(canvas.height)) * 100))
+        let size = PanoramaOutputSizer.size(fullWidth: canvas.width, fullHeight: canvas.height, device: gpu.device)
+        let budget = PanoramaOutputSizer.editPixelBudget(recommendedWorkingSetBytes: gpu.device.recommendedMaxWorkingSetSize)
+        print(String(format: "Output: %d x %d px (%.1f MP), scale %.3f, limit %@, decode span %d "
+                     + "(max texture side %d px, edit budget %.1f MP of %.1f GB working set)",
+                     size.width, size.height, Double(size.width) * Double(size.height) / 1e6, size.scale,
+                     size.limit.rawValue, size.decodeSpan, PanoramaOutputSizer.maxTextureSide(gpu.device), budget / 1e6,
+                     Double(gpu.device.recommendedMaxWorkingSetSize) / 1_073_741_824))
+        print("Timings:")
+        print("    " + padded("open photos", 32) + String(format: "%7.3f s", openSeconds))
+        print("    " + padded("decode and reduce", 32) + String(format: "%7.3f s", thumbnailSeconds))
+        for stage in report.stages {
+            print("    " + padded(stage.name, 32) + String(format: "%7.3f s", stage.seconds))
+        }
+        print("    " + padded("layout total", 32) + String(format: "%7.3f s", solveSeconds))
+
+        if let previewPath {
+            start = clock.now
+            var thumbnails: [Int: PanoramaThumbnail] = [:]
+            for camera in layout.cameras { thumbnails[camera.frameIndex] = inputs[camera.frameIndex].thumbnail }
+            let image = PanoramaPreview.stitch(layout, thumbnails: thumbnails, longSide: 3000)
+            let reference = try RawFile(path: photos[0].url.path, metadataOnly: true)
+            let rendered = try PanoramaPreview.render(image, reference: photos[0].summary,
+                                                      cameraToXYZ: reference.cameraToXYZMatrixRaw, gpu: gpu)
+            try PanoramaPreview.writeJPEG(rendered, to: URL(fileURLWithPath: previewPath))
+            print(String(format: "Wrote %@ (%d x %d) in %.2f s", previewPath, image.width, image.height,
+                         seconds(since: start)))
+        }
+    } catch let error as PanoramaError {
+        print("Failed: \(error.errorDescription ?? String(describing: error))")
+        exit(1)
+    } catch {
+        print("Failed: \(error)")
+        exit(1)
+    }
+    exit(0)
+}
+
 guard args.count >= 3, args[1] == "render" else {
     print("""
     Usage:
@@ -235,6 +381,8 @@ guard args.count >= 3, args[1] == "render" else {
       latent-cli catalog <folder> [--include-subfolders]
       latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N]
                            [--no-align] [--deghost none|low|medium|high]
+      latent-cli pano-layout <raw> <raw> [...] [--projection automatic|perspective|cylindrical|spherical]
+                             [--preview out.jpg]
 
     Options:
       --out <path.png>       write the result as a PNG
