@@ -20,6 +20,7 @@ These pages are also in the app: **Help > Latent Help** (⌘?) shows them with s
 | [Library](Library) | The sidebar, the catalog, the grid, sorting and filtering, Finder tags, Loupe, Compare and Survey, full screen, moving and renaming, undo, the slideshow |
 | [Develop](Develop) | Every editing module, typed values, masks, spot and red-eye removal, presets, history |
 | [Export](Export) | Formats, HDR gain maps, watermark, naming templates, metadata, batch export, printing, contact sheets, external editors |
+| [Photo Merge](Photo-Merge) | HDR: merging a bracket into one DNG, and how to shoot one |
 | [Keyboard Shortcuts](Keyboard-Shortcuts) | The full list |
 | [Architecture](Architecture) | Modules, the render pipeline, performance, tests |
 | [Security and Privacy](Security-and-Privacy) | Sandbox, isolated decoder, location in exports, what is written where |

@@ -33,11 +33,14 @@ extension Library {
 
     /// Takes back `writeMergeRecipe` when the DNG could not be placed (step
     /// 3's name clash, a cancel), so the next name planned isn't blocked by
-    /// a sidecar with no photo. Leaves it if a file or row has appeared.
-    public func discardMergeRecipe(forNewImageAt relPath: String, in target: Catalog? = nil) async throws {
+    /// a sidecar with no photo. Leaves it if a file or row has appeared,
+    /// unless `fileTookTheName` says the file is another one that took the
+    /// name (see `Catalog.discardMergeSidecar`).
+    public func discardMergeRecipe(forNewImageAt relPath: String, in target: Catalog? = nil,
+                                   fileTookTheName: Bool = false) async throws {
         guard let catalog = target ?? catalog else { return }
         try await countedAsPendingWork("Removing an unused merge recipe") {
-            try await catalog.discardMergeSidecar(forRelPath: relPath)
+            try await catalog.discardMergeSidecar(forRelPath: relPath, fileTookTheName: fileTookTheName)
         }
     }
 

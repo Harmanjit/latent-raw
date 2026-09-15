@@ -73,3 +73,9 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 |---|---|
 | F2 | Rename the selected image (its sidecar and thumbnail follow) |
 | Drag images onto a sidebar folder | Move them there with their edits (hold ⌥ to copy) |
+
+## Photo Merge
+
+| Keys | Action |
+|---|---|
+| ⌃H | HDR merge of the selected photos into one DNG beside them (see [Photo Merge](Photo-Merge)); not while typing in a text field, where ⌃H deletes backward |

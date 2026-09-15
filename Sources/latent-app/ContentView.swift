@@ -5,6 +5,7 @@ import MLKit
 import ColorKit
 import Catalog
 import LensKit
+import MergeKit
 import UniformTypeIdentifiers
 
 /// Which part of the app is showing: the grid (Library), one image
@@ -48,6 +49,7 @@ struct ContentView: View {
     @ObservedObject private var model = MainWindowModels.shared.model
     @ObservedObject private var library = MainWindowModels.shared.library
     @ObservedObject private var exportQueue = MainWindowModels.shared.exportQueue
+    @ObservedObject private var photoMerge = MainWindowModels.shared.photoMerge
     @ObservedObject private var prefs = AppPreferences.shared
     @ObservedObject private var handOff = ExternalEditorHandOff.shared
     @ObservedObject private var fileOperations = MainWindowModels.shared.library.fileOperations
@@ -58,6 +60,8 @@ struct ContentView: View {
     @State private var secondDisplayLoad: Task<Void, Never>?
     @State private var mode: AppMode = .library
     @State private var showingExportSheet = false
+    /// The HDR Merge dialog's state, while it is up (Photo › Photo Merge › HDR…).
+    @State private var hdrMergeSheet: HDRMergeSheetModel?
     /// Compare's left pane ("Select"): its own render, created the first
     /// time Compare opens. The right pane ("Candidate") is the main model,
     /// which follows the selection as arrow keys move it.
@@ -202,6 +206,11 @@ struct ContentView: View {
             }
             .motionFollowsAccessibility()
         }
+        .sheet(item: $hdrMergeSheet) { sheet in
+            HDRMergeSheet(model: sheet, thumbnail: { await library.loadThumbnail(for: $0) },
+                          onMerge: { startHDRMerge($0, from: sheet) }, canMerge: !exportQueue.isGPUBusy)
+                .motionFollowsAccessibility()
+        }
         .sheet(item: $renaming) { record in
             RenameSheet(record: record) { name in
                 do {
@@ -257,7 +266,7 @@ struct ContentView: View {
     }
 
     private var libraryPanel: some View {
-        LibraryPanel(library: library, exportQueue: exportQueue, model: model,
+        LibraryPanel(library: library, exportQueue: exportQueue, photoMerge: photoMerge, model: model,
                      onOpenFolder: showOpenFolderPanel,
                      onRate: rate, onFlag: flag,
                      onExport: { showingExportSheet = true },
@@ -754,6 +763,39 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Photo Merge
+
+    /// Opens the HDR Merge dialog on the whole selection, which the engine
+    /// starts measuring at once.
+    private func beginHDRMerge() {
+        guard let gpu = model.gpu else { return }
+        let records = library.selectedImages
+        let urls = records.compactMap { library.fileURL(for: $0) }
+        guard records.count >= 2, urls.count == records.count else { return }
+        let catalog = library.catalog
+        let sheet = HDRMergeSheetModel(records: records, urls: urls, engine: PhotoMergeEngine.hdr(gpu: gpu)) { reference in
+            // The name as it would be now; the job plans it again on Merge.
+            guard let catalog,
+                  let relPath = try? await catalog.planMergeResult(forReference: reference.relPath, suffix: "HDR")
+            else { return nil }
+            return (relPath as NSString).lastPathComponent
+        }
+        hdrMergeSheet = sheet
+        sheet.start()
+    }
+
+    /// Merge in the dialog: the job runs in the background from here, with
+    /// the same engine that measured the photos.
+    private func startHDRMerge(_ analysis: HDRMergeAnalysis, from sheet: HDRMergeSheetModel) {
+        let records = sheet.recordsInFrameOrder.compactMap { $0 }
+        guard records.count == analysis.frames.count,
+              photoMerge.start(analysis, records: records, library: library, engine: sheet.engine) else {
+            library.lastError = "HDR merge couldn’t start: an export or another merge is using the graphics processor, "
+                + "or the photos are no longer in the open folder."
+            return
+        }
+    }
+
     // MARK: - Metadata shortcuts (both modes)
 
     /// In the grid these act on the whole selection. Loupe, Compare and
@@ -881,6 +923,8 @@ struct ContentView: View {
             PrintPresenter.present(openImage: mode.showsEditorImage && model.hasImage, model: model, library: library)
         case .contactSheet:
             ContactSheetPresenter.present(model: model, library: library)
+        case .photoMergeHDR:
+            beginHDRMerge()
         case .slideshow:
             SlideshowController.start(model: model, library: library)
         case .editExternally:
@@ -990,6 +1034,7 @@ struct ContentView: View {
         state.editorReady = model.isReady
         state.exportingOpenImage = model.isExporting
         state.exportQueueRunning = exportQueue.isRunning
+        state.photoMergeRunning = exportQueue.slotHeldByOtherJob || photoMerge.isRunning
         state.outputJobRunning = OutputJobs.shared.isRunning
         let history = model.history
         state.undoLabel = history.canUndo ? history.steps[history.cursor].label : nil

@@ -1,17 +1,19 @@
 import Foundation
 import Observation
 
-/// Prints and contact sheets being made. Both render every photo from its
-/// file on a thread of their own after their dialog has gone (a print once
-/// its panel closes, a contact sheet while its dialog shows progress), so
-/// the app has to know about them:
+/// Prints, contact sheets and Photo Merges being made. Each renders photos
+/// from their files in the background after its dialog has gone (a print
+/// once its panel closes, a contact sheet while its dialog shows progress,
+/// a merge from the library panel), so the app has to know about them:
 ///
 /// - each holds an `ExportActivity`, so the Mac doesn't sleep partway
 ///   through, as for exports;
 /// - Rename, Move to Folder and Copy to Folder are unavailable, since a
-///   file moved meanwhile prints or lays out as an empty cell;
+///   file moved meanwhile prints or lays out as an empty cell, or is
+///   missing from a merge;
 /// - quitting asks first, stops a contact sheet (its file isn't written)
-///   and waits for a print to reach the printing system.
+///   and a merge (neither its DNG nor its sidecar is left), and waits for a
+///   print to reach the printing system.
 ///
 /// Observable, so the menus follow it.
 @MainActor @Observable
@@ -21,12 +23,15 @@ final class OutputJobs {
     enum Kind: Equatable {
         case print
         case contactSheet
+        /// Photo › Photo Merge (PhotoMergeQueue).
+        case photoMerge
     }
 
     struct Job: Identifiable {
         let id = UUID()
         let kind: Kind
-        /// The print's title ("12 Photos") or the contact sheet's file name.
+        /// The print's title ("12 Photos"), the contact sheet's file name,
+        /// or the merge's reference photo ("DSC_0107.NEF").
         let name: String
         /// Stops the job early; nil when it can only be waited for (a print).
         let cancel: (() -> Void)?
@@ -41,7 +46,11 @@ final class OutputJobs {
     /// Registers a job that has started; call `end` with the id when it
     /// has finished, however it finished.
     func begin(_ kind: Kind, name: String, cancel: (() -> Void)? = nil) -> UUID {
-        let reason = kind == .print ? "Printing \(name)" : "Making the contact sheet \(name)"
+        let reason = switch kind {
+        case .print: "Printing \(name)"
+        case .contactSheet: "Making the contact sheet \(name)"
+        case .photoMerge: "Merging photos with \(name)"
+        }
         let job = Job(kind: kind, name: name, cancel: cancel, activity: ExportActivity(reason: reason))
         running.append(job)
         return job.id
@@ -56,7 +65,7 @@ final class OutputJobs {
         for waiter in waiting { waiter.resume() }
     }
 
-    /// Stops what can be stopped (contact sheets); prints carry on.
+    /// Stops what can be stopped (contact sheets, merges); prints carry on.
     func cancelAll() {
         for job in running { job.cancel?() }
     }
@@ -72,19 +81,36 @@ final class OutputJobs {
     static func quitAlert(for jobs: [Job]) -> (message: String, information: String, button: String) {
         let prints = jobs.filter { $0.kind == .print }
         let sheets = jobs.filter { $0.kind == .contactSheet }
-        let printing = prints.count == 1 ? "printing “\(prints[0].name)”" : "printing \(prints.count) jobs"
-        let stopsSheet = "Quitting now stops the contact sheet\(sheets.count == 1 ? "" : "s"), which "
-            + (sheets.count == 1 ? "isn’t" : "aren’t") + " saved"
-        let waitsForPrint = "waits for the print\(prints.count == 1 ? "" : "s") to reach the printing system"
-        switch (prints.isEmpty, sheets.isEmpty) {
-        case (true, _):
-            return ("Latent is still making a contact sheet", stopsSheet + ".", "Stop and Quit")
-        case (false, true):
-            return ("Latent is still \(printing)", "Quitting now " + waitsForPrint + ", then quits.",
-                    "Finish Printing and Quit")
-        case (false, false):
-            return ("Latent is still \(printing) and making a contact sheet",
-                    stopsSheet + ", and " + waitsForPrint + ", then quits.", "Finish Printing and Quit")
+        let merges = jobs.filter { $0.kind == .photoMerge }
+        // What is under way, in the order the message names it.
+        var underWay: [String] = []
+        if !prints.isEmpty {
+            underWay.append(prints.count == 1 ? "printing “\(prints[0].name)”" : "printing \(prints.count) jobs")
         }
+        if !sheets.isEmpty { underWay.append("making a contact sheet") }
+        if !merges.isEmpty { underWay.append(merges.count == 1 ? "making an HDR merge" : "making HDR merges") }
+        // What quitting stops, then what it waits for.
+        var stopped: [String] = []
+        if !sheets.isEmpty {
+            stopped.append("the contact sheet\(sheets.count == 1 ? "" : "s"), which "
+                           + (sheets.count == 1 ? "isn’t" : "aren’t") + " saved")
+        }
+        if !merges.isEmpty {
+            stopped.append(merges.count == 1 ? "the HDR merge, which leaves no photo"
+                                             : "the HDR merges, which leave no photos")
+        }
+        var information = stopped.isEmpty ? "" : "Quitting now stops " + stopped.joined(separator: ", and ")
+        if !prints.isEmpty {
+            information += (information.isEmpty ? "Quitting now " : ", and ")
+                + "waits for the print\(prints.count == 1 ? "" : "s") to reach the printing system, then quits"
+        }
+        return ("Latent is still " + spokenList(underWay), information + ".",
+                prints.isEmpty ? "Stop and Quit" : "Finish Printing and Quit")
+    }
+
+    /// "a", "a and b", "a, b and c".
+    private static func spokenList(_ items: [String]) -> String {
+        guard items.count > 1 else { return items.first ?? "" }
+        return items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
     }
 }

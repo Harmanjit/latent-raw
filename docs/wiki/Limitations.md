@@ -47,6 +47,17 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **The print panel's preview is drawn from thumbnails.** It shows the layout; the photos themselves are rendered for the printer only when you print.
 - **Showing and hiding the sidebar and filmstrip has no keyboard shortcut or menu item.** The filmstrip has its film button in the status bar.
 
+## Photo Merge
+
+- **HDR only.** Panorama and HDR Panorama merges aren't there yet, and neither is focus stacking (Lightroom doesn't have it either).
+- **Brackets must be shot on a tripod.** HDR merge doesn't align frames or remove ghosts yet, so a camera that moved gives doubled edges and anything that moved between shots shows through semi-transparent. The dialog warns when the frames don't line up.
+- **Raw files from Bayer sensors only,** all from one camera at one size and orientation; merged photos can't be merged again. On 8 GB Macs a merge takes at most 5 photos.
+- **Edits on the bracket's photos aren't used.** The merge reads the raw files; the result starts unedited at the reference photo's exposure.
+- **The reference photo is chosen automatically,** and there are no merge options yet.
+- **No re-merge.** The result records which photos made it, but Latent can't merge them again from that record, and a merge can't be undone except by deleting its DNG in Finder.
+- **Merged DNGs are large and uncompressed,** about 6 bytes per pixel (roughly 145 MB for 24 MP). Merges write DNG; export still doesn't.
+- **A merged DNG copied in from Finder without its sidecar** is catalogued as a plain DNG; the record of what made it stays inside the file, unread.
+
 ## Editing
 
 - **Masks are placed once.** A gradient or radial cannot be dragged into a new position after placement; delete and redraw.
