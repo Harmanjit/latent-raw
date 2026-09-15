@@ -28,6 +28,15 @@
   - Soltesz 5-frame JPEG bracket and Hurd 4-frame JPEG panorama.
 - **Shot list** for what's missing (handheld bracket, long panorama, HDR panorama) is in the Wave A report.
 
+**Phase 6 (Auto Align and Deghost) is done (2026-09-15).** Where it differs from sections 2c and 3:
+- **Alignment** is phase correlation plus ECC on the CPU (`MergeKit/Align`), as the Vision spike recommended, not Vision. The analysis aligns neighbours on half-size frames (2 x 2 photosite blocks; 4 x 4 above about 60 MP) and keeps only the links (`HDRMergeAlignment`), so the merge can chain them to whichever frame is the reference. Real brackets: Market Mires frames moved up to 28 px at the corners, Ihrke and Crete 0.2–2.3 px; every neighbour pair was accepted (NCC 0.95–0.996).
+- **A link the aligner rejects** gets a second opinion from the old phase-correlation check: within 1.5 px, the frames beyond it merge unaligned; further, they are left out (never leaving fewer than two frames). The dialog warns with `frameCouldNotBeAligned`; the old misalignment warning only appears with Auto Align off.
+- **Exposure is measured again after aligning** a pair that moved 0.5 px or more: measured several pixels apart, the ratio was 0.04 stops off on a synthetic bracket shifted 6 px.
+- **Merge:** each frame is warped (Catmull-Rom) after RCD and before the clip feathering, ghost mask and weights; alpha is coverage and multiplies the weight, so the output keeps the reference frame's full size and uncovered edges get weight 0 (the reference keeps a 1e-8 floor when anything warps). The clip mask is warped with the largest of its four nearest pixels, not the full Catmull-Rom footprint: with the accumulator's own one-pixel widening that covers the same pixels, and the full footprint widened twice showed as grey squares in glittering water. Warping adds 9 bytes per pixel.
+- **Deghost with alignment:** each frame's quarter-size measurement (brightness interval and usable map) is warped onto the reference grid before the local references are chosen, blending the interval limits bilinearly. Taking the widest interval of the footprint instead found a fortieth of the movement on Ihrke.
+- **Recipe** options add `autoAlign`, `alignmentShifts` (px per frame, null if not aligned) and `leftOut`.
+- **Not done, for Phase 7:** the deghost overlay (the dialog has no preview yet), colour-aware ghost detection (moving people against an equally bright background can still double at Medium and High on Market Mires), parallax (a near pole against the street in a handheld bracket keeps a doubled edge).
+
 **Active-area fix** is merged: the sensor plane is cut to LibRaw's visible area, and old edits with geometry are migrated on load. The "Crop every frame to the active area" rule in 2a is therefore already true everywhere.
 
 ## 1. What Photo Merge will do
@@ -276,8 +285,8 @@ Every decision is made on a **1/8-scale** copy. Only the final warp and blend ru
 | 4 | **Tripod HDR core + `latent-cli merge-hdr`** | 2–3 wk | `MergeKit/HDR/*`, `Shaders/MergeHDR.metal`, `latent-cli/main.swift` | after 2+3 |
 | 5a | **Catalog:** `latent:Merge` sidecar block + tests | 3 d | `XMPSidecar.swift`, CatalogTests | ⇉ from phase 1 on |
 | 5b | **App: Photo › Photo Merge › HDR… (⌃H), tripod only.** Small options sheet, job, naming/commit, docs | 2 wk | `BareKeys.swift`, `AppMenus.swift`, `ContentView.swift`, `MergeJob.swift`, `LatentApp.swift`, `docs/wiki/*` | after 4 |
-| 6a | **Auto Align:** Vision chain, validation, `mergeWarp` | 1.5 wk | `MergeKit/Align/*`, `Shaders/MergeWarp.metal` | ⇉ with 6b |
-| 6b | **Deghost** None/Low/Med/High + overlay (not red-only) | 1.5 wk | `MergeKit/Deghost/*`, `Shaders/MergeDeghost.metal` | ⇉ with 6a |
+| 6a | **Auto Align:** Vision chain, validation, `mergeWarp` (**done**; ECC instead of Vision, see §0) | 1.5 wk | `MergeKit/Align/*`, `Shaders/MergeWarp.metal` | ⇉ with 6b |
+| 6b | **Deghost** None/Low/Med/High + overlay (not red-only) (**done** without the overlay, which moves to 7) | 1.5 wk | `MergeKit/Deghost/*`, `Shaders/MergeDeghost.metal` | ⇉ with 6a |
 | 7 | Preview sheet on cached binned frames, Auto Settings, headless ⇧⌃H, Undo to Trash | 2 wk | app + `MergeKit/Preview` | — |
 | 8a | **Panorama geometry:** camera solve, projections, CPU twin, gains, crop | 2 wk | `MergeKit/Pano/Geometry/*` | ⇉ with 8b (agree the `PanoCameras` struct first) |
 | 8b | **Panorama GPU:** `mergeLensPrep`, warp, Voronoi, tiled blend, scratch files | 2–3 wk | `MergeKit/Pano/Blend/*`, `Shaders/MergePano.metal` | ⇉ with 8a |

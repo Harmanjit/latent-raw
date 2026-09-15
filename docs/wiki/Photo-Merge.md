@@ -12,12 +12,12 @@ A *bracket* is the answer: the same scene shot several times, each at a differen
 
 ## Shooting a bracket
 
-- **Use a tripod.** The shots must line up exactly. This version doesn't align handheld shots yet (see Current limits, below).
+- **Use a tripod if you can.** Handheld brackets work too, because **Auto Align** lines the shots up (see below), but a tripod gives the cleanest result. Handheld, use your camera's continuous shooting so the bracket takes a fraction of a second, and keep the shutter speed of the brightest shot fast enough to hold steady (1/60 s or faster).
 - **Focus manually,** or focus once and switch autofocus off, so the focus doesn't move between shots.
 - **Use aperture priority (A or Av) or manual,** so the aperture, and with it the depth of field, stays the same. Let the shutter speed change the exposure. Keep the ISO fixed.
 - **Turn on your camera's auto exposure bracketing (AEB)** if it has one, and set it to **2 EV steps** with **3 or 5 frames**: for example −2, 0 and +2 EV. Five frames at 2 EV cover very bright scenes; three are enough for most.
 - **Use the self-timer or a remote,** so pressing the button doesn't shake the camera.
-- **Avoid moving things** where you can: people, cars, leaves in wind and clouds move between shots. This version doesn't remove the ghosts they leave.
+- **Avoid moving things** where you can: people, cars, leaves in wind, waves and clouds move between shots. **Deghost** (see below) can keep each one to a single shot, but it works best when little moves.
 - **Shoot raw.** Photo Merge reads raw files only (Bayer sensors; not Fujifilm X-Trans).
 
 ## Merging
@@ -26,14 +26,46 @@ A *bracket* is the answer: the same scene shot several times, each at a differen
 2. Choose **Photo › Photo Merge › HDR…**, or press **⌃H**. It needs two or more selected photos. In Loupe, Compare, Survey and Develop it merges the photos you selected in the grid, as Export does.
 3. The **HDR Merge** dialog reads the photos for a moment, then lists them brightest first. Each row shows the shutter speed, aperture and ISO, and how many stops brighter or darker it is than the **Reference** photo. The reference is the frame with the fewest clipped and black pixels, chosen for you; the merged photo opens looking like it.
 4. Below the list are the merged photo's size in pixels and megapixels, roughly how large the file will be, and its name.
-5. Read any warning. The most common is that the photos don't line up exactly, which usually means the camera moved.
-6. Press **Merge** (Return). The dialog closes and the merge runs in the background. Its progress shows in the left panel's **Export** section, with a **Cancel** button. Esc or **Cancel** in the dialog closes it without merging.
+5. Choose the options: **Auto Align** (on unless you turned it off) and **Deghost** (None unless you chose a level). The dialog remembers both for next time. Turning Auto Align on or off reads the photos again.
+6. Read any note or warning. When Auto Align moved the photos by a pixel or more, a note says by how much ("Photo Merge aligned these photos (up to 17 px)"). A warning says when a photo couldn't be aligned.
+7. Press **Merge** (Return). The dialog closes and the merge runs in the background. Its progress shows in the left panel's **Export** section, with a **Cancel** button. Esc or **Cancel** in the dialog closes it without merging.
 
 If the photos can't be merged (they are from different cameras, different sizes, or all the same exposure, say) the dialog says why and offers only **Close**.
 
 When the merge finishes, the new photo is selected in the grid, and VoiceOver says "HDR merge finished" with its name. If a filter would hide it, the filter is cleared. If something goes wrong, the reason shows in the status bar and nothing is left behind.
 
 A merge takes turns with exports: Export waits while a merge runs, and a merge can't start during an export. Quitting during a merge asks first; quitting stops the merge, and neither a half-made photo nor its sidecar is left.
+
+## Auto Align
+
+Between the shots of a bracket the camera moves a little, even on a tripod when the mirror or the wind shakes it, and a lot when you hold it. Merged as they are, the shots give doubled edges: two copies of every branch and window frame, a few pixels apart.
+
+**Auto Align** measures how each shot moved compared with the reference photo and moves it back before merging. It handles shifts, a slight turn of the camera and the small change of perspective that comes with it. It compares each shot with its neighbour in brightness (the neighbours share the most detail) and checks the answer before using it. Shots that didn't move are left exactly as they are.
+
+- **Leave it on.** Measuring the movement takes a fraction of a second per photo, and a tripod bracket that didn't move comes out the same as without it.
+- **The merged photo keeps the reference photo's full frame.** Along the edges, where another shot moved out of the picture, that shot simply doesn't contribute; nothing is cropped or stretched.
+- **When a shot can't be aligned** (too little detail it shares with its neighbour, as in a nearly black shot of a night sky), the dialog says so. If it looks within a pixel or so of the others it is merged where it is; if it looks further out it is left out of the merge, because doubled edges look worse than the few highlights or shadows it would have added. Its warning says which.
+- **Turn it off** only if you want to see a bracket exactly as shot, or to compare. With it off, the dialog warns when the shots don't line up.
+- **It can't fix everything that moved.** It moves each whole shot, so things at different distances that shift against each other (a pole close to a handheld camera against the street behind it) and things that moved by themselves still differ between shots. Deghost is for those.
+
+## Deghost
+
+A *ghost* is something that moved between the shots: a person walking, leaves in the wind, a wave. Merged as it is, it shows up several times, half transparent, or smeared. **Deghost** finds the parts of the picture that changed between the shots and takes each of them from one shot only (the reference photo wherever it shows that part well), so the moving thing appears once.
+
+The cost is noise and range in those parts: they come from one shot instead of several, so shadows there can look noisier and very bright or very dark parts of the moving thing may clip. That is why it starts at **None**, as in Lightroom.
+
+| Level | What it catches | Use it for |
+|---|---|---|
+| **None** | Nothing | Still scenes: architecture, interiors, landscapes on a calm day. |
+| **Low** | Only large, clear changes, such as a dark coat crossing a pale wall | A person or car passing through an otherwise still scene. |
+| **Medium** | Most movement, including leaves and water that change the brightness noticeably | Trees in a breeze, waves, busy streets. A good first try when something moved. |
+| **High** | Faint changes too: ripples, thin branches | Scenes where Medium still leaves soft or doubled patches, if you accept more noise in them. |
+
+What to expect:
+
+- **Deghost compares brightness, not colour.** Something that moved in front of a background just as bright (a blond head in front of a sunlit wall) can go unnoticed and still look doubled or transparent. Try a higher level; if that doesn't help, a merge without it may look softer but more natural.
+- **Deghost takes a little longer**: each shot is read once more to look for movement.
+- **Use Auto Align with it.** Without alignment, a shot that moved differs from the reference everywhere, and Deghost would take almost the whole picture from one shot.
 
 ## The merged photo
 
@@ -47,15 +79,15 @@ A merge takes turns with exports: Export waits while a merge runs, and a merge c
 
 **Size.** The file is uncompressed half floats, about 6 bytes per pixel: a merge of 24 MP photos is roughly 145 MB, of 45 MP photos about 270 MB. Latent checks the disk has room before writing.
 
-**What made it.** The photo's sidecar and the DNG itself record which photos were merged (by path and fingerprint), when they were taken, and how. That is a record only: Latent can't yet re-run a merge from it.
+**What made it.** The photo's sidecar and the DNG itself record which photos were merged (by path and fingerprint), when they were taken, and how: the Deghost level, whether Auto Align was on, how far it moved each shot and which shots it left out. That is a record only: Latent can't yet re-run a merge from it.
 
 ## Current limits
 
-- **No alignment.** Shots that moved, even slightly, give doubled edges. Use a tripod; the dialog warns when the photos don't line up.
-- **No deghosting.** Anything that moved between shots appears semi-transparent.
+- **Auto Align moves whole shots.** Near and far things that shifted against each other in a handheld bracket (parallax) still show slightly doubled edges, and a shot it can't align is merged as it is or left out.
+- **Deghost compares brightness only,** so movement against an equally bright background can slip through, and deghosted parts come from one shot, with that shot's noise. There is no overlay yet showing which parts it took from one shot.
 - **HDR only.** Panorama and HDR Panorama are coming.
 - **Raw files only,** from Bayer sensors. X-Trans, monochrome and already-merged files can't be merged, and all photos must come from the same camera at the same size and orientation.
-- **The reference is chosen automatically;** you can't pick another yet.
+- **The reference is chosen automatically;** you can't pick another yet, and the merge can't be previewed before it runs.
 - **On Macs with 8 GB of memory,** a merge takes at most 5 photos.
 
 See also [Limitations](Limitations) and [Keyboard Shortcuts](Keyboard-Shortcuts).

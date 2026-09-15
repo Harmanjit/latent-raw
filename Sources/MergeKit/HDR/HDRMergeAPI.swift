@@ -21,21 +21,36 @@ public struct HDRMergeFrame: Sendable, Equatable {
     public let exifRelativeEV: Double
     /// Share of pixels clipped (at the sensor's maximum) in this frame, 0...1.
     public let clippedFraction: Double
+    /// How far Auto Align moves this frame to line it up with the reference
+    /// frame: the most any of its corners moves, in full-resolution pixels.
+    /// 0 for the reference frame; nil when Auto Align was off or couldn't
+    /// line this frame up (a `frameCouldNotBeAligned` warning says which).
+    public let alignmentShiftPixels: Double?
 
+    /// `alignmentShiftPixels` defaults to nil, so code written before Auto
+    /// Align (the app's test engines) builds frames as it did.
     public init(url: URL, exposureSeconds: Double, iso: Double, aperture: Double,
-                relativeEV: Double, exifRelativeEV: Double, clippedFraction: Double) {
+                relativeEV: Double, exifRelativeEV: Double, clippedFraction: Double,
+                alignmentShiftPixels: Double? = nil) {
         self.url = url; self.exposureSeconds = exposureSeconds; self.iso = iso; self.aperture = aperture
         self.relativeEV = relativeEV; self.exifRelativeEV = exifRelativeEV; self.clippedFraction = clippedFraction
+        self.alignmentShiftPixels = alignmentShiftPixels
     }
 }
 
 /// Something the user should know before merging. None of these stop a
 /// merge; errors (`HDRMergeError`) do.
 public enum HDRMergeWarning: Sendable, Equatable {
-    /// Neighbouring frames are offset by up to this many full-resolution
-    /// pixels. v1 doesn't align frames yet, so the result may show double
-    /// edges.
+    /// With Auto Align off: neighbouring frames are offset by up to this
+    /// many full-resolution pixels, so the result may show double edges.
     case framesLookMisaligned(maximumShiftPixels: Double)
+    /// Auto Align couldn't line this frame up with the reference (too
+    /// little detail both frames recorded, or no match good enough to
+    /// trust). If it looks within a pixel or so of where it belongs it is
+    /// merged where it is; otherwise (`leftOut`) it is left out of the
+    /// merge, since a frame several pixels out would double every edge it
+    /// contributes to. See `HDRMergeAlignment.plan`.
+    case frameCouldNotBeAligned(frameIndex: Int, leftOut: Bool)
     /// The pixels say this frame's exposure differs from its EXIF by this
     /// much; the measured value is used.
     case exposureMetadataDisagrees(frameIndex: Int, exifRelativeEV: Double, measuredRelativeEV: Double)
@@ -59,12 +74,18 @@ public struct HDRMergeAnalysis: Sendable, Equatable {
     public let warnings: [HDRMergeWarning]
     /// Roughly how big the DNG will be, for the free-space check and the dialog.
     public let estimatedOutputBytes: Int64
+    /// How the frames moved relative to each other, measured when Auto
+    /// Align was on (nil when it was off). `merge` lines the frames up from
+    /// this, whichever frame ends up the reference.
+    public let alignment: HDRMergeAlignment?
 
     public init(frames: [HDRMergeFrame], referenceIndex: Int, width: Int, height: Int,
-                exposureRangeStops: Double, warnings: [HDRMergeWarning], estimatedOutputBytes: Int64) {
+                exposureRangeStops: Double, warnings: [HDRMergeWarning], estimatedOutputBytes: Int64,
+                alignment: HDRMergeAlignment? = nil) {
         self.frames = frames; self.referenceIndex = referenceIndex; self.width = width; self.height = height
         self.exposureRangeStops = exposureRangeStops; self.warnings = warnings
         self.estimatedOutputBytes = estimatedOutputBytes
+        self.alignment = alignment
     }
 }
 
@@ -74,21 +95,29 @@ public struct HDRMergeOptions: Sendable, Equatable, Codable {
     public var referenceIndex: Int?
     /// How hard the merge looks for things that moved (Phase 6b).
     public var deghost: DeghostAmount = .none
+    /// Line the frames up before merging them (Phase 6a), for brackets shot
+    /// without a tripod. On by default: a tripod bracket that didn't move
+    /// is left exactly as it is, so it costs only the measuring. `analyse`
+    /// measures the movement only when this is on, so changing it means
+    /// analysing again.
+    public var autoAlign: Bool = true
 
-    public init(referenceIndex: Int? = nil, deghost: DeghostAmount = .none) {
+    public init(referenceIndex: Int? = nil, deghost: DeghostAmount = .none, autoAlign: Bool = true) {
         self.referenceIndex = referenceIndex
         self.deghost = deghost
+        self.autoAlign = autoAlign
     }
 
-    private enum CodingKeys: String, CodingKey { case referenceIndex, deghost }
+    private enum CodingKeys: String, CodingKey { case referenceIndex, deghost, autoAlign }
 
     /// Written by hand so options saved before a field existed still decode,
     /// with that field at its default: the synthesised decoder would
-    /// refuse JSON without a `deghost` key.
+    /// refuse JSON without a `deghost` or `autoAlign` key.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         referenceIndex = try container.decodeIfPresent(Int.self, forKey: .referenceIndex)
         deghost = try container.decodeIfPresent(DeghostAmount.self, forKey: .deghost) ?? DeghostAmount.none
+        autoAlign = try container.decodeIfPresent(Bool.self, forKey: .autoAlign) ?? true
     }
 }
 
@@ -140,7 +169,9 @@ public struct HDRMergeProgress: Sendable, Equatable {
 /// substitute their own.
 public protocol HDRMerging: Sendable {
     /// Validates the photos and measures them. Throws `HDRMergeError`.
-    func analyse(_ urls: [URL]) async throws -> HDRMergeAnalysis
+    /// Of `options`, only `autoAlign` matters here: with it on, the analysis
+    /// also measures how the frames moved (`HDRMergeAnalysis.alignment`).
+    func analyse(_ urls: [URL], options: HDRMergeOptions) async throws -> HDRMergeAnalysis
 
     /// Merges and writes the DNG to `destination` (which must not exist).
     ///
@@ -158,4 +189,11 @@ public protocol HDRMerging: Sendable {
                to destination: URL,
                prepareSidecar: @escaping @Sendable (MergeRecipe) async throws -> Void,
                progress: @escaping @Sendable (HDRMergeProgress) -> Void) async throws -> MergeDNGWriteResult
+}
+
+extension HDRMerging {
+    /// `analyse` with the default options (Auto Align on).
+    public func analyse(_ urls: [URL]) async throws -> HDRMergeAnalysis {
+        try await analyse(urls, options: HDRMergeOptions())
+    }
 }

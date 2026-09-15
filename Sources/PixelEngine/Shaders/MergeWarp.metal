@@ -169,6 +169,16 @@ kernel void mergeWarpRGBA(
 //    counts as clipped, because a clipped value's error travels with it.
 //    At a whole-pixel shift only one pixel has weight, so the mask moves
 //    exactly as the colours do.
+// 2. Nearest four maximum: the largest of the four pixels a bilinear sample
+//    would blend (those with a non-zero weight), the four the Catmull-Rom
+//    sample leans on (its outer taps weigh at most 7.4% each way). For the
+//    HDR merge's clip mask: the merge widens the mask by a pixel all round
+//    anyway (`mergeHDRAccumulate`), and a neighbouring output pixel's
+//    nearest four are the outer taps of this one's, so after that widening
+//    every output a clipped pixel fed is marked, as with mode 1. Mode 1
+//    widened twice marked a ring more, and on glittering water the merge
+//    then handed whole blocks over to darker frames, which showed as grey
+//    squares.
 //
 // Outside the source the mask reads `outside`.
 kernel void mergeWarpMask(
@@ -201,6 +211,15 @@ kernel void mergeWarpMask(
         float top = mix(source.read(uint2(xa, ya)).r, source.read(uint2(xb, ya)).r, t.x);
         float bottom = mix(source.read(uint2(xa, yb)).r, source.read(uint2(xb, yb)).r, t.x);
         value = mix(top, bottom, t.y);
+    } else if (mode == 2) {
+        for (int j = 0; j < 2; j++) {
+            if ((j == 0 ? 1.0 - t.y : t.y) < 1e-6) continue;
+            int row = clamp(by + j, 0, height - 1);
+            for (int i = 0; i < 2; i++) {
+                if ((i == 0 ? 1.0 - t.x : t.x) < 1e-6) continue;
+                value = max(value, source.read(uint2(clamp(bx + i, 0, width - 1), row)).r);
+            }
+        }
     } else {
         float4 wx = mergeWarpCatmullRom(t.x), wy = mergeWarpCatmullRom(t.y);
         for (int j = 0; j < 4; j++) {

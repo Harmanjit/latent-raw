@@ -135,8 +135,13 @@ public final class HDRGhostDetector {
 
     /// Measures frame `index` of the bracket (brightest first) and adds it
     /// to the choice of local references. Waits for the GPU.
+    ///
+    /// - Parameter movingToReference: with alignment, where this frame's
+    ///   pixels belong on the reference frame (full-resolution pixels, as
+    ///   `MergeWarpKernels` takes it); the measurement is moved there before
+    ///   anything compares it. Nil or the identity leaves it where it is.
     public func measure(_ file: RawFile, index: Int, levels: HDRFrameLevels,
-                        relativeEV: Double) throws -> HDRGhostMeasurement {
+                        relativeEV: Double, movingToReference: simd_double3x3? = nil) throws -> HDRGhostMeasurement {
         guard !measuringDone else { throw RenderError.commandBufferFailed }
         guard case .bayer(let order) = file.summary.cfaPattern, let plane = file.sensorPlane,
               let buffer = gpu.makeSharedBuffer(wrapping: plane) else { throw HDRMergeKernelError.notABayerFrame }
@@ -148,7 +153,7 @@ public final class HDRGhostDetector {
         let usable = try scratchTexture(.r16Float, "usable")
         let eroded = try scratchTexture(.r16Float, "usableEroded")
         let feathered = try scratchTexture(.r16Float, "usableFeathered")
-        guard let commands = gpu.commandQueue.makeCommandBuffer() else { throw RenderError.commandBufferFailed }
+        guard var commands = gpu.commandQueue.makeCommandBuffer() else { throw RenderError.commandBufferFailed }
 
         // 1. The blocks' brightness intervals and how usable each is.
         let measure = try gpu.lazyPipeline(.mergeDeghostMeasure)
@@ -177,12 +182,19 @@ public final class HDRGhostDetector {
         HDRMergeKernels.dispatch(encoder, pso: measure, width: mapWidth, height: mapHeight)
         encoder.endEncoding()
 
-        // (Alignment goes here too: `interval` and `usable` warped onto the
-        // reference frame at quarter size.)
+        // With alignment, the measurement moved onto the reference frame
+        // (`warpMeasurement`), in its own command buffers.
+        var usableHere = usable
+        if let movingToReference, !MergeWarpKernels.isIdentity(movingToReference) {
+            try HDRMergeKernels.run(commands)
+            usableHere = try warpMeasurement(interval: interval, usable: usable, movingToReference: movingToReference)
+            guard let next = gpu.commandQueue.makeCommandBuffer() else { throw RenderError.commandBufferFailed }
+            commands = next
+        }
 
         // 2. Feathered as the merge will feather the frame, then offered as
         // the local reference.
-        HDRMergeKernels.encodeFeather(commands, gpu: gpu, feather: feather, source: usable, eroded: eroded,
+        HDRMergeKernels.encodeFeather(commands, gpu: gpu, feather: feather, source: usableHere, eroded: eroded,
                                       feathered: feathered)
         let choose = try gpu.lazyPipeline(.mergeDeghostChooseReference)
         guard let chooser = commands.makeComputeCommandEncoder() else { throw RenderError.commandBufferFailed }
@@ -215,6 +227,90 @@ public final class HDRGhostDetector {
             intervals[i * 2 + 1] = Float16(full[i * 4 + 1])
         }
         return HDRGhostMeasurement(width: mapWidth, height: mapHeight, intervals: intervals)
+    }
+
+    /// Largest log2 brightness a warped interval keeps: far beyond any real
+    /// scene (2^64 times the brightest frame's white), close enough to zero
+    /// for 32-bit floats to hold to a hundred-thousandth of a stop.
+    static let warpLimit: Float = 64
+
+    /// Moves a measured frame onto the reference frame's quarter-size grid:
+    /// its `interval` in place, and its `usable` map into a new texture,
+    /// which it returns.
+    ///
+    /// **Blended, like the brightness it describes.** Where a moved block
+    /// lands between four blocks, its low and high limits are blends of
+    /// theirs (bilinear), as the block's brightness would be. Taking the
+    /// widest interval of every block the sample touches instead was tried:
+    /// on the Ihrke bracket it found a fortieth of the movement found without
+    /// alignment (blending finds about as much), because a sample between
+    /// blocks touches four of them each way and the comparison already
+    /// allows a block of misalignment on top. Outside the frame
+    /// there is nothing to compare: the interval is unbounded both ways,
+    /// which never disagrees, and the block isn't usable, so the frame
+    /// can't be the local reference there.
+    ///
+    /// "Unbounded" is 10,000 stops, which a blend would turn into thousands
+    /// of stops of nonsense, so the logs are first clamped to plus or minus
+    /// `warpLimit`: a blend with an unbounded limit still lands tens of
+    /// stops beyond any real brightness, which the comparison treats as
+    /// unbounded anyway. Both limits are shifted by `warpLimit` on the way
+    /// (0...2 x `warpLimit`), so a mask texture's non-negative range holds them.
+    private func warpMeasurement(interval: MTLTexture, usable: MTLTexture,
+                                 movingToReference: simd_double3x3) throws -> MTLTexture {
+        // The same move in quarter-size pixels: a map pixel's centre is its
+        // block's centre, so full-resolution coordinates are just divided.
+        let span = Double(HDRMergeKernels.maskSpan)
+        let toMap = simd_double3x3(diagonal: SIMD3(1 / span, 1 / span, 1))
+        let h = toMap * movingToReference * toMap.inverse
+
+        let count = mapWidth * mapHeight
+        // "No limit", as MergeDeghost.metal's `mergeDeghostUnbounded` writes it.
+        let limit = Self.warpLimit, unbounded: Float = 10000
+        var measured = [Float](repeating: 0, count: count * 4)
+        interval.getBytes(&measured, bytesPerRow: mapWidth * 16, from: MTLRegionMake2D(0, 0, mapWidth, mapHeight),
+                          mipmapLevel: 0)
+        var lows = [Float](repeating: 0, count: count), highs = lows, exposed = lows
+        for i in 0..<count {
+            lows[i] = min(max(limit + measured[i * 4], 0), 2 * limit)
+            highs[i] = min(max(limit + measured[i * 4 + 1], 0), 2 * limit)
+            exposed[i] = measured[i * 4 + 2]
+        }
+        func upload(_ values: [Float], _ purpose: String) throws -> MTLTexture {
+            let texture = try scratchTexture(.r32Float, purpose, storage: .shared)
+            values.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                texture.replace(region: MTLRegionMake2D(0, 0, mapWidth, mapHeight), mipmapLevel: 0,
+                                withBytes: base, bytesPerRow: mapWidth * 4)
+            }
+            return texture
+        }
+        func warped(_ source: MTLTexture, _ purpose: String, _ sampling: MergeWarpKernels.MaskSampling,
+                    outside: Float) throws -> [Float] {
+            let output = try scratchTexture(.r32Float, purpose, storage: .shared)
+            _ = try MergeWarpKernels.warpMask(source, movingToReference: h, sampling: sampling, outside: outside,
+                                              into: output, gpu: gpu)
+            var values = [Float](repeating: 0, count: count)
+            output.getBytes(&values, bytesPerRow: mapWidth * 4, from: MTLRegionMake2D(0, 0, mapWidth, mapHeight),
+                            mipmapLevel: 0)
+            return values
+        }
+        let movedLows = try warped(try upload(lows, "warpLow"), "warpedLow", .bilinear, outside: 0)
+        let movedHighs = try warped(try upload(highs, "warpHigh"), "warpedHigh", .bilinear, outside: 2 * limit)
+        let movedExposed = try warped(try upload(exposed, "warpExposed"), "warpedExposed", .bilinear, outside: 0)
+        for i in 0..<count {
+            let low = movedLows[i] - limit, high = movedHighs[i] - limit
+            measured[i * 4] = low <= 0.999 * -limit ? -unbounded : low
+            measured[i * 4 + 1] = high >= 0.999 * limit ? unbounded : high
+            measured[i * 4 + 2] = movedExposed[i]
+        }
+        measured.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return }
+            interval.replace(region: MTLRegionMake2D(0, 0, mapWidth, mapHeight), mipmapLevel: 0,
+                             withBytes: base, bytesPerRow: mapWidth * 16)
+        }
+        return try MergeWarpKernels.warpMask(usable, movingToReference: h, sampling: .bilinear, outside: 0,
+                                             into: try scratchTexture(.r16Float, "usableWarped"), gpu: gpu)
     }
 
     /// Ends the measuring pass and frees its textures.

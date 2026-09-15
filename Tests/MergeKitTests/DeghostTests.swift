@@ -198,6 +198,6 @@ final class DeghostTests: XCTestCase {
             XCTAssertLessThan(stricter.patchCount, looser.patchCount)
         }
         XCTAssertEqual(HDRMerger.recipeOptions(HDRMergeOptions(deghost: .low)),
-                       ["deghost": .string("low"), "clipFeather": .number(1)])
+                       ["deghost": .string("low"), "clipFeather": .number(1), "autoAlign": .bool(false)])
     }
 }

@@ -182,6 +182,10 @@ constexpr sampler mergeHDRMaskSampler(coord::pixel, filter::linear, address::cla
 // - `weightFloor` is 0 except for the darkest frame, which keeps at least
 //   1e-4: where every frame is clipped, the darkest one's value is the
 //   best there is, and the floor makes it the result with no special case.
+// - With `coverageOn` (a frame warped onto the reference by alignment), the
+//   weight, floor included, is multiplied by the frame's alpha: 1 inside
+//   the moved frame, 0 where it moved out of the picture and has nothing to
+//   give.
 kernel void mergeHDRAccumulate(
     texture2d<float, access::read> rgb               [[texture(0)]],
     texture2d<float, access::read> clipMask          [[texture(1)]],
@@ -196,6 +200,7 @@ kernel void mergeHDRAccumulate(
     constant float &maskSpan                         [[buffer(5)]],
     constant float &featherOn                        [[buffer(6)]],
     constant float &ghostOn                          [[buffer(7)]],
+    constant float &coverageOn                       [[buffer(8)]],
     uint2 gid                                        [[thread_position_in_grid]])
 {
     int width = int(accumulator.get_width()), height = int(accumulator.get_height());
@@ -218,6 +223,7 @@ kernel void mergeHDRAccumulate(
     if (featherOn > 0.5) weight *= saturate(feather.sample(mergeHDRMaskSampler, maskPosition).r);
     if (ghostOn > 0.5) weight *= 1.0 - saturate(ghost.sample(mergeHDRMaskSampler, maskPosition).r);
     weight = max(weight, weightFloor);
+    if (coverageOn > 0.5) weight *= saturate(rgb.read(gid).a);
 
     float4 sums = accumulator.read(gid);
     accumulator.write(sums + float4(unitWB * (radianceScale * weight), weight), gid);

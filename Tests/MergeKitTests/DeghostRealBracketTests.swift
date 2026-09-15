@@ -102,16 +102,26 @@ final class DeghostRealBracketTests: XCTestCase {
         Self.checkShares(outcome, most: 0.4)
     }
 
-    /// People walking through a market, 5 frames 1 stop apart, handheld:
-    /// until alignment arrives the frames are up to 17 px apart, so a large
-    /// share counts as moving.
+    /// People walking through a market, 5 frames 1 stop apart, handheld
+    /// (frames up to 28 px apart at the corners). Auto Align makes the
+    /// region far sharper; deghosting at medium adds a little more, not a
+    /// lot: the walking people are about as bright as the sunlit street
+    /// behind them, so brightness alone finds only part of their movement
+    /// (docs/wiki/Photo-Merge.md, Deghost). Aligned, it leaves out under a
+    /// fifth of any frame; unaligned it was nearly half.
     func testMarketMiresPeopleComeFromOneExposure() async throws {
         let urls = try Self.bracket("empa-market-mires-2", extension: "NEF")
-        let outcome = try await Self.mergeBothWays(urls, region: (900, 1400, 900, 600))
-        print("Market Mires: sharpness \(outcome.none.sharpness) -> \(outcome.medium.sharpness), "
-              + "masked \(outcome.medium.report.ghostMaskedFractions)")
-        XCTAssertGreaterThan(outcome.medium.sharpness, 1.1 * outcome.none.sharpness)
-        Self.checkShares(outcome, most: 0.7)
+        let region: Region = (900, 1400, 900, 600)
+        let outcome = try await Self.mergeBothWays(urls, region: region)
+        let merger = try HDRTestSupport.merger()
+        let unaligned = try await Self.merge(try await merger.analyse(urls, options: HDRMergeOptions(autoAlign: false)),
+                                             merger: merger, options: HDRMergeOptions(autoAlign: false), region: region)
+        let unalignedSharpness = Self.sharpness(unaligned.luminance, width: region.width, height: region.height)
+        print("Market Mires: sharpness unaligned \(unalignedSharpness), aligned \(outcome.none.sharpness), "
+              + "aligned at medium \(outcome.medium.sharpness), masked \(outcome.medium.report.ghostMaskedFractions)")
+        XCTAssertGreaterThan(outcome.none.sharpness, 1.1 * unalignedSharpness, "alignment sharpens")
+        XCTAssertGreaterThan(outcome.medium.sharpness, outcome.none.sharpness, "deghosting doesn't soften")
+        Self.checkShares(outcome, most: 0.2)
     }
 
     /// Wind-blown birch leaves against a bright sky, 6 frames 2 stops apart

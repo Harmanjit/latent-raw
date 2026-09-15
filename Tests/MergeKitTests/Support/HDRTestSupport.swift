@@ -117,12 +117,12 @@ enum HDRTestSupport {
         return Merged(width: plane.width, height: plane.height, rgb: rgb, file: file)
     }
 
-    /// Analyses and merges `urls` into a new folder; returns everything a
-    /// test may check. The caller removes `folder`.
+    /// Analyses (with `options`, for Auto Align) and merges `urls` into a new
+    /// folder; returns everything a test may check. The caller removes `folder`.
     static func merge(_ urls: [URL], merger: HDRMerger? = nil, options: HDRMergeOptions = HDRMergeOptions())
     async throws -> (analysis: HDRMergeAnalysis, result: MergeDNGWriteResult, report: HDRMergeReport, folder: URL) {
         let merger = try merger ?? self.merger()
-        let analysis = try await merger.analyse(urls)
+        let analysis = try await merger.analyse(urls, options: options)
         let folder = try Fixtures.temporaryFolder()
         let destination = folder.appendingPathComponent("merged-HDR.dng")
         let (result, report) = try await merger.mergeWithReport(

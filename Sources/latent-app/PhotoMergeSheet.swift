@@ -6,6 +6,11 @@ import MergeKit
 /// measures the selected photos, then the dialog lists them with what the
 /// merge will make, or says why they can't be merged.
 ///
+/// **Options.** Auto Align and Deghost start as they were last left (kept
+/// in `UserDefaults`, as Lightroom remembers its merge options). Auto Align
+/// is measured during the analysis, so turning it on or off analyses the
+/// photos again; Deghost only matters to the merge.
+///
 /// Kept apart from the view so the tests can walk it through each state
 /// with a fake engine.
 @MainActor
@@ -41,30 +46,61 @@ final class HDRMergeSheetModel: ObservableObject, Identifiable {
     /// The file name the result will get, once planned: "DSC_0107-HDR.dng".
     /// Planned again when the merge starts, since a file may arrive meanwhile.
     @Published private(set) var destinationName: String?
+    /// Line the photos up before merging. Changing it analyses them again.
+    @Published var autoAlign: Bool {
+        didSet {
+            guard autoAlign != oldValue else { return }
+            defaults.set(autoAlign, forKey: Self.autoAlignKey)
+            reanalyse()
+        }
+    }
+    /// How hard the merge looks for things that moved.
+    @Published var deghost: DeghostAmount {
+        didSet { defaults.set(deghost.rawValue, forKey: Self.deghostKey) }
+    }
+
+    /// Where the options are remembered between dialogs.
+    static let autoAlignKey = "PhotoMerge.HDR.autoAlign"
+    static let deghostKey = "PhotoMerge.HDR.deghost"
 
     /// The engine that measures the photos, and merges them on Merge.
     let engine: any HDRMerging
     private let urls: [URL]
     /// Plans the result's name from its reference photo; nil when it can't.
     private let planDestination: (ImageRecord) async -> String?
+    private let defaults: UserDefaults
     private var analysis: Task<Void, Never>?
 
     /// `urls` are the files of `records`, in the same order.
-    init(records: [ImageRecord], urls: [URL], engine: any HDRMerging,
+    ///
+    /// - Parameter defaults: where the options are remembered; tests pass
+    ///   a suite of their own.
+    init(records: [ImageRecord], urls: [URL], engine: any HDRMerging, defaults: UserDefaults = .standard,
          planDestination: @escaping (ImageRecord) async -> String?) {
         self.records = records
         self.urls = urls
         self.engine = engine
+        self.defaults = defaults
         self.planDestination = planDestination
+        // Auto Align is on unless it was turned off; Deghost is None unless
+        // a level was chosen, as in Lightroom.
+        autoAlign = defaults.object(forKey: Self.autoAlignKey) as? Bool ?? true
+        deghost = defaults.string(forKey: Self.deghostKey).flatMap(DeghostAmount.init(rawValue:)) ?? DeghostAmount.none
     }
 
-    /// Starts measuring the photos; `phase` follows. Once only.
+    /// The options the merge runs with.
+    var options: HDRMergeOptions {
+        HDRMergeOptions(deghost: deghost, autoAlign: autoAlign)
+    }
+
+    /// Starts measuring the photos; `phase` follows. Once only (changing
+    /// Auto Align starts again by itself).
     func start() {
         guard analysis == nil else { return }
-        let engine = engine, urls = urls
+        let engine = engine, urls = urls, options = options
         analysis = Task { [weak self] in
             do {
-                let result = try await engine.analyse(urls)
+                let result = try await engine.analyse(urls, options: options)
                 guard let self, !Task.isCancelled else { return }
                 // The name before the list, so the dialog doesn't grow a
                 // line a moment after it has appeared.
@@ -85,6 +121,17 @@ final class HDRMergeSheetModel: ObservableObject, Identifiable {
     /// Stops an analysis under way (the dialog was closed).
     func cancel() {
         analysis?.cancel()
+    }
+
+    /// Throws away the analysis, whether done or under way, and measures
+    /// the photos again with the current options. Only once the dialog has
+    /// started: setting the options beforehand just sets them.
+    private func reanalyse() {
+        guard let running = analysis else { return }
+        running.cancel()
+        analysis = nil
+        phase = .analysing
+        start()
     }
 
     var analysisResult: HDRMergeAnalysis? {
@@ -135,6 +182,20 @@ final class HDRMergeSheetModel: ObservableObject, Identifiable {
         return result.warnings.map { Self.text(for: $0, frames: result.frames) }
     }
 
+    /// Said when Auto Align moved the photos by a pixel or so or more:
+    /// "Photo Merge aligned these photos (up to 17 px)." A note, not a
+    /// warning: this is Auto Align doing its job. Nothing is said for the
+    /// fraction of a pixel a tripod bracket usually moves.
+    var alignmentNote: String? {
+        guard let result = analysisResult else { return nil }
+        let largest = result.frames.compactMap(\.alignmentShiftPixels).max() ?? 0
+        guard largest >= Self.notedShiftPixels else { return nil }
+        return "Photo Merge aligned these photos (up to \(max(1, Int(largest.rounded()))) px)."
+    }
+
+    /// The smallest shift the dialog mentions.
+    static let notedShiftPixels = 0.5
+
     /// The analysing line: "Analysing 3 photos…".
     var analysingText: String { "Analysing \(records.count) photos…" }
 
@@ -172,8 +233,14 @@ final class HDRMergeSheetModel: ObservableObject, Identifiable {
             // Whole pixels, and never "0 px": the engine only warns about a
             // shift it can see.
             let pixels = max(1, Int(shift.rounded()))
-            return "These photos don’t line up exactly (up to \(pixels) px apart). Photo Merge doesn’t align "
-                + "handheld brackets yet, so edges may look doubled. For now, use brackets shot on a tripod."
+            return "These photos don’t line up exactly (up to \(pixels) px apart), so edges may look doubled. "
+                + "Turn on Auto Align to line them up."
+        case .frameCouldNotBeAligned(let index, let leftOut):
+            let name = frames.indices.contains(index) ? frames[index].url.lastPathComponent : "One photo"
+            return leftOut
+                ? "Photo Merge couldn’t align \(name), so it’s left out of the merge."
+                : "Photo Merge couldn’t align \(name), but it looks close, so it’s merged as it is. "
+                    + "Edges may look slightly doubled."
         case .exposureMetadataDisagrees(let index, let exif, let measured):
             let name = frames.indices.contains(index) ? frames[index].url.lastPathComponent : "One photo"
             let apart = abs(measured - exif)
@@ -219,8 +286,9 @@ struct HDRMergeSheet: View {
     @ObservedObject var model: HDRMergeSheetModel
     /// The thumbnail of a photo in the list.
     let thumbnail: (ImageRecord) async -> CGImage?
-    /// Merge was pressed with this analysis; the dialog closes itself.
-    let onMerge: (HDRMergeAnalysis) -> Void
+    /// Merge was pressed with this analysis and these options; the dialog
+    /// closes itself.
+    let onMerge: (HDRMergeAnalysis, HDRMergeOptions) -> Void
     /// Merge is refused while another GPU job (an export, a merge) runs.
     var canMerge = true
     @Environment(\.dismiss) private var dismiss
@@ -228,6 +296,9 @@ struct HDRMergeSheet: View {
     /// Rows shown before the list scrolls: a bracket is usually 3 to 5.
     private static let visibleRows = 5
     private static let rowHeight: CGFloat = 52
+    /// The label column of the details and the options, the same width in
+    /// both grids so their values line up.
+    private static let labelWidth: CGFloat = 72
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -244,10 +315,12 @@ struct HDRMergeSheet: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(model.analysingText)
+                options
             case .ready:
                 frameList
                 details
-                warnings
+                options
+                notes
             case .failed(let message):
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
@@ -300,7 +373,7 @@ struct HDRMergeSheet: View {
     private func detail(_ label: String, _ value: String) -> some View {
         GridRow {
             Text(label).foregroundStyle(.secondary)
-                .gridColumnAlignment(.trailing)
+                .frame(width: Self.labelWidth, alignment: .trailing)
             Text(value)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -311,7 +384,53 @@ struct HDRMergeSheet: View {
         .accessibilityValue(value)
     }
 
-    @ViewBuilder private var warnings: some View {
+    /// Auto Align and Deghost, shown while the photos are read too, so the
+    /// controls don't jump when the list arrives.
+    private var options: some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+            GridRow {
+                Text("Auto Align").foregroundStyle(.secondary)
+                    .frame(width: Self.labelWidth, alignment: .trailing)
+                    .accessibilityHidden(true)
+                Toggle("Line up photos shot without a tripod", isOn: $model.autoAlign)
+                    .accessibilityLabel("Auto Align")
+                    .accessibilityHint("Lines the photos up before merging. Changing it measures the photos again.")
+                    .help("Lines the photos up before merging, for brackets shot without a tripod. "
+                          + "Photos that didn’t move are left as they are. Changing it measures the photos again.")
+            }
+            GridRow {
+                Text("Deghost").foregroundStyle(.secondary)
+                    .frame(width: Self.labelWidth, alignment: .trailing)
+                    .accessibilityHidden(true)
+                Picker("Deghost", selection: $model.deghost) {
+                    Text("None").tag(DeghostAmount.none)
+                    Text("Low").tag(DeghostAmount.low)
+                    Text("Medium").tag(DeghostAmount.medium)
+                    Text("High").tag(DeghostAmount.high)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 280)
+                .accessibilityLabel("Deghost")
+                .accessibilityHint("Keeps things that moved between the photos, such as people, leaves or waves, "
+                                   + "from showing more than once.")
+                .help("Keeps things that moved between the photos (people, leaves, waves) from showing more than once. "
+                      + "Low catches only big changes; High also catches faint ones, but takes more of the picture "
+                      + "from a single, noisier photo.")
+            }
+        }
+        .font(.callout)
+    }
+
+    /// Auto Align's note, then the warnings.
+    @ViewBuilder private var notes: some View {
+        if let note = model.alignmentNote {
+            Label(note, systemImage: "checkmark.circle")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(note)
+        }
         ForEach(Array(model.warnings.enumerated()), id: \.offset) { _, warning in
             Label(warning, systemImage: "exclamationmark.triangle.fill")
                 .font(.callout)
@@ -335,7 +454,7 @@ struct HDRMergeSheet: View {
                 .keyboardShortcut(.cancelAction)
                 Button("Merge") {
                     guard let analysis = model.analysisResult else { return }
-                    onMerge(analysis)
+                    onMerge(analysis, model.options)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)

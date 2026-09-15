@@ -35,6 +35,7 @@ final class FakeHDREngine: HDRMerging, @unchecked Sendable {
     private var _recipes: [MergeRecipe] = []
     private var _destinations: [URL] = []
     private var _sources: [[MergeRecipe.Source]] = []
+    private var _mergeOptions: [HDRMergeOptions] = []
     private var merges = 0
     let script: Script
     let reports: [HDRMergeProgress]
@@ -49,6 +50,8 @@ final class FakeHDREngine: HDRMerging, @unchecked Sendable {
     var recipes: [MergeRecipe] { lock.withLock { _recipes } }
     var destinations: [URL] { lock.withLock { _destinations } }
     var sources: [[MergeRecipe.Source]] { lock.withLock { _sources } }
+    /// The options each merge was given.
+    var mergeOptions: [HDRMergeOptions] { lock.withLock { _mergeOptions } }
 
     /// Holds `analyse` until `openGate`.
     func closeGate() { lock.withLock { _gateOpen = false } }
@@ -56,8 +59,11 @@ final class FakeHDREngine: HDRMerging, @unchecked Sendable {
 
     private func note(_ line: String) { lock.withLock { _log.append(line) } }
 
-    func analyse(_ urls: [URL]) async throws -> HDRMergeAnalysis {
-        note("analyse \(urls.count)")
+    /// Replaces the analysis the next `analyse` returns.
+    func setAnalysis(_ analysis: HDRMergeAnalysis) { lock.withLock { _analysis = .success(analysis) } }
+
+    func analyse(_ urls: [URL], options: HDRMergeOptions) async throws -> HDRMergeAnalysis {
+        note("analyse \(urls.count)" + (options.autoAlign ? "" : " without aligning"))
         while !lock.withLock({ _gateOpen }) {
             try Task.checkCancellation()
             try await Task.sleep(for: .milliseconds(5))
@@ -69,7 +75,13 @@ final class FakeHDREngine: HDRMerging, @unchecked Sendable {
                to destination: URL,
                prepareSidecar: @escaping @Sendable (MergeRecipe) async throws -> Void,
                progress: @escaping @Sendable (HDRMergeProgress) -> Void) async throws -> MergeDNGWriteResult {
-        let attempt = lock.withLock { merges += 1; _destinations.append(destination); _sources.append(sources); return merges }
+        let attempt = lock.withLock {
+            merges += 1
+            _destinations.append(destination)
+            _sources.append(sources)
+            _mergeOptions.append(options)
+            return merges
+        }
         // From another thread, as a real engine reports.
         let reports = reports
         await Task.detached { for report in reports { progress(report) } }.value
@@ -255,24 +267,35 @@ final class HDRMergeSheetModelTests: XCTestCase {
 
     private let root = URL(fileURLWithPath: "/Photos/Bracket", isDirectory: true)
 
-    private func analysis(warnings: [HDRMergeWarning] = [], reference: Int = 1) -> HDRMergeAnalysis {
+    private func analysis(warnings: [HDRMergeWarning] = [], reference: Int = 1,
+                          shifts: [Double?] = [nil, nil, nil]) -> HDRMergeAnalysis {
         // The engine hands the files back in exposure order, not the grid's.
         let names = ["DSC_0106.NEF", "DSC_0107.NEF", "DSC_0108.NEF"]
         let frames = names.enumerated().map { index, name in
             HDRMergeFrame(url: root.appendingPathComponent(name), exposureSeconds: [1.0 / 15, 1.0 / 60, 1.0 / 250][index],
                           iso: 100, aperture: 8, relativeEV: Double(-2 * index), exifRelativeEV: Double(-2 * index),
-                          clippedFraction: 0)
+                          clippedFraction: 0, alignmentShiftPixels: shifts[index])
         }
         return HDRMergeAnalysis(frames: frames, referenceIndex: reference, width: 6016, height: 4016,
                                 exposureRangeStops: 4, warnings: warnings, estimatedOutputBytes: 145_000_000)
     }
+
+    /// Options remembered by one test only, never the user's own.
+    nonisolated(unsafe) private var defaultsSuite = "latent-photo-merge-tests-\(UUID().uuidString)"
+
+    override func tearDown() async throws {
+        let suite = defaultsSuite
+        UserDefaults().removePersistentDomain(forName: suite)
+    }
+
+    private var defaults: UserDefaults { UserDefaults(suiteName: defaultsSuite)! }
 
     private func model(_ engine: FakeHDREngine, planned: String? = "DSC_0107-HDR.dng") -> (HDRMergeSheetModel, Recorder) {
         // The grid's order: darkest first.
         let records = [record("DSC_0108.NEF", id: 3), record("DSC_0106.NEF", id: 1), record("DSC_0107.NEF", id: 2)]
         let asked = Recorder()
         let model = HDRMergeSheetModel(records: records, urls: records.map { root.appendingPathComponent($0.relPath) },
-                                       engine: engine) { reference in
+                                       engine: engine, defaults: defaults) { reference in
             asked.names.append(reference.fileName)
             return planned
         }
@@ -310,6 +333,7 @@ final class HDRMergeSheetModelTests: XCTestCase {
         XCTAssertEqual(model.referenceRecord?.id, 2)
         XCTAssertEqual(model.recordsInFrameOrder.map { $0?.id }, [1, 2, 3])
         XCTAssertEqual(model.warnings, [])
+        XCTAssertNil(model.alignmentNote, "nothing moved")
         XCTAssertEqual(HDRMergeSheetModel.editsNotice,
                        "The merge starts from the original raw files. Edits you made to these photos aren’t used.")
     }
@@ -319,15 +343,20 @@ final class HDRMergeSheetModelTests: XCTestCase {
             .framesLookMisaligned(maximumShiftPixels: 3.4),
             .exposureMetadataDisagrees(frameIndex: 2, exifRelativeEV: -4, measuredRelativeEV: -4.7),
             .smallExposureRange(stops: 0.3),
+            .frameCouldNotBeAligned(frameIndex: 0, leftOut: false),
+            .frameCouldNotBeAligned(frameIndex: 2, leftOut: true),
         ])))
         let (model, _) = model(engine)
         model.start()
         await waitUntil("the list") { model.analysisResult != nil }
         XCTAssertEqual(model.warnings, [
-            "These photos don’t line up exactly (up to 3 px apart). Photo Merge doesn’t align handheld brackets yet, "
-                + "so edges may look doubled. For now, use brackets shot on a tripod.",
+            "These photos don’t line up exactly (up to 3 px apart), so edges may look doubled. "
+                + "Turn on Auto Align to line them up.",
             "DSC_0108.NEF looks 0.7 stops darker than its camera settings say. Photo Merge uses the brightness it measured.",
             "These photos are only 0.3 stops apart, so the merge adds little. HDR works best with photos 2 stops apart.",
+            "Photo Merge couldn’t align DSC_0106.NEF, but it looks close, so it’s merged as it is. "
+                + "Edges may look slightly doubled.",
+            "Photo Merge couldn’t align DSC_0108.NEF, so it’s left out of the merge.",
         ])
         XCTAssertTrue(HDRMergeSheetModel.text(for: .framesLookMisaligned(maximumShiftPixels: 0.2), frames: [])
             .contains("up to 1 px apart"), "never 0 px")
@@ -348,6 +377,64 @@ final class HDRMergeSheetModelTests: XCTestCase {
         XCTAssertTrue(other.hasPrefix("These photos couldn’t be read for an HDR merge."), other)
         XCTAssertEqual(HDRMergeSheetModel.message(for: HDRMergeError.gpuUnavailable(reason: "out of memory")),
                        "The graphics processor couldn't run the merge: out of memory")
+    }
+
+    /// Auto Align on and Deghost None the first time, as Lightroom starts;
+    /// after that, as they were last left.
+    func testOptionsStartAsTheyWereLastLeft() {
+        let engine = FakeHDREngine(analysis: .success(analysis()))
+        let (first, _) = model(engine)
+        XCTAssertTrue(first.autoAlign)
+        XCTAssertEqual(first.deghost, .none)
+        XCTAssertEqual(first.options, HDRMergeOptions(deghost: .none, autoAlign: true))
+        first.autoAlign = false
+        first.deghost = .medium
+        XCTAssertEqual(engine.log, [], "not started, so nothing is analysed")
+
+        let (second, _) = model(engine)
+        XCTAssertFalse(second.autoAlign)
+        XCTAssertEqual(second.deghost, .medium)
+        XCTAssertEqual(second.options, HDRMergeOptions(deghost: .medium, autoAlign: false))
+    }
+
+    /// Auto Align is measured by the analysis: turning it off measures the
+    /// photos again, without aligning, and the dialog shows what that found.
+    /// Deghost only matters to the merge, so changing it doesn't.
+    func testTurningAutoAlignOffAnalysesAgain() async {
+        let engine = FakeHDREngine(analysis: .success(analysis(shifts: [16.6, 0, 3.2])))
+        let (model, asked) = model(engine)
+        model.start()
+        await waitUntil("the list") { model.analysisResult != nil }
+        XCTAssertEqual(model.alignmentNote, "Photo Merge aligned these photos (up to 17 px).")
+        XCTAssertEqual(model.warnings, [])
+
+        engine.closeGate()
+        model.deghost = .high
+        XCTAssertNotNil(model.analysisResult, "Deghost doesn't analyse again")
+        engine.setAnalysis(analysis(warnings: [.framesLookMisaligned(maximumShiftPixels: 16.6)]))
+        model.autoAlign = false
+        XCTAssertEqual(model.phase, .analysing)
+        XCTAssertNil(model.alignmentNote)
+        engine.openGate()
+        await waitUntil("the second list") { model.analysisResult != nil }
+        XCTAssertEqual(engine.log, ["analyse 3", "analyse 3 without aligning"])
+        XCTAssertNil(model.alignmentNote)
+        XCTAssertEqual(model.warnings.count, 1)
+        XCTAssertTrue(model.warnings[0].contains("Turn on Auto Align"), model.warnings[0])
+        XCTAssertEqual(asked.names, ["DSC_0107.NEF", "DSC_0107.NEF"])
+        XCTAssertEqual(model.options, HDRMergeOptions(deghost: .high, autoAlign: false))
+    }
+
+    /// The note appears only for a shift worth mentioning, never as "0 px".
+    func testTheAlignmentNote() async {
+        for (shifts, note) in [([0.3, 0, 0.2], nil), ([nil, 0, nil], nil), ([0.6, 0, nil], "up to 1 px"),
+                               ([2.5, 0, 1.1], "up to 3 px")] as [([Double?], String?)] {
+            let engine = FakeHDREngine(analysis: .success(analysis(shifts: shifts)))
+            let (model, _) = model(engine)
+            model.start()
+            await waitUntil("the list") { model.analysisResult != nil }
+            XCTAssertEqual(model.alignmentNote, note.map { "Photo Merge aligned these photos (\($0))." }, "\(shifts)")
+        }
     }
 
     /// Closing the dialog while the photos are read stops the analysis and
@@ -452,6 +539,19 @@ final class PhotoMergeJobTests: XCTestCase {
         XCTAssertFalse(jobs.isRunning)
         XCTAssertFalse(exports.isGPUBusy)
         XCTAssertEqual(ExportActivity.activeCount, held)
+    }
+
+    /// The dialog's options reach the engine's merge unchanged.
+    func testTheOptionsReachTheMerge() async throws {
+        let bracket = try await bracket()
+        let engine = FakeHDREngine(analysis: .success(bracket.analysis()))
+        let queue = queue()
+        let options = HDRMergeOptions(deghost: .medium, autoAlign: false)
+        XCTAssertTrue(queue.start(bracket.analysis(), options: options, records: bracket.records,
+                                  library: bracket.library, engine: engine))
+        await queue.waitUntilDone()
+        XCTAssertEqual(engine.mergeOptions, [options])
+        XCTAssertEqual(engine.destinations.map(\.lastPathComponent), ["DSC_0107-HDR.dng"])
     }
 
     /// A filter that would hide the result is cleared, so it can be seen.

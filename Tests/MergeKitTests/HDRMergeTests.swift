@@ -148,9 +148,22 @@ final class HDRMergeTests: XCTestCase {
             XCTAssertEqual(result.recipe.reference, reference)
             XCTAssertEqual(result.recipe.kind, .hdr)
             XCTAssertEqual(result.recipe.sources, HDRTestSupport.sources(analysis.frames.map(\.url)))
-            var options: [String: JSONValue] = ["deghost": .string("none"), "clipFeather": .number(1)]
+            var options: [String: JSONValue] = ["deghost": .string("none"), "clipFeather": .number(1),
+                                                "autoAlign": .bool(true)]
             if let override { options["referenceIndex"] = .number(Double(override)) }
-            XCTAssertEqual(result.recipe.options, options)
+            var recorded = result.recipe.options
+            // A tripod bracket: Auto Align measured every frame within a
+            // tenth of a pixel of where it belongs, the reference at 0.
+            guard case .array(let shifts)? = recorded.removeValue(forKey: "alignmentShifts") else {
+                return XCTFail("no alignment shifts in \(result.recipe.options)")
+            }
+            XCTAssertEqual(recorded, options)
+            XCTAssertEqual(shifts.count, 3)
+            XCTAssertEqual(shifts[reference], .number(0))
+            for shift in shifts {
+                guard case .number(let pixels) = shift else { return XCTFail("\(shifts)") }
+                XCTAssertLessThan(pixels, 0.1)
+            }
             // Clipped in every frame at 98% of the darkest frame's white, on
             // the brightest frame's scale, then divided as the pixels were.
             XCTAssertEqual(Double(info.clipLevel), 0.98 * pow(2, analysis.exposureRangeStops - shift), accuracy: 1e-3)

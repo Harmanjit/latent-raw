@@ -1,5 +1,5 @@
-// The tripod HDR merge: a bracket of raws in, one LinearRaw DNG out
-// (docs/PhotoMerge.md section 3; no alignment yet).
+// The HDR merge: a bracket of raws in, lined up if they moved, one LinearRaw
+// DNG out (docs/PhotoMerge.md section 3).
 
 import CoreGraphics
 import Foundation
@@ -14,7 +14,15 @@ import ColorKit
 /// merged, and measures it on reduced frames: the exposure between
 /// neighbouring frames (from the pixels, checked against EXIF), how much of
 /// each frame is clipped, which frame the result should open like, and
-/// whether the frames look misaligned.
+/// (with Auto Align on) how the frames moved relative to each other.
+///
+/// **Auto Align** measures, in the analysis, how each frame moved relative
+/// to its neighbour in exposure (`FrameAligner`, on half-size frames), and
+/// the merge warps every frame onto the reference frame's pixel grid before
+/// weighting it (`HDRMergeAlignment` has the rules for frames that can't be
+/// lined up). The result keeps the reference frame's full size: along the
+/// edges where another frame moved out of the picture, that frame simply
+/// counts for nothing.
 ///
 /// **Merging** (`merge`) opens each frame again, one at a time, demosaics it
 /// at full resolution and adds it to a weighted sum on the GPU
@@ -78,34 +86,46 @@ public final class HDRMerger: HDRMerging {
 
     // MARK: - Analysis
 
-    public func analyse(_ urls: [URL]) async throws -> HDRMergeAnalysis {
-        try await analyseWithReport(urls).analysis
+    public func analyse(_ urls: [URL], options: HDRMergeOptions) async throws -> HDRMergeAnalysis {
+        try await analyseWithReport(urls, options: options).analysis
     }
 
     /// `analyse`, with how long each stage took.
-    public func analyseWithReport(_ urls: [URL]) async throws -> (analysis: HDRMergeAnalysis, report: HDRMergeReport) {
+    public func analyseWithReport(_ urls: [URL], options: HDRMergeOptions = HDRMergeOptions())
+    async throws -> (analysis: HDRMergeAnalysis, report: HDRMergeReport) {
         var report = HDRMergeReport()
         let bracket = try report.time("Check the photos") { try validate(urls) }
         let width = bracket[0].summary.width, height = bracket[0].summary.height
         let span = Self.analysisSpan(width: width, height: height)
+        let alignmentSpan = Self.alignmentSpan(width: width, height: height)
+        let aligner = FrameAligner()
 
-        // Only the previous frame's reduced image is kept: pairs are
-        // neighbours, and a 24 MP frame's image is 16 MB.
-        var previous: (frame: HDRAnalysisFrame, relativeEV: Double)?
+        // Only the previous frame's reduced images are kept: pairs are
+        // neighbours, and a 24 MP frame's alignment pyramid alone is 40 MB.
+        var previous: (frame: HDRAnalysisFrame, relativeEV: Double, alignment: AlignmentImage?)?
         var relativeEVs: [Double] = []
         var clipped: [Double] = [], crushed: [Double] = []
         var largestShift = 0.0
+        var links: [AlignmentResult] = []
+        var neighbourShifts: [Double?] = []
         for (index, member) in bracket.enumerated() {
             try Task.checkCancellation()
             let name = member.url.lastPathComponent
-            let frame = try report.time("Decode and reduce \(name)") { () throws -> HDRAnalysisFrame in
+            let (frame, alignmentSource) = try report.time("Decode and reduce \(name)") {
+                () throws -> (HDRAnalysisFrame, HDRMergeKernels.AnalysisImage?) in
                 try autoreleasepool {
                     let file = try Self.open(member.url)
                     let levels = try Self.gpuStep { try Self.levels(for: file, gpu: gpu) }
                     let image = try Self.gpuStep {
                         try HDRMergeKernels.analysisImage(of: file, span: span, levels: levels, gpu: gpu)
                     }
-                    return HDRAnalysisFrame(image, levels: levels)
+                    // Alignment wants more detail than the exposure
+                    // measurement: 2 x 2 blocks give each Bayer quad's
+                    // colour without demosaicing.
+                    let alignmentImage = try options.autoAlign ? Self.gpuStep {
+                        try HDRMergeKernels.analysisImage(of: file, span: alignmentSpan, levels: levels, gpu: gpu)
+                    } : nil
+                    return (HDRAnalysisFrame(image, levels: levels), alignmentImage)
                 }
             }
             report.sampleMemory(gpu.device)
@@ -113,26 +133,63 @@ public final class HDRMerger: HDRMerging {
             crushed.append(frame.crushedFraction)
 
             var relativeEV = 0.0
-            if let last = previous {
-                let (previousFrame, previousEV) = (last.frame, last.relativeEV)
-                // Neighbour to neighbour: very dark and very bright frames
-                // share almost nothing usable, neighbours share the most.
+            // Neighbour to neighbour: very dark and very bright frames share
+            // almost nothing usable, neighbours share the most.
+            func measureExposure(brighter: HDRAnalysisFrame) -> Double {
+                guard let last = previous else { return 0 }
                 let exifStops = log2(bracket[index - 1].exposure / member.exposure)
                 let pair = report.time("Measure exposure \(index - 1)-\(index)") {
-                    HDRExposure.measuredStops(brighter: previousFrame, darker: frame)
+                    HDRExposure.measuredStops(brighter: brighter, darker: frame)
                 }
-                relativeEV = previousEV - HDRExposure.pairStops(measured: pair.stops, samples: pair.samples,
-                                                                exif: exifStops).stops
+                return last.relativeEV - HDRExposure.pairStops(measured: pair.stops, samples: pair.samples,
+                                                               exif: exifStops).stops
+            }
+            if let last = previous { relativeEV = measureExposure(brighter: last.frame) }
+            // Phase correlation's shift between this frame and the previous
+            // one, in full-resolution pixels; nil when it can't judge.
+            func neighbourShift() -> Double? {
+                guard let last = previous else { return nil }
                 let shift = report.time("Check alignment \(index - 1)-\(index)") { () -> HDRAlignmentCheck.Shift? in
-                    let (a, b) = HDRAlignmentCheck.matchedLogLuminance(brighter: previousFrame, brighterEV: previousEV,
+                    let (a, b) = HDRAlignmentCheck.matchedLogLuminance(brighter: last.frame, brighterEV: last.relativeEV,
                                                                        darker: frame, darkerEV: relativeEV)
                     return HDRAlignmentCheck.shift(a, b, width: frame.width, height: frame.height)
                 }
-                if let shift, shift.peak >= HDRAlignmentCheck.minimumPeak {
-                    largestShift = max(largestShift, shift.length * Double(span))
-                }
+                guard let shift, shift.peak >= HDRAlignmentCheck.minimumPeak else { return nil }
+                return shift.length * Double(span)
             }
-            previous = (frame, relativeEV)
+            var alignment: AlignmentImage?
+            if let alignmentSource {
+                // The frame's alignment image needs its exposure, known only now.
+                let image = report.time("Prepare \(name) for alignment") {
+                    AlignmentImage(analysis: alignmentSource, fullWidth: width, fullHeight: height,
+                                   exposure: AlignmentExposure(gain: pow(2, relativeEV),
+                                                               channelClip: frame.channelClip))
+                }
+                if let last = previous?.alignment {
+                    let link = report.time("Align \(index - 1) to \(index)") {
+                        aligner.align(moving: last, reference: image, model: .hdr)
+                    }
+                    links.append(link)
+                    // Phase correlation is asked only about links the aligner
+                    // rejected: it takes several times longer than aligning.
+                    neighbourShifts.append(link.accepted ? nil : neighbourShift())
+                    // The exposure measured again with the previous frame
+                    // lined up: compared block by block while several pixels
+                    // apart, edges slip into the "flat" blocks and bias the
+                    // ratio (0.04 stops for a 6 px shift on the synthetic
+                    // bracket), which would show as faint steps where the
+                    // merge hands over between frames. This frame's
+                    // alignment image keeps the first measurement, a few
+                    // hundredths of a stop out, which alignment can't notice.
+                    if link.accepted, link.maxCornerShift >= Self.remeasureShiftPixels, let last = previous {
+                        relativeEV = measureExposure(brighter: last.frame.moved(by: link.estimatedHomography))
+                    }
+                }
+                alignment = image
+            } else if let shift = neighbourShift() {
+                largestShift = max(largestShift, shift)
+            }
+            previous = (frame, relativeEV, alignment)
             relativeEVs.append(relativeEV)
         }
 
@@ -143,12 +200,27 @@ public final class HDRMerger: HDRMerging {
             relativeEVs[i] != relativeEVs[j] ? relativeEVs[i] > relativeEVs[j] : i < j
         }
         let brightest = order[0]
-        let frames = order.map { i -> HDRMergeFrame in
+        let referenceIndex = HDRExposure.referenceIndex(clipped: order.map { clipped[$0] },
+                                                        crushed: order.map { crushed[$0] })
+        // The links follow the order the frames were read in; the chain
+        // records where each of those frames ended up.
+        let alignment = options.autoAlign
+            ? HDRMergeAlignment(links: links, chainOrder: bracket.indices.map { i in order.firstIndex(of: i)! },
+                                neighbourShiftPixels: neighbourShifts, width: width, height: height)
+            : nil
+        let plan = alignment?.plan(reference: referenceIndex)
+        let frames = order.enumerated().map { index, i -> HDRMergeFrame in
             let s = bracket[i].summary
+            var shift: Double?
+            switch plan?.frames[index] {
+            case .reference?: shift = 0
+            case .aligned(let pixels)?: shift = pixels
+            default: shift = nil
+            }
             return HDRMergeFrame(url: bracket[i].url, exposureSeconds: s.shutter, iso: s.iso, aperture: s.aperture,
                                  relativeEV: relativeEVs[i] - relativeEVs[brightest],
                                  exifRelativeEV: log2(bracket[i].exposure / bracket[brightest].exposure),
-                                 clippedFraction: clipped[i])
+                                 clippedFraction: clipped[i], alignmentShiftPixels: shift)
         }
         let range = -(frames.map(\.relativeEV).min() ?? 0)
 
@@ -159,20 +231,31 @@ public final class HDRMerger: HDRMerging {
             warnings.append(.exposureMetadataDisagrees(frameIndex: index, exifRelativeEV: frame.exifRelativeEV,
                                                        measuredRelativeEV: frame.relativeEV))
         }
-        if largestShift > Self.misalignmentPixels {
+        if let plan {
+            // Aligned frames need no warning; the dialog notes how far they moved.
+            for (index, frame) in plan.frames.enumerated() {
+                if frame == .unaligned { warnings.append(.frameCouldNotBeAligned(frameIndex: index, leftOut: false)) }
+                if frame == .leftOut { warnings.append(.frameCouldNotBeAligned(frameIndex: index, leftOut: true)) }
+            }
+        } else if largestShift > Self.misalignmentPixels {
             warnings.append(.framesLookMisaligned(maximumShiftPixels: largestShift))
         }
 
         let analysis = HDRMergeAnalysis(
-            frames: frames,
-            referenceIndex: HDRExposure.referenceIndex(clipped: order.map { clipped[$0] }, crushed: order.map { crushed[$0] }),
+            frames: frames, referenceIndex: referenceIndex,
             width: width, height: height, exposureRangeStops: range, warnings: warnings,
-            estimatedOutputBytes: Self.estimatedOutputBytes(width: width, height: height))
+            estimatedOutputBytes: Self.estimatedOutputBytes(width: width, height: height), alignment: alignment)
         return (analysis, report)
     }
 
-    /// Shifts larger than this many full-resolution pixels get a warning.
-    static let misalignmentPixels = 1.5
+    /// A neighbour that Auto Align moves by at least this many pixels has
+    /// its exposure measured again, lined up. Below it the blocks the
+    /// measurement compares (6 or more photosites wide) barely change.
+    static let remeasureShiftPixels = 0.5
+
+    /// With Auto Align off, shifts larger than this many full-resolution
+    /// pixels get a warning.
+    static let misalignmentPixels = HDRMergeAlignment.unalignedLimitPixels
 
     /// A photo of the bracket, as validation found it.
     struct BracketMember {
@@ -227,6 +310,15 @@ public final class HDRMerger: HDRMerging {
         2 * max(1, Int((Double(max(width, height)) / 2048).rounded(.up)))
     }
 
+    /// Photosites per side of an alignment image's block: 2 (each Bayer
+    /// quad) up to a long edge of 9,600 photosites (about 60 MP), which
+    /// leaves the aligner's 3,200 px finest level plenty to reduce from;
+    /// bigger sensors get 4 and so on, so the image read back stays under
+    /// about 90 MB.
+    static func alignmentSpan(width: Int, height: Int) -> Int {
+        2 * max(1, Int((Double(max(width, height)) / 9600).rounded(.up)))
+    }
+
     /// The DNG's size: every tile is full size, 3 half floats per pixel,
     /// plus room for the directories and the previews.
     static func estimatedOutputBytes(width: Int, height: Int) -> Int64 {
@@ -261,10 +353,14 @@ public final class HDRMerger: HDRMerging {
         }
         // An override outside the bracket is ignored rather than trusted.
         let reference = options.referenceIndex.flatMap { frames.indices.contains($0) ? $0 : nil } ?? analysis.referenceIndex
+        // Auto Align needs the analysis's measurements: an analysis made
+        // with it off merges the frames where they are.
+        let alignment = options.autoAlign ? analysis.alignment?.plan(reference: reference) : nil
 
         // Everything that can refuse the merge outright, before any work.
         try checkDiskSpace(needed: analysis.estimatedOutputBytes, at: destination)
-        let needed = HDRMergeAccumulator.estimatedPeakBytes(width: analysis.width, height: analysis.height)
+        let needed = HDRMergeAccumulator.estimatedPeakBytes(width: analysis.width, height: analysis.height,
+                                                            aligned: alignment?.warps ?? false)
         let budget = gpuMemoryBudget ?? Int(clamping: gpu.device.recommendedMaxWorkingSetSize)
         guard needed <= budget else {
             let format = { (bytes: Int) in ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory) }
@@ -279,13 +375,15 @@ public final class HDRMerger: HDRMerging {
         var mergeProgress = (start: 0.0, share: 0.8)
         if let settings = options.deghost.settings {
             ghosts = try findGhosts(frames, reference: reference, width: analysis.width, height: analysis.height,
-                                    settings: settings, feather: clipFeather, report: &report) { fraction, stage in
+                                    alignment: alignment, settings: settings, feather: clipFeather,
+                                    report: &report) { fraction, stage in
                 progress(HDRMergeProgress(fraction: 0.25 * fraction, stage: stage))
             }
             mergeProgress = (0.25, 0.55)
         }
         let accumulated = try accumulate(frames, reference: reference, width: analysis.width,
-                                         height: analysis.height, ghosts: ghosts, report: &report) { fraction, stage in
+                                         height: analysis.height, alignment: alignment, ghosts: ghosts,
+                                         report: &report) { fraction, stage in
             progress(HDRMergeProgress(fraction: mergeProgress.start + mergeProgress.share * fraction, stage: stage))
         }
         let merged = accumulated.merged
@@ -293,15 +391,15 @@ public final class HDRMerger: HDRMerging {
         try Task.checkCancellation()
         progress(HDRMergeProgress(fraction: 0.8, stage: "Rendering the preview"))
         let maximum = try ExposureNormalisation.maximum(of: merged, commandQueue: gpu.commandQueue)
-        // Where the result is clipped in every frame: the darkest frame's
-        // clip level on the brightest frame's scale (0.98 x 2^range when
-        // the darkest frame saturates at its nominal white).
-        let range = -(frames.last?.relativeEV ?? 0)
+        // Where the result is clipped in every frame: the darkest merged
+        // frame's clip level on the brightest frame's scale (0.98 x 2^range
+        // when it saturates at its nominal white).
+        let range = -accumulated.darkestRelativeEV
         let darkest = accumulated.darkestLevels
         let darkestSaturation = (darkest.clipRaw / Self.clipFraction - darkest.channelBlack.min()) * darkest.scale
         let recipe = MergeRecipe(kind: .hdr, clipLevel: Self.clipFraction * Float(pow(2, range)) * darkestSaturation,
                                  lensApplied: false, reference: reference,
-                                 options: Self.recipeOptions(options), sources: sources)
+                                 options: Self.recipeOptions(options, alignment: alignment), sources: sources)
         let normalisation = try ExposureNormalisation(maximum: maximum)
         let stored = recipe.normalised(by: normalisation)
         let referenceFrame = accumulated.reference
@@ -353,7 +451,9 @@ public final class HDRMerger: HDRMerging {
     private struct Accumulated {
         let merged: MTLTexture
         let reference: (summary: RawSummary, cameraToXYZ: [Float]?)
+        /// The darkest frame that went into the merge.
         let darkestLevels: HDRFrameLevels
+        let darkestRelativeEV: Double
     }
 
     /// Adds every frame to the GPU sums, one at a time, and resolves them.
@@ -361,54 +461,63 @@ public final class HDRMerger: HDRMerging {
     /// released when it returns, before the preview needs memory.
     ///
     /// Each frame goes through the same steps, in this order: decode, the
-    /// accumulator's demosaic, (alignment, when it arrives, warps the frame
-    /// here, inside `HDRMergeAccumulator.add`), the clip feathering and the
-    /// ghost mask, then the weighted sum.
+    /// accumulator's demosaic, the warp onto the reference frame (with Auto
+    /// Align), the clip feathering and the ghost mask, then the weighted sum.
     ///
     /// - Parameters:
+    ///   - alignment: what Auto Align decided, or nil with it off. Frames it
+    ///     left out are skipped.
     ///   - ghosts: the deghosting pass's masks, or nil without deghosting.
     ///   - progress: the share of this step done (0...1) and a stage name.
     private func accumulate(_ frames: [HDRMergeFrame], reference: Int, width: Int, height: Int,
-                            ghosts: GhostPass?, report: inout HDRMergeReport,
+                            alignment: HDRMergeAlignment.Plan?, ghosts: GhostPass?, report: inout HDRMergeReport,
                             progress: (Double, String) -> Void) throws -> Accumulated {
         let multipliers = try sharedMultipliers(frames)
         let accumulator = try Self.gpuStep { try HDRMergeAccumulator(gpu: gpu, width: width, height: height) }
+        let merged = frames.indices.filter { alignment?.includes($0) ?? true }
+        let warps = alignment?.warps ?? false
         var referenceFrame: (summary: RawSummary, cameraToXYZ: [Float]?)?
         var darkestLevels: HDRFrameLevels?
-        for (index, frame) in frames.enumerated() {
+        for (index, frame) in frames.enumerated() where merged.contains(index) {
             try Task.checkCancellation()
             progress(Double(index) / Double(frames.count), "Merging photo \(index + 1) of \(frames.count)")
             let name = frame.url.lastPathComponent
-            let isDarkest = index == frames.count - 1
+            let isDarkest = index == merged.last
+            let homography = alignment?.homographies[index]
             // The pool drains Metal's autoreleased objects (command buffers,
             // the sensor buffer's wrapper) before the next frame opens.
             try autoreleasepool {
                 let file = try report.time("Decode \(name)") { try Self.open(frame.url) }
                 guard case .bayer = file.summary.cfaPattern else { throw HDRMergeError.unsupportedSource(fileName: name) }
                 guard file.summary.width == width, file.summary.height == height else { throw HDRMergeError.differentSizes }
-                let levels = try ghosts.map { $0.levels[index] } ?? Self.gpuStep { try Self.levels(for: file, gpu: gpu) }
+                let levels = try ghosts?.levels[index] ?? Self.gpuStep { try Self.levels(for: file, gpu: gpu) }
                 try report.time("Demosaic and add \(name)") {
                     try Self.gpuStep {
                         // The darkest frame keeps a weight floor, so pixels
                         // clipped in every frame come from it, and no
                         // feathering: no darker frame could take over from it.
+                        // When frames are warped, the reference keeps a
+                        // far smaller floor still: along an edge that every
+                        // other frame moved away from, it is all there is.
                         try accumulator.add(file, levels: levels, multipliers: multipliers,
                                             relativeEV: frame.relativeEV,
-                                            weightFloor: isDarkest ? 1e-4 : 0,
+                                            weightFloor: isDarkest ? 1e-4 : (warps && index == reference ? 1e-8 : 0),
                                             feather: isDarkest ? nil : clipFeather,
-                                            ghostMask: ghosts?.masks[index])
+                                            ghostMask: ghosts?.masks[index],
+                                            movingToReference: homography)
                     }
                 }
                 report.sampleMemory(gpu.device)
                 if index == reference { referenceFrame = (file.summary, file.cameraToXYZMatrixRaw) }
-                if index == frames.count - 1 { darkestLevels = levels }
+                if isDarkest { darkestLevels = levels }
             }
         }
         accumulator.releaseScratch()
-        let merged = try report.time("Resolve") { try Self.gpuStep { try accumulator.resolve() } }
+        let result = try report.time("Resolve") { try Self.gpuStep { try accumulator.resolve() } }
         report.sampleMemory(gpu.device)
-        guard let referenceFrame, let darkestLevels else { throw HDRMergeError.tooFewFrames }
-        return Accumulated(merged: merged, reference: referenceFrame, darkestLevels: darkestLevels)
+        guard let referenceFrame, let darkestLevels, let darkest = merged.last else { throw HDRMergeError.tooFewFrames }
+        return Accumulated(merged: result, reference: referenceFrame, darkestLevels: darkestLevels,
+                           darkestRelativeEV: frames[darkest].relativeEV)
     }
 
     /// The as-shot white balance of the median-exposure frame (see the
@@ -431,14 +540,33 @@ public final class HDRMerger: HDRMerging {
 
     /// The merge's options as the recipe records them.
     ///
-    /// Deghosting and the version of the clip feathering are always recorded
-    /// (both change the pixels); the reference frame only when overridden.
-    static func recipeOptions(_ options: HDRMergeOptions) -> [String: JSONValue] {
+    /// Deghosting, Auto Align and the version of the clip feathering are
+    /// always recorded (all change the pixels); the reference frame only
+    /// when overridden. With Auto Align, `alignmentShifts` holds how far
+    /// each frame was moved (the most any corner moved, in pixels, to a
+    /// hundredth; null for a frame that couldn't be lined up) and `leftOut`
+    /// the frames left out of the merge, if any.
+    ///
+    /// - Parameter alignment: what Auto Align decided; nil when it was off
+    ///   (or the analysis had no measurements), recorded as `autoAlign: false`.
+    static func recipeOptions(_ options: HDRMergeOptions, alignment: HDRMergeAlignment.Plan? = nil) -> [String: JSONValue] {
         var recorded: [String: JSONValue] = [
             "deghost": .string(options.deghost.rawValue),
             "clipFeather": .number(Double(HDRClipFeather.version)),
+            "autoAlign": .bool(alignment != nil),
         ]
         if let index = options.referenceIndex { recorded["referenceIndex"] = .number(Double(index)) }
+        if let alignment {
+            recorded["alignmentShifts"] = .array(alignment.frames.map { frame in
+                switch frame {
+                case .reference: .number(0)
+                case .aligned(let shift): .number((shift * 100).rounded() / 100)
+                case .unaligned, .leftOut: .null
+                }
+            })
+            let leftOut = alignment.frames.indices.filter { !alignment.includes($0) }
+            if !leftOut.isEmpty { recorded["leftOut"] = .array(leftOut.map { .number(Double($0)) }) }
+        }
         return recorded
     }
 

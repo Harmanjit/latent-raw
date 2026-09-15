@@ -72,19 +72,7 @@ final class HDRAnalysisTests: XCTestCase {
         XCTAssertEqual(analysis.warnings, [])
     }
 
-    /// The middle frame moved 5 px: the check must say so, and by about that much.
-    func testShiftedFrameWarnsMisaligned() async throws {
-        var frames = SyntheticBracket.frames(HDRTestSupport.threeExposures)
-        frames[1].shiftX = 5
-        let urls = try HDRTestSupport.bracket("shifted5", frames, noise: true)
-        let analysis = try await HDRTestSupport.merger().analyse(urls)
-        let shifts = analysis.warnings.compactMap { warning -> Double? in
-            if case .framesLookMisaligned(let pixels) = warning { return pixels }
-            return nil
-        }
-        XCTAssertEqual(shifts.count, 1, "\(analysis.warnings)")
-        XCTAssertEqual(shifts.first ?? 0, 5, accuracy: 1)
-    }
+    // A frame that moved: HDRAutoAlignTests, with Auto Align on and off.
 
     func testSmallExposureRangeWarns() async throws {
         let urls = try HDRTestSupport.bracket("small", SyntheticBracket.frames([1, 0.6]), noise: true)

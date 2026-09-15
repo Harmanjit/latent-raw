@@ -208,7 +208,7 @@ struct ContentView: View {
         }
         .sheet(item: $hdrMergeSheet) { sheet in
             HDRMergeSheet(model: sheet, thumbnail: { await library.loadThumbnail(for: $0) },
-                          onMerge: { startHDRMerge($0, from: sheet) }, canMerge: !exportQueue.isGPUBusy)
+                          onMerge: { startHDRMerge($0, options: $1, from: sheet) }, canMerge: !exportQueue.isGPUBusy)
                 .motionFollowsAccessibility()
         }
         .sheet(item: $renaming) { record in
@@ -785,11 +785,12 @@ struct ContentView: View {
     }
 
     /// Merge in the dialog: the job runs in the background from here, with
-    /// the same engine that measured the photos.
-    private func startHDRMerge(_ analysis: HDRMergeAnalysis, from sheet: HDRMergeSheetModel) {
+    /// the same engine that measured the photos and the dialog's options.
+    private func startHDRMerge(_ analysis: HDRMergeAnalysis, options: HDRMergeOptions, from sheet: HDRMergeSheetModel) {
         let records = sheet.recordsInFrameOrder.compactMap { $0 }
         guard records.count == analysis.frames.count,
-              photoMerge.start(analysis, records: records, library: library, engine: sheet.engine) else {
+              photoMerge.start(analysis, options: options, records: records, library: library,
+                               engine: sheet.engine) else {
             library.lastError = "HDR merge couldn’t start: an export or another merge is using the graphics processor, "
                 + "or the photos are no longer in the open folder."
             return

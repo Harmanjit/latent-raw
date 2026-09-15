@@ -30,6 +30,13 @@ public enum MergeWarpKernels {
         /// draws on, for clip masks: an output counts as clipped if any
         /// clipped pixel fed its colour.
         case footprintMaximum = 1
+        /// The largest of the four pixels a bilinear sample blends: the
+        /// ones the colour warp's sample leans on (its outer taps weigh
+        /// 7.4% at most). For the HDR merge's clip mask, which the merge
+        /// widens by a pixel all round itself, so together they mark what
+        /// `footprintMaximum` marks without widening it twice
+        /// (Shaders/MergeWarp.metal has the details).
+        case nearestFourMaximum = 2
     }
 
     /// Pixels per command buffer: about 50 ms of GPU work for a warp.

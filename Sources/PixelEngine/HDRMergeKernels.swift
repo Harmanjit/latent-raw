@@ -243,6 +243,7 @@ public enum HDRMergeKernels {
 /// | RCD's six intermediates | mixed | 775 MB |
 /// | clip feathering, three quarter-size maps | r16Float | 9 MB |
 /// | deghosting mask, quarter size | r8Unorm | 2 MB |
+/// | with alignment: the warped frame and clip mask | rgba16Float, r8Unorm | 218 MB |
 ///
 /// `releaseScratch()` frees all but the accumulator once the last frame is
 /// in, before `resolve()` makes the half-float result (194 MB).
@@ -288,14 +289,17 @@ public final class HDRMergeAccumulator {
     }
 
     /// GPU memory a merge of this size holds at its peak, in bytes: the
-    /// accumulator, the per-frame textures and the frame's sensor plane.
-    public static func estimatedPeakBytes(width: Int, height: Int) -> Int {
+    /// accumulator, the per-frame textures and the frame's sensor plane,
+    /// plus, when frames are `aligned`, the warped copy of each frame and
+    /// its clip mask.
+    public static func estimatedPeakBytes(width: Int, height: Int, aligned: Bool = false) -> Int {
         let pixels = width * height
         let accumulator = 16, cfa = 4, mask = 1, sensor = 2
         let rcd = 2 + 4 + 8 + 2 + 8 + 8
+        let warp = aligned ? MergeWarpKernels.extraBytes(width: 1, height: 1) + mask : 0
         let map = HDRMergeKernels.maskSize(width: width, height: height)
         let quarterSize = map.width * map.height * (3 * 2 + 1)
-        return pixels * (accumulator + cfa + mask + sensor + rcd) + quarterSize
+        return pixels * (accumulator + cfa + mask + sensor + rcd + warp) + quarterSize
     }
 
     /// Demosaics `file` and adds it to the sums.
@@ -309,10 +313,15 @@ public final class HDRMergeAccumulator {
     ///   - feather: how the frame fades out near its clipping; nil for none
     ///     (the darkest frame, which nothing darker could replace).
     ///   - ghostMask: where the frame shows something that moved, from
-    ///     `HDRGhostDetector`; nil for no deghosting.
+    ///     `HDRGhostDetector`, already on the reference frame's grid; nil
+    ///     for no deghosting.
+    ///   - movingToReference: with alignment, where this frame's pixels
+    ///     belong on the reference frame (`MergeWarpKernels` has the
+    ///     convention); nil or the identity leaves the frame where it is.
     public func add(_ file: RawFile, levels: HDRFrameLevels, multipliers: SIMD3<Float>,
                     relativeEV: Double, weightFloor: Float,
-                    feather: HDRClipFeather? = nil, ghostMask: HDRGhostMask? = nil) throws {
+                    feather: HDRClipFeather? = nil, ghostMask: HDRGhostMask? = nil,
+                    movingToReference: simd_double3x3? = nil) throws {
         guard case .bayer(let order) = file.summary.cfaPattern, let plane = file.sensorPlane,
               let buffer = gpu.makeSharedBuffer(wrapping: plane) else { throw HDRMergeKernelError.notABayerFrame }
         guard file.summary.rawWidth == width, file.summary.rawHeight == height else {
@@ -325,8 +334,8 @@ public final class HDRMergeAccumulator {
                                                    actual: "\(ghostMask.width) x \(ghostMask.height)")
         }
         let cfa = try scratchTexture(.r32Float, "cfa")
-        let mask = try scratchTexture(.r8Unorm, "clipMask")
-        guard let commands = gpu.commandQueue.makeCommandBuffer() else { throw RenderError.commandBufferFailed }
+        var mask = try scratchTexture(.r8Unorm, "clipMask")
+        guard var commands = gpu.commandQueue.makeCommandBuffer() else { throw RenderError.commandBufferFailed }
 
         // 1. Black, normalisation, white balance, clip mask.
         let prepare = try gpu.lazyPipeline(.mergeHDRRawPrepare)
@@ -349,12 +358,32 @@ public final class HDRMergeAccumulator {
         encoder.endEncoding()
 
         // 2. RCD, the pipeline's own passes, into textures kept for the next frame.
-        let rgb = try pipeline.encodeRCD(cmdBuffer: commands, cfa: cfa, order: order) { format, role in
+        var rgb = try pipeline.encodeRCD(cmdBuffer: commands, cfa: cfa, order: order) { format, role in
             try scratchTexture(format, "rcd-\(role)")
         }
 
-        // 3. (Alignment goes here: `rgb` and `mask` warped onto the reference
-        // frame, so everything below sees the frame where it belongs.)
+        // 3. With alignment, the frame and its clip mask moved onto the
+        // reference frame, so everything below sees the frame where it
+        // belongs. The warps run their own command buffers (in bands, so no
+        // single one covers a whole 45 MP frame), so the work so far runs
+        // first and the rest goes in a new one.
+        // - The colours' alpha becomes coverage: 0 where the frame moved
+        //   out of the picture, which takes it out of the sums there.
+        // - The warped mask marks the four pixels each warped colour leans
+        //   on most (`nearestFourMaximum`); with the widening step 6 gives
+        //   it, that covers every pixel a clipped photosite fed. Everything
+        //   outside the frame counts as clipped.
+        let aligned = movingToReference.map { !MergeWarpKernels.isIdentity($0) } ?? false
+        if let movingToReference, aligned {
+            try HDRMergeKernels.run(commands)
+            rgb = try MergeWarpKernels.warp(rgb, movingToReference: movingToReference,
+                                            into: try scratchTexture(.rgba16Float, "warped"), gpu: gpu)
+            mask = try MergeWarpKernels.warpMask(mask, movingToReference: movingToReference,
+                                                 sampling: .nearestFourMaximum, outside: 1,
+                                                 into: try scratchTexture(.r8Unorm, "warpedClipMask"), gpu: gpu)
+            guard let next = gpu.commandQueue.makeCommandBuffer() else { throw RenderError.commandBufferFailed }
+            commands = next
+        }
 
         var inverse = SIMD4<Float>(1 / max(multipliers.x, 1e-6), 1 / max(multipliers.y, 1e-6),
                                    1 / max(multipliers.z, 1e-6), 1)
@@ -408,6 +437,7 @@ public final class HDRMergeAccumulator {
         var maskSpan = Float(HDRMergeKernels.maskSpan)
         var featherOn: Float = feather == nil ? 0 : 1
         var ghostOn: Float = ghostMask == nil ? 0 : 1
+        var coverageOn: Float = aligned ? 1 : 0
         adder.setBytes(&inverse, length: 16, index: 0)
         adder.setBytes(&clip, length: 16, index: 1)
         adder.setBytes(&radianceScale, length: 4, index: 2)
@@ -416,6 +446,7 @@ public final class HDRMergeAccumulator {
         adder.setBytes(&maskSpan, length: 4, index: 5)
         adder.setBytes(&featherOn, length: 4, index: 6)
         adder.setBytes(&ghostOn, length: 4, index: 7)
+        adder.setBytes(&coverageOn, length: 4, index: 8)
         HDRMergeKernels.dispatch(adder, pso: accumulate, width: width, height: height)
         adder.endEncoding()
 

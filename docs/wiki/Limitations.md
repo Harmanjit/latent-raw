@@ -50,10 +50,11 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 ## Photo Merge
 
 - **HDR only.** Panorama and HDR Panorama merges aren't there yet, and neither is focus stacking (Lightroom doesn't have it either).
-- **Brackets must be shot on a tripod.** HDR merge doesn't align frames or remove ghosts yet, so a camera that moved gives doubled edges and anything that moved between shots shows through semi-transparent. The dialog warns when the frames don't line up.
+- **Auto Align moves whole frames.** It lines up handheld brackets, but near and far things that shifted against each other (parallax) still show slightly doubled edges. A frame it can't align is merged unaligned if it looks within a pixel or so, or left out of the merge otherwise; the dialog says which.
+- **Deghost compares brightness, not colour.** Something that moved in front of an equally bright background can go unnoticed and look doubled or semi-transparent, and deghosted areas come from a single frame, with its noise. There is no overlay showing what Deghost masked, and no preview of the merge before it runs.
 - **Raw files from Bayer sensors only,** all from one camera at one size and orientation; merged photos can't be merged again. On 8 GB Macs a merge takes at most 5 photos.
 - **Edits on the bracket's photos aren't used.** The merge reads the raw files; the result starts unedited at the reference photo's exposure.
-- **The reference photo is chosen automatically,** and there are no merge options yet.
+- **The reference photo is chosen automatically;** the only merge options are Auto Align and Deghost.
 - **No re-merge.** The result records which photos made it, but Latent can't merge them again from that record, and a merge can't be undone except by deleting its DNG in Finder.
 - **Merged DNGs are large and uncompressed,** about 6 bytes per pixel (roughly 145 MB for 24 MP). Merges write DNG; export still doesn't.
 - **A merged DNG copied in from Finder without its sidecar** is catalogued as a plain DNG; the record of what made it stays inside the file, unread.

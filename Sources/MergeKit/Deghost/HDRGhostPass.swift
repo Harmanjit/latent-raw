@@ -11,11 +11,11 @@ extension HDRMerger {
     /// What the deghosting pass hands the merge.
     struct GhostPass {
         /// One per frame, in the analysis's order; nil for the reference
-        /// frame, which is never masked.
+        /// frame, which is never masked, and for frames left out of the merge.
         let masks: [HDRGhostMask?]
         /// Each frame's levels (`HDRMerger.levels`), so the merge needn't
-        /// work them out again.
-        let levels: [HDRFrameLevels]
+        /// work them out again; nil for frames left out of the merge.
+        let levels: [HDRFrameLevels?]
     }
 
     /// Finds every frame's ghost mask (`HDRGhostDetector` has the steps).
@@ -27,19 +27,32 @@ extension HDRMerger {
     /// detector's GPU textures are freed when this returns, before the merge
     /// allocates its own.
     ///
+    /// **With Auto Align** every frame's measurement is warped onto the
+    /// reference frame before it is compared (`HDRGhostDetector.measure`), so
+    /// a frame's brightness is compared with the same part of the scene in
+    /// the others, not with whatever sits at the same pixel. Frames Auto
+    /// Align left out aren't looked at.
+    ///
     /// - Parameters:
+    ///   - alignment: what Auto Align decided, or nil with it off.
     ///   - progress: the share of this pass done (0...1) and a stage name.
     func findGhosts(_ frames: [HDRMergeFrame], reference: Int, width: Int, height: Int,
-                    settings: HDRDeghostSettings, feather: HDRClipFeather, report: inout HDRMergeReport,
-                    progress: (Double, String) -> Void) throws -> GhostPass {
+                    alignment: HDRMergeAlignment.Plan?, settings: HDRDeghostSettings, feather: HDRClipFeather,
+                    report: inout HDRMergeReport, progress: (Double, String) -> Void) throws -> GhostPass {
         let detector = try Self.gpuStep {
             try HDRGhostDetector(gpu: gpu, width: width, height: height, feather: feather,
                                  referenceIndex: reference, referenceEV: frames[reference].relativeEV)
         }
-        var measurements: [HDRGhostMeasurement] = []
-        var levels: [HDRFrameLevels] = []
+        let merged = frames.indices.filter { alignment?.includes($0) ?? true }
+        var measurements: [HDRGhostMeasurement?] = []
+        var levels: [HDRFrameLevels?] = []
         for (index, frame) in frames.enumerated() {
             try Task.checkCancellation()
+            guard merged.contains(index) else {
+                measurements.append(nil)
+                levels.append(nil)
+                continue
+            }
             progress(0.7 * Double(index) / Double(frames.count),
                      "Looking for movement in photo \(index + 1) of \(frames.count)")
             let name = frame.url.lastPathComponent
@@ -50,7 +63,8 @@ extension HDRMerger {
                 let frameLevels = try Self.gpuStep { try Self.levels(for: file, gpu: gpu) }
                 let measurement = try report.time("Measure \(name) for deghosting") {
                     try Self.gpuStep {
-                        try detector.measure(file, index: index, levels: frameLevels, relativeEV: frame.relativeEV)
+                        try detector.measure(file, index: index, levels: frameLevels, relativeEV: frame.relativeEV,
+                                             movingToReference: alignment?.homographies[index])
                     }
                 }
                 report.sampleMemory(gpu.device)
@@ -63,14 +77,14 @@ extension HDRMerger {
         var flagged: [Double] = []
         for (index, frame) in frames.enumerated() {
             try Task.checkCancellation()
-            guard index != reference else {
+            guard index != reference, let measurement = measurements[index] else {
                 flagged.append(0)
                 continue
             }
             progress(0.7 + 0.15 * Double(index) / Double(frames.count),
                      "Comparing photo \(index + 1) of \(frames.count)")
             flagged.append(try report.time("Find movement in \(frame.url.lastPathComponent)") {
-                try Self.gpuStep { try detector.findMovement(measurements[index], index: index, settings: settings) }
+                try Self.gpuStep { try detector.findMovement(measurement, index: index, settings: settings) }
             })
         }
         measurements.removeAll()
@@ -79,7 +93,7 @@ extension HDRMerger {
         var fractions: [Double] = []
         for (index, frame) in frames.enumerated() {
             try Task.checkCancellation()
-            guard index != reference else {
+            guard index != reference, merged.contains(index) else {
                 masks.append(nil)
                 fractions.append(0)
                 continue

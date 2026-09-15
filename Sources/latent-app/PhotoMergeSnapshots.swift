@@ -41,21 +41,28 @@ enum PhotoMergeSnapshots {
 }
 
 /// Measures nothing: says the files are a 2 EV bracket of a 24 MP camera,
-/// brightest first, with the misalignment warning, the longest the dialog's
-/// text gets.
+/// brightest first, shot by hand: with Auto Align, aligned by up to 17 px
+/// with the last photo left out, the longest the dialog's text gets; without
+/// it, the misalignment warning.
 private struct StandInHDRMerger: HDRMerging {
-    func analyse(_ urls: [URL]) async throws -> HDRMergeAnalysis {
+    func analyse(_ urls: [URL], options: HDRMergeOptions) async throws -> HDRMergeAnalysis {
         // A camera's shutter speeds, 2 stops apart.
         let speeds: [Double] = [15, 60, 250, 1000, 4000, 16000]
+        let count = min(urls.count, speeds.count)
+        let reference = count / 2
         let frames = urls.prefix(speeds.count).enumerated().map { index, url in
             HDRMergeFrame(url: url, exposureSeconds: 1 / speeds[index], iso: 100, aperture: 8,
                           relativeEV: Double(-2 * index), exifRelativeEV: Double(-2 * index),
-                          clippedFraction: 0.2 / Double(index + 1))
+                          clippedFraction: 0.2 / Double(index + 1),
+                          alignmentShiftPixels: !options.autoAlign || index == count - 1 ? nil
+                              : index == reference ? 0 : 16.6)
         }
-        return HDRMergeAnalysis(frames: frames, referenceIndex: frames.count / 2, width: 6016, height: 4016,
+        let warnings: [HDRMergeWarning] = options.autoAlign
+            ? [.frameCouldNotBeAligned(frameIndex: count - 1, leftOut: true)]
+            : [.framesLookMisaligned(maximumShiftPixels: 16.6)]
+        return HDRMergeAnalysis(frames: frames, referenceIndex: reference, width: 6016, height: 4016,
                                 exposureRangeStops: Double(2 * max(frames.count - 1, 0)),
-                                warnings: [.framesLookMisaligned(maximumShiftPixels: 3.4)],
-                                estimatedOutputBytes: 145_000_000)
+                                warnings: warnings, estimatedOutputBytes: 145_000_000)
     }
 
     func merge(_ analysis: HDRMergeAnalysis, options: HDRMergeOptions, sources: [MergeRecipe.Source],
