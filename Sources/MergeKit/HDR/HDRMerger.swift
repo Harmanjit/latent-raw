@@ -1,5 +1,5 @@
 // The tripod HDR merge: a bracket of raws in, one LinearRaw DNG out
-// (docs/PhotoMerge.md section 3, v1: no alignment and no deghosting yet).
+// (docs/PhotoMerge.md section 3; no alignment yet).
 
 import CoreGraphics
 import Foundation
@@ -23,6 +23,16 @@ import ColorKit
 /// result, hands the app the recipe for the sidecar, and streams the DNG
 /// to disk.
 ///
+/// **Near clipping** a frame fades out over a wide band rather than pixel
+/// by pixel (`HDRClipFeather`), so something that moved across a bright,
+/// clipped sky during a long exposure can't punch dark holes in it.
+///
+/// **Deghosting**, when asked for, runs before merging: every frame is
+/// opened once more at quarter size to find what moved (`findGhosts`), and
+/// wherever something moved every frame's weight drops to zero except the
+/// one frame that sees that place best, so moving things come from a single
+/// exposure.
+///
 /// **One white balance for every frame.** RCD demosaics best with the
 /// colours roughly balanced, and every frame must be demosaiced alike, so
 /// all of them use the as-shot multipliers of the median-exposure frame
@@ -43,13 +53,17 @@ public final class HDRMerger: HDRMerging {
         self.init(gpu: gpu, memoryPolicy: .current)
     }
 
+    /// How frames fade out near their clipping; replaceable for tests.
+    let clipFeather: HDRClipFeather
+
     init(gpu: GPUContext, memoryPolicy: MemoryPolicy,
          availableCapacity: @escaping @Sendable (URL) -> Int64? = LinearRawDNGWriter.volumeAvailableCapacity,
-         gpuMemoryBudget: Int? = nil) {
+         gpuMemoryBudget: Int? = nil, clipFeather: HDRClipFeather = .standard) {
         self.gpu = gpu
         self.memoryPolicy = memoryPolicy
         self.availableCapacity = availableCapacity
         self.gpuMemoryBudget = gpuMemoryBudget
+        self.clipFeather = clipFeather
     }
 
     /// Most frames a merge takes: 9, or 5 on a Mac with 8 GB or less,
@@ -259,8 +273,21 @@ public final class HDRMerger: HDRMerging {
         }
 
         progress(HDRMergeProgress(fraction: 0, stage: "Preparing"))
+        // With deghosting the first quarter of the progress bar finds the
+        // movement; merging the frames takes the bar to 80% either way.
+        var ghosts: GhostPass?
+        var mergeProgress = (start: 0.0, share: 0.8)
+        if let settings = options.deghost.settings {
+            ghosts = try findGhosts(frames, reference: reference, width: analysis.width, height: analysis.height,
+                                    settings: settings, feather: clipFeather, report: &report) { fraction, stage in
+                progress(HDRMergeProgress(fraction: 0.25 * fraction, stage: stage))
+            }
+            mergeProgress = (0.25, 0.55)
+        }
         let accumulated = try accumulate(frames, reference: reference, width: analysis.width,
-                                         height: analysis.height, report: &report, progress: progress)
+                                         height: analysis.height, ghosts: ghosts, report: &report) { fraction, stage in
+            progress(HDRMergeProgress(fraction: mergeProgress.start + mergeProgress.share * fraction, stage: stage))
+        }
         let merged = accumulated.merged
 
         try Task.checkCancellation()
@@ -332,32 +359,44 @@ public final class HDRMerger: HDRMerging {
     /// Adds every frame to the GPU sums, one at a time, and resolves them.
     /// Its own function so the accumulator and every per-frame texture are
     /// released when it returns, before the preview needs memory.
+    ///
+    /// Each frame goes through the same steps, in this order: decode, the
+    /// accumulator's demosaic, (alignment, when it arrives, warps the frame
+    /// here, inside `HDRMergeAccumulator.add`), the clip feathering and the
+    /// ghost mask, then the weighted sum.
+    ///
+    /// - Parameters:
+    ///   - ghosts: the deghosting pass's masks, or nil without deghosting.
+    ///   - progress: the share of this step done (0...1) and a stage name.
     private func accumulate(_ frames: [HDRMergeFrame], reference: Int, width: Int, height: Int,
-                            report: inout HDRMergeReport,
-                            progress: @Sendable (HDRMergeProgress) -> Void) throws -> Accumulated {
+                            ghosts: GhostPass?, report: inout HDRMergeReport,
+                            progress: (Double, String) -> Void) throws -> Accumulated {
         let multipliers = try sharedMultipliers(frames)
         let accumulator = try Self.gpuStep { try HDRMergeAccumulator(gpu: gpu, width: width, height: height) }
         var referenceFrame: (summary: RawSummary, cameraToXYZ: [Float]?)?
         var darkestLevels: HDRFrameLevels?
         for (index, frame) in frames.enumerated() {
             try Task.checkCancellation()
-            progress(HDRMergeProgress(fraction: 0.8 * Double(index) / Double(frames.count),
-                                      stage: "Merging photo \(index + 1) of \(frames.count)"))
+            progress(Double(index) / Double(frames.count), "Merging photo \(index + 1) of \(frames.count)")
             let name = frame.url.lastPathComponent
+            let isDarkest = index == frames.count - 1
             // The pool drains Metal's autoreleased objects (command buffers,
             // the sensor buffer's wrapper) before the next frame opens.
             try autoreleasepool {
                 let file = try report.time("Decode \(name)") { try Self.open(frame.url) }
                 guard case .bayer = file.summary.cfaPattern else { throw HDRMergeError.unsupportedSource(fileName: name) }
                 guard file.summary.width == width, file.summary.height == height else { throw HDRMergeError.differentSizes }
-                let levels = try Self.gpuStep { try Self.levels(for: file, gpu: gpu) }
+                let levels = try ghosts.map { $0.levels[index] } ?? Self.gpuStep { try Self.levels(for: file, gpu: gpu) }
                 try report.time("Demosaic and add \(name)") {
                     try Self.gpuStep {
                         // The darkest frame keeps a weight floor, so pixels
-                        // clipped in every frame come from it.
+                        // clipped in every frame come from it, and no
+                        // feathering: no darker frame could take over from it.
                         try accumulator.add(file, levels: levels, multipliers: multipliers,
                                             relativeEV: frame.relativeEV,
-                                            weightFloor: index == frames.count - 1 ? 1e-4 : 0)
+                                            weightFloor: isDarkest ? 1e-4 : 0,
+                                            feather: isDarkest ? nil : clipFeather,
+                                            ghostMask: ghosts?.masks[index])
                     }
                 }
                 report.sampleMemory(gpu.device)
@@ -391,8 +430,16 @@ public final class HDRMerger: HDRMerging {
     }
 
     /// The merge's options as the recipe records them.
+    ///
+    /// Deghosting and the version of the clip feathering are always recorded
+    /// (both change the pixels); the reference frame only when overridden.
     static func recipeOptions(_ options: HDRMergeOptions) -> [String: JSONValue] {
-        options.referenceIndex.map { ["referenceIndex": .number(Double($0))] } ?? [:]
+        var recorded: [String: JSONValue] = [
+            "deghost": .string(options.deghost.rawValue),
+            "clipFeather": .number(Double(HDRClipFeather.version)),
+        ]
+        if let index = options.referenceIndex { recorded["referenceIndex"] = .number(Double(index)) }
+        return recorded
     }
 
     static var softwareVersion: String {
