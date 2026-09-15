@@ -68,12 +68,17 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
     }
 }
 
-/// The XPC interface. One method: decode the file behind an open
-/// descriptor. The service never receives a path and has no file
-/// access of its own; the descriptor is the only thing it can read.
+/// The XPC interface: decode the file behind an open descriptor, or read
+/// its metadata for export. The service never receives a path and has no
+/// file access of its own; the descriptor is the only thing it can read.
 @objc public protocol RawDecoderProtocol {
     func decode(_ file: FileHandle, metadataOnly: Bool,
                 reply: @escaping (_ metadataJSON: Data?, _ plane: IOSurface?, _ preview: Data?, _ error: String?) -> Void)
+
+    /// Reads the photo's own metadata for export (`SourceMetadata`): two
+    /// binary property lists, the dictionaries and the XMP tag tree.
+    func readMetadata(_ file: FileHandle,
+                      reply: @escaping (_ properties: Data?, _ xmpTags: Data?, _ error: String?) -> Void)
 }
 
 public enum RawDecoderXPC {
@@ -168,5 +173,28 @@ public final class RawDecoderClient: @unchecked Sendable {
         let metadata = try JSONDecoder().decode(RawSnapshotMetadata.self, from: metaData)
         RawDecoderXPC.logger.notice("decoded \(metadata.cameraModel, privacy: .public) in service, \(Int(Date().timeIntervalSince(start) * 1000)) ms, plane \(result.1?.allocationSize ?? 0) bytes shared")
         return (metadata, result.1, result.2)
+    }
+
+    /// Reads a file's metadata for export, synchronously.
+    public func readMetadata(fileDescriptor fd: Int32) throws -> SourceMetadata {
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
+        var result: (Data?, Data?, String?) = (nil, nil, nil)
+        var transportError: Error?
+        guard let proxy = proxy(errorHandler: { transportError = $0 }) else {
+            throw ClientError.connectionLost("no proxy")
+        }
+        proxy.readMetadata(handle) { properties, xmpTags, error in
+            result = (properties, xmpTags, error)
+        }
+        if let transportError {
+            RawDecoderXPC.logger.error("raw decoder transport error: \(String(describing: transportError), privacy: .public)")
+            throw ClientError.connectionLost(String(describing: transportError))
+        }
+        if let error = result.2 {
+            RawDecoderXPC.logger.error("raw decoder service error: \(error, privacy: .public)")
+            throw ClientError.serviceFailed(error)
+        }
+        guard let properties = result.0 else { throw ClientError.serviceFailed("empty reply") }
+        return try SourceMetadata(properties: properties, xmpTags: result.1)
     }
 }

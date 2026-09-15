@@ -20,6 +20,15 @@ final class RawDecoderService: NSObject, RawDecoderProtocol {
             reply(nil, nil, nil, String(describing: error))
         }
     }
+
+    func readMetadata(_ file: FileHandle, reply: @escaping (Data?, Data?, String?) -> Void) {
+        do {
+            let metadata = try SourceMetadata(fileDescriptor: file.fileDescriptor)
+            reply(metadata.properties, metadata.xmpTags, nil)
+        } catch {
+            reply(nil, nil, String(describing: error))
+        }
+    }
 }
 
 final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
