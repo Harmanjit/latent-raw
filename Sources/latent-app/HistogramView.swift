@@ -31,6 +31,7 @@ struct HistogramView: View {
         VStack(alignment: .leading, spacing: 3) {
             plotArea
             xAxisLabels
+                .accessibilityHidden(true)
         }
     }
 
@@ -52,6 +53,10 @@ struct HistogramView: View {
             }
         }
         .frame(height: 90)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isImage)
+        .accessibilityLabel("Histogram")
+        .accessibilityValue(histogram.map { SpokenText.histogram(luminance: $0.luminance) } ?? "No data")
     }
 
     private var xAxisLabels: some View {

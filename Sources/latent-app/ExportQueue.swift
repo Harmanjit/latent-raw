@@ -316,9 +316,11 @@ struct ExportSheet: View {
             }
             if preset.format.supportsQuality {
                 HStack {
-                    Text("Quality")
-                    ResettableSlider(value: $preset.quality, in: 0.3...1) { preset.quality = 0.92 }
+                    Text("Quality").accessibilityHidden(true)
+                    ResettableSlider(value: $preset.quality, in: 0.3...1, label: "Quality",
+                                     format: SliderValueFormat(decimals: 0, scale: 100)) { preset.quality = 0.92 }
                     Text(String(format: "%.0f", preset.quality * 100)).monospacedDigit().frame(width: 30)
+                        .accessibilityHidden(true)
                 }
             }
             if preset.format.supportsGainMap {
@@ -336,10 +338,12 @@ struct ExportSheet: View {
                 HStack {
                     Text("Long edge")
                     TextField("px", value: $preset.maxLongEdge, format: .number).frame(width: 80)
-                    Text("px").foregroundStyle(.secondary)
+                        .accessibilityLabel("Long edge in pixels")
+                    Text("px").foregroundStyle(.secondary).accessibilityHidden(true)
                     Spacer()
                     ForEach([1024, 2048, 4096], id: \.self) { n in
                         Button("\(n)") { preset.maxLongEdge = n }.controlSize(.small)
+                            .accessibilityLabel("\(n) pixels")
                     }
                 }
             }
@@ -349,6 +353,7 @@ struct ExportSheet: View {
             HStack {
                 Text("Template")
                 TextField("{name}", text: $preset.template)
+                    .accessibilityLabel("File name template")
                 Menu("Insert") {
                     ForEach(ExportNaming.tokens, id: \.token) { t in
                         Button("\(t.token)  \(t.meaning)") { preset.template += t.token }
@@ -395,6 +400,8 @@ struct ExportSheet: View {
             HStack {
                 Text(destination?.path ?? "choose a folder…").lineLimit(1).truncationMode(.middle)
                     .foregroundStyle(destination == nil ? .secondary : .primary)
+                    .accessibilityLabel("Destination")
+                    .accessibilityValue(destination?.path ?? "none chosen")
                 Spacer()
                 Button("Choose…") {
                     let panel = NSOpenPanel()
@@ -521,5 +528,6 @@ struct ExportSheet: View {
     private func groupLabel(_ title: String) -> some View {
         Text(title).font(.caption).fontWeight(.semibold).foregroundStyle(.secondary).textCase(.uppercase)
             .padding(.top, 4)
+            .accessibilityAddTraits(.isHeader)
     }
 }

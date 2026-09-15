@@ -43,7 +43,7 @@ private final class HelpWindowController: NSWindowController {
     static let minimumSize = NSSize(width: 640, height: 420)
 
     init() {
-        let hosting = NSHostingController(rootView: HelpView(model: model))
+        let hosting = NSHostingController(rootView: HelpView(model: model).motionFollowsAccessibility())
         // The window's size is the user's, not the content's: a split view
         // would otherwise shrink it to its smallest fitting size.
         hosting.sizingOptions = []

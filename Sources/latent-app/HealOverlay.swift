@@ -7,6 +7,7 @@ import PixelEngine
 /// testing, so this can never disagree with what a drag actually grabs.
 struct HealOverlay: View {
     @ObservedObject var model: EditorModel
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         GeometryReader { geo in
@@ -33,9 +34,34 @@ struct HealOverlay: View {
                     context.stroke(sourceCircle, with: .color(.black.opacity(0.5)), lineWidth: 3)
                     context.stroke(sourceCircle, with: .color(selected ? .accentColor : .white),
                                    style: StrokeStyle(lineWidth: selected ? 2 : 1.5, dash: [4, 3]))
+
+                    // Increase Contrast: a solid ring just outside the selected
+                    // target, so the selection doesn't rest on colour alone.
+                    let ring = Contrast.selectionOutlineWidth(selected: selected, increased: contrast == .increased)
+                    if ring > 0 {
+                        let outer = r + 3 + ring
+                        let halo = Path(ellipseIn: CGRect(x: t.x - outer, y: t.y - outer, width: 2 * outer, height: 2 * outer))
+                        context.stroke(halo, with: .color(.black), lineWidth: ring + 2)
+                        context.stroke(halo, with: .color(.accentColor), lineWidth: ring)
+                    }
                 }
             }
             .allowsHitTesting(false)
+            // Patches are placed with the mouse; VoiceOver can count them,
+            // step the selection through them and delete the selected one.
+            .accessibilityElement()
+            .accessibilityLabel("Spot removal patches")
+            .accessibilityValue(SpokenText.healPatches(count: model.parameters.heals.count,
+                                                       selected: model.selectedHealIndex))
+            .accessibilityHint("Click a spot on the image to remove it")
+            .accessibilityAdjustableAction { direction in
+                let count = model.parameters.heals.count
+                guard count > 0 else { return }
+                let step = direction == .increment ? 1 : direction == .decrement ? -1 : 0
+                let current = model.selectedHealIndex ?? (step > 0 ? -1 : count)
+                model.selectedHealIndex = min(max(current + step, 0), count - 1)
+            }
+            .accessibilityAction(named: "Delete selected patch") { model.deleteSelectedHeal() }
         }
     }
 

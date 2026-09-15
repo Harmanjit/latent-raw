@@ -37,6 +37,7 @@ struct LatentApp: App {
         Settings {
             PreferencesView()
                 .tint(prefs.accent.color)
+                .motionFollowsAccessibility()
         }
     }
 }

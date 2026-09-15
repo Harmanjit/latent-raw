@@ -14,6 +14,7 @@ struct FilterBar: View {
             flagToggles
             Toggle("Edited", isOn: $library.filter.editedOnly)
                 .toggleStyle(.button)
+                .accessibilityLabel("Edited only")
 
             attributeMenu("Camera", selection: $library.filter.camera, options: library.availableCameras)
             attributeMenu("Lens", selection: $library.filter.lens, options: library.availableLenses)
@@ -21,6 +22,7 @@ struct FilterBar: View {
 
             TextField("Search file names", text: $library.filter.text)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Search file names")
                 .frame(width: 150)
 
             Spacer()
@@ -57,6 +59,17 @@ struct FilterBar: View {
             }
         }
         .help("Show images rated this many stars or more")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Minimum rating")
+        .accessibilityValue(SpokenText.minimumRating(library.filter.minRating))
+        .accessibilityAdjustableAction { direction in
+            let rating = library.filter.minRating
+            switch direction {
+            case .increment: library.filter.minRating = min(rating + 1, 5)
+            case .decrement: library.filter.minRating = max(rating - 1, 0)
+            @unknown default: break
+            }
+        }
     }
 
     /// Picked / unflagged / rejected, each independently toggled. None
@@ -81,6 +94,8 @@ struct FilterBar: View {
         }
         .buttonStyle(.bordered)
         .tint(on ? color : nil)
+        .accessibilityLabel("Show \(SpokenText.flag(flag.rawValue).lowercased())")
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private func attributeMenu(_ title: String, selection: Binding<String?>, options: [String]) -> some View {
@@ -104,6 +119,8 @@ struct FilterBar: View {
                 .frame(maxWidth: 140)
         }
         .disabled(options.isEmpty && selection.wrappedValue == nil)
+        .accessibilityLabel(title)
+        .accessibilityValue(selection.wrappedValue ?? "Any")
     }
 
     private var countLabel: some View {
@@ -129,6 +146,8 @@ struct FilterBar: View {
                 Image(systemName: library.sort.ascending ? "arrow.up" : "arrow.down")
             }
             .help(library.sort.ascending ? "Ascending" : "Descending")
+            .accessibilityLabel("Sort order")
+            .accessibilityValue(library.sort.ascending ? "Ascending" : "Descending")
         }
     }
 }

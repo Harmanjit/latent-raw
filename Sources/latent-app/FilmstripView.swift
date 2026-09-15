@@ -116,9 +116,10 @@ struct FilmstripView: NSViewRepresentable {
             guard let index = images.firstIndex(where: { $0.id == currentID }) else { return }
             collectionView.layoutSubtreeIfNeeded()
             let path = IndexPath(item: index, section: 0)
-            if hasScrolled, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let glide = Motion.scrollDuration(0.2)
+            if hasScrolled, glide > 0 {
                 NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.2
+                    context.duration = glide
                     context.allowsImplicitAnimation = true
                     collectionView.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge)
                 }
@@ -150,6 +151,8 @@ struct FilmstripView: NSViewRepresentable {
             let record = images[indexPath.item]
             cell.show(record, library: library)
             cell.isCurrent = record.id != nil && record.id == currentID
+            // VoiceOver's press does what a click does.
+            cell.onPress = { [weak self] in self?.onSelect?(record) }
             return cell
         }
 
@@ -197,6 +200,10 @@ private final class FilmstripItem: NSCollectionViewItem {
     private(set) var record: ImageRecord?
     private weak var library: Library?
     private var load: ThumbnailRequest?
+    var onPress: (() -> Void)? {
+        get { (view as? CellView)?.onPress }
+        set { (view as? CellView)?.onPress = newValue }
+    }
 
     var isCurrent = false {
         didSet {
@@ -240,11 +247,10 @@ private final class FilmstripItem: NSCollectionViewItem {
         let sameImage = record.id == self.record?.id && record.userRotation == self.record?.userRotation
         self.record = record
         self.library = library
-        var label = record.fileName
-        if record.rating > 0 { label += ", \(record.rating) star\(record.rating == 1 ? "" : "s")" }
-        if record.flag > 0 { label += ", picked" } else if record.flag < 0 { label += ", rejected" }
+        let isEdited = record.id.map(library.editedImageIDs.contains) ?? false
         view.toolTip = record.fileName
-        view.setAccessibilityLabel(label)
+        view.setAccessibilityLabel(SpokenText.image(name: record.fileName, rating: record.rating,
+                                                    flag: record.flag, isEdited: isEdited))
         if !sameImage {
             cancelThumbnail()
             setImage(nil)
@@ -288,6 +294,7 @@ private final class FilmstripItem: NSCollectionViewItem {
         super.prepareForReuse()
         cancelThumbnail()
         record = nil
+        onPress = nil
         isCurrent = false
         setImage(nil)
     }
@@ -295,6 +302,12 @@ private final class FilmstripItem: NSCollectionViewItem {
     /// Reports size and scale changes so the layers follow the cell.
     private final class CellView: NSView {
         var onLayout: (() -> Void)?
+        var onPress: (() -> Void)?
+        override func accessibilityPerformPress() -> Bool {
+            guard let onPress else { return false }
+            onPress()
+            return true
+        }
         override func setFrameSize(_ newSize: NSSize) {
             super.setFrameSize(newSize)
             onLayout?()

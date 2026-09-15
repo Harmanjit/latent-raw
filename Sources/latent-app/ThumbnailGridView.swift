@@ -350,6 +350,7 @@ final class GridCollectionView: NSCollectionView {
     var menuProvider: ((IndexPath?) -> NSMenu?)?
     var onScreenChange: (() -> Void)?
     private var screenObservers: [NSObjectProtocol] = []
+    private var displayOptionsObserver: NSObjectProtocol?
 
     override func mouseDown(with event: NSEvent) {
         super.mouseDown(with: event)
@@ -371,6 +372,8 @@ final class GridCollectionView: NSCollectionView {
         super.viewDidMoveToWindow()
         for observer in screenObservers { NotificationCenter.default.removeObserver(observer) }
         screenObservers = []
+        if let displayOptionsObserver { NSWorkspace.shared.notificationCenter.removeObserver(displayOptionsObserver) }
+        displayOptionsObserver = nil
         guard let window else { return }
         let names: [(NSNotification.Name, NSWindow?)] = [
             (NSWindow.didChangeScreenNotification, window),
@@ -383,6 +386,15 @@ final class GridCollectionView: NSCollectionView {
             })
         }
         onScreenChange?()
+        // Increase Contrast turned on or off: cells redraw their outlines now,
+        // not when they next scroll in.
+        displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                for item in self?.visibleItems() ?? [] { item.view.needsDisplay = true }
+            }
+        }
     }
 }
 
@@ -621,15 +633,10 @@ final class ThumbnailCellView: NSView {
 
     override func isAccessibilitySelected() -> Bool { selectionStyle == .selected }
 
-    /// "DSC_0107.NEF, picked, 3 stars, edited". Unrated and unflagged say
-    /// nothing, as the cell shows nothing.
+    /// "DSC_0107.NEF, picked, 3 stars, edited" (SpokenText.image, which the
+    /// filmstrip reads too).
     static func accessibilityText(name: String, rating: Int, flag: Int, isEdited: Bool) -> String {
-        var parts = [name]
-        if flag > 0 { parts.append("picked") }
-        if flag < 0 { parts.append("rejected") }
-        if rating > 0 { parts.append(rating == 1 ? "1 star" : "\(min(rating, 5)) stars") }
-        if isEdited { parts.append("edited") }
-        return parts.joined(separator: ", ")
+        SpokenText.image(name: name, rating: rating, flag: flag, isEdited: isEdited)
     }
 
     /// Name, stars, flag and edited badge. Text is set only when it
@@ -686,8 +693,7 @@ final class ThumbnailCellView: NSView {
         }
         layer?.backgroundColor = fill.cgColor
         // A tinted fill alone is faint with Increase Contrast; add an outline.
-        let outlined = selectionStyle == .selected && NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-        layer?.borderWidth = outlined ? 2 : 0
+        layer?.borderWidth = Contrast.selectionOutlineWidth(selected: selectionStyle == .selected)
         layer?.borderColor = NSColor.controlAccentColor.cgColor
         imageLayer.contentsScale = window?.backingScaleFactor ?? 2
     }

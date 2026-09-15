@@ -221,19 +221,19 @@ struct ToneRangeSliders: View {
     }
 
     private func row(_ title: String, _ value: Binding<Float>) -> some View {
-        let text = String(format: "%+.2f", value.wrappedValue)
+        let format = SliderValueFormat(printf: "%+.2f")
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title).font(.subheadline)
                 Spacer()
-                Text(text)
+                Text(format.text(value.wrappedValue))
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
-            ResettableSlider(value: value, in: -1...1) { value.wrappedValue = 0 }
+            .accessibilityHidden(true)
+            // Named on the NSSlider itself, which SwiftUI's modifiers don't reach.
+            ResettableSlider(value: value, in: -1...1, label: title, format: format) { value.wrappedValue = 0 }
                 .help("Double-click to reset")
-                .accessibilityLabel(title)
-                .accessibilityValue(text)
         }
     }
 }
@@ -244,13 +244,15 @@ struct HSLPanel: View {
     @Binding var hsl: HSLAdjustments
     @State private var mode = 1   // 0 hue, 1 saturation, 2 luminance
 
+    private static let modeNames = ["hue", "saturation", "luminance"]
+
     private static let swatches: [Color] = [
         .red, .orange, .yellow, .green, .cyan, .blue, .purple, Color(red: 1, green: 0, blue: 0.6),
     ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("", selection: $mode) {
+            Picker("Adjust", selection: $mode) {
                 Text("Hue").tag(0); Text("Saturation").tag(1); Text("Luminance").tag(2)
             }
             .pickerStyle(.segmented).labelsHidden().controlSize(.small)
@@ -258,12 +260,19 @@ struct HSLPanel: View {
             ForEach(0..<8, id: \.self) { band in
                 HStack(spacing: 6) {
                     Circle().fill(Self.swatches[band]).frame(width: 8, height: 8)
+                        .accessibilityHidden(true)
                     Text(HSLAdjustments.bandNames[band]).font(.caption).frame(width: 52, alignment: .leading)
-                    ResettableSlider(value: binding(band), in: -1...1) { binding(band).wrappedValue = 0 }
+                        .accessibilityHidden(true)
+                    ResettableSlider(value: binding(band), in: -1...1,
+                                     label: "\(HSLAdjustments.bandNames[band]) \(Self.modeNames[mode])",
+                                     format: SliderValueFormat(decimals: 0, signed: true, scale: 100)) {
+                        binding(band).wrappedValue = 0
+                    }
                     Text(String(format: "%+.0f", binding(band).wrappedValue * 100))
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .frame(width: 30, alignment: .trailing)
+                        .accessibilityHidden(true)
                 }
             }
             HStack {
@@ -298,7 +307,9 @@ struct SplitToningPanel: View {
                     Text(String(format: "%+.0f", toning.balance * 100))
                         .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
                 }
-                ResettableSlider(value: $toning.balance, in: -1...1) { toning.balance = 0 }
+                .accessibilityHidden(true)
+                ResettableSlider(value: $toning.balance, in: -1...1, label: "Balance",
+                                 format: SliderValueFormat(decimals: 0, signed: true, scale: 100)) { toning.balance = 0 }
             }
             group("Shadows", hue: $toning.shadowHue, saturation: $toning.shadowSaturation)
             HStack {
@@ -312,25 +323,34 @@ struct SplitToningPanel: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title).font(.caption).fontWeight(.semibold).foregroundStyle(.secondary).textCase(.uppercase)
+                    .accessibilityAddTraits(.isHeader)
                 Spacer()
                 Circle()
                     .fill(Color(hue: Double(hue.wrappedValue) / 360, saturation: 1, brightness: 1))
                     .frame(width: 10, height: 10)
                     .opacity(Double(saturation.wrappedValue) * 0.8 + 0.2)
+                    .accessibilityHidden(true)
             }
             HStack {
                 Text("Hue").font(.caption).frame(width: 60, alignment: .leading)
-                Slider(value: hue, in: 0...360)
+                    .accessibilityHidden(true)
+                Slider(value: hue, in: 0...360) { Text("\(title) hue") }
+                    .labelsHidden()
+                    .accessibilityValue(String(format: "%.0f degrees", hue.wrappedValue))
                 Text(String(format: "%.0f°", hue.wrappedValue))
                     .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
                     .frame(width: 34, alignment: .trailing)
+                    .accessibilityHidden(true)
             }
             HStack {
                 Text("Saturation").font(.caption).frame(width: 60, alignment: .leading)
-                ResettableSlider(value: saturation, in: 0...1) { saturation.wrappedValue = 0 }
+                    .accessibilityHidden(true)
+                ResettableSlider(value: saturation, in: 0...1, label: "\(title) saturation",
+                                 format: SliderValueFormat(decimals: 0, scale: 100)) { saturation.wrappedValue = 0 }
                 Text(String(format: "%.0f", saturation.wrappedValue * 100))
                     .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
                     .frame(width: 34, alignment: .trailing)
+                    .accessibilityHidden(true)
             }
         }
     }

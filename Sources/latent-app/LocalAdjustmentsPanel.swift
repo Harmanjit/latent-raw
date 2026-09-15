@@ -52,6 +52,7 @@ struct LocalAdjustmentsPanel: View {
     private var localList: some View {
         VStack(spacing: 2) {
             ForEach(Array(model.parameters.locals.enumerated()), id: \.element.id) { index, local in
+                let selected = model.selectedLocalIndex == index
                 HStack(spacing: 6) {
                     Image(systemName: icon(for: local.shape)).frame(width: 14)
                     Text(local.name).font(.caption)
@@ -59,11 +60,15 @@ struct LocalAdjustmentsPanel: View {
                     if local.invert { Text("inv").font(.caption2).foregroundStyle(.tertiary) }
                 }
                 .padding(.vertical, 3).padding(.horizontal, 6)
-                .background(model.selectedLocalIndex == index
-                            ? Color.accentColor.opacity(0.25) : Color.clear,
+                .background(selected ? Color.accentColor.opacity(0.25) : Color.clear,
                             in: RoundedRectangle(cornerRadius: 4))
+                .selectionOutline(selected, cornerRadius: 4)
                 .contentShape(Rectangle())
                 .onTapGesture { model.selectedLocalIndex = index }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(local.invert ? "\(local.name), inverted" : local.name)
+                .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+                .accessibilityAction { model.selectedLocalIndex = index }
             }
         }
     }
@@ -119,7 +124,7 @@ struct LocalAdjustmentsPanel: View {
             }
         case .brush:
             VStack(alignment: .leading, spacing: 6) {
-                Picker("", selection: $model.maskTool) {
+                Picker("Brush tool", selection: $model.maskTool) {
                     Text("Paint").tag(EditorModel.MaskTool.brush)
                     Text("Erase").tag(EditorModel.MaskTool.erase)
                     Text("Pan").tag(EditorModel.MaskTool.none)
@@ -194,6 +199,7 @@ struct LocalAdjustmentsPanel: View {
             HStack {
                 Circle().fill(Color(hue: Double(hr.centre.wrappedValue) / 360, saturation: 1, brightness: 1))
                     .frame(width: 10, height: 10)
+                    .accessibilityHidden(true)
                 slider("Hue", hr.centre, 0...360, "%.0f°")
             }
             slider("Width", hr.width, 5...90, "%.0f°")
@@ -205,7 +211,7 @@ struct LocalAdjustmentsPanel: View {
                         _ format: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
-                Text(title).font(.caption)
+                Text(title).font(.caption).accessibilityHidden(true)
                 Spacer()
                 SliderValueField(value: value, in: range, format: SliderValueFormat(printf: format), label: title)
             }
