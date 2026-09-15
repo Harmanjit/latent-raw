@@ -3,7 +3,9 @@
 <!-- Generated from Sources/latent-app/Shortcuts.swift. Edit the table there, then run
      LATENT_WRITE_SHORTCUTS_PAGE=1 swift test --filter ShortcutsPageTests -->
 
-Single keys do nothing while you type in a text field. The menu bar lists these commands too, with a single key after the name, as in Pick (P).
+Single keys do nothing while you type in a text field, such as search, keywords or a slider's value; click the grid or the image to get them back. The menu bar lists these commands too, with a single key after the name, as in Pick (P).
+
+In the Library grid, stars, flags and rotation apply to every selected image. In Loupe, Compare and Develop they apply to the image shown.
 
 ## Views and navigation
 
@@ -18,6 +20,7 @@ Single keys do nothing while you type in a text field. The menu bar lists these 
 | ⇧X | Compare: make the candidate the Select |
 | ⇧⌘O | Open folder |
 | ⌘, | Settings |
+| ⌘? | Latent Help (these pages) |
 
 ## Rating and metadata
 
@@ -42,6 +45,7 @@ Single keys do nothing while you type in a text field. The menu bar lists these 
 | Esc | Leave any on-image tool |
 | ⇧⌘C, ⇧⌘V | Copy / paste settings (to the whole selection in the Library) |
 | Double-click a slider | Reset it |
+| Click a slider's value | Type a value: Return or Tab applies it, Esc cancels, ↑ and ↓ step it (with ⇧, ten steps) |
 
 ## Export
 

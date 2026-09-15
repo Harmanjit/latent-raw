@@ -10,5 +10,6 @@
 - [Keyboard Shortcuts](Keyboard-Shortcuts)
 - [Architecture](Architecture)
 - [Security and Privacy](Security-and-Privacy)
+- [Accessibility](Accessibility)
 - [Limitations](Limitations)
 - [Troubleshooting](Troubleshooting)
