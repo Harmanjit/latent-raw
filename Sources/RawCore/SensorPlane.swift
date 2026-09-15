@@ -34,6 +34,31 @@ public final class SensorPlane: @unchecked Sendable {
         self.count = samples.count
     }
 
+    /// Copies the active area out of a whole sensor readout
+    /// (`area.fullWidth x area.fullHeight` samples, row by row) into a new
+    /// surface, so the plane holds `area.width x area.height`
+    /// samples and its (0, 0) is the active area's top-left photosite.
+    /// Like `init(copying:)`, this is the one copy between LibRaw and the
+    /// GPU; the border is simply never copied. Nil if the rectangle
+    /// doesn't lie inside a buffer of that size.
+    public init?(copying area: SensorActiveArea, of readout: UnsafeBufferPointer<UInt16>) {
+        guard area.isValid, let source = readout.baseAddress,
+              readout.count >= area.fullWidth * area.fullHeight else { return nil }
+        let count = area.width * area.height
+        let rowBytes = area.width * MemoryLayout<UInt16>.size
+        guard let surface = IOSurface(properties: Self.properties(byteCount: count * MemoryLayout<UInt16>.size)),
+              surface.allocationSize >= count * MemoryLayout<UInt16>.size else { return nil }
+        guard surface.lock(options: [], seed: nil) == kIOReturnSuccess else { return nil }
+        for row in 0..<area.height {
+            let from = source + (area.top + row) * area.fullWidth + area.left
+            (surface.baseAddress + row * rowBytes).copyMemory(from: from, byteCount: rowBytes)
+        }
+        surface.unlock(options: [], seed: nil)
+        guard surface.lock(options: .readOnly, seed: nil) == kIOReturnSuccess else { return nil }
+        self.surface = surface
+        self.count = count
+    }
+
     /// Adopts a surface received from the decoder service. `count` comes
     /// from the service's metadata and is checked against the surface's
     /// real size, so a lying peer can't make us read past the end.

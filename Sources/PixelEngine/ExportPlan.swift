@@ -10,14 +10,15 @@ public enum ExportPlan {
     /// The image's defaults with the saved edit over them, exactly as the
     /// editor reconstructs it. White balance saved as "as shot" becomes
     /// this camera's own; the output space comes from the export, never
-    /// from the edit (an edit stack doesn't store one).
+    /// from the edit (an edit stack doesn't store one). Geometry from
+    /// before the active-area change is moved onto it, as the editor does.
     public static func parameters(editStackJSON: String?, session: ImageSession,
                                   colorSpace: ColorKit.OutputSpace) throws -> EditParameters {
         var defaults = EditParameters()
         defaults.whiteBalance = session.asShotWhiteBalance
         var parameters = defaults
         if let json = editStackJSON {
-            parameters = try EditStack.decode(json: json).parameters(defaults: defaults)
+            parameters = try session.stackForThisImage(EditStack.decode(json: json)).parameters(defaults: defaults)
             if parameters.whiteBalance.isAsShot { parameters.whiteBalance = defaults.whiteBalance }
         }
         parameters.outputSpace = colorSpace

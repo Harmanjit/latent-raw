@@ -20,12 +20,61 @@ public enum RawFileError: Error, CustomStringConvertible {
     }
 }
 
-/// Metadata pulled from a raw file cheaply, before any demosaic.
-public struct RawSummary: Sendable {
+/// Where the picture sits in the camera's sensor readout.
+///
+/// LibRaw unpacks the whole readout, `fullWidth x fullHeight`. Only the
+/// active area inside it is picture: around it many cameras record
+/// optically masked photosites (black strips a camera measures its black
+/// level from, 100-250 columns on the left of a Canon file) or padding
+/// with no image data (right and bottom columns on some Nikons). LibRaw
+/// calls the active area "visible" and its offsets `left_margin` and
+/// `top_margin`; its CFA pattern counts from the active area's corner.
+///
+/// `RawFile` copies only this rectangle into the sensor plane, so the
+/// plane, every render and every edit coordinate start at the active
+/// area's top-left photosite and nothing downstream sees the border.
+public struct SensorActiveArea: Sendable, Equatable {
+    public let left: Int
+    public let top: Int
     public let width: Int
     public let height: Int
-    public let rawWidth: Int
-    public let rawHeight: Int
+    /// The whole readout, border included.
+    public let fullWidth: Int
+    public let fullHeight: Int
+
+    public init(left: Int, top: Int, width: Int, height: Int, fullWidth: Int, fullHeight: Int) {
+        self.left = left; self.top = top; self.width = width; self.height = height
+        self.fullWidth = fullWidth; self.fullHeight = fullHeight
+    }
+
+    /// True when the readout is all picture: nothing to cut away.
+    public var isWholeReadout: Bool {
+        left == 0 && top == 0 && width == fullWidth && height == fullHeight
+    }
+
+    /// True when the rectangle is non-empty and lies inside the readout,
+    /// the condition for copying it out of a readout-sized buffer.
+    public var isValid: Bool {
+        left >= 0 && top >= 0 && width > 0 && height > 0
+            && left + width <= fullWidth && top + height <= fullHeight
+    }
+}
+
+/// Metadata pulled from a raw file cheaply, before any demosaic.
+public struct RawSummary: Sendable {
+    /// Where the picture is in the sensor readout (see `SensorActiveArea`).
+    public let activeArea: SensorActiveArea
+    /// The picture's size in photosites: LibRaw's visible size, which the
+    /// catalog records as the image's dimensions.
+    public var width: Int { activeArea.width }
+    public var height: Int { activeArea.height }
+    /// The sensor plane's size: the grid every render stage, mask and
+    /// edit coordinate works in. The plane is cut to the active area, so
+    /// this is the same as `width x height`; the pipeline's own name for
+    /// it is kept because its code talks about "sensor" pixels.
+    public var rawWidth: Int { activeArea.width }
+    public var rawHeight: Int { activeArea.height }
+    /// The Bayer order at the plane's (0, 0), i.e. the active area's corner.
     public let cfaPattern: CFAPattern
     public let cameraMultipliers: (Float, Float, Float, Float)
     public let blackLevel: Float
@@ -187,8 +236,12 @@ public final class RawFile {
             guard let ptr = clibraw_get_raw_plane(h, &planeLength), planeLength > 0 else {
                 throw RawFileError.libRawOpenFailed
             }
-            let samples = UnsafeBufferPointer(start: ptr, count: planeLength / MemoryLayout<UInt16>.size)
-            guard let plane = SensorPlane(copying: samples) else { throw RawFileError.planeAllocationFailed }
+            let readout = UnsafeBufferPointer(start: ptr, count: planeLength / MemoryLayout<UInt16>.size)
+            // The one copy: just the active area, straight into the surface
+            // the GPU (and, from the service, the app) will read.
+            guard let plane = SensorPlane(copying: summary.activeArea, of: readout) else {
+                throw RawFileError.planeAllocationFailed
+            }
             sensorPlane = plane
         }
         isMetadataOnly = metadataOnly
@@ -203,7 +256,10 @@ public final class RawFile {
         if metadataOnly {
             sensorPlane = nil
         } else {
-            guard let surface = reply.plane,
+            // Every stage indexes the plane as width x height, so a reply
+            // whose count disagrees with its own dimensions is refused
+            // here, before anything reads past what the surface holds.
+            guard let surface = reply.plane, meta.planeSampleCount == meta.width * meta.height,
                   let plane = SensorPlane(surface: surface, count: meta.planeSampleCount) else {
                 throw RawDecoderClient.ClientError.serviceFailed("no usable sensor plane in reply")
             }
@@ -226,8 +282,9 @@ public final class RawFile {
             }
         }
         return RawSummary(
-            width: Int(c.width), height: Int(c.height),
-            rawWidth: Int(c.raw_width), rawHeight: Int(c.raw_height),
+            activeArea: SensorActiveArea(
+                left: Int(c.left_margin), top: Int(c.top_margin), width: Int(c.width), height: Int(c.height),
+                fullWidth: Int(c.raw_width), fullHeight: Int(c.raw_height)),
             cfaPattern: CFAPattern(rawValue: c.cfa_pattern),
             cameraMultipliers: (c.cam_mul.0, c.cam_mul.1, c.cam_mul.2, c.cam_mul.3),
             blackLevel: c.black_level, whiteLevel: c.white_level,

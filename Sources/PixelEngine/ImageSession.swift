@@ -227,6 +227,14 @@ public final class ImageSession {
         }
     }
 
+    /// A stored edit as this image's renders must read it: geometry saved
+    /// before the sensor plane was cut to the active area is moved onto
+    /// it (`EditStack.migratingGeometry(to:)`). Every path that turns a
+    /// stored stack into parameters for an open file goes through here.
+    public func stackForThisImage(_ stack: EditStack) -> EditStack {
+        stack.migratingGeometry(to: file.summary.activeArea)
+    }
+
     /// The multipliers to render with, for a given white balance setting.
     ///
     /// `.asShot` returns the camera's own values rather than round-tripping

@@ -46,6 +46,12 @@ extension EditorModel {
         return stack
     }
 
+    /// A stack from storage or the clipboard, with any geometry from before
+    /// the active-area change moved onto the open image's sensor plane.
+    func onThisImage(_ stack: EditStack) -> EditStack {
+        session.map { $0.stackForThisImage(stack) } ?? stack
+    }
+
     // MARK: - History (undo / redo) and snapshots
 
     var canUndo: Bool { hasImage && history.canUndo }
@@ -56,8 +62,10 @@ extension EditorModel {
     /// stored step, e.g. the sidecar was edited elsewhere).
     func loadHistory(steps: [(stackJSON: String, createdAt: Int64)],
                      snapshots stored: [(name: String, stackJSON: String)]) {
+        // Stored steps are converted like the current edit was when the
+        // image opened, so undo never steps back into the old geometry.
         var entries: [EditHistory.Step] = steps.compactMap { step in
-            guard let stack = try? EditStack.decode(json: step.stackJSON) else { return nil }
+            guard let stack = try? onThisImage(EditStack.decode(json: step.stackJSON)) else { return nil }
             return EditHistory.Step(stack: stack, label: "", date: Date(timeIntervalSince1970: Double(step.createdAt) / 1000))
         }
         // Labels are derived, not stored.
@@ -71,7 +79,7 @@ extension EditorModel {
         h.record(current)
         history = h
         snapshots = stored.compactMap { s in
-            (try? EditStack.decode(json: s.stackJSON)).map { EditSnapshot(name: s.name, stack: $0) }
+            (try? onThisImage(EditStack.decode(json: s.stackJSON))).map { EditSnapshot(name: s.name, stack: $0) }
         }
     }
 

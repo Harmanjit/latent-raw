@@ -74,6 +74,16 @@ extension EditStack {
                 result.modules.redeye = other.modules.redeye
             }
         }
+        // The result's geometry keeps the frame it was written in. When it
+        // mixes both sides and they disagree (only possible while an image
+        // still holds an edit from before the active-area change and is
+        // pasted into without being opened) this stack's frame wins: its
+        // own heals and masks then stay right, and at worst the pasted
+        // geometry lands off by the camera's masked border.
+        let chosen = groups.intersection([.locals, .crop, .heal])
+        let keepsOwnGeometry = !geometryGroups.subtracting(chosen).isEmpty
+        let takesOtherGeometry = !other.geometryGroups.intersection(chosen).isEmpty
+        result.frame = keepsOwnGeometry ? frame : (takesOtherGeometry ? other.frame : nil)
         return result
     }
 

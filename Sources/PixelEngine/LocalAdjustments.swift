@@ -6,8 +6,9 @@ import simd
 /// A local adjustment: a mask and what to do inside it (DESIGN.md §8.4).
 ///
 /// Geometry is in normalized sensor coordinates — (0,0) top-left of the
-/// raw frame, (1,1) bottom-right — so it's independent of rotation, zoom
-/// and window size, and survives a re-render at any resolution.
+/// sensor plane (the camera's active area), (1,1) bottom-right — so it's
+/// independent of rotation, zoom and window size, and survives a
+/// re-render at any resolution.
 public struct LocalAdjustment: Equatable, Sendable, Codable, Identifiable {
     public var id: UUID
     public var name: String

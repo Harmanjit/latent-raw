@@ -14,11 +14,21 @@ extern "C" {
 typedef struct CLibRawHandle CLibRawHandle;
 
 typedef struct {
-    uint16_t width;
+    // The sensor readout LibRaw unpacks is raw_width x raw_height. Only
+    // part of it is picture: the active (LibRaw: "visible") area is the
+    // width x height rectangle whose top-left photosite is at
+    // (left_margin, top_margin). Around it can sit optically masked
+    // columns and rows (black strips, common on Canon) and padding with
+    // no image data at all (some Nikons). LibRaw's CFA pattern, and
+    // everything else it does with the image, counts from the active
+    // area's corner, not the readout's.
+    uint16_t width;       // active area, clamped to lie inside the readout
     uint16_t height;
-    uint16_t raw_width;   // includes any border LibRaw doesn't crop
+    uint16_t raw_width;   // the whole readout, masked border included
     uint16_t raw_height;
-    uint8_t  cfa_pattern; // packed 2x2 Bayer order, or 0xFF for X-Trans/other
+    uint16_t left_margin; // where the active area starts in the readout
+    uint16_t top_margin;
+    uint8_t  cfa_pattern; // packed 2x2 Bayer order at the active area's top-left, or 0xFF for X-Trans/other
     float    cam_mul[4];  // as-shot white balance multipliers, camera order
     float    black_level;
     float    white_level;
@@ -73,9 +83,10 @@ int clibraw_get_summary(CLibRawHandle *handle, CLibRawSummary *out);
 int clibraw_get_cam_xyz(CLibRawHandle *handle, float *out12);
 
 // Returns a pointer to LibRaw's internal unpacked sensor buffer (one
-// uint16 per photosite, in raw_width x raw_height) without copying it,
-// along with its byte length. The pointer is owned by `handle` and is
-// valid until clibraw_close is called.
+// uint16 per photosite, the whole raw_width x raw_height readout, row by
+// row) without copying it, along with its byte length. The caller cuts
+// the active area out of it (see CLibRawSummary). The pointer is owned
+// by `handle` and is valid until clibraw_close is called.
 const uint16_t *clibraw_get_raw_plane(CLibRawHandle *handle, size_t *out_length);
 
 // Extracts the embedded JPEG preview (for instant thumbnails) into a

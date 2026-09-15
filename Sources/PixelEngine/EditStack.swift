@@ -22,6 +22,14 @@ public struct EditStack: Codable, Equatable, Sendable {
 
     public var schema: Int = EditStack.schemaVersion
     public var process: String = EditStack.processVersion
+    /// Which grid the normalized geometry (crop, local masks, heals,
+    /// red-eye) measures: `EditStack.activeAreaFrame`, the camera's active
+    /// area, for anything written since the sensor plane was cut to it.
+    /// Absent from older stacks, whose (0, 0)...(1, 1) spanned the whole
+    /// sensor readout, masked border included; `migratingGeometry(to:)`
+    /// moves those onto the active area. Only written when there is
+    /// geometry, so a stack without any encodes exactly as before.
+    public var frame: String?
     public var modules: Modules = Modules()
 
     public struct Modules: Codable, Equatable, Sendable {
@@ -198,6 +206,8 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.crop = (p.crop.isIdentity && p.crop.aspect == nil) ? nil
             : Crop(cx: p.crop.centre.x, cy: p.crop.centre.y, w: p.crop.size.x, h: p.crop.size.y,
                    angle: p.crop.angle, aspect: p.crop.aspect)
+        // Parameters always measure the sensor plane as it is now.
+        frame = hasGeometry ? Self.activeAreaFrame : nil
     }
 
     /// Records which profile produced this edit. Not part of equality

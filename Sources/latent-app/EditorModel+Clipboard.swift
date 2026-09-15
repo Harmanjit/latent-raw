@@ -33,7 +33,10 @@ extension EditorModel {
     func apply(_ stack: EditStack, groups: Set<EditGroup>) {
         guard hasImage else { return }
         let current = EditStack(parameters: parameters)
-        var next = current.merged(with: stack, groups: groups).parameters(defaults: defaultParameters)
+        // An old clipboard or preset stack's geometry is read as if it came
+        // from a camera with this image's border: the best guess there is,
+        // and exact for the usual case of syncing between frames of one body.
+        var next = current.merged(with: onThisImage(stack), groups: groups).parameters(defaults: defaultParameters)
         if next.whiteBalance.isAsShot { next.whiteBalance = defaultParameters.whiteBalance }
         parameters = next
     }

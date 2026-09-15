@@ -24,7 +24,8 @@ struct PipelineThumbnailRenderer: EditedThumbnailRenderer {
         defaults.whiteBalance = session.asShotWhiteBalance
         // An unreadable edit is a failed thumbnail (reported in the status
         // bar's count), not a silently unedited one.
-        let parameters = try EditStack.decode(json: editStackJSON).parameters(defaults: defaults)
+        let parameters = try session.stackForThisImage(EditStack.decode(json: editStackJSON))
+            .parameters(defaults: defaults)
 
         // Bin so the long edge lands at or under the thumbnail size.
         let longEdge = max(file.summary.rawWidth, file.summary.rawHeight)

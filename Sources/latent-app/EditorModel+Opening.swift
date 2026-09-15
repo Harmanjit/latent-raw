@@ -68,7 +68,7 @@ extension EditorModel {
             var restored = fresh
             if let editStackJSON {
                 do {
-                    let stack = try EditStack.decode(json: editStackJSON)
+                    let stack = try newSession.stackForThisImage(EditStack.decode(json: editStackJSON))
                     restored = stack.parameters(defaults: fresh)
                     if restored.whiteBalance.isAsShot { restored.whiteBalance = fresh.whiteBalance }
                 } catch {

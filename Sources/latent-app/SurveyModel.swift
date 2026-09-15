@@ -359,7 +359,7 @@ extension EditorModel {
         var next = defaultParameters
         if let json {
             do {
-                next = try EditStack.decode(json: json).parameters(defaults: defaultParameters)
+                next = try onThisImage(EditStack.decode(json: json)).parameters(defaults: defaultParameters)
                 if next.whiteBalance.isAsShot { next.whiteBalance = defaultParameters.whiteBalance }
             } catch {
                 reportFailure("Reading the stored edit for \(imageTitle ?? "the image")", error)

@@ -7,6 +7,7 @@
 
 #include "include/clibraw_shim.h"
 #include "libraw.h"
+#include <algorithm>
 #include <cstring>
 #include <cstdlib>
 
@@ -45,13 +46,26 @@ extern "C" int clibraw_get_summary(CLibRawHandle *handle, CLibRawSummary *out) {
 
     auto &d = handle->processor.imgdata;
 
-    out->width      = static_cast<uint16_t>(d.sizes.width);
-    out->height     = static_cast<uint16_t>(d.sizes.height);
-    out->raw_width  = static_cast<uint16_t>(d.sizes.raw_width);
-    out->raw_height = static_cast<uint16_t>(d.sizes.raw_height);
+    // The active area. LibRaw's own raw2image() copies
+    // min(width, raw_width - left_margin) columns (and likewise rows), so
+    // a file whose header claims more than the readout holds gets the
+    // same clamp here and the rectangle always lies inside the buffer.
+    auto &s = d.sizes;
+    int activeWidth  = std::max(0, std::min(int(s.width),  int(s.raw_width)  - int(s.left_margin)));
+    int activeHeight = std::max(0, std::min(int(s.height), int(s.raw_height) - int(s.top_margin)));
+    out->width       = static_cast<uint16_t>(activeWidth);
+    out->height      = static_cast<uint16_t>(activeHeight);
+    out->raw_width   = s.raw_width;
+    out->raw_height  = s.raw_height;
+    out->left_margin = s.left_margin;
+    out->top_margin  = s.top_margin;
 
     // idata.filters encodes the 2x2 Bayer pattern as 4 x 2-bit color indices.
-    // 0 => not a simple Bayer pattern; 9 => X-Trans.
+    // 0 => not a simple Bayer pattern; 9 => X-Trans. LibRaw defines it
+    // relative to the active area's top-left photosite (raw2image() looks
+    // colours up with active-area coordinates), and open_datastream()
+    // already moves an odd margin in by one and rotates `filters` to
+    // match, so the low byte is the pattern of the plane RawFile cuts out.
     out->cfa_pattern = (d.idata.filters != 0 && d.idata.filters != 9)
                           ? static_cast<uint8_t>(d.idata.filters & 0xFF)
                           : 0xFF;
@@ -128,6 +142,14 @@ extern "C" const uint16_t *clibraw_get_raw_plane(CLibRawHandle *handle, size_t *
     }
 
     auto &sizes = handle->processor.imgdata.sizes;
+    // raw_pitch is the row stride in bytes. LibRaw sets it to
+    // raw_width * 2 for a Bayer raw_image; anything else (only a RawSpeed
+    // build produces it) would break the raw_width x raw_height layout
+    // this function promises, so refuse rather than hand out a skewed plane.
+    if (sizes.raw_pitch != 0 && sizes.raw_pitch != static_cast<unsigned>(sizes.raw_width) * 2) {
+        *out_length = 0;
+        return nullptr;
+    }
     *out_length = static_cast<size_t>(sizes.raw_width) * sizes.raw_height * sizeof(uint16_t);
     return raw.raw_image;
 }

@@ -153,6 +153,8 @@ do {
           "in \(Int((t1.timeIntervalSince(t0)) * 1000))ms " +
           "(decoder: \(file.decodedInService ? "XPC service" : "in-process"), " +
           "service \(RawDecoderXPC.isServiceAvailable ? "available" : "absent"))")
+    let area = file.summary.activeArea
+    print("  sensor readout \(area.fullWidth)x\(area.fullHeight), active area at (\(area.left), \(area.top))")
 
     let li = file.summary.lens
     print(String(format: "  lens: name='%@' makernotes='%@' make='%@' id=%llu nikonID=%d type=%d " +

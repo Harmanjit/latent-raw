@@ -9,8 +9,14 @@ import os
 /// app's GPU reads the very pages the service wrote), and the embedded
 /// preview as `Data`. IOSurface is the only non-plist class on the wire,
 /// and the interface whitelists exactly that.
+///
+/// The service and the app are built together and ship in one bundle, so
+/// the two ends always agree on this shape; no older payload can arrive.
 public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
-    public var width, height, rawWidth, rawHeight: Int
+    /// The active area (the plane's size) and where it sits in the
+    /// `rawWidth x rawHeight` readout; see `SensorActiveArea`.
+    public var width, height, leftMargin, topMargin: Int
+    public var rawWidth, rawHeight: Int
     /// 0xFF for non-Bayer, else the packed 2x2 order.
     public var cfaCode: UInt8
     public var cameraMultipliers: [Float]
@@ -26,12 +32,15 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
     public var cameraToXYZ: [Float]?
     public var thumbnailError: Int32
     public var isMetadataOnly: Bool
-    /// UInt16 samples in the plane; checked against the surface's size.
+    /// UInt16 samples in the plane; checked against `width x height` and
+    /// the surface's size.
     public var planeSampleCount: Int
 
     public init(summary s: RawSummary, cameraToXYZ: [Float]?, thumbnailError: Int32, isMetadataOnly: Bool,
                 planeSampleCount: Int) {
-        width = s.width; height = s.height; rawWidth = s.rawWidth; rawHeight = s.rawHeight
+        let area = s.activeArea
+        width = area.width; height = area.height; leftMargin = area.left; topMargin = area.top
+        rawWidth = area.fullWidth; rawHeight = area.fullHeight
         cfaCode = s.cfaPattern.rawCode
         cameraMultipliers = [s.cameraMultipliers.0, s.cameraMultipliers.1, s.cameraMultipliers.2, s.cameraMultipliers.3]
         blackLevel = s.blackLevel; whiteLevel = s.whiteLevel
@@ -52,7 +61,8 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
 
     public var summary: RawSummary {
         RawSummary(
-            width: width, height: height, rawWidth: rawWidth, rawHeight: rawHeight,
+            activeArea: SensorActiveArea(left: leftMargin, top: topMargin, width: width, height: height,
+                                         fullWidth: rawWidth, fullHeight: rawHeight),
             cfaPattern: CFAPattern(rawValue: cfaCode),
             cameraMultipliers: (cameraMultipliers[0], cameraMultipliers[1], cameraMultipliers[2], cameraMultipliers[3]),
             blackLevel: blackLevel, whiteLevel: whiteLevel,

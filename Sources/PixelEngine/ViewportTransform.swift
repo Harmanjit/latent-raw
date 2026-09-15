@@ -10,7 +10,8 @@ import CoreGraphics
 ///   for a 24 MP image on any display.
 /// - `center`: the sensor-space point shown at the centre of the view.
 ///
-/// "Sensor space" is the full `rawWidth x rawHeight` grid. Every rendered
+/// "Sensor space" is the sensor plane's `rawWidth x rawHeight` grid: the
+/// camera's active area, masked border already cut away. Every rendered
 /// texture reports which sensor rectangle it covers, so the same transform
 /// places a whole-image binned preview and a full-resolution crop alike.
 /// That's what lets the presenter draw *whatever it currently has* at the
