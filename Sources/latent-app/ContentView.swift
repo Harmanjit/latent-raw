@@ -10,13 +10,14 @@ import UniformTypeIdentifiers
 /// Which half of the app is showing. Same two-mode shape as Lightroom's
 /// Library and Develop modules.
 enum AppMode: String, CaseIterable, Identifiable {
-    case library, loupe, compare, develop
+    case library, loupe, compare, survey, develop
     var id: String { rawValue }
     var title: String {
         switch self {
         case .library: "Library"
         case .loupe: "Loupe"
         case .compare: "Compare"
+        case .survey: "Survey"
         case .develop: "Develop"
         }
     }
@@ -65,6 +66,8 @@ struct ContentView: View {
     @State private var editingText = false
     /// Compare's panes zoom and pan together (see `EditorModel.linkedPane`).
     @State private var compareSyncsView = true
+    /// Survey's panes (N), each with its own view-only model.
+    @StateObject private var survey = SurveyModel()
 
     var body: some View {
         NavigationSplitView(columnVisibility: sidebarVisibility) {
@@ -114,6 +117,9 @@ struct ContentView: View {
                     }
                 case .compare:
                     compareArea
+                case .survey:
+                    SurveyView(survey: survey, library: library,
+                               onRemove: surveyRemove, onSelectionChange: surveyFollowSelection)
                 case .develop:
                     imageArea
                     Divider()
@@ -289,6 +295,7 @@ struct ContentView: View {
         model.closeImage()
         compareModel = nil
         compareRecord = nil
+        survey.closeAll()
     }
 
     /// Adds a folder to the sidebar's Favourites through the open panel,
@@ -344,6 +351,7 @@ struct ContentView: View {
             openLoupe: { if library.selectedImage != nil { mode = .loupe } },
             openDevelop: { if let selected = library.selectedImage { openInEditor(selected) } },
             openCompare: { if library.selectedImage != nil { mode = .compare } },
+            openSurvey: { _ = perform(.survey) },
             rate: rate, flag: flag, rotate: { rotate(by: $0) },
             copySettings: copySettings, pasteSettings: pasteSettings,
             canPasteSettings: { EditorModel.clipboardStack() != nil },
@@ -422,6 +430,7 @@ struct ContentView: View {
             // never place a patch or move a crop.
             model.disarmTools()
         }
+        guard surveyModeDidChange(from: old) else { return }
         guard mode != .library, let selected = library.selectedImage else { return }
         if model.catalogImageID != selected.id { load(selected) }
         if mode == .compare {
@@ -509,6 +518,54 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Survey
+
+    /// Entering or leaving Survey; false when there is nothing more for
+    /// `modeDidChange` to do. Survey needs two to four selected images, and
+    /// asked for with any other number (only the mode picker can ask) the
+    /// mode goes back. The editor's model loads nothing for Survey, and on
+    /// a Mac with little memory its catalog image closes while Survey
+    /// shows: Loupe, Compare and Develop load it again.
+    private func surveyModeDidChange(from old: AppMode) -> Bool {
+        if old == .survey { survey.end() }
+        guard mode == .survey else { return true }
+        guard survey.begin(library: library, onFailure: model.reportFailure) else {
+            NSSound.beep()
+            mode = old
+            return false
+        }
+        if !MemoryPolicy.current.keepsIdleImages, model.catalogImageID != nil { model.closeImage() }
+        return false
+    }
+
+    /// ← and → in Survey.
+    private func surveyMoveFocus(by offset: Int) {
+        guard survey.moveFocus(by: offset) else { return }
+        survey.writeSelection(to: library)
+        survey.announceFocus(in: library)
+    }
+
+    /// ✕ or / : the pane goes and its image is deselected. With one image
+    /// left, Survey becomes Loupe on it.
+    private func surveyRemove(_ id: Int64) {
+        guard survey.remove(id) else { return }
+        survey.writeSelection(to: library)
+        surveyLeaveIfIncomplete()
+    }
+
+    /// A filter hiding a rated image deselects it, and so on: panes follow.
+    private func surveyFollowSelection() {
+        guard mode == .survey,
+              survey.follow(selected: library.selectedImageIDs, primary: library.selectedImageID) else { return }
+        survey.writeSelection(to: library)
+        surveyLeaveIfIncomplete()
+    }
+
+    private func surveyLeaveIfIncomplete() {
+        guard let panes = survey.panes, !panes.isComplete else { return }
+        mode = panes.ids.isEmpty ? .library : .loupe
+    }
+
     /// Edits settle in the editor and land in the catalog here; so do
     /// history steps and snapshots.
     ///
@@ -559,6 +616,9 @@ struct ContentView: View {
                model.imageTitle == selected.fileName {
                 model.setUserRotation(selected.userRotation)
             }
+            if let selected = library.selectedImage {
+                survey.model(for: selected.id)?.setUserRotation(selected.userRotation)
+            }
         }
     }
 
@@ -584,7 +644,7 @@ struct ContentView: View {
         }
         switch command {
         case .step(let offset):
-            step(offset)
+            if mode == .survey { surveyMoveFocus(by: offset) } else { step(offset) }
         case .openSelection:
             if let selected = library.selectedImage { openInEditor(selected) }
         case .library:
@@ -597,11 +657,16 @@ struct ContentView: View {
             if library.selectedImage != nil { mode = .loupe }
         case .compare:
             if library.selectedImage != nil { mode = .compare }
+        case .survey:
+            mode = .survey
+        case .removeFromSurvey:
+            if let focused = survey.panes?.focusedID { surveyRemove(focused) }
         case .toggleLoupe:
             if mode == .library, library.selectedImage != nil { mode = .loupe }
             else if mode == .loupe { mode = .library }
         case .toggleZoom:
             guard mode.showsImage else { break }
+            if mode == .survey { survey.focusedModel?.toggleZoomAtCenter(); break }
             model.toggleZoomAtCenter()
             if mode == .compare { compareModel?.toggleZoomAtCenter() }
         // Ratings 0-5 and flags P/X/U, the same keys Lightroom uses.
@@ -652,15 +717,15 @@ struct ContentView: View {
         case .zoomIn where mode == .library, .zoomOut where mode == .library:
             prefs.thumbnailSize = ThumbnailGridLayout.stepped(prefs.thumbnailSize, larger: command == .zoomIn)
         case .zoomIn:
-            model.zoomIn(); mirrorModel?.zoomIn()
+            viewedModel.zoomIn(); mirrorModel?.zoomIn()
         case .zoomOut:
-            model.zoomOut(); mirrorModel?.zoomOut()
+            viewedModel.zoomOut(); mirrorModel?.zoomOut()
         case .revealInFinder:
             GridContextMenu.revealInFinder(library)
         case .zoomToFit:
-            model.zoomToFit(); mirrorModel?.zoomToFit()
+            viewedModel.zoomToFit(); mirrorModel?.zoomToFit()
         case .zoomToActualSize:
-            model.zoomToActualSize(); mirrorModel?.zoomToActualSize()
+            viewedModel.zoomToActualSize(); mirrorModel?.zoomToActualSize()
         case .autoAdjust:
             model.autoAdjust()
         case .clearFilter:
@@ -708,6 +773,7 @@ struct ContentView: View {
         state.showMaskOverlay = model.showMaskOverlay
         state.filterActive = library.filter.isActive
         state.hasCompareSelect = compareRecord != nil
+        state.surveyHasImage = survey.focusedModel?.hasImage ?? false
         return state
     }
 
@@ -771,6 +837,8 @@ struct ContentView: View {
         if target != .selection, mode == .compare, let select = compareRecord?.id, select == library.selectedImageID {
             compareModel?.apply(stack, groups: groups)
         }
+        // So may a Survey pane, the focused one.
+        if target != .selection, mode == .survey { survey.model(for: library.selectedImageID)?.apply(stack, groups: groups) }
         if target == .editor {
             model.apply(stack, groups: groups)
             return
@@ -1325,6 +1393,11 @@ struct ContentView: View {
     /// In Compare, zoom buttons drive both panes.
     private var mirrorModel: EditorModel? { mode == .compare ? compareModel : nil }
 
+    /// What zoom commands act on and the status bar describes: Survey's
+    /// focused pane (which carries a zoom to the others while Sync is on),
+    /// else the editor.
+    private var viewedModel: EditorModel { mode == .survey ? survey.focusedModel ?? model : model }
+
     /// The failure the status bar shows in red, if any.
     private var currentProblem: String? { model.setupError ?? library.lastError ?? model.lastError }
 
@@ -1336,7 +1409,7 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .controlSize(.small)
-            .frame(width: 280)
+            .frame(width: 340)
 
             Button("Open File…") { model.showOpenPanel(); mode = .develop }
                 .controlSize(.small)
@@ -1381,7 +1454,7 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(Color.red)
             } else {
-                Text(mode == .library ? library.statusText : model.status)
+                Text(mode == .library ? library.statusText : viewedModel.status)
                     .font(.caption)
                     .foregroundStyle(Color.secondary)
                     .lineLimit(1)
@@ -1394,23 +1467,23 @@ struct ContentView: View {
             // same things from the image itself; these exist for the
             // keyboard and for people who like buttons.
             HStack(spacing: 6) {
-                Button("−") { model.zoomOut(); mirrorModel?.zoomOut() }
+                Button("−") { viewedModel.zoomOut(); mirrorModel?.zoomOut() }
                     .accessibilityLabel("Zoom out")
-                Text(model.zoomLabel)
+                Text(viewedModel.zoomLabel)
                     .font(.system(.caption, design: .monospaced))
                     .frame(minWidth: 40)
                     .accessibilityLabel("Zoom")
-                    .accessibilityValue(SpokenText.zoom(model.zoomLabel))
-                    .accessibilityHidden(model.zoomLabel.isEmpty)
-                Button("+") { model.zoomIn(); mirrorModel?.zoomIn() }
+                    .accessibilityValue(SpokenText.zoom(viewedModel.zoomLabel))
+                    .accessibilityHidden(viewedModel.zoomLabel.isEmpty)
+                Button("+") { viewedModel.zoomIn(); mirrorModel?.zoomIn() }
                     .accessibilityLabel("Zoom in")
-                Button("Fit") { model.zoomToFit(); mirrorModel?.zoomToFit() }
+                Button("Fit") { viewedModel.zoomToFit(); mirrorModel?.zoomToFit() }
                     .accessibilityLabel("Zoom to fit")
-                Button("100%") { model.zoomToActualSize(); mirrorModel?.zoomToActualSize() }
+                Button("100%") { viewedModel.zoomToActualSize(); mirrorModel?.zoomToActualSize() }
                     .accessibilityLabel("Actual size")
             }
             .controlSize(.small)
-            .disabled(!model.hasImage || !mode.showsImage)
+            .disabled(!viewedModel.hasImage || !mode.showsImage)
 
             if !model.renderReport.isEmpty && mode == .develop && prefs.showRenderTimings {
                 // What the last action rendered and how long it took, on

@@ -55,6 +55,8 @@ enum KeyCommand: Equatable {
     case rate(Int), pick, reject, unflag
     case beforeAfter, crop, heal, deleteHeal, disarmTools
     case makeSelect
+    /// Survey (N), and taking its focused pane away.
+    case survey, removeFromSurvey
     // Reached from the menus, most with a Command shortcut as well.
     case openFolder, openFile, export, exportOpenImage
     case undo, redo, copySettings, pasteSettings

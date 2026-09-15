@@ -88,7 +88,7 @@ extension EditorModel {
     /// redraw of the scope view. The last change of a burst is always
     /// measured, just up to one interval late.
     func updateScopes() {
-        guard analysisTexture != nil else { return }
+        guard analysisTexture != nil, measuresScopes else { return }
         let now = ContinuousClock.now
         if let last = lastScopeMeasurement, now - last < Self.scopeInterval {
             guard pendingScopeMeasurement == nil else { return }

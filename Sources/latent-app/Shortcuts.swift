@@ -12,7 +12,7 @@ struct ShortcutModifiers: OptionSet, Hashable {
 /// Where a shortcut does anything. Two shortcuts may share keys only when
 /// their scopes can never apply at once.
 enum ShortcutScope: Equatable {
-    case everywhere, develop, compare
+    case everywhere, develop, compare, survey
 
     func overlaps(_ other: ShortcutScope) -> Bool {
         self == .everywhere || other == .everywhere || self == other
@@ -86,6 +86,7 @@ enum Shortcuts {
         Shortcut(.library, "g"),
         Shortcut(.loupe, "e"),
         Shortcut(.compare, "c"),
+        Shortcut(.survey, "n"),
         Shortcut(.develop, "d"),
         Shortcut(.toggleLoupe, " "),
         Shortcut(.step(-1), .leftArrow),
@@ -97,6 +98,7 @@ enum Shortcuts {
         Shortcut(.zoomIn, "=", .command),
         Shortcut(.zoomOut, "-", .command),
         Shortcut(.makeSelect, "x", .shift, in: .compare),
+        Shortcut(.removeFromSurvey, "/", in: .survey),
         Shortcut(.openFolder, "o", [.shift, .command]),
         // Rating and metadata
         Shortcut(.rate(0), "0"),
@@ -233,6 +235,8 @@ extension Shortcuts {
             ShortcutPageRow([.toggleZoom], "Toggle fit / 100%"),
             ShortcutPageRow([.zoomToFit, .zoomToActualSize, .zoomIn, .zoomOut], "Fit, 100%, zoom in, zoom out (in the grid, ⌘= and ⌘- size the thumbnails)"),
             ShortcutPageRow([.makeSelect], "Compare: make the candidate the Select"),
+            ShortcutPageRow([.survey], "Survey: the 2 to 4 selected images side by side (in Survey, ← and → move the focus)"),
+            ShortcutPageRow([.removeFromSurvey], "Survey: take the focused image out and deselect it"),
             ShortcutPageRow([.openFolder], "Open folder"),
             ShortcutPageRow(keys: .system("Settings"), "Settings"),
             ShortcutPageRow(keys: .system("Latent Help"), "Latent Help (these pages)"),

@@ -16,7 +16,7 @@ import Catalog
 ///                                               the last folder); unset, nothing is opened
 ///     LATENT_SNAPSHOT_STEPS="library;loupe"     states to picture, in order (default:
 ///                                               library;loupe;develop;crop;heal;compare;
-///                                               export;settings). Also `next`, which moves
+///                                               survey;export;settings). Also `next`, which moves
 ///                                               the selection on. Each writes NN-step.png
 ///     LATENT_SNAPSHOT_SIZE=1400x900             window content size in points (default
 ///                                               1400x900, not the size it was last left at)
@@ -334,7 +334,8 @@ enum SnapshotHarness {
                 // just moves its highlight.
                 let showing = window.contentView?.superview.map { SnapshotHarness.imageViews(in: $0).count } ?? 0
                 _ = perform(.step(1))
-                if showing > 0 { await waitForImage(views: showing) }
+                // Survey keeps its selection and moves its focus instead.
+                if showing > 0, library.selectedImageIDs.count <= 1 { await waitForImage(views: showing) }
             case .loupe, .develop, .crop, .heal:
                 guard library.selectedImage != nil else { fail("\(step.rawValue): no image selected"); return nil }
                 _ = perform(step == .loupe ? .loupe : .develop)
@@ -358,6 +359,22 @@ enum SnapshotHarness {
                 }
                 _ = perform(.compare)
                 await waitForImage(views: 2)
+            case .survey:
+                guard let selected = library.selectedImage,
+                      let index = library.visibleImages.firstIndex(where: { $0.id == selected.id })
+                else { fail("survey: no image selected"); return nil }
+                // The selection and the images after it (before it at the
+                // folder's end), four in all.
+                let around = library.visibleImages[index...] + library.visibleImages[..<index].reversed()
+                let ids = Set(around.prefix(4).compactMap(\.id))
+                guard ids.count >= 2 else { fail("survey: the folder has fewer than two images"); return nil }
+                library.setSelection(ids, primary: selected.id)
+                _ = perform(.survey)
+                let library = library
+                _ = await wait("the survey to render", upTo: 60) {
+                    guard let root = window.contentView?.superview else { return false }
+                    return SnapshotHarness.imageViews(in: root).count >= ids.count && !library.isBusy
+                }
             case .export:
                 guard !library.selectedImageIDs.isEmpty else { fail("export: no image selected"); return nil }
                 exportSheet.wrappedValue = true
