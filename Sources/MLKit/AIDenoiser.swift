@@ -15,6 +15,17 @@ import PixelEngine
 /// above 1.0 (clipped highlights, or specular values the white balance
 /// pushed past white) are handed back unchanged: they carry no noise
 /// worth removing and lie outside the model's input range.
+///
+/// The encoded values are lifted onto a pedestal (`pedestal`) before they
+/// go in, because the network itself is unstable near black: a tile whose
+/// encoded mean is below about 0.07, with little texture or noise (deep,
+/// smooth shadows in an underexposed frame) sends NAFNet's deepest encoder
+/// into a runaway, and the tile comes out as a flat block of garbage, up to
+/// ten times out of range. That happens in PyTorch at float32 with the
+/// published weights too, so it is the model, not Core ML or float16.
+/// Above about 0.08 the network is well behaved at every noise level, and
+/// it is close to shift-equivariant there, so mapping [0, 1] onto
+/// [pedestal, 1] and back costs nothing measurable.
 public final class AIDenoiser: @unchecked Sendable {
     /// The bundled network and the optional, larger one (`OptionalModel`).
     public enum Variant: String, CaseIterable, Sendable {
@@ -45,6 +56,12 @@ public final class AIDenoiser: @unchecked Sendable {
     public static let tile = 256
     /// Overlap between neighbouring tiles; the seam is blended across it.
     public static let overlap = 32
+    /// Encoded black is fed to the network at this level (see above).
+    static let pedestal: Float = 0.15
+    /// A tile whose output drifts further than this from its input, in
+    /// encoded units averaged over 16×16 blocks, is a failed prediction:
+    /// denoising moves local means by well under 0.02.
+    static let divergenceLimit: Float = 0.05
     static let preferenceKey = "latent.aiDenoiseModel"
 
     public let variant: Variant
@@ -109,7 +126,10 @@ public final class AIDenoiser: @unchecked Sendable {
                 let model = self.model
                 group.addTask {
                     try Task.checkCancellation()
-                    let out = try Self.run(model, input: input)
+                    var out = try Self.unpack(Self.run(model, input: input))
+                    // Should the network still fail on some tile, keep
+                    // the noisy original there rather than a broken block.
+                    if Self.diverged(input: input, output: out) { out = Self.unpack(input) }
                     return (x0, y0, out)
                 }
             }
@@ -146,14 +166,46 @@ public final class AIDenoiser: @unchecked Sendable {
 
     static func encode(_ v: Float) -> Float { pow(max(v, 0), 1 / 2.2) }
     static func decode(_ v: Float) -> Float { pow(max(v, 0), 2.2) }
+    static func lift(_ v: Float) -> Float { pedestal + (1 - pedestal) * v }
+    /// Undoes `lift` on a model output and clamps to the encoded range.
+    static func unpack(_ out: [Float]) -> [Float] {
+        let scale = 1 / (1 - pedestal)
+        return out.map { v in v.isFinite ? min(max((v - pedestal) * scale, 0), 1) : 0 }
+    }
+
+    /// Whether a tile's output (unpacked) has left its input (packed, as
+    /// fed to the model) at low frequencies, or isn't finite.
+    static func diverged(input: [Float], output: [Float]) -> Bool {
+        let t = tile, b = 16, n = t / b
+        let scale = 1 / (1 - pedestal)
+        for c in 0..<3 {
+            for by in 0..<n {
+                for bx in 0..<n {
+                    var sIn: Float = 0, sOut: Float = 0
+                    for y in (by * b)..<(by * b + b) {
+                        let row = c * t * t + y * t
+                        for x in (bx * b)..<(bx * b + b) {
+                            sIn += (input[row + x] - pedestal) * scale
+                            sOut += output[row + x]
+                        }
+                    }
+                    let d = abs(sOut - sIn) / Float(b * b)
+                    if !(d <= divergenceLimit) { return true }
+                }
+            }
+        }
+        return false
+    }
+
     static func smoothstep(_ a: Float, _ b: Float, _ x: Float) -> Float {
         let t = min(max((x - a) / (b - a), 0), 1)
         return t * t * (3 - 2 * t)
     }
 
     /// Extracts a tile as the model's 1×3×T×T planar float array, scaled
-    /// by `white`, gamma-encoded and clamped to [0, 1]. Tiles that fall
-    /// off the image's edge (small images) are padded by clamping.
+    /// by `white`, gamma-encoded, clamped to [0, 1] and lifted onto the
+    /// pedestal. Tiles that fall off the image's edge (small images) are
+    /// padded by clamping.
     static func packTile(_ pixels: [Float16], width: Int, height: Int, x0: Int, y0: Int,
                          white: Float) -> [Float] {
         let t = tile
@@ -165,7 +217,7 @@ public final class AIDenoiser: @unchecked Sendable {
                 let sx = min(x0 + x, width - 1)
                 let i = (sy * width + sx) * 4
                 for c in 0..<3 {
-                    out[c * t * t + y * t + x] = min(encode(Float(pixels[i + c]) * inv), 1)
+                    out[c * t * t + y * t + x] = lift(min(encode(Float(pixels[i + c]) * inv), 1))
                 }
             }
         }
@@ -199,7 +251,7 @@ public final class AIDenoiser: @unchecked Sendable {
                 let i = sy * width + sx
                 weight[i] += w
                 for c in 0..<3 {
-                    accum[i * 3 + c] += w * min(max(out[c * t * t + y * t + x], 0), 1)
+                    accum[i * 3 + c] += w * out[c * t * t + y * t + x]
                 }
             }
         }
