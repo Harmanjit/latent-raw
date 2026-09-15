@@ -833,7 +833,8 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
-                    CurveEditor(curve: $model.parameters.toneCurve)
+                    ToneCurvePanel(master: $model.parameters.toneCurve,
+                                   channels: $model.parameters.channelCurves)
                         .disabled(!model.hasImage)
                         .padding(.top, 8)
                 } label: {
@@ -1038,6 +1039,8 @@ struct ContentView: View {
                     sliderRow(title: "Mid Grey",
                                value: $model.parameters.greyPoint,
                                range: 0.05...0.5, format: "%.3f", defaultValue: 0.1845)
+                    ToneRangeSliders(ranges: $model.parameters.toneRanges)
+                        .disabled(!model.hasImage)
 
                     // Only offered on screens that can actually show more
                     // than paper white; on an SDR display it would be a

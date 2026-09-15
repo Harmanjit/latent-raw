@@ -199,6 +199,42 @@ inline float3 applyCurve(float3 p, constant float *lut) {
     return out;
 }
 
+/// The red, green and blue curves: three 256-entry tables end to end,
+/// each channel looked up in its own.
+inline float3 applyChannelCurves(float3 p, constant float *lut) {
+    float3 idx = clamp(p, 0.0, 1.0) * 255.0;
+    float3 out;
+    for (int c = 0; c < 3; c++) {
+        int i = int(idx[c]);
+        float f = idx[c] - float(i);
+        out[c] = mix(lut[c * 256 + i], lut[c * 256 + min(i + 1, 255)], f);
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------
+// Highlights, Shadows, Whites and Blacks (ToneRanges.swift has the design).
+// An exposure change per pixel, chosen by where its luminance falls on the
+// tone map's own log scale, t = contrast * log2(Y / grey). The table holds
+// the shift in t across [-12, 12]; every band is flat beyond that, so the
+// clamp is exact. Dividing by contrast turns the shift in t back into
+// stops of scene light.
+// ---------------------------------------------------------------------
+constant float kToneRangeLow = -12.0;
+constant float kToneRangeHigh = 12.0;
+
+inline float3 applyToneRanges(float3 working, constant float *lut,
+                              float contrast, float greyPoint) {
+    float y = dot(working, float3(0.2627, 0.6780, 0.0593));
+    float c = max(contrast, 1e-3);
+    float t = c * log2(max(y, 1e-10) / max(greyPoint, 1e-6));
+    float x = (clamp(t, kToneRangeLow, kToneRangeHigh) - kToneRangeLow)
+            / (kToneRangeHigh - kToneRangeLow) * 255.0;
+    int i = min(int(x), 254);
+    float shift = mix(lut[i], lut[i + 1], x - float(i));
+    return working * exp2(shift / c);
+}
+
 // ---------------------------------------------------------------------
 // Local adjustments (stage 10): each has a mask in [0,1] built from its
 // geometry, optionally narrowed by a luminance or hue range, and applies
@@ -320,6 +356,9 @@ kernel void colorAndTone(
     constant int &maskOverlayIndex               [[buffer(21)]],  // -1 = none
     constant uint &proofMode                     [[buffer(22)]],  // 0 off, 1 proof, 2 proof + warning
     constant float &vibrance                     [[buffer(23)]],  // −1…1
+    constant float *toneRangeLUT                 [[buffer(24)]],  // 256 shifts in t
+    constant float *channelCurveLUT              [[buffer(25)]],  // 3 x 256: red, green, blue
+    constant uint  &toneRangesOn                 [[buffer(26)]],
     texture2d_array<float, access::sample> brushMasks [[texture(2)]],
     texture3d<float, access::sample> proofLUT    [[texture(3)]],
     uint2 gid                                    [[thread_position_in_grid]])
@@ -340,6 +379,13 @@ kernel void colorAndTone(
 
     // Stage 6: exposure, in linear light (the only place it's meaningful).
     working *= exposureScale;
+
+    // Stage 9a: Highlights, Shadows, Whites, Blacks. Before the local
+    // adjustments, so their range masks see the tones the user sees; and
+    // part of tone mapping, so analysis renders skip it with the curve.
+    if (toneRangesOn != 0 && applyToneMap != 0) {
+        working = applyToneRanges(working, toneRangeLUT, contrast, greyPoint);
+    }
 
     // Stage 10: local adjustments. Range masks look at the pixel *before*
     // any local changes it, so brightening the shadows can't push a pixel
@@ -368,7 +414,8 @@ kernel void colorAndTone(
     // HDR mode. Skipped entirely when every module is neutral.
     if (any(gradingFlags != uint3(0)) || vibrance != 0.0) {
         float3 p = pow(max(display / headroom, 0.0), 1.0 / 2.2);
-        if (gradingFlags.x != 0) p = applyCurve(p, curveLUT);
+        if ((gradingFlags.x & 1) != 0) p = applyCurve(p, curveLUT);
+        if ((gradingFlags.x & 2) != 0) p = applyChannelCurves(p, channelCurveLUT);
         if (gradingFlags.y != 0) p = applyHSL(p, hsl);
         if (vibrance != 0.0) p = applyVibrance(p, vibrance);
         if (gradingFlags.z != 0) p = applySplitToning(p, splitTint, splitBalance);

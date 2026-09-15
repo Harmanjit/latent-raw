@@ -82,6 +82,25 @@ final class GoldenImageTests: XCTestCase {
         })
     }
 
+    /// Highlights, Shadows, Whites and Blacks, all four at once.
+    func testToneRanges() throws {
+        try check(Recipe(name: "tone-ranges") {
+            $0.toneRanges = ToneRanges(highlights: -0.7, shadows: 0.6, whites: 0.4, blacks: -0.5)
+        })
+    }
+
+    /// Red, green and blue curves over a master curve, which pins their
+    /// order as well as their shape.
+    func testChannelCurves() throws {
+        try check(Recipe(name: "channel-curves") {
+            $0.toneCurve = ToneCurve(points: [SIMD2(0, 0), SIMD2(0.5, 0.56), SIMD2(1, 1)])
+            $0.channelCurves = RGBCurves(
+                red: ToneCurve(points: [SIMD2(0, 0), SIMD2(0.55, 0.62), SIMD2(1, 1)]),
+                green: ToneCurve(points: [SIMD2(0, 0.02), SIMD2(1, 0.97)]),
+                blue: ToneCurve(points: [SIMD2(0, 0.06), SIMD2(0.4, 0.33), SIMD2(1, 1)]))
+        })
+    }
+
     func testPresence() throws {
         try check(Recipe(name: "presence", detail: Self.ballCentre) {
             $0.clarity = 0.6

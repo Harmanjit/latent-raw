@@ -12,9 +12,9 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     public var displayName: String {
         switch self {
         case .whiteBalance: return "White Balance"
-        case .tone:         return "Tone (exposure, contrast, highlights)"
+        case .tone:         return "Tone (exposure, contrast, highlights & shadows, recovery)"
         case .presence:     return "Presence (texture, clarity, dehaze)"
-        case .toneCurve:    return "Tone Curve"
+        case .toneCurve:    return "Tone Curve (master and RGB)"
         case .colour:       return "HSL / Colour / Vibrance"
         case .splitToning:  return "Split Toning"
         case .detail:       return "Detail (sharpening, noise, AI denoise)"
@@ -46,6 +46,7 @@ extension EditStack {
                 result.modules.exposure = other.modules.exposure
                 result.modules.tone = other.modules.tone
                 result.modules.highlights = other.modules.highlights
+                result.modules.toneranges = other.modules.toneranges
             case .presence:
                 result.modules.presence = other.modules.presence
             case .toneCurve:
@@ -87,7 +88,7 @@ extension EditStack {
         var g: Set<EditGroup> = []
         let m = modules
         if m.whitebalance != nil { g.insert(.whiteBalance) }
-        if m.exposure != nil || m.tone != nil || m.highlights != nil { g.insert(.tone) }
+        if m.exposure != nil || m.tone != nil || m.highlights != nil || m.toneranges != nil { g.insert(.tone) }
         if m.presence != nil { g.insert(.presence) }
         if m.curve != nil { g.insert(.toneCurve) }
         if m.hsl != nil || m.vibrance != nil { g.insert(.colour) }
