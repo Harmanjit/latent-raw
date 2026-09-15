@@ -48,9 +48,9 @@ fi
 #
 # fetch_merge_set <folder> <zip name> <Zenodo record> <sha256> <files to keep...>
 fetch_merge_set() {
-  local folder="TestAssets/merge/$1" zip="$2" record="$3" sum="$4"; shift 4
+  local name="$1" folder="TestAssets/merge/$1" zip="$2" record="$3" sum="$4"; shift 4
   if [ -f "${folder}/.verified-${sum}" ]; then
-    echo "merge/$1: present and verified"
+    echo "merge/${name}: present and verified"
     return
   fi
   mkdir -p "${folder}"
@@ -68,7 +68,7 @@ fetch_merge_set() {
   unzip -q -j -o "${tmp}" "$@" -d "${folder}"
   rm -f "${tmp}"
   touch "${folder}/.verified-${sum}"
-  echo "merge/$1: downloaded and verified"
+  echo "merge/${name}: downloaded and verified"
 }
 
 # Ivo Ihrke: Canon EOS 5D Mark II on a tripod, 6 frames 2 EV apart (1 s to 1/1250 s).
