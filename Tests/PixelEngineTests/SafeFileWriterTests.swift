@@ -115,6 +115,77 @@ final class SafeFileWriterTests: XCTestCase {
         XCTAssertEqual(try contents(), ["fresh.jpg", "photo.jpg"])
     }
 
+    /// A batch whose policy is Add a number or Skip settled the name before
+    /// rendering; a file that took the name during the render must be kept,
+    /// and the commit must say so rather than replace it.
+    func testCreateOnlyCommitKeepsAFileThatAppearedMeanwhile() throws {
+        let url = folder.appendingPathComponent("photo.jpg")
+        for canCreateSibling in [true, false] {
+            let pending = try SafeFileWriter.begin(url, canCreateSibling: { _ in canCreateSibling })
+            defer { pending.discard() }
+            try Data("export".utf8).write(to: pending.url)
+            try Data("someone else's".utf8).write(to: url)
+            XCTAssertThrowsError(try pending.commit(replacingExisting: false)) {
+                XCTAssertTrue($0 is SafeFileWriter.DestinationExists, "\($0)")
+            }
+            XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "someone else's")
+            try FileManager.default.removeItem(at: url)
+        }
+        XCTAssertEqual(try contents(), [])
+
+        // A link, even a broken one, holds the name too.
+        try FileManager.default.createSymbolicLink(atPath: url.path, withDestinationPath: "nowhere.jpg")
+        let pending = try SafeFileWriter.begin(url)
+        defer { pending.discard() }
+        try Data("export".utf8).write(to: pending.url)
+        XCTAssertThrowsError(try pending.commit(replacingExisting: false))
+        try FileManager.default.removeItem(at: url)
+
+        // With the name free, it writes as usual.
+        try pending.commit(replacingExisting: false)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "export")
+        XCTAssertEqual(try contents(), ["photo.jpg"])
+    }
+
+    /// The exporter passes the choice through, and leaves no temporary file.
+    func testExporterRefusesToReplaceWhenAskedNotTo() throws {
+        let url = folder.appendingPathComponent("photo.png")
+        try Data("existing".utf8).write(to: url)
+        let context = try XCTUnwrap(CGContext(data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                              bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        let image = try XCTUnwrap(context.makeImage())
+        XCTAssertThrowsError(try Exporter.write(cgImage: image, to: url, settings: ExportSettings(format: .png),
+                                                replacingExisting: false)) {
+            XCTAssertTrue($0 is SafeFileWriter.DestinationExists, "\($0)")
+        }
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "existing")
+        XCTAssertEqual(try contents(), ["photo.png"])
+    }
+
+    /// Quitting before an export finishes: the unfinished file goes, from
+    /// beside the destination or from the scratch folder, and a commit
+    /// that comes after can't put anything in place.
+    func testAbandoningRemovesUnfinishedWrites() throws {
+        let beside = folder.appendingPathComponent("beside.jpg")
+        let scratch = folder.appendingPathComponent("scratch.jpg")
+        let first = try SafeFileWriter.begin(beside)
+        let second = try SafeFileWriter.begin(scratch, canCreateSibling: { _ in false })
+        defer { first.discard(); second.discard() }
+        for pending in [first, second] { try Data("unfinished".utf8).write(to: pending.url) }
+        let committed = try SafeFileWriter.begin(folder.appendingPathComponent("done.jpg"))
+        try Data("done".utf8).write(to: committed.url)
+        try committed.commit()
+
+        // At least these two: nothing else in this process should be writing.
+        XCTAssertGreaterThanOrEqual(SafeFileWriter.abandonPendingWrites(), 2)
+        XCTAssertEqual(try contents(), ["done.jpg"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: second.url.deletingLastPathComponent().path))
+        XCTAssertThrowsError(try first.commit())
+        XCTAssertEqual(try contents(), ["done.jpg"])
+        XCTAssertEqual(SafeFileWriter.abandonPendingWrites(), 0)
+    }
+
     func testASymbolicLinkIsWrittenThrough() throws {
         let target = folder.appendingPathComponent("target.jpg")
         try Data("old".utf8).write(to: target)

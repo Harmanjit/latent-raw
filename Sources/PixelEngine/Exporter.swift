@@ -112,6 +112,10 @@ public struct ExportSettings: Sendable {
 /// when ImageIO can't read the raw. Latent's keywords are added to the
 /// file's own, its rating (when it has one) replaces the file's, and the
 /// software is Latent.
+///
+/// Where the photo was taken and the camera's and lens's serial numbers
+/// are left out unless `includeLocation` is set; the exact list is
+/// `SourceMetadata.locationTags`.
 public struct ExportMetadata: Sendable, Equatable {
     public var cameraMake: String?
     public var cameraModel: String?
@@ -126,6 +130,10 @@ public struct ExportMetadata: Sendable, Equatable {
     public var software: String = "Latent"
     /// The raw's own metadata, already cleaned of storage-specific tags.
     public var source: SourceMetadata?
+    /// Keep the source's GPS position, place names and serial numbers.
+    /// Off unless asked for: a file shared online would otherwise say where
+    /// it was taken (often the photographer's home) and which camera took it.
+    public var includeLocation = false
 
     public init() {}
 
@@ -147,7 +155,7 @@ public struct ExportMetadata: Sendable, Equatable {
         -> (properties: [CFString: Any], xmp: CGImageMetadata?) {
         let tiffKey = kCGImagePropertyTIFFDictionary as String, exifKey = kCGImagePropertyExifDictionary as String
         let iptcKey = kCGImagePropertyIPTCDictionary as String
-        var props = source?.imageProperties() ?? [:]
+        var props = source?.imageProperties(includingLocation: includeLocation) ?? [:]
         var tiff = props[tiffKey] as? [String: Any] ?? [:]
         var exif = props[exifKey] as? [String: Any] ?? [:]
         var iptc = props[iptcKey] as? [String: Any] ?? [:]
@@ -163,8 +171,7 @@ public struct ExportMetadata: Sendable, Equatable {
         fill(&exif, kCGImagePropertyExifFocalLength, focalLength)
         fill(&exif, kCGImagePropertyExifLensModel, lensModel)
         if let captureDate {
-            let f = DateFormatter()
-            f.dateFormat = "yyyy:MM:dd HH:mm:ss"
+            let f = Self.exifDateFormatter()
             fill(&exif, kCGImagePropertyExifDateTimeOriginal, f.string(from: captureDate))
             fill(&tiff, kCGImagePropertyTIFFDateTime, f.string(from: captureDate))
         }
@@ -190,7 +197,7 @@ public struct ExportMetadata: Sendable, Equatable {
         props[exifKey] = exif
         props[iptcKey] = iptc.isEmpty ? nil : iptc
 
-        let xmp = source?.xmpMetadata()
+        let xmp = source?.xmpMetadata(includingLocation: includeLocation)
         if let xmp {
             CGImageMetadataSetValueMatchingImageProperty(xmp, kCGImagePropertyTIFFDictionary,
                                                          kCGImagePropertyTIFFSoftware, software as CFString)
@@ -204,6 +211,18 @@ public struct ExportMetadata: Sendable, Equatable {
             }
         }
         return (Dictionary(uniqueKeysWithValues: props.map { ($0.key as CFString, $0.value) }), xmp)
+    }
+
+    /// EXIF's date form, "2024:06:01 12:34:56", in local time as cameras
+    /// write it. The locale and calendar are fixed: the user's own would
+    /// put a Buddhist or Japanese-era year, or other digits, into the file.
+    static func exifDateFormatter(timeZone: TimeZone = .current) -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = timeZone
+        f.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        return f
     }
 }
 
@@ -233,6 +252,11 @@ public final class Exporter {
     ///
     /// `hdrRender` renders the same edit for another output; it is needed
     /// only when `settings.writesGainMap`, for the HDR half of the map.
+    ///
+    /// `replacingExisting` false never replaces a file: one found under
+    /// `url` when the finished file is moved into place (even one that
+    /// appeared during the render) makes this throw
+    /// `SafeFileWriter.DestinationExists`, and the file is left alone.
     @discardableResult
     public func write(_ texture: MTLTexture,
                        to url: URL,
@@ -242,23 +266,27 @@ public final class Exporter {
                        crop: CropParameters = .none,
                        metadata: ExportMetadata? = nil,
                        maxLongEdge: Int? = nil,
+                       replacingExisting: Bool = true,
                        hdrRender: ((RenderOutput) throws -> MTLTexture)? = nil) throws -> (width: Int, height: Int) {
         if settings.writesGainMap, let hdrRender {
             return try writeWithGainMap(texture, to: url, settings: settings, colorSpace: colorSpace,
                                         rotation: rotation, crop: crop, metadata: metadata,
-                                        maxLongEdge: maxLongEdge, hdrRender: hdrRender)
+                                        maxLongEdge: maxLongEdge, replacingExisting: replacingExisting,
+                                        hdrRender: hdrRender)
         }
         let cgImage = try cgImage(from: texture, colorSpace: colorSpace, rotation: rotation, crop: crop,
                                   bitsPerComponent: settings.format.bitsPerComponent,
                                   maxLongEdge: maxLongEdge)
-        try Self.write(cgImage: cgImage, to: url, settings: settings, metadata: metadata)
+        try Self.write(cgImage: cgImage, to: url, settings: settings, metadata: metadata,
+                       replacingExisting: replacingExisting)
         return (cgImage.width, cgImage.height)
     }
 
     /// Writes an already-built CGImage. The image's own colour space tag
     /// is embedded as the file's ICC profile.
     public static func write(cgImage: CGImage, to url: URL, settings: ExportSettings,
-                             metadata: ExportMetadata? = nil, gainMap: GainMap? = nil) throws {
+                             metadata: ExportMetadata? = nil, gainMap: GainMap? = nil,
+                             replacingExisting: Bool = true) throws {
         // Encoded under a temporary name and moved into place only once
         // finalised, so a failed or interrupted encode never leaves a
         // truncated file, or costs the old one, under the real name.
@@ -288,7 +316,7 @@ public final class Exporter {
         guard CGImageDestinationFinalize(destination) else {
             throw ExportError.writeFailed(url)
         }
-        try pending.commit()
+        try pending.commit(replacingExisting: replacingExisting)
     }
 
     /// Output size after crop, rotation and resize.

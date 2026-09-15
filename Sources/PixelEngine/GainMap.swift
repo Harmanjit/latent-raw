@@ -139,7 +139,7 @@ extension Exporter {
     /// read before the HDR render runs.
     func writeWithGainMap(_ texture: MTLTexture, to url: URL, settings: ExportSettings,
                           colorSpace: ColorKit.OutputSpace, rotation: ImageRotation, crop: CropParameters,
-                          metadata: ExportMetadata?, maxLongEdge: Int?,
+                          metadata: ExportMetadata?, maxLongEdge: Int?, replacingExisting: Bool = true,
                           hdrRender: (RenderOutput) throws -> MTLTexture) throws -> (width: Int, height: Int) {
         let headroom = GainMap.exportHeadroom
         let base = try linearTexture(from: texture, rotation: rotation, crop: crop,
@@ -150,7 +150,8 @@ extension Exporter {
         let alternate = try linearTexture(from: hdr, rotation: rotation, crop: crop,
                                           maxLongEdge: maxLongEdge, sourceIsEncoded: false)
         let map = try gainMap(base: base, alternate: alternate, headroom: headroom)
-        try Self.write(cgImage: image, to: url, settings: settings, metadata: metadata, gainMap: map)
+        try Self.write(cgImage: image, to: url, settings: settings, metadata: metadata, gainMap: map,
+                       replacingExisting: replacingExisting)
         return (image.width, image.height)
     }
 

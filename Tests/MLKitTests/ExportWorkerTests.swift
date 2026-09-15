@@ -51,20 +51,22 @@ final class ExportWorkerTests: XCTestCase {
     }
 
     /// The golden D750 raw exported as JPEG: the photo's own metadata
-    /// comes along, storage tags don't, and the metadata switch really
-    /// does write pixels only.
+    /// comes along, storage tags don't, the body's serial number only when
+    /// location is included, and the metadata switch really does write
+    /// pixels only.
     func testGoldenRawJPEGCarriesCameraMetadataAndStripsStorageTags() async throws {
         let path = AIMaskTests.assetPath("golden_nikon_d750_cc0.nef")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
         let gpu = try GPUContext()
-        func export(includeMetadata: Bool) async throws -> (props: [CFString: Any], data: Data, width: Int) {
+        func export(includeMetadata: Bool, includeLocation: Bool = false) async throws
+            -> (props: [CFString: Any], data: Data, width: Int) {
             let out = FileManager.default.temporaryDirectory.appendingPathComponent("latent-export-\(UUID().uuidString).jpg")
             defer { try? FileManager.default.removeItem(at: out) }
             let request = ExportWorker.Request(
                 sourceURL: URL(fileURLWithPath: path), destinationURL: out, editStackJSON: nil, userRotation: 0,
                 settings: ExportSettings(format: .jpeg), colorSpace: .sRGB, maxLongEdge: 800,
                 keywords: includeMetadata ? ["latent"] : [], rating: includeMetadata ? 3 : 0,
-                includeMetadata: includeMetadata)
+                includeMetadata: includeMetadata, includeLocation: includeLocation)
             let outcome = try await ExportWorker.export(request, gpu: gpu)
             let source = try XCTUnwrap(CGImageSourceCreateWithURL(out as CFURL, nil))
             let props = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
@@ -88,9 +90,12 @@ final class ExportWorkerTests: XCTestCase {
         XCTAssertEqual(exif[kCGImagePropertyExifPixelXDimension] as? Int, width)
         XCTAssertEqual(exif[kCGImagePropertyExifColorSpace] as? Int, 1)
         XCTAssertNil(exif[kCGImagePropertyExifCFAPattern])
-        let aux = try XCTUnwrap(props[kCGImagePropertyExifAuxDictionary] as? [CFString: Any])
-        XCTAssertNotNil(aux[kCGImagePropertyExifAuxSerialNumber])
+        let aux = props[kCGImagePropertyExifAuxDictionary] as? [CFString: Any] ?? [:]
+        XCTAssertNil(aux[kCGImagePropertyExifAuxSerialNumber], "location is off unless asked for")
         XCTAssertNil(aux["AFInfo" as CFString])
+        let located = try await export(includeMetadata: true, includeLocation: true).props
+        let locatedAux = try XCTUnwrap(located[kCGImagePropertyExifAuxDictionary] as? [CFString: Any])
+        XCTAssertNotNil(locatedAux[kCGImagePropertyExifAuxSerialNumber])
         XCTAssertNil(props["{MakerNikon}" as CFString])
         let iptc = try XCTUnwrap(props[kCGImagePropertyIPTCDictionary] as? [CFString: Any])
         XCTAssertEqual(iptc[kCGImagePropertyIPTCByline] as? [String], ["grodovsky@gmail.com"])

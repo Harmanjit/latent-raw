@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Catalog
+import PixelEngine
 
 /// Latent's application target.
 ///
@@ -132,20 +133,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///    snapshots): waited for, so the XMP sidecar and the database
     ///    both have them.
     /// 3. An export under way: ask whether to stop after the current file
-    ///    and quit, or keep exporting and not quit.
+    ///    and quit, or keep exporting and not quit. Export Open Image is one
+    ///    file, so for it the choice is to let it finish and quit.
     ///
     /// `.terminateLater` keeps the app alive until `reply` is called.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let windows = Self.windows
         let exporting = windows.map(\.exportQueue).filter(\.isRunning)
-        if !exporting.isEmpty, !confirmStoppingExports(exporting) {
+        let exportingOpenImage = windows.map(\.model).filter(\.isExporting)
+        if !exporting.isEmpty || !exportingOpenImage.isEmpty,
+           !confirmStoppingExports(exporting, openImage: !exportingOpenImage.isEmpty) {
             return .terminateCancel
         }
         // Saving goes through Library.perform, so from here on the flushed
         // edit counts as pending work below.
         for window in windows { window.model.flushPendingSave() }
         let libraries = windows.map(\.library)
-        guard !exporting.isEmpty || libraries.contains(where: \.hasPendingWork) else {
+        guard !exporting.isEmpty || !exportingOpenImage.isEmpty || libraries.contains(where: \.hasPendingWork) else {
             return .terminateNow
         }
         Task {
@@ -156,27 +160,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     Log.export.error("Quit: the export file being written did not finish within \(Self.exportWaitLimit, privacy: .public); quitting anyway")
                 }
             }
+            for model in exportingOpenImage {
+                if await !Self.finishes(within: Self.exportWaitLimit, model.waitForExport) {
+                    Log.export.error("Quit: Export Open Image did not finish within \(Self.exportWaitLimit, privacy: .public); quitting anyway")
+                }
+            }
             for library in libraries {
                 if await !Self.finishes(within: Self.catalogWaitLimit, library.waitForPendingWork) {
                     Log.catalog.error("Quit: catalog writes did not finish within \(Self.catalogWaitLimit, privacy: .public); quitting anyway")
                 }
+            }
+            // An export still writing is cut short by the exit: remove its
+            // hidden temporary file now, or nothing ever would.
+            let abandoned = SafeFileWriter.abandonPendingWrites()
+            if abandoned > 0 {
+                Log.export.error("Quit: removed \(abandoned, privacy: .public) unfinished export file(s)")
             }
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
     }
 
-    /// Asks before cutting an export short. Returns whether to quit.
-    private func confirmStoppingExports(_ queues: [ExportQueue]) -> Bool {
+    /// Asks before cutting an export short, or waiting for Export Open
+    /// Image (`openImage`). Returns whether to quit.
+    private func confirmStoppingExports(_ queues: [ExportQueue], openImage: Bool) -> Bool {
         let done = queues.reduce(0) { $0 + $1.done }
         let total = queues.reduce(0) { $0 + $1.total }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Latent is still exporting (\(done) of \(total) done)"
-        alert.informativeText = "Quitting now finishes the image being written and skips the rest. "
-            + "Files already exported stay where they are."
-        alert.addButton(withTitle: "Stop After This Image and Quit")
-        let keep = alert.addButton(withTitle: "Keep Exporting")
+        if queues.isEmpty {
+            alert.messageText = "Latent is still exporting the open image"
+            alert.informativeText = "Quitting now waits for its file to be written, then quits."
+            alert.addButton(withTitle: "Finish Exporting and Quit")
+        } else {
+            alert.messageText = "Latent is still exporting (\(done) of \(total) done)"
+            alert.informativeText = "Quitting now finishes the image being written and skips the rest. "
+                + (openImage ? "The open image being exported is finished too. " : "")
+                + "Files already exported stay where they are."
+            alert.addButton(withTitle: "Stop After This Image and Quit")
+        }
+        let keep = alert.addButton(withTitle: queues.isEmpty ? "Keep Working" : "Keep Exporting")
         keep.keyEquivalent = "\u{1b}"
         return alert.runModal() == .alertFirstButtonReturn
     }

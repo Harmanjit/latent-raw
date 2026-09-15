@@ -30,7 +30,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Metadata editing** is limited to rating, label, flag and keywords. Title, caption and copyright are not editable. Keywords apply to one image at a time, not to a multiple selection.
 - **Undo works in Develop, not in the Library.**
 - **Typed values aren't on every slider.** Temperature, Highlights, Shadows, Whites and Blacks, HSL, Split Toning and export quality show their value but can't be typed into.
-- **Export open image… always includes metadata,** GPS location among it, and is always full size in sRGB. Use the export sheet for anything else.
+- **Export open image… is always full size in sRGB.** Use the export sheet for anything else.
 - **Compare's Sync isn't remembered;** it is on again at every launch.
 - **Showing and hiding the sidebar and filmstrip has no keyboard shortcut or menu item.** The filmstrip has its film button in the status bar.
 

@@ -95,10 +95,11 @@ What it writes, and where:
 - Settings in the app's UserDefaults, including bookmarks for the last
   folder, the export folder and the sidebar's favourite folders.
 - Exported files go only where you choose. By default they carry the
-  photo's own metadata, including its **GPS location**, artist and
-  copyright, plus Latent's keywords and rating; the export sheet's metadata
-  toggle strips all of it. Export Open Image in the left panel always
-  includes it.
+  photo's own metadata (artist, copyright, camera details) plus Latent's
+  keywords and rating, but not its **GPS location**, place names or the
+  camera and lens serial numbers unless **Include location** is on. Both
+  switches are in the export sheet and, for Export Open Image, in the left
+  panel.
 
 Failures are logged to the unified system log under `com.latent.app`
 with file names marked private, so they show as `<private>` in Console

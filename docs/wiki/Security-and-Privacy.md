@@ -16,7 +16,7 @@ The service answers one more question, for exports: the photo's own metadata. It
 
 ## Location in exports
 
-Exports carry the photo's own metadata by default, and that includes the **GPS position** your camera or phone recorded, along with artist, copyright, camera and lens details, keywords and rating. To share a photo without them, turn off **Include camera metadata, location, keywords and rating** in the export sheet (and save that as a preset if you share often). Export open image… in the left panel has no such switch and always writes the metadata, location included; use the export sheet when that matters. See [Export](Export).
+Exports carry the photo's own metadata by default: artist, copyright, camera and lens details, capture time, keywords and rating. Where the photo was taken is left out unless you turn on **Include location**, in the export sheet and, for Export open image…, in the left panel's Export section. Left out means the **GPS position** your camera or phone recorded, the place names (city, sublocation, state or province, country, and the locations shown or created), and the camera body's and lens's **serial numbers**, which tie every photo to one camera as surely as a position ties it to a place. Artist, copyright and the camera owner's name stay, as credits. Turn off **Include camera metadata** to write none of it. Presets saved by earlier versions keep location off. See [Export](Export).
 
 ## Parsers
 
@@ -34,5 +34,5 @@ LibRaw is pinned by commit hash and refused if the tag moves. The one Swift depe
 
 - `_latent/` inside each photo folder: catalog, sidecars, thumbnails, and a set-aside `catalog.damaged-<date>.sqlite` if a database was ever found damaged. Nothing else in your folders is touched.
 - The app container: settings, bookmarks for the last folder, export folders and favourites, compiled models, saved presets.
-- Exports: only where you choose, written under a temporary name and then moved into place; metadata, including location, can be stripped.
+- Exports: only where you choose, written under a temporary name and then moved into place; location and serial numbers only when asked for, and metadata can be stripped altogether.
 - The unified log receives failure messages with file names marked private.

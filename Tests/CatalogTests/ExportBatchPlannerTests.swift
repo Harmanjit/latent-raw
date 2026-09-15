@@ -144,6 +144,22 @@ final class ExportBatchPlannerTests: XCTestCase {
         XCTAssertLessThan(elapsed, .seconds(2))
     }
 
+    /// A file can also take the name while the image renders; the commit
+    /// then refuses to replace it and the queue settles the same output
+    /// again, which must move on to the next free name (or skip) each time.
+    func testRecheckAgainAfterAFileTookTheSettledName() {
+        let records = [record("A.NEF"), record("B.NEF")]
+        var plan = ExportBatchPlanner.plan(records, into: out, options: options("{name}", .addNumber), probe: probe())
+        XCTAssertEqual(plan.recheck(0, probe: probe(files: ["/out/A.jpg"])).url.lastPathComponent, "A-1.jpg")
+        let again = plan.recheck(0, probe: probe(files: ["/out/A.jpg", "/out/A-1.jpg"]))
+        XCTAssertEqual(again.url.lastPathComponent, "A-2.jpg")
+        XCTAssertEqual(again.action, .write)
+
+        var skip = ExportBatchPlanner.plan(records, into: out, options: options("{name}", .skip), probe: probe())
+        XCTAssertEqual(skip.recheck(0, probe: probe()).action, .write)
+        XCTAssertEqual(skip.recheck(0, probe: probe(files: ["/out/A.jpg"])).action, .skip)
+    }
+
     /// Just before writing, the queue looks again: a file that appeared
     /// under a planned name meanwhile is numbered, replaced or skipped as
     /// the policy says, and never takes a name promised to another output.
