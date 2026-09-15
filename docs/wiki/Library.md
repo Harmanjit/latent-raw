@@ -2,7 +2,7 @@
 
 ## The sidebar
 
-The column on the far left lists favourite folders. Add one with **Add Folder…** at its foot, by dragging folders in from Finder, or with **Add to Favourites** on a folder's right-click menu. Each favourite expands into its folder tree; clicking any folder in it opens that folder as the catalog, exactly as Open Folder does. Expanding a folder only lists its subfolders; nothing touches a catalog until you click.
+The column on the far left lists favourite folders. Add one with **Add Folder…** at its foot, by dragging folders in from Finder, or with **Add to Favourites** on a folder's right-click menu. Each favourite expands into its folder tree; clicking any folder in it opens that folder as the catalog, exactly as Open Folder does. Expanding a folder only lists its subfolders; nothing touches a catalog until you click. From the keyboard, Tab into the sidebar, move with the arrow keys or by typing a name, and press Return or Space to open the selected folder.
 
 The app is sandboxed, so it can read inside favourites and folders you chose in an open panel, and nowhere else. A folder outside every favourite still opens with ⇧⌘O, and the sidebar then offers to add it. A favourite on a disk or network share that isn't mounted shows as not connected and comes back when the volume does; Latent never mounts anything on its own. The sidebar can be collapsed, and stays shown or hidden as you left it.
 

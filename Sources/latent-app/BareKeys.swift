@@ -78,12 +78,22 @@ enum KeyFocus: Equatable {
     /// A button, checkbox, switch, pop-up or segmented control. With Full
     /// Keyboard Access, Tab moves focus to these and Space presses them.
     case control
+    /// A table or outline, such as the folder sidebar once Tab or VoiceOver
+    /// gives it the keyboard (a click doesn't).
+    case list
+    /// A slider, reached with Tab under Full Keyboard Access.
+    case slider
+    /// Anything else, the thumbnail grid and the image among them: single
+    /// keys are commands there.
     case other
 
     @MainActor init(_ responder: NSResponder?) {
         switch responder {
         case let text as NSText where text.isEditable: self = .text
         case is NSButton, is NSSegmentedControl, is NSSwitch: self = .control
+        // NSOutlineView is a table view.
+        case is NSTableView: self = .list
+        case is NSSlider: self = .slider
         default: self = .other
         }
     }
@@ -91,13 +101,19 @@ enum KeyFocus: Equatable {
 
 extension BareKeyPress {
     /// Whether the key is for whatever has focus rather than for the
-    /// command table. Text takes every key. A focused control takes Space
-    /// and Return, which press it; the arrows still step through images,
-    /// since a control that isn't a slider does little with them.
+    /// command table: the keys that control uses. Text takes every key. A
+    /// focused control takes Space and Return, which press it; the arrows
+    /// still step through images, since such a control does nothing with
+    /// them. A list takes the arrows (← and → collapse and expand an
+    /// outline), Return and Space (the sidebar opens the selected folder)
+    /// and typed characters, which jump to the row they start; Escape and
+    /// Delete stay commands. A slider takes ← and →, which move it.
     func belongs(to focus: KeyFocus) -> Bool {
         switch focus {
         case .text: return true
         case .control: return !shift && (key == .character(" ") || key == .returnKey)
+        case .list: return key != .escape && key != .delete
+        case .slider: return key == .leftArrow || key == .rightArrow
         case .other: return false
         }
     }
