@@ -33,6 +33,24 @@ public struct PresentLayer {
     }
 }
 
+/// The press-and-hold magnifier, as the presenter draws it: a circle at
+/// `loupe.center` showing the image at `loupe.zoom` about that point, from
+/// `tile` where it covers and from the base layer (softly) where it doesn't,
+/// inside a thin ring.
+public struct PresentMagnifier {
+    public var loupe: ViewerInteraction.Magnifier
+    /// Ring width in drawable pixels.
+    public var ringWidth: CGFloat
+    /// A full-resolution render of the area under the loupe, when one is ready.
+    public var tile: PresentLayer?
+
+    public init(loupe: ViewerInteraction.Magnifier, ringWidth: CGFloat, tile: PresentLayer?) {
+        self.loupe = loupe
+        self.ringWidth = ringWidth
+        self.tile = tile
+    }
+}
+
 /// The viewport's EDR decisions, as plain arithmetic so they can be tested
 /// without a screen.
 ///
@@ -162,10 +180,11 @@ public final class Presenter {
                          frame: CropFrame,
                          to drawable: CAMetalDrawable,
                          backgroundLevel: Float = 0.12,
-                         displayHeadroom: Float = 1) {
+                         displayHeadroom: Float = 1,
+                         magnifier: PresentMagnifier? = nil) {
         guard let cmdBuffer = encode(base: base, tile: tile, transform: transform, frame: frame,
                                      into: drawable.texture, backgroundLevel: backgroundLevel,
-                                     displayHeadroom: displayHeadroom) else { return }
+                                     displayHeadroom: displayHeadroom, magnifier: magnifier) else { return }
         cmdBuffer.present(drawable)
         cmdBuffer.commit()
     }
@@ -178,31 +197,75 @@ public final class Presenter {
                 frame: CropFrame,
                 into target: MTLTexture,
                 backgroundLevel: Float,
-                displayHeadroom: Float) -> MTLCommandBuffer? {
+                displayHeadroom: Float,
+                magnifier: PresentMagnifier? = nil) -> MTLCommandBuffer? {
         let drawableSize = CGSize(width: target.width, height: target.height)
         let baseMap = transform.screenToTextureMap(coverage: base.coverage, frame: frame,
                                                    drawableSize: drawableSize)
+        let (tileMap, tileSource) = Self.tilePlacement(tile, transform: transform, frame: frame,
+                                                       drawableSize: drawableSize, fallback: baseMap)
 
-        var tileMap = baseMap
-        var tileSource = SIMD4<Float>(0, 0, 1, 1)
-        if let tile {
-            let shown = tile.coverage.insetBy(dx: tile.inset, dy: tile.inset)
-            tileMap = transform.screenToTextureMap(coverage: shown, frame: frame,
-                                                   drawableSize: drawableSize)
-            let w = Float(tile.texture.width), h = Float(tile.texture.height)
-            let i = Float(tile.inset)
-            tileSource = SIMD4<Float>(i / w, i / h, (w - 2 * i) / w, (h - 2 * i) / h)
+        var flags: UInt32 = 0
+        // Full-resolution layers show square pixels past 200%.
+        if ViewerInteraction.samplesNearest(zoom: transform.zoom) { flags |= PresentFlags.tileNearest }
+        var loupe = PresentLoupe(baseMap: baseMap, tileMap: tileMap, tileSource: tileSource,
+                                 circle: SIMD4<Float>(0, 0, -1, 0))
+        if let magnifier {
+            let shown = magnifier.loupe.transform(in: transform, drawableSize: drawableSize)
+            let loupeBase = shown.screenToTextureMap(coverage: base.coverage, frame: frame,
+                                                     drawableSize: drawableSize)
+            let (map, source) = Self.tilePlacement(magnifier.tile, transform: shown, frame: frame,
+                                                   drawableSize: drawableSize, fallback: loupeBase)
+            loupe = PresentLoupe(baseMap: loupeBase, tileMap: map, tileSource: source,
+                                 circle: SIMD4<Float>(Float(magnifier.loupe.center.x), Float(magnifier.loupe.center.y),
+                                                      Float(magnifier.loupe.radius), Float(magnifier.ringWidth)))
+            flags |= PresentFlags.magnifier
+            if magnifier.tile != nil { flags |= PresentFlags.magnifierHasTile }
+            if ViewerInteraction.samplesNearest(zoom: magnifier.loupe.zoom) { flags |= PresentFlags.magnifierNearest }
         }
 
         // The screen's headroom, then the ceiling each layer was rendered to.
-        let headrooms = SIMD4<Float>(max(1, displayHeadroom), base.headroom, tile?.headroom ?? 1, 0)
+        let headrooms = SIMD4<Float>(max(1, displayHeadroom), base.headroom, tile?.headroom ?? 1,
+                                     magnifier?.tile?.headroom ?? 1)
         return draw(base: base.texture, baseMap: baseMap,
                     tile: tile?.texture, tileMap: tileMap, tileSource: tileSource,
+                    loupeTile: magnifier?.tile?.texture, loupe: loupe, flags: flags,
                     into: target, backgroundLevel: backgroundLevel, headrooms: headrooms)
+    }
+
+    /// A full-resolution layer's screen-to-texture map, and the part of the
+    /// texture to draw from (its inset border trimmed).
+    private static func tilePlacement(_ tile: PresentLayer?, transform: ViewportTransform, frame: CropFrame,
+                                      drawableSize: CGSize,
+                                      fallback: simd_float3x2) -> (simd_float3x2, SIMD4<Float>) {
+        guard let tile else { return (fallback, SIMD4<Float>(0, 0, 1, 1)) }
+        let shown = tile.coverage.insetBy(dx: tile.inset, dy: tile.inset)
+        let map = transform.screenToTextureMap(coverage: shown, frame: frame, drawableSize: drawableSize)
+        let w = Float(tile.texture.width), h = Float(tile.texture.height)
+        let i = Float(tile.inset)
+        return (map, SIMD4<Float>(i / w, i / h, (w - 2 * i) / w, (h - 2 * i) / h))
+    }
+
+    /// Bits of the kernel's `flags` argument (Present.metal).
+    private enum PresentFlags {
+        static let tileNearest: UInt32 = 1 << 0
+        static let magnifier: UInt32 = 1 << 1
+        static let magnifierHasTile: UInt32 = 1 << 2
+        static let magnifierNearest: UInt32 = 1 << 3
+    }
+
+    /// The magnifier's placement, laid out as the kernel's `Loupe` struct.
+    private struct PresentLoupe {
+        var baseMap: simd_float3x2
+        var tileMap: simd_float3x2
+        var tileSource: SIMD4<Float>
+        /// Centre x, y, radius (negative: none) and ring width, in drawable pixels.
+        var circle: SIMD4<Float>
     }
 
     private func draw(base: MTLTexture, baseMap: simd_float3x2,
                       tile: MTLTexture?, tileMap: simd_float3x2, tileSource: SIMD4<Float>,
+                      loupeTile: MTLTexture?, loupe: PresentLoupe, flags: UInt32,
                       into target: MTLTexture, backgroundLevel: Float,
                       headrooms: SIMD4<Float>) -> MTLCommandBuffer? {
         guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
@@ -227,6 +290,11 @@ public final class Presenter {
         encoder.setBytes(&background, length: 4, index: 4)
         var headroomsV = headrooms
         encoder.setBytes(&headroomsV, length: MemoryLayout<SIMD4<Float>>.size, index: 5)
+        encoder.setTexture(loupeTile ?? base, index: 3)
+        var loupeV = loupe
+        encoder.setBytes(&loupeV, length: MemoryLayout<PresentLoupe>.stride, index: 6)
+        var flagsV = flags
+        encoder.setBytes(&flagsV, length: 4, index: 7)
 
         let pso = gpu.presentPSO
         let tw = pso.threadExecutionWidth

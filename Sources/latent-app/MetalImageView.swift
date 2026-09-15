@@ -14,9 +14,11 @@ import PixelEngine
 /// efficiency rule 4: zero cost when idle).
 ///
 /// The view deliberately knows nothing about images. It turns raw AppKit
-/// events into three intents — zoom by a factor about a point, pan by a
-/// delta, double-click at a point — and hands them to the model, which
-/// owns the transform and does the clamping. The view then draws whatever
+/// events into intents — zoom by a factor about a point, pan by a delta,
+/// toggle zoom at a point, step to another image, show the magnifier
+/// here — and hands them to the model, which owns the transform and does
+/// the clamping. What each event means is decided by `ViewerInteraction`
+/// in PixelEngine, which is tested without a window. The view then draws whatever
 /// texture, coverage and transform it's told to. Keeping the maths out of
 /// here means it's testable in PixelEngine without a window.
 struct MetalImageView: NSViewRepresentable {
@@ -38,12 +40,23 @@ struct MetalImageView: NSViewRepresentable {
     let onHeadroomChange: (CGFloat) -> Void
     /// Grey level for the surround, in the drawable's own encoding.
     let backgroundLevel: Float
-    /// Pinch or option-scroll: multiply zoom by `factor`, keeping the
-    /// content under `screenPoint` (device pixels, top-left origin) still.
+    /// Pinch or Option/Command-scroll: multiply zoom by `factor`, keeping
+    /// the content under `screenPoint` (device pixels, top-left origin) still.
     let onZoom: (_ factor: CGFloat, _ screenPoint: CGPoint) -> Void
     /// Scroll or drag: move the content by this many device pixels.
     let onPan: (CGSize) -> Void
+    /// Double-click or two-finger double-tap: toggle fit / 100% here.
     let onDoubleClick: (CGPoint) -> Void
+    /// The whole image is in view: swipes may step and a press magnifies.
+    let atFit: Bool
+    /// A sideways swipe at fit steps by this many images; nil, it doesn't.
+    let onStep: ((Int) -> Void)?
+    /// Holding the mouse button on the fitted image shows the magnifier.
+    let allowsMagnifier: Bool
+    /// The model's full-resolution render under the magnifier, if any.
+    let magnifierTile: PresentLayer?
+    /// The magnifier appeared or moved (non-nil) or went away (nil).
+    let onMagnifier: (ViewerInteraction.Magnifier?) -> Void
     /// When true, drags shape a mask instead of panning.
     let toolActive: Bool
     /// Second argument: whether Option was held (exclude for prompts).
@@ -59,6 +72,7 @@ struct MetalImageView: NSViewRepresentable {
         view.onZoom = onZoom
         view.onPan = onPan
         view.onDoubleClick = onDoubleClick
+        view.onMagnifier = onMagnifier
         view.onToolBegan = onToolBegan
         view.onToolMoved = onToolMoved
         view.onToolEnded = onToolEnded
@@ -68,7 +82,11 @@ struct MetalImageView: NSViewRepresentable {
     func updateNSView(_ view: MetalLayerView, context: Context) {
         view.backgroundLevel = backgroundLevel
         view.toolActive = toolActive
-        view.display(preview: preview, tile: tile, transform: transform, frame: frame)
+        view.atFit = atFit
+        view.onStep = onStep
+        view.allowsMagnifier = allowsMagnifier
+        view.display(preview: preview, tile: tile, transform: transform, frame: frame,
+                     magnifierTile: magnifierTile)
     }
 }
 
@@ -84,6 +102,8 @@ private struct PresentedFrame: Equatable {
     var backgroundLevel: Float
     var drawableSize: CGSize
     var displayHeadroom: Float
+    var magnifier: ViewerInteraction.Magnifier?
+    var magnifierTile: UInt64?
 }
 
 final class MetalLayerView: NSView {
@@ -94,6 +114,7 @@ final class MetalLayerView: NSView {
     private var currentTile: PresentLayer?
     private var currentTransform = ViewportTransform(zoom: 1, center: .zero)
     private var currentFrame = CropFrame(sensorSize: .zero)
+    private var currentMagnifierTile: PresentLayer?
     private var lastReportedSize: CGSize = .zero
     private var lastReportedHeadroom: CGFloat = 0
     var backgroundLevel: Float = 0.12 {
@@ -113,6 +134,10 @@ final class MetalLayerView: NSView {
     var onZoom: ((CGFloat, CGPoint) -> Void)?
     var onPan: ((CGSize) -> Void)?
     var onDoubleClick: ((CGPoint) -> Void)?
+    var atFit = true
+    var onStep: ((Int) -> Void)?
+    var allowsMagnifier = true
+    var onMagnifier: ((ViewerInteraction.Magnifier?) -> Void)?
     var toolActive = false
     var onToolBegan: ((CGPoint, Bool) -> Void)?
     var onToolMoved: ((CGPoint) -> Void)?
@@ -172,6 +197,9 @@ final class MetalLayerView: NSView {
             NotificationCenter.default.removeObserver(
                 self, name: NSWindow.didChangeScreenNotification, object: window)
         }
+        // Leaving the window mid-press (a mode change from the keyboard)
+        // must not leave the model rendering for a magnifier nobody sees.
+        if newWindow == nil { cancelPress(notifyingLater: true) }
     }
 
     override func viewDidMoveToWindow() {
@@ -268,11 +296,12 @@ final class MetalLayerView: NSView {
     // MARK: - Drawing
 
     func display(preview: PresentLayer, tile: PresentLayer?, transform: ViewportTransform,
-                 frame: CropFrame) {
+                 frame: CropFrame, magnifierTile: PresentLayer?) {
         currentPreview = preview
         currentTile = tile
         currentTransform = transform
         currentFrame = frame
+        currentMagnifierTile = magnifierTile
         setNeedsRedraw()
     }
 
@@ -296,17 +325,22 @@ final class MetalLayerView: NSView {
               metalLayer.drawableSize.width > 0 else { return }
         updateDynamicRange()
         let headroom = presentHeadroom
+        let magnifierTile = magnifier == nil ? nil : currentMagnifierTile
         let wanted = PresentedFrame(preview: preview.generation, tile: currentTile?.generation,
                                     transform: currentTransform, frame: currentFrame,
                                     backgroundLevel: backgroundLevel,
                                     drawableSize: metalLayer.drawableSize,
-                                    displayHeadroom: headroom)
+                                    displayHeadroom: headroom,
+                                    magnifier: magnifier, magnifierTile: magnifierTile?.generation)
         guard wanted != presented, let drawable = metalLayer.nextDrawable() else { return }
         presented = wanted
         presenter.present(base: preview, tile: currentTile,
                           transform: currentTransform, frame: currentFrame,
                           to: drawable, backgroundLevel: backgroundLevel,
-                          displayHeadroom: headroom)
+                          displayHeadroom: headroom,
+                          magnifier: magnifier.map {
+                              PresentMagnifier(loupe: $0, ringWidth: magnifierRingWidth, tile: magnifierTile)
+                          })
         #if DEBUG
         SnapshotHarness.noteDrawable(drawable.texture, presentedBy: self)
         #endif
@@ -323,41 +357,96 @@ final class MetalLayerView: NSView {
 
     /// Trackpad pinch.
     override func magnify(with event: NSEvent) {
+        guard magnifier == nil else { return }
         onZoom?(1 + event.magnification, screenPoint(for: event))
     }
 
-    /// Two-finger scroll pans; holding Option turns it into zoom, so a
-    /// plain mouse wheel (which can't pinch) still has a way to zoom.
-    override func scrollWheel(with event: NSEvent) {
-        if event.modifierFlags.contains(.option) {
-            // Wheel notches are coarse; trackpads report fine deltas.
-            let step = event.hasPreciseScrollingDeltas ? 0.01 : 0.1
-            let factor = 1 + event.scrollingDeltaY * step
-            onZoom?(factor, screenPoint(for: event))
-            return
-        }
-        // Precise deltas (trackpad) are in points; wheel notches aren't,
-        // so scale those up to something that feels like a scroll.
-        let gain: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10
-        onPan?(CGSize(width: event.scrollingDeltaX * gain * backingScale,
-                      height: event.scrollingDeltaY * gain * backingScale))
+    /// Two-finger double-tap: fit ↔ 100% at the pointer, as a double-click.
+    override func smartMagnify(with event: NSEvent) {
+        guard magnifier == nil else { return }
+        onDoubleClick?(screenPoint(for: event))
     }
+
+    private var wheel = ViewerInteraction.WheelInterpreter()
+
+    /// Scrolling pans a zoomed-in image; at fit a sideways swipe steps to
+    /// the next or previous image once per swipe; Option or Command turns
+    /// it into zoom (a plain mouse wheel can't pinch), with momentum ignored
+    /// so the zoom stops when the fingers lift. `ViewerInteraction` decides.
+    override func scrollWheel(with event: NSEvent) {
+        guard magnifier == nil else { return }
+        let flags = event.modifierFlags
+        let scroll = ViewerInteraction.WheelEvent(
+            precise: event.hasPreciseScrollingDeltas,
+            delta: CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY),
+            invertedFromDevice: event.isDirectionInvertedFromDevice,
+            phase: Self.phase(event.phase), momentumPhase: Self.phase(event.momentumPhase),
+            zoomModifier: flags.contains(.option) || flags.contains(.command),
+            atFit: atFit, canNavigate: onStep != nil && !toolActive)
+        switch wheel.interpret(scroll) {
+        case .navigate(let offset):
+            onStep?(offset)
+        case .zoom(let factor):
+            onZoom?(factor, screenPoint(for: event))
+        case .pan(let points):
+            // Precise deltas are in points; the model pans in device pixels.
+            onPan?(CGSize(width: points.width * backingScale, height: points.height * backingScale))
+        case .none:
+            break
+        }
+    }
+
+    private static func phase(_ phase: NSEvent.Phase) -> ViewerInteraction.ScrollPhase {
+        if phase.contains(.began) || phase.contains(.mayBegin) { return .began }
+        if phase.contains(.changed) || phase.contains(.stationary) { return .changed }
+        if phase.contains(.ended) || phase.contains(.cancelled) { return .ended }
+        return .none
+    }
+
+    // MARK: - Mouse
+
+    /// The press in progress on a fitted image, until it turns out to be a
+    /// click, a hold or a drag.
+    private var press: ViewerInteraction.PressClassifier?
+    /// Where the pointer last was during `press`, in view points.
+    private var pressLocation: CGPoint = .zero
+    /// The magnifier while it shows, in drawable pixels.
+    private var magnifier: ViewerInteraction.Magnifier?
 
     override func mouseDown(with event: NSEvent) {
         if toolActive {
             onToolBegan?(screenPoint(for: event), event.modifierFlags.contains(.option))
             return
         }
+        cancelPress()
         if event.clickCount == 2 {
             onDoubleClick?(screenPoint(for: event))
+            return
         }
+        guard event.clickCount == 1, atFit, allowsMagnifier, currentPreview != nil else { return }
+        let location = convert(event.locationInWindow, from: nil)
+        press = ViewerInteraction.PressClassifier(location: location, time: event.timestamp)
+        pressLocation = location
+        scheduleHoldCheck(after: ViewerInteraction.PressClassifier.holdDelay)
     }
 
     /// Click-drag pans; the content follows the pointer. With a mask tool
-    /// armed, the drag shapes the mask instead.
+    /// armed, the drag shapes the mask instead; at fit it moves the
+    /// magnifier.
     override func mouseDragged(with event: NSEvent) {
         if toolActive {
             onToolMoved?(screenPoint(for: event))
+            return
+        }
+        if var current = press {
+            let location = convert(event.locationInWindow, from: nil)
+            let state = current.moved(to: location, time: event.timestamp)
+            press = current
+            pressLocation = location
+            if ViewerInteraction.PressClassifier.showsMagnifier(state) {
+                cancelHoldTimer()
+                showMagnifier(at: location)
+            }
             return
         }
         onPan?(CGSize(width: event.deltaX * backingScale,
@@ -366,5 +455,76 @@ final class MetalLayerView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         if toolActive { onToolEnded?() }
+        cancelPress()
+    }
+
+    /// A one-shot check when the hold delay is up, for a pointer that never
+    /// moves (no events arrive to ask). Not a repeating timer.
+    private func scheduleHoldCheck(after delay: TimeInterval) {
+        perform(#selector(holdDelayElapsed), with: nil, afterDelay: delay, inModes: [.common])
+    }
+
+    @objc private func holdDelayElapsed() {
+        guard var current = press else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let state = current.update(time: now)
+        press = current
+        switch state {
+        case .hold:
+            showMagnifier(at: pressLocation)
+        case .pending:
+            // The run loop can fire a hair before the event clock says the
+            // delay is up; check once more for the remainder (bounded, in
+            // case an event carried a timestamp from another clock).
+            let remaining = current.startTime + ViewerInteraction.PressClassifier.holdDelay - now
+            if remaining > 0, remaining < ViewerInteraction.PressClassifier.holdDelay {
+                scheduleHoldCheck(after: remaining + 0.005)
+            }
+        case .click, .drag:
+            break
+        }
+    }
+
+    private func cancelHoldTimer() {
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(holdDelayElapsed), object: nil)
+    }
+
+    /// Ends any press, and the magnifier with it. `notifyingLater` tells
+    /// the model on the next turn, for when SwiftUI is mid-update.
+    private func cancelPress(notifyingLater: Bool = false) {
+        cancelHoldTimer()
+        press = nil
+        guard magnifier != nil else { return }
+        magnifier = nil
+        NSCursor.arrow.set()
+        if notifyingLater {
+            let notify = onMagnifier
+            DispatchQueue.main.async { notify?(nil) }
+        } else {
+            onMagnifier?(nil)
+        }
+        setNeedsRedraw()
+    }
+
+    // MARK: - Magnifier
+
+    /// Shows or moves the magnifier to `location` (view points). It draws
+    /// at once from whatever the model has, and the model sharpens it.
+    private func showMagnifier(at location: CGPoint) {
+        let scale = backingScale
+        let loupe = ViewerInteraction.Magnifier(
+            center: CGPoint(x: location.x * scale, y: location.y * scale),
+            radius: ViewerInteraction.Magnifier.radiusPoints * scale,
+            zoom: ViewerInteraction.Magnifier.zoom(backingScale: scale, viewZoom: currentTransform.zoom))
+        guard loupe != magnifier else { return }
+        if magnifier == nil { NSCursor.crosshair.set() }
+        magnifier = loupe
+        onMagnifier?(loupe)
+        setNeedsRedraw()
+    }
+
+    /// Ring around the loupe, in drawable pixels: wider with Increase Contrast.
+    private var magnifierRingWidth: CGFloat {
+        (Contrast.isIncreased ? 3 : 1.5) * backingScale
     }
 }

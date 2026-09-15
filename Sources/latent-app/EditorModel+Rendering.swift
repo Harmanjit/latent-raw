@@ -141,12 +141,13 @@ extension EditorModel {
         }
         lastRenderMs = Date().timeIntervalSince(start) * 1000
         renderReport = what.joined(separator: " + ") + String(format: " · %.1f ms", lastRenderMs)
+        refreshMagnifier()
     }
 
     /// Returns a short description of what ran, for the status bar.
     /// What actually renders: the edit, or the defaults while "before"
     /// is held.
-    private var renderParameters: EditParameters { showingBefore ? defaultParameters : parameters }
+    var renderParameters: EditParameters { showingBefore ? defaultParameters : parameters }
 
     @discardableResult
     private func renderPreview(session: ImageSession, pipeline: RenderPipeline) throws -> String {

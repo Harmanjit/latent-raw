@@ -15,6 +15,16 @@ struct ImageViewport: View {
     var mirror: EditorModel? = nil
     /// Develop only. Viewing modes pass false so a click can never edit.
     var allowsTools: Bool = true
+    /// Steps to another image (the arrow keys' `.step`). Given, a sideways
+    /// two-finger swipe at fit steps once per swipe; nil (Compare) it
+    /// doesn't.
+    var onStep: ((Int) -> Void)? = nil
+
+    /// A Develop tool owns clicks and drags on the image, so there's no
+    /// swipe to another image and no magnifier while one is armed.
+    private var toolArmed: Bool {
+        allowsTools && (model.imageToolActive || model.cropToolActive)
+    }
 
     var body: some View {
         ZStack {
@@ -40,6 +50,11 @@ struct ImageViewport: View {
                                 onDoubleClick: { point in
                                     model.toggleZoom(at: point)
                                 },
+                                atFit: model.fitMode,
+                                onStep: toolArmed ? nil : onStep,
+                                allowsMagnifier: !toolArmed,
+                                magnifierTile: model.magnifierTile,
+                                onMagnifier: { model.magnifierChanged($0) },
                                 toolActive: allowsTools && model.imageToolActive,
                                 onToolBegan: { model.imageToolBegan(at: $0, exclude: $1) },
                                 onToolMoved: { model.imageToolMoved(to: $0) },

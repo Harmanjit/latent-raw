@@ -50,6 +50,16 @@ struct CommandState: Equatable {
     /// More than one display is connected.
     var hasSecondDisplay = false
     var secondaryDisplayShowing = false
+    /// Settings has the arrow keys pan a zoomed-in image.
+    var arrowKeysPanImage = false
+    /// The image shown is zoomed in past fit.
+    var imageZoomedIn = false
+
+    /// Whether the arrow keys pan the image rather than step through images
+    /// (Loupe and Develop only; Compare keeps them for the candidate).
+    var arrowKeysPan: Bool {
+        arrowKeysPanImage && (mode == .loupe || mode == .develop) && hasImage && imageZoomedIn
+    }
 
     func isEnabled(_ command: KeyCommand) -> Bool {
         switch command {
@@ -96,6 +106,7 @@ struct CommandState: Equatable {
         // The grid goes to Loupe first, which needs a selection.
         case .fullScreenImage: fullScreenImage || hasSelection || (mode == .develop && hasImage)
         case .secondaryDisplay: secondaryDisplayShowing || hasSecondDisplay
+        case .panImage: arrowKeysPan
         }
     }
 
@@ -109,7 +120,7 @@ struct CommandState: Equatable {
     /// doesn't beep.
     static func passesThroughWhenUnavailable(_ command: KeyCommand) -> Bool {
         switch command {
-        case .deleteHeal, .makeSelect, .toolSize: true
+        case .deleteHeal, .makeSelect, .toolSize, .panImage: true
         default: false
         }
     }

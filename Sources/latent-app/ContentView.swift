@@ -123,7 +123,7 @@ struct ContentView: View {
                     .onDisappear { model.flushPendingSave() }
                 case .loupe:
                     VStack(spacing: 0) {
-                        ImageViewport(model: model, allowsTools: false)
+                        ImageViewport(model: model, allowsTools: false, onStep: { _ = perform(.step($0)) })
                         if !fullScreen.isActive {
                             Divider()
                             ImageCaption(record: library.selectedImage)
@@ -746,7 +746,8 @@ struct ContentView: View {
     /// keyboard; Command shortcuts are the menu bar's (LatentCommands).
     private var navigationShortcuts: some View {
         Group {
-            BareKeyMonitor(perform: perform, onTextFocusChange: { editingText = $0 })
+            BareKeyMonitor(perform: { perform($0.panningImage(commandState.arrowKeysPan)) },
+                           onTextFocusChange: { editingText = $0 })
             WindowUndoManagerReader { libraryUndo.attach($0, to: library) }
         }
         .opacity(0)
@@ -908,6 +909,8 @@ struct ContentView: View {
             } else {
                 secondDisplay.show(model: model, library: library, beside: NSApp.keyWindow ?? NSApp.mainWindow)
             }
+        case .panImage(let direction):
+            model.panImage(direction)
         }
         return true
     }
@@ -945,6 +948,8 @@ struct ContentView: View {
         state.redoLabel = history.canRedo ? history.steps[history.cursor + 1].label : nil
         if mode != .develop { (state.undoLabel, state.redoLabel) = (libraryUndo.labels.undo, libraryUndo.labels.redo) }
         state.isEditingText = editingText
+        state.arrowKeysPanImage = prefs.arrowKeysPanImage
+        state.imageZoomedIn = model.hasImage && !model.fitMode
         state.showingBefore = model.showingBefore
         state.cropToolActive = model.cropToolActive
         state.healToolActive = model.healToolActive
@@ -1086,7 +1091,7 @@ struct ContentView: View {
 
     private var imageArea: some View {
         ZStack {
-            ImageViewport(model: model)
+            ImageViewport(model: model, onStep: { _ = perform(.step($0)) })
             if model.isExporting {
                 Color.black.opacity(0.4)
                 ProgressView("Exporting…")

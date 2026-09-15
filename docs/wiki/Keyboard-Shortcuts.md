@@ -15,8 +15,13 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | Space | Grid ↔ Loupe |
 | ←, → | Previous / next image (loads it in Loupe, Compare and Develop) |
 | Return | Open the selection in Develop |
+| ↑, ↓ | Pan a zoomed-in image in Loupe and Develop, and ← → too, when Settings › Library › Arrow keys pan a zoomed-in image is on (at fit ← → still step) |
 | Z | Toggle fit / 100% |
 | F | Full-screen image (from the grid, in Loupe): the pointer at the left, right or bottom edge brings in the library panel, Develop's adjustments or the filmstrip. F or Esc leaves |
+| Two-finger swipe left / right | Next / previous image, at fit in Loupe and Develop (one image per swipe) |
+| Pinch, or scroll with ⌥ or ⌘ | Zoom about the pointer |
+| Double-click, or double-tap with two fingers | Toggle fit / 100% at the pointer |
+| Hold the mouse button on a fitted image | Magnifier: one image pixel per point under the pointer, until you let go (not while a Develop tool is on) |
 | ⌘0, ⌘1, ⌘=, ⌘- | Fit, 100%, zoom in, zoom out (in the grid, ⌘= and ⌘- size the thumbnails) |
 | ⇧X | Compare: make the candidate the Select |
 | N | Survey: the 2 to 4 selected images side by side (in Survey, ← and → move the focus) |

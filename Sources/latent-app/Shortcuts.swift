@@ -52,6 +52,8 @@ struct Shortcut {
         case .character(let c): KeyEquivalent(c)
         case .leftArrow: .leftArrow
         case .rightArrow: .rightArrow
+        case .upArrow: .upArrow
+        case .downArrow: .downArrow
         case .returnKey: .return
         case .delete: .delete
         case .escape: .escape
@@ -92,6 +94,8 @@ enum Shortcuts {
         Shortcut(.toggleLoupe, " "),
         Shortcut(.step(-1), .leftArrow),
         Shortcut(.step(1), .rightArrow),
+        Shortcut(.panImage(.up), .upArrow),
+        Shortcut(.panImage(.down), .downArrow),
         Shortcut(.openSelection, .returnKey),
         Shortcut(.toggleZoom, "z"),
         Shortcut(.fullScreenImage, "f"),
@@ -179,6 +183,8 @@ enum Shortcuts {
         case .character(let c): text += c.uppercased()
         case .leftArrow: text += "←"
         case .rightArrow: text += "→"
+        case .upArrow: text += "↑"
+        case .downArrow: text += "↓"
         case .returnKey: text += "Return"
         case .delete: text += "⌫"
         case .escape: text += "Esc"
@@ -243,8 +249,13 @@ extension Shortcuts {
             ShortcutPageRow([.toggleLoupe], "Grid ↔ Loupe"),
             ShortcutPageRow([.step(-1), .step(1)], "Previous / next image (loads it in Loupe, Compare and Develop)"),
             ShortcutPageRow([.openSelection], "Open the selection in Develop"),
+            ShortcutPageRow([.panImage(.up), .panImage(.down)], "Pan a zoomed-in image in Loupe and Develop, and ← → too, when Settings › Library › Arrow keys pan a zoomed-in image is on (at fit ← → still step)"),
             ShortcutPageRow([.toggleZoom], "Toggle fit / 100%"),
             ShortcutPageRow([.fullScreenImage], "Full-screen image (from the grid, in Loupe): the pointer at the left, right or bottom edge brings in the library panel, Develop's adjustments or the filmstrip. F or Esc leaves"),
+            ShortcutPageRow(keys: .gesture("Two-finger swipe left / right"), "Next / previous image, at fit in Loupe and Develop (one image per swipe)"),
+            ShortcutPageRow(keys: .gesture("Pinch, or scroll with ⌥ or ⌘"), "Zoom about the pointer"),
+            ShortcutPageRow(keys: .gesture("Double-click, or double-tap with two fingers"), "Toggle fit / 100% at the pointer"),
+            ShortcutPageRow(keys: .gesture("Hold the mouse button on a fitted image"), "Magnifier: one image pixel per point under the pointer, until you let go (not while a Develop tool is on)"),
             ShortcutPageRow([.zoomToFit, .zoomToActualSize, .zoomIn, .zoomOut], "Fit, 100%, zoom in, zoom out (in the grid, ⌘= and ⌘- size the thumbnails)"),
             ShortcutPageRow([.makeSelect], "Compare: make the candidate the Select"),
             ShortcutPageRow([.survey], "Survey: the 2 to 4 selected images side by side (in Survey, ← and → move the focus)"),

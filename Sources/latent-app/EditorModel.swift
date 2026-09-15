@@ -273,6 +273,12 @@ final class EditorModel: ObservableObject {
     /// may reuse it (`HealPatch.isSelfContained`).
     var tileHealedCoverage = CGRect.null
 
+    /// The press-and-hold magnifier's full-resolution render of the area
+    /// under the pointer, and what it was rendered for
+    /// (EditorModel+Magnifier.swift).
+    @Published var magnifierTile: PresentLayer?
+    var magnifierState = MagnifierRenderState()
+
     /// An image asked for before the GPU was ready, opened when it is.
     var openWhenGPUReady: (() -> Void)?
 
