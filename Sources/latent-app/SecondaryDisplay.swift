@@ -263,6 +263,8 @@ struct SecondaryLoupeView: View {
                                    backgroundLevel: prefs.surroundLinear,
                                    // A view to look at: zoom, pan and the tools stay in the main window.
                                    onZoom: { _, _ in }, onPan: { _ in }, onDoubleClick: { _ in },
+                                   atFit: true, onStep: nil,
+                                   allowsMagnifier: false, magnifierTile: nil, onMagnifier: { _ in },
                                    toolActive: false,
                                    onToolBegan: { _, _ in }, onToolMoved: { _ in }, onToolEnded: {})
                         .accessibilityElement(children: .ignore)

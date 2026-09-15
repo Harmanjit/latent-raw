@@ -472,8 +472,10 @@ enum SnapshotHarness {
                 _ = perform(.slideshow)
                 _ = await wait("the first slide", upTo: 60) {
                     SlideshowController.current?.isShowingSlideAtRest == true
+                }
                 guard let show = SlideshowController.current, let slideshowWindow = show.slideshowWindow else {
                     fail("slideshow: it did not start"); return nil
+                }
                 show.debugPinControls()
                 return slideshowWindow
             }
@@ -504,11 +506,11 @@ enum SnapshotHarness {
             case .rename: if let sheet = window.attachedSheet { window.endSheet(sheet) }
             case .settings: window.close()
             case .quality: QualityCompareWindow.close()
-            case .crop, .heal, .redEye:
             case .contactSheet, .contactSheetFile, .print: SheetSnapshots.leave(step, window: window)
             case .slideshow: SlideshowController.current?.end()
             case .fullscreen, .fullscreenLeft, .fullscreenRight, .fullscreenBottom: FullScreenImageMode.shared.leave()
             case .secondDisplay: SecondaryDisplay.shared.close()
+            case .crop, .heal, .redEye:
                 _ = perform(.disarmTools)
                 scrollAdjustments(toEnd: false)
             default: break

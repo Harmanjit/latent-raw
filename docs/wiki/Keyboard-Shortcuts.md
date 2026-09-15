@@ -53,7 +53,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | Y | Red-eye tool |
 | [, ] | Smaller, larger brush or spot (while the mask brush, spot removal or red-eye is on) |
 | ⌫ | Delete the selected spot patch or red-eye spot |
-| Esc | Leave any on-image tool |
+| Esc | Leave any on-image tool; with none on, leave the full-screen image |
 | ⇧⌘C, ⇧⌘V | Copy / paste settings (to the whole selection in the Library) |
 | Double-click a slider | Reset it |
 | Click a slider's value | Type a value: Return or Tab applies it, Esc cancels, ↑ and ↓ step it (with ⇧, ten steps) |
