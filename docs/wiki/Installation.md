@@ -4,13 +4,15 @@
 
 - macOS 15 (Sequoia) or 26 (Tahoe).
 - Apple Silicon. Verified on an M4 MacBook Air and an M1 Pro MacBook Pro; any M-series chip should work. The M1 Pro, with its larger GPU, is if anything faster in the editor.
-- **Xcode 16 or newer**, the full application from the App Store, not just the Command Line Tools. The build needs Xcode's Metal compiler and `xcodebuild`, and Xcode must be the active developer directory:
+- **Xcode 16 or newer**, the full application from the App Store, not just the Command Line Tools. The build needs `xcodebuild`, and Xcode must be the active developer directory:
 
 ```bash
 sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 ```
 
 Without that step the build fails with errors about missing tools even though Xcode is installed. Run it once after installing Xcode.
+
+- Optionally, Xcode's Metal toolchain, so `make_app.sh` can precompile the shaders. Xcode 26 ships it as a separate download (`xcodebuild -downloadComponent MetalToolchain`). Without it the app compiles its shaders the first time it launches, which takes about half a second longer.
 
 - About 1 GB of disk for the build.
 
@@ -30,6 +32,8 @@ open build/Latent.app
 Drag `build/Latent.app` to Applications if you want it in the Dock.
 
 `scripts/build_libraw.sh` clones LibRaw at a pinned tag, checks that the tag still points at the vetted commit, and refuses to build otherwise. The framework it produces is not committed, so this step runs once per clone.
+
+`scripts/make_app.sh` builds release, precompiles the shaders when the Metal toolchain is installed, strips local symbols from the binaries (roughly halving them), copies these wiki pages into the app for **Help > Latent Help**, and signs the bundle.
 
 ## The Gatekeeper dialog
 
@@ -55,4 +59,6 @@ scripts/fetch_test_assets.sh               # downloads the public-domain raw the
 swift test                                 # tests needing the author's own samples skip
 ```
 
-Development builds are not sandboxed, which is why they accept a path on the command line and the bundle does not. Some features are much slower in debug builds; judge speed on the bundle.
+Development builds are not sandboxed, which is why they accept a path on the command line and the bundle does not. Defaults overrides such as `-AppleLanguages (en)` may come before the path. Some features are much slower in debug builds; judge speed on the bundle.
+
+Debug builds also honour switches that release builds ignore. `LATENT_SNAPSHOT_DIR=.build/snapshots swift run latent-app` runs a harness that saves a picture of the window in each main view and quits; the other `LATENT_SNAPSHOT_*` variables are listed in `Sources/latent-app/SnapshotHarness.swift`. `LATENT_RAW_INPROCESS=1` makes a debug-built bundle decode in its own process rather than in the isolated service; `swift run` does that anyway, and every bundle `scripts/make_app.sh` makes is a release build, which ignores the switch.

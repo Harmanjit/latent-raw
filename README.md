@@ -6,32 +6,39 @@ Repository: `Harmanjit/latent-raw`.
 - **Platform:** macOS 15 (Sequoia) and 26 (Tahoe), Apple Silicon. Verified on
   M1 Pro and M4; Metal 3 is the baseline. Building needs the full Xcode 16+
   selected as the active developer directory
-  (`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`).
+  (`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`). The
+  Metal toolchain is optional: without it (a separate download on Xcode 26,
+  `xcodebuild -downloadComponent MetalToolchain`) the shaders compile at first
+  launch.
 - **License:** GPLv3. See `LICENSE`.
-- **Status:** beta (Phase 7). Editing, catalog, AI masks, export and soft-proofing work; expect rough edges.
+- **Status:** beta (Phase 7). Editing, catalog with a folder sidebar, AI masks, export (with optional HDR gain maps) and soft-proofing work; DNG export does not exist. Expect rough edges.
 - **Name:** the project was called *rawhead* until September 2026. Folders
   catalogued by those builds have a `_rawhead/` container; opening them in
   Latent renames it to `_latent/` in place, keeping every edit and sidecar.
 
 See `DESIGN.md` for the full architecture: storage layout, pipeline design,
-efficiency rules and the roadmap. See `PHASE0.md` for exactly what this
-spike needs to prove before Phase 1 starts.
+efficiency rules and the roadmap. `PHASE0.md` records what the Phase 0 spike
+measured. The user guide is the wiki in `docs/wiki`, which the app also shows
+under **Help > Latent Help**.
 
 ## Layout
 
 ```
 Sources/
-  RawCore/       LibRaw wrapper — unpacking, EXIF, embedded previews
-  PixelEngine/    Metal pipeline: kernels, stage cache, heaps
-  ColorKit/       ICC / ColorSync / camera matrix handling
-  LensKit/        Lensfun + embedded lens-correction lookup
-  Catalog/        Per-folder catalogs: GRDB schema, XMP read/write, import
-  MLKit/          Vision + Core ML masking
-  latent-cli/    Headless renderer for golden-image tests and benchmarks
-  latent-app/    The SwiftUI/AppKit editor (viewport, adjustments, export)
-Tests/            Unit and golden-image tests
-vendor/           Vendored C/C++ dependencies (LibRaw, etc.) built as XCFrameworks
-TestAssets/       Sample RAW files for the CI test matrix (not committed — see below)
+  RawCore/            LibRaw wrapper: unpacking, EXIF, embedded previews, the XPC decoder client, export metadata
+  latent-rawdecoder/  The sandboxed XPC service that runs LibRaw
+  PixelEngine/        Metal pipeline: kernels, stage cache, heal, tone ranges, presenter, exporter, gain maps
+  ColorKit/           Camera matrices, white balance, working space
+  LensKit/            Lensfun database and lens matching
+  Catalog/            Per-folder catalogs: GRDB schema, XMP read/write, reconciliation, thumbnails, export naming
+  MLKit/              Core ML and Vision: masks, AI denoise, the export worker
+  HelpKit/            The Help window's content: the wiki's Markdown, links and search
+  latent-cli/         Headless renderer for benchmarks
+  latent-app/         The SwiftUI/AppKit app (viewport, grid, sidebar, adjustments, export, menus)
+Tests/                Unit, golden-image, help-page and app-logic tests
+docs/wiki/            The user guide (GitHub wiki and in-app Help)
+vendor/               Vendored C/C++ dependencies (LibRaw) built as XCFrameworks
+TestAssets/           Sample RAW files (not committed; see below)
 ```
 
 ## Sandbox, signing and Gatekeeper
@@ -39,8 +46,9 @@ TestAssets/       Sample RAW files for the CI test matrix (not committed — see
 `scripts/make_app.sh` signs the bundle ad hoc with the App Sandbox and
 the hardened runtime (`scripts/Latent.entitlements`). No developer
 account is involved, and none is needed for either to be enforced: the
-app can reach only the folders you choose in an open panel (remembered
-between launches by security-scoped bookmark), its own container under
+app can reach only the folders you choose in an open panel or add to the
+sidebar's favourites, and everything inside those (remembered between
+launches by security-scoped bookmark), its own container under
 `~/Library/Containers/com.latent.app`, and nothing on the network, since
 the network entitlement is deliberately absent.
 
@@ -49,7 +57,10 @@ signed with the sandbox and nothing else: no file access (it is handed
 an open descriptor per file), no network. A crafted raw file that
 exploits the decoder gets a process that can do nothing, and the app
 reports an error instead of crashing. `swift run` builds and the tests
-decode in-process; `LATENT_RAW_INPROCESS=1` forces that in the bundle.
+decode in-process. `LATENT_RAW_INPROCESS=1` forces that only in a debug
+build; `scripts/make_app.sh` always builds release, so it does nothing in
+the bundles the script makes. Every such debug-only switch is compiled
+under `#if DEBUG`.
 
 What an account would add is notarisation. Without it, Gatekeeper stops
 the app the first time it is opened from a download or a copy on another
@@ -81,21 +92,25 @@ What it writes, and where:
   thumbnails. Nothing is written elsewhere in your photo folders.
 - `~/Library/Application Support/latent/`: compiled Core ML models and
   your saved presets.
-- Preferences in the app's UserDefaults, including the last export folder.
-- Exported files go only where you choose; the export sheet can strip
-  camera metadata, keywords and rating from them.
+- Settings in the app's UserDefaults, including bookmarks for the last
+  folder, the export folder and the sidebar's favourite folders.
+- Exported files go only where you choose. By default they carry the
+  photo's own metadata, including its **GPS location**, artist and
+  copyright, plus Latent's keywords and rating; the export sheet's metadata
+  toggle strips all of it. Export Open Image in the left panel always
+  includes it.
 
 Failures are logged to the unified system log under `com.latent.app`
 with file names marked private, so they show as `<private>` in Console
 unless you opt in.
 
-## Preferences (⌘,)
+## Settings (⌘,)
 
 Theme (system/light/dark), accent colour, image surround grey, render
 timings, default export folder, subfolder policy for new catalogs, and
 the Core ML compute choice. Export naming templates, sequence numbers,
-collision policy, date subfolders and saved export presets live in the
-export sheet (⌘⇧E).
+letter case, collision policy, date subfolders, the HDR gain map and saved
+export presets live in the export sheet (⇧⌘E).
 
 ## Building (on macOS, Apple Silicon, Xcode 16+)
 
@@ -104,7 +119,7 @@ swift build                                   # everything, debug
 scripts/fetch_test_assets.sh                  # public-domain raw for the golden-image tests
 swift test                                    # unit + golden tests (tests on private samples skip)
 scripts/build_libraw.sh                      # once per clone: builds vendor/LibRaw.xcframework from a pinned tag
-swift run latent-app TestAssets/photo.nef    # the editor, opening a file straight away
+swift run latent-app TestAssets/photo.nef    # the editor, opening a file straight away (defaults such as -AppleLanguages (en) may come first)
 swift run latent-cli render photo.nef --out /tmp/out.png   # headless render + timings
 ```
 
@@ -115,21 +130,24 @@ scripts/make_app.sh 0.1.0        # builds release and assembles build/Latent.app
 open build/Latent.app
 ```
 
+`make_app.sh` precompiles the shaders into `default.metallib` when the Metal
+toolchain is installed (otherwise the app compiles them at first launch),
+strips local symbols from the binaries before signing, and copies
+`docs/wiki` into `Contents/Resources/Help` for the Help window.
+
+A debug build can picture its own window without screen-recording
+permission: `LATENT_SNAPSHOT_DIR=.build/snapshots swift run latent-app`
+walks through the main views, saves a PNG of each and quits. The other
+`LATENT_SNAPSHOT_*` switches are documented in
+`Sources/latent-app/SnapshotHarness.swift`.
+
 ## Keyboard reference
 
-| Keys | Action |
-|---|---|
-| G / D | Library / Develop |
-| ← → | previous / next image (loads it in Develop) |
-| Return | open the selection in Develop |
-| 0–5, P / X / U | rating, pick / reject / unflag |
-| ⌘[ ⌘] | rotate |
-| ⌘0 ⌘1 ⌘= ⌘- | fit, 100%, zoom in/out |
-| \ | before / after |
-| ⌘Z ⌘⇧Z | undo / redo |
-| ⌘⇧C ⌘⇧V | copy / paste settings (to the Library selection when several are selected) |
-| ⌘U | Auto adjust |
-| ⌘⇧O ⌘⇧E | open folder, export selection |
+The full list is [`docs/wiki/Keyboard-Shortcuts.md`](docs/wiki/Keyboard-Shortcuts.md),
+generated from the one table in `Sources/latent-app/Shortcuts.swift` that
+the menu bar and the single-key handler also use, so it can't drift. The
+menu bar shows every command with its key. After changing the table, run
+`LATENT_WRITE_SHORTCUTS_PAGE=1 swift test --filter ShortcutsPageTests`.
 
 `RawCore` depends on LibRaw as a vendored C library. See `vendor/README.md`
 for how it's fetched and built as an XCFramework — this step needs to run
@@ -138,10 +156,11 @@ on macOS since it compiles native code for arm64.
 ## Test assets
 
 Sample RAW files are intentionally not committed (they're large and mostly
-redistributable-but-not-ours). `TestAssets/README.md` lists exactly which
-files to pull from raw.pixls.us for the CI matrix, plus where to drop your
-own D750/A7 III samples.
+redistributable-but-not-ours). `scripts/fetch_test_assets.sh` downloads
+the public-domain D750 raw the golden-image tests render, which is all CI
+uses. `TestAssets/README.md` describes the optional samples; tests whose
+sample is missing skip themselves.
 
 ## Contributing
 
-Not yet open for contributions — still pre-Phase-1.
+Not yet open for contributions.
