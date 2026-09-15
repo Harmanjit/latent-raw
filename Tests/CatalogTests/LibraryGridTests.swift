@@ -38,6 +38,65 @@ final class LibraryGridTests: XCTestCase {
         XCTAssertEqual(library.selectedImageIDs, [], "no ids left over from the previous catalog")
     }
 
+    /// Selected images a filter hides leave the selection, so rating keys
+    /// in the grid never change what it doesn't show. Loupe and Develop
+    /// still change the image on screen.
+    func testFilteredOutImagesAreNotChangedByGridKeys() async throws {
+        let library = Library()
+        try await library.open(folder: folder)
+        let (a, b, c) = (id(library, "A.NEF"), id(library, "B.NEF"), id(library, "C.NEF"))
+        func record(_ name: String) -> ImageRecord { library.images.first { $0.fileName == name }! }
+
+        library.setSelection([a, b, c], primary: a)
+        try await library.setRating(2)
+        library.filter.minRating = 1
+        library.setSelection([a, b], primary: b)
+        try await library.setRating(0)
+        XCTAssertEqual(library.visibleImages.map(\.fileName), ["C.NEF"])
+        XCTAssertEqual(library.selectedImageIDs, [], "hidden images leave the selection")
+        try await library.setRating(3)
+        XCTAssertEqual([record("A.NEF").rating, record("B.NEF").rating], [0, 0], "nothing shown selected, nothing changed")
+        XCTAssertEqual(record("C.NEF").rating, 2)
+
+        // Narrowing the filter after selecting: only what stays shown changes,
+        // even when the lead is among the hidden.
+        library.filter = LibraryFilter()
+        library.setSelection([a, b, c], primary: a)
+        library.filter.minRating = 1
+        XCTAssertEqual(library.selectedImageIDs, [c])
+        XCTAssertEqual(library.selectedImageID, a, "the lead stays: in Develop it's the image on screen")
+        try await library.setFlag(.picked)
+        XCTAssertEqual(record("A.NEF").flag, ImageFlag.none.rawValue)
+        XCTAssertEqual(record("B.NEF").flag, ImageFlag.none.rawValue)
+        XCTAssertEqual(record("C.NEF").flag, ImageFlag.picked.rawValue)
+
+        try await library.setFlag(.rejected, onlyPrimary: true)
+        XCTAssertEqual(record("A.NEF").flag, ImageFlag.rejected.rawValue, "Develop's image, filtered out or not")
+        XCTAssertEqual(record("C.NEF").flag, ImageFlag.picked.rawValue)
+    }
+
+    /// Rotate pressed twice before the first press has finished writing:
+    /// both turns count.
+    func testOverlappingRotationsBothCount() async throws {
+        let library = Library()
+        try await library.open(folder: folder)
+        library.selectAllVisible()
+        library.setSelection(Set(library.images.compactMap(\.id)), primary: id(library, "A.NEF"))
+        let first = Task { try await library.rotateSelected(by: 1) }
+        let second = Task { try await library.rotateSelected(by: 1) }
+        try await first.value
+        try await second.value
+
+        let catalog = try XCTUnwrap(library.catalog)
+        for name in ["A.NEF", "B.NEF", "C.NEF"] {
+            let stored = try await catalog.image(forRelPath: name)
+            XCTAssertEqual(stored?.userRotation, 2, name)
+        }
+        try await library.rotateSelected(by: -3)
+        let turned = try await catalog.image(forRelPath: "B.NEF")
+        XCTAssertEqual(turned?.userRotation, 3, "2 - 3 wraps to 3")
+    }
+
     func testSelectionLeadRules() async throws {
         let library = Library()
         try await library.open(folder: folder)

@@ -2,7 +2,7 @@
 
 ## The sidebar
 
-The column on the far left lists favourite folders. Add one with **Add Folder…** at its foot, by dragging folders in from Finder, or with **Add to Favourites** on a folder's right-click menu. Each favourite expands into its folder tree; clicking any folder in it opens that folder as the catalog, exactly as Open Folder does. Expanding a folder only lists its subfolders; nothing touches a catalog until you click.
+The column on the far left lists favourite folders. Add one with **Add Folder…** at its foot, by dragging folders in from Finder, or with **Add to Favourites** on a folder's right-click menu. Each favourite expands into its folder tree; clicking any folder in it opens that folder as the catalog, exactly as Open Folder does. Expanding a folder only lists its subfolders; nothing touches a catalog until you click. Until the folder's images are ready, the grid keeps showing the folder you are leaving; click another folder meanwhile and that one opens instead.
 
 The app is sandboxed, so it can read inside favourites and folders you chose in an open panel, and nowhere else. A folder outside every favourite still opens with ⇧⌘O, and the sidebar then offers to add it. A favourite on a disk or network share that isn't mounted shows as not connected and comes back when the volume does; Latent never mounts anything on its own. The sidebar can be collapsed, and stays shown or hidden as you left it.
 
@@ -33,7 +33,7 @@ Extensions indexed: NEF, NRW, ARW, SRF, SR2, CR2, CR3, CRW, DNG, RAF, ORF, RW2, 
 
 ## The grid
 
-Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to open in Develop. With several selected, the image you clicked last (for a ⇧-click, the end you clicked) leads: Loupe, Develop and the left panel show it, and ⌘A keeps it. Rating, flag and rotate keys act on every selected image. Badges show a pencil for edited images, ✓ and ✗ for flags, stars for rating.
+Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to open in Develop. With several selected, the image you clicked last (for a ⇧-click, the end you clicked) leads: Loupe, Develop and the left panel show it, and ⌘A keeps it. Rating, flag and rotate keys act on every selected image. Selected images that the filter hides are deselected, so these keys, Paste Settings and Export act only on images the grid shows. Badges show a pencil for edited images, ✓ and ✗ for flags, stars for rating.
 
 **Thumbnail size.** The slider in the filter bar, or ⌘= and ⌘- while the grid shows (View > Larger Thumbnails, Smaller Thumbnails). The size is remembered.
 

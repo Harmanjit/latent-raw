@@ -33,14 +33,10 @@ struct FolderSidebar: View {
         }
     }
 
-    /// A favourite whose disk wasn't there is resolved again first; if it
-    /// still isn't, opening reports why.
+    /// A favourite whose disk wasn't there is resolved again first, by
+    /// `onOpen` off the main thread; if it still isn't, opening reports why.
     private func open(_ url: URL) -> Bool {
-        if let favourite = favourites.folders.first(where: { FolderAccess.samePath($0.url, url) }),
-           !favourite.isAvailable {
-            return onOpen(favourites.retry(url) ?? url)
-        }
-        return onOpen(url)
+        onOpen(url)
     }
 
     private var isInsideAFavourite: Bool {

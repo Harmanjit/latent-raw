@@ -25,6 +25,13 @@ extension Catalog {
         try updateRow(id) { $0.userRotation = ((quarterTurns % 4) + 4) % 4 }
     }
 
+    /// Adds quarter turns to the stored rotation, read inside the write, so
+    /// rotations sent one after another all count even when the caller's
+    /// copy of the record is behind.
+    public func rotate(by quarterTurns: Int, forImageID id: Int64) throws {
+        try updateRow(id) { $0.userRotation = ((($0.userRotation + quarterTurns) % 4) + 4) % 4 }
+    }
+
     public func setKeywords(_ keywords: [String], forImageID id: Int64) throws {
         let cleaned = keywords.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }

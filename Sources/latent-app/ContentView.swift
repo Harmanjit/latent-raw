@@ -211,34 +211,52 @@ struct ContentView: View {
     }
 
     /// Opens `url` as the catalog, from Open Folder, the sidebar or launch.
-    /// Returns false when the folder is refused before anything changes,
-    /// with the reason in the status bar.
+    /// Always starts: whether the folder can be read is found out off the
+    /// main thread, and a refusal arrives a moment later, with the reason
+    /// in the status bar and the sidebar's highlight moved back.
     @discardableResult
     private func openFolder(_ url: URL) -> Bool {
-        // Opening the directory, not asking whether it exists: the sandbox
-        // lets the app see folders it won't let it read.
-        if let trouble = FolderAccess.problem(opening: url) {
-            model.lastError = FolderAccess.message(for: trouble, folder: url)
-            return false
-        }
         openingFolder = url
         // Through perform, so quitting waits for the catalog it is building.
         library.perform("Opening \(url.lastPathComponent)") {
             defer { if openingFolder == url { openingFolder = nil } }
-            // An included subfolder belongs to the catalog above it; opening
+            // A favourite whose disk wasn't there is resolved again first.
+            let target = await FavouriteFolders.shared.retry(url) ?? url
+            // Off the main thread, as everything in FolderAccess: on a share
+            // that stopped answering, opening the directory waits for the
+            // network to time out. Opening it, not asking whether it exists:
+            // the sandbox lets the app see folders it won't let it read. And
+            // an included subfolder belongs to the catalog above it; opening
             // it alone would give it a container and split that catalog.
-            let owner = await Task.detached(priority: .userInitiated) { FolderAccess.owningCatalog(of: url) }.value
-            let folder = owner?.root ?? url
+            let (refusal, owner) = await Task.detached(priority: .userInitiated) {
+                () -> (String?, FolderAccess.Membership?) in
+                if let trouble = FolderAccess.problem(opening: target) {
+                    return (FolderAccess.message(for: trouble, folder: target), nil)
+                }
+                return (nil, FolderAccess.owningCatalog(of: target))
+            }.value
+            if let refusal {
+                model.lastError = refusal
+                return
+            }
+            let folder = owner?.root ?? target
             if let owner {
                 model.lastError = "“\(url.lastPathComponent)” is part of the catalog of “\(owner.root.lastPathComponent)” "
                     + "(an included subfolder), so that catalog is open."
                 if let open = library.folderURL, FolderAccess.samePath(open, owner.root) { return }
             }
             closeEditorForFolderChange()
+            // And again as the new list replaces the old, for an image of the
+            // old folder opened while this one loaded.
+            library.willReplaceCatalog = { closeEditorForFolderChange() }
             mode = .library
             await attachEditedThumbnailRenderer()
             do {
-                try await library.open(folder: folder, defaultSubfolderMode: prefs.defaultSubfolderMode)
+                // Overtaken by a folder clicked after this one, which saves
+                // itself as the one to reopen.
+                guard try await library.open(folder: folder, defaultSubfolderMode: prefs.defaultSubfolderMode) else {
+                    return
+                }
                 BookmarkStore.save(folder, key: BookmarkStore.lastFolder)
                 if let setAside = library.catalog?.damagedDatabaseSetAside {
                     // After this operation, so the alert doesn't hold it open.

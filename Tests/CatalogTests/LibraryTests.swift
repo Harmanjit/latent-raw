@@ -223,6 +223,8 @@ final class LibraryTests: XCTestCase {
 
         // The editor can make an image primary without touching the grid
         // selection; then only that image changes, not the stale set.
+        // (With the keyword filter off: the grid never changes what it hides.)
+        library.filter = LibraryFilter()
         library.selectedImageID = c
         try await library.setRating(1)
         XCTAssertEqual(record("C.NEF").rating, 1)

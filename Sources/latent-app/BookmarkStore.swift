@@ -143,32 +143,70 @@ final class FavouriteFolders: ObservableObject {
         persist()
     }
 
-    /// Resolves an unavailable favourite again, quietly, as a click on it
-    /// asks. Returns its folder when it can be opened now.
-    func retry(_ url: URL) -> URL? {
-        guard let index = folders.firstIndex(where: { FolderAccess.samePath($0.url, url) }) else { return nil }
-        guard !folders[index].isAvailable else { return folders[index].url }
-        guard let resolved = BookmarkStore.resolveQuietly(folders[index].bookmark),
-              FolderAccess.problem(opening: resolved.url) == nil else { return nil }
-        startAccessing(resolved.url)
-        folders[index].url = resolved.url
-        folders[index].isAvailable = true
-        if resolved.stale, let data = BookmarkStore.bookmark(for: resolved.url) {
-            folders[index].bookmark = data
-            persist()
+    /// Resolves an unavailable favourite again, quietly, as a click on it or
+    /// a mount asks. Returns its folder when it can be opened now, and nil
+    /// for a folder that isn't a favourite.
+    func retry(_ url: URL) async -> URL? {
+        guard let favourite = folders.first(where: { FolderAccess.samePath($0.url, url) }) else { return nil }
+        guard !favourite.isAvailable else { return favourite.url }
+        let accessingNow = accessing
+        let found = await Task.detached(priority: .userInitiated) {
+            Self.reachable(favourite.bookmark, alreadyAccessing: accessingNow)
+        }.value
+        guard let found else { return nil }
+        if found.startedAccess { accessing.insert(found.url.standardizedFileURL.path) }
+        // Looked up again: the list may have changed during the wait.
+        if let index = folders.firstIndex(where: { $0.id == favourite.id }) {
+            folders[index].url = found.url
+            folders[index].isAvailable = true
+            if found.stale, let data = BookmarkStore.bookmark(for: found.url) {
+                folders[index].bookmark = data
+                persist()
+            }
         }
-        return resolved.url
+        return found.url
+    }
+
+    /// Resolves `bookmark` and checks its folder opens, off the main thread
+    /// (a share that stopped answering blocks both until it times out).
+    ///
+    /// Under the sandbox a folder named by a resolved security-scoped
+    /// bookmark can't be read until its scope has started, so the scope
+    /// starts before the check, and stops again if the folder still won't
+    /// open. The steps are parameters so tests can check that order.
+    nonisolated static func reachable(
+        _ bookmark: Data, alreadyAccessing: Set<String>,
+        resolve: (Data) -> (url: URL, stale: Bool)? = BookmarkStore.resolveQuietly,
+        startAccess: (URL) -> Bool = { $0.startAccessingSecurityScopedResource() },
+        stopAccess: (URL) -> Void = { $0.stopAccessingSecurityScopedResource() },
+        problem: (URL) -> FolderAccess.Trouble? = { FolderAccess.problem(opening: $0) }
+    ) -> (url: URL, stale: Bool, startedAccess: Bool)? {
+        guard let resolved = resolve(bookmark) else { return nil }
+        let started = !alreadyAccessing.contains(resolved.url.standardizedFileURL.path) && startAccess(resolved.url)
+        guard problem(resolved.url) == nil else {
+            if started { stopAccess(resolved.url) }
+            return nil
+        }
+        return (resolved.url, resolved.stale, started)
     }
 
     /// After a mount or unmount. Only favourites under /Volumes can be
-    /// affected; a missing volume's folder fails to open at once, so this
-    /// never waits on a disk.
+    /// affected. Checked off the main thread: a volume that is mounted but
+    /// no longer answering would otherwise hold the whole app.
     private func recheckVolumes() {
-        for index in folders.indices where folders[index].url.path.hasPrefix("/Volumes/") {
-            if folders[index].isAvailable {
-                if FolderAccess.isOnDisconnectedVolume(folders[index].url.path) { folders[index].isAvailable = false }
-            } else {
-                _ = retry(folders[index].url)
+        let onVolumes = folders.filter { $0.url.path.hasPrefix("/Volumes/") }
+        guard !onVolumes.isEmpty else { return }
+        Task {
+            for folder in onVolumes {
+                if folder.isAvailable {
+                    let path = folder.url.path
+                    let gone = await Task.detached(priority: .utility) { FolderAccess.isOnDisconnectedVolume(path) }.value
+                    if gone, let index = folders.firstIndex(where: { $0.id == folder.id }) {
+                        folders[index].isAvailable = false
+                    }
+                } else {
+                    _ = await retry(folder.url)
+                }
             }
         }
     }

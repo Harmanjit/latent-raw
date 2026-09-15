@@ -28,8 +28,9 @@ public final class Library: ObservableObject {
     /// when a record in it only changes in place (a rating, say). The grid
     /// rebuilds on the first and redraws just the changed cells on the second.
     public private(set) var visibleListVersion = 0
-    /// Set while re-read records are patched into `images`, which then
-    /// decides for itself whether the visible list needs recomputing.
+    /// Set while re-read records are patched into `images`, or a whole list
+    /// is put in place, by code that then decides for itself whether the
+    /// visible list needs recomputing.
     private var isPatchingRecords = false
     @Published public var filter = LibraryFilter() {
         didSet { if filter != oldValue { recomputeVisible() } }
@@ -40,9 +41,14 @@ public final class Library: ObservableObject {
     /// image id → keywords, for filtering; refreshed with the image list
     /// and whenever keywords are edited.
     private var keywordIndex: [Int64: Set<String>] = [:] {
-        didSet { if filter.keyword != nil { recomputeVisible() } }
+        didSet { if filter.keyword != nil, !isPatchingRecords { recomputeVisible() } }
     }
     @Published public private(set) var isBusy = false
+    /// Opens and refreshes still running. They can overlap (a second folder
+    /// clicked while the first reconciles), so one finishing isn't the end.
+    private var busyCount = 0 {
+        didSet { if isBusy != (busyCount > 0) { isBusy = busyCount > 0 } }
+    }
     @Published public private(set) var statusText = "No folder open"
     @Published public private(set) var thumbnailsDone = 0
     @Published public private(set) var thumbnailsTotal = 0
@@ -55,7 +61,7 @@ public final class Library: ObservableObject {
     @Published public var lastError: String?
     /// Images that have a stored edit, so the grid can badge them.
     @Published public private(set) var editedImageIDs: Set<Int64> = [] {
-        didSet { if filter.editedOnly { recomputeVisible() } }
+        didSet { if filter.editedOnly, !isPatchingRecords { recomputeVisible() } }
     }
 
     /// The primary selection: what the editor opens and the panel edits.
@@ -92,8 +98,9 @@ public final class Library: ObservableObject {
     /// Decoded thumbnails for display, bounded in bytes. The HEIC files in
     /// `_latent/thumbnails` are the disk tier.
     public let thumbnailLoader = ThumbnailLoader()
-    /// Where the open catalog's thumbnail files are; nil while a folder is
-    /// opening, so nothing is decoded for ids that are about to change.
+    /// Where the open catalog's thumbnail files are. Changes in the same
+    /// step as `catalog` and `images`, so a cell never asks for one
+    /// catalog's thumbnail under another's ids.
     private var thumbnailDirectory: URL?
 
     /// Renders thumbnails for edited images. Set by the app (it needs the
@@ -177,9 +184,23 @@ public final class Library: ObservableObject {
             : images
         let next = passing.sorted(by: sort)
         if next != visibleImages {
-            if !next.elementsEqual(visibleImages, by: { $0.id == $1.id }) { visibleListVersion += 1 }
+            if !next.elementsEqual(visibleImages, by: { $0.id == $1.id }) {
+                visibleListVersion += 1
+                deselectHidden(visible: next)
+            }
             visibleImages = next
         }
+    }
+
+    /// A filter (or a rating under one) that hides selected images
+    /// deselects them: the grid shows only visible images selected, and
+    /// batch actions such as rating, paste and export must act on exactly
+    /// those. The lead stays even if hidden: in Loupe and Develop it's the
+    /// image on screen, and moving it would send the next key to another.
+    private func deselectHidden(visible: [ImageRecord]) {
+        guard !selectedImageIDs.isEmpty else { return }
+        let shown = selectedImageIDs.intersection(visible.lazy.compactMap(\.id))
+        if shown != selectedImageIDs { selectedImageIDs = shown }
     }
 
     /// Puts re-read records into `images` and `visibleImages` in place.
@@ -240,56 +261,139 @@ public final class Library: ObservableObject {
 
     // MARK: - Opening
 
+    /// Bumped by every open and every refresh respectively. Each captures
+    /// its number and shows its results only if no later one has started,
+    /// so a slow folder clicked first can't put its list over the one
+    /// clicked next.
+    private var openGeneration = 0
+    private var refreshGeneration = 0
+
+    /// Called just before another catalog replaces the open one, while
+    /// `catalog` is still the old one. The app closes its editor here: an
+    /// image of the old folder opened while the new one loaded then saves
+    /// its pending edit into its own catalog, not under the same id in the
+    /// next.
+    public var willReplaceCatalog: (@MainActor () -> Void)?
+
+    /// Tests only: runs after a folder's list is read and before it is
+    /// shown, so a test can hold one open or refresh while another finishes.
+    var willPublishList: (@MainActor (Catalog) async throws -> Void)?
+
     /// Opens (or creates) the catalog in `folder`, reconciles, shows the
     /// images, then generates thumbnails in the background.
-    public func open(folder: URL, defaultSubfolderMode: SubfolderMode? = nil) async throws {
-        thumbnailTask?.cancel()
-        isBusy = true
-        statusText = "Opening \(folder.lastPathComponent)…"
-        defer { isBusy = false }
+    ///
+    /// Until the new list is ready the Library stays wholly on the previous
+    /// catalog: its images, its selection and its thumbnails, so a key
+    /// pressed meanwhile changes the photo the user sees. Then everything
+    /// switches in one step. If opening fails, nothing has switched.
+    ///
+    /// Returns false, without showing anything, when a later `open` started
+    /// before this one finished: that folder is the one the user wants.
+    @discardableResult
+    public func open(folder: URL, defaultSubfolderMode: SubfolderMode? = nil) async throws -> Bool {
+        openGeneration += 1
+        let generation = openGeneration
+        busyCount += 1
+        defer { busyCount -= 1 }
+        let opening = "Opening \(folder.lastPathComponent)…"
+        let previousStatus = statusText
+        statusText = opening
 
-        let catalog = try Catalog.open(at: folder)
-        // Image ids belong to a catalog: nothing decoded for the old one may
-        // be shown, or cached, under the new one's ids. Ids also restart in
-        // every catalog, so two folders can list the same ids (even the same
-        // names) in the same order: a new catalog always counts as a new list.
-        thumbnailDirectory = nil
-        thumbnailLoader.removeAll()
-        visibleListVersion += 1
-        // A catalog that has never recorded a subfolder policy takes the
-        // app's default; one that has keeps its own.
-        if let mode = defaultSubfolderMode, try await catalog.setting(Catalog.defaultSubfolderModeKey) == nil {
-            try await catalog.setDefaultSubfolderMode(mode)
+        do {
+            // Off the main thread: the database may be on a slow disk or a
+            // network share.
+            let catalog = try await Task.detached(priority: .userInitiated) { try Catalog.open(at: folder) }.value
+            // A catalog that has never recorded a subfolder policy takes the
+            // app's default; one that has keeps its own.
+            if let mode = defaultSubfolderMode, try await catalog.setting(Catalog.defaultSubfolderModeKey) == nil {
+                try await catalog.setDefaultSubfolderMode(mode)
+            }
+            let list = try await loadList(from: catalog)
+            guard generation == openGeneration else { return false }
+            publish(list, of: catalog, isNewCatalog: true)
+            return true
+        } catch {
+            // Overtaken as well as failed: the folder opening now matters,
+            // not this one's error.
+            guard generation == openGeneration else { return false }
+            if statusText == opening { statusText = previousStatus }
+            throw error
         }
-        self.catalog = catalog
-        self.folderURL = await catalog.rootPath
-        selectedImageID = nil
-        selectedImageIDs = []
-
-        try await refresh()
     }
 
     /// Re-reconciles the open folder (the Refresh action, DESIGN.md §5.3
-    /// "no live watching").
+    /// "no live watching"). Its result is dropped if another folder opened,
+    /// or another refresh started, while it ran.
     public func refresh() async throws {
         guard let catalog else { return }
-        isBusy = true
-        defer { isBusy = false }
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        busyCount += 1
+        defer { busyCount -= 1 }
 
+        let list = try await loadList(from: catalog)
+        guard catalog === self.catalog, generation == refreshGeneration else { return }
+        publish(list, of: catalog, isNewCatalog: false)
+    }
+
+    /// Everything the grid shows of a catalog, read but not yet shown.
+    private struct LoadedList {
+        var report: ReconcileReport
+        var rootPath: URL
+        var thumbnailDirectory: URL
+        var images: [ImageRecord]
+        var editedImageIDs: Set<Int64>
+        var keywordIndex: [Int64: Set<String>]
+    }
+
+    /// Reconciles `catalog` and reads its list, touching nothing shown:
+    /// the awaits here are where another open or refresh can overtake.
+    private func loadList(from catalog: Catalog) async throws -> LoadedList {
         let report = try await catalog.reconcile()
-        undecidedSubfolders = report.undecidedSubfolders
-        let all = try await catalog.allImages()
-        // Set together, with no suspension between, so a cell never asks for
-        // one catalog's thumbnail under another's ids.
-        thumbnailDirectory = await catalog.thumbnailDirectory
-        images = all
-        editedImageIDs = try await catalog.editedImageIDs()
-        keywordIndex = try await catalog.allImageKeywords()
+        let list = LoadedList(report: report,
+                              rootPath: catalog.rootPath,
+                              thumbnailDirectory: await catalog.thumbnailDirectory,
+                              images: try await catalog.allImages(),
+                              editedImageIDs: try await catalog.editedImageIDs(),
+                              keywordIndex: try await catalog.allImageKeywords())
+        try await willPublishList?(catalog)
+        return list
+    }
+
+    /// Shows `list` as `catalog`'s. One synchronous step: the catalog, its
+    /// folder, thumbnails, images, badges, keywords and selection always
+    /// belong together, whatever runs between two awaits elsewhere.
+    private func publish(_ list: LoadedList, of catalog: Catalog, isNewCatalog: Bool) {
+        if isNewCatalog {
+            willReplaceCatalog?()
+            thumbnailTask?.cancel()
+            // Image ids belong to a catalog: nothing decoded for the old one
+            // may be shown, or cached, under the new one's ids. Ids also
+            // restart in every catalog, so two folders can list the same ids
+            // (even the same names) in the same order: a new catalog always
+            // counts as a new list.
+            thumbnailLoader.removeAll()
+            visibleListVersion += 1
+            self.catalog = catalog
+            folderURL = list.rootPath
+            selectedImageID = nil
+            selectedImageIDs = []
+        }
+        thumbnailDirectory = list.thumbnailDirectory
+        undecidedSubfolders = list.report.undecidedSubfolders
+        // All three before filtering once, so the visible list is never
+        // worked out from one list's images and another's badges.
+        isPatchingRecords = true
+        images = list.images
+        editedImageIDs = list.editedImageIDs
+        keywordIndex = list.keywordIndex
+        isPatchingRecords = false
+        recomputeVisible()
         if let selected = selectedImageID, !images.contains(where: { $0.id == selected }) {
             selectedImageID = nil
         }
         selectedImageIDs = selectedImageIDs.filter { id in images.contains { $0.id == id } }
-        statusText = "\(images.count) images · \(report)"
+        statusText = "\(images.count) images · \(list.report)"
 
         startThumbnailGeneration()
     }
@@ -300,6 +404,8 @@ public final class Library: ObservableObject {
         for relPath in undecidedSubfolders {
             try await catalog.setSubfolderMode(include ? .included : .independent, forRelPath: relPath)
         }
+        // Another folder opened meanwhile: its question is still open.
+        guard catalog === self.catalog else { return }
         undecidedSubfolders = []
         try await refresh()
     }
@@ -314,13 +420,16 @@ public final class Library: ObservableObject {
         thumbnailTask = Task { [weak self] in
             do {
                 let needed = try await catalog.imagesNeedingThumbnails().count
-                await MainActor.run { self?.thumbnailsTotal = needed }
+                // Every hop back checks the catalog is still the open one:
+                // cancelling doesn't stop a generation already under way.
+                await MainActor.run { if self?.catalog === catalog { self?.thumbnailsTotal = needed } }
                 guard needed > 0 else { return }
                 let renderer = await self?.thumbnailRenderer
                 let report = try await catalog.generateMissingThumbnails(
                     editedRenderer: renderer
                 ) { done, total in
                     Task { @MainActor in
+                        guard self?.catalog === catalog else { return }
                         self?.thumbnailsDone = done
                         self?.thumbnailsTotal = total
                         // Refresh the grid every few, and at the end, rather
@@ -329,7 +438,7 @@ public final class Library: ObservableObject {
                     }
                 }
                 await MainActor.run {
-                    guard let self else { return }
+                    guard let self, self.catalog === catalog else { return }
                     // Files that replaced an older thumbnail replace what the
                     // cache holds; first-time files can't be cached stale.
                     if !report.replacedRelPaths.isEmpty {
@@ -343,7 +452,7 @@ public final class Library: ObservableObject {
                     }
                 }
             } catch {
-                await MainActor.run { self?.statusText = "Thumbnails failed: \(error)" }
+                await MainActor.run { if self?.catalog === catalog { self?.statusText = "Thumbnails failed: \(error)" } }
             }
         }
     }
@@ -417,10 +526,18 @@ public final class Library: ObservableObject {
     /// primary — the editor made another image primary without touching
     /// the grid, or the set is left over from before — only the primary
     /// changes, so images the user can't see selected are never touched.
+    /// For the same reason the grid never changes what its filter hides,
+    /// a hidden primary included; Loupe and Develop (`onlyPrimary`) change
+    /// the image on screen, filtered out or not.
     private func metadataTargets(onlyPrimary: Bool) -> [ImageRecord] {
         guard let primary = selectedImage else { return [] }
-        guard !onlyPrimary, let primaryID = primary.id, selectedImageIDs.contains(primaryID) else { return [primary] }
-        return selectedImages
+        if onlyPrimary { return [primary] }
+        let visibleIDs = Set(visibleImages.lazy.compactMap(\.id))
+        let shown = { (record: ImageRecord) in record.id.map(visibleIDs.contains) ?? false }
+        guard let primaryID = primary.id, selectedImageIDs.contains(primaryID) else {
+            return shown(primary) ? [primary] : selectedImages.filter(shown)
+        }
+        return selectedImages.filter(shown)
     }
 
     /// A metadata change that failed on some of the selected images. The
@@ -440,8 +557,9 @@ public final class Library: ObservableObject {
     /// filters and badges update without a full reload. One image failing
     /// doesn't stop the rest; the failures are thrown together at the end
     /// so `perform` reports them.
-    private func change(_ records: [ImageRecord],
-                        _ change: @Sendable (Catalog, Int64, ImageRecord) async throws -> Void) async throws {
+    /// Internal rather than private so tests can hold a change open.
+    func change(_ records: [ImageRecord],
+                _ change: @Sendable (Catalog, Int64, ImageRecord) async throws -> Void) async throws {
         guard let catalog, !records.isEmpty else { return }
         var failures: [(fileName: String, error: any Error)] = []
         var fresh: [Int64: ImageRecord] = [:]
@@ -465,9 +583,13 @@ public final class Library: ObservableObject {
         }
         // Patch whatever `images` is now (a refresh may have landed during
         // the awaits), in one assignment, recomputing the visible list only
-        // if the filter or sort cares.
-        applyChangedRecords(fresh)
-        await reloadSelectedKeywords()
+        // if the filter or sort cares. Unless another folder opened: the
+        // writes stayed in the catalog these records belong to, but `images`
+        // is now the other catalog's, where the same ids are other photos.
+        if catalog === self.catalog {
+            applyChangedRecords(fresh)
+            await reloadSelectedKeywords()
+        }
         if failures.count == 1, records.count == 1 { throw failures[0].error }
         if !failures.isEmpty { throw SelectionChangeError(total: records.count, failures: failures) }
     }
@@ -484,20 +606,27 @@ public final class Library: ObservableObject {
     /// keywords and this replaces the whole list with them, so applying
     /// it to the selection would wipe every other image's own keywords.
     public func setKeywords(_ keywords: [String]) async throws {
-        try await change(selectedImage.map { [$0] } ?? []) { catalog, id, _ in
+        let written = catalog
+        let target = selectedImage
+        try await change(target.map { [$0] } ?? []) { catalog, id, _ in
             try await catalog.setKeywords(keywords, forImageID: id)
         }
-        if let id = selectedImageID {
+        // The image written, not whatever is selected after the write, and
+        // only while its catalog is still the open one.
+        if let id = target?.id, written === catalog {
             let cleaned = Set(keywords.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
             keywordIndex[id] = cleaned.isEmpty ? nil : cleaned
         }
     }
 
     /// Adds quarter turns clockwise (negative for counter-clockwise) to
-    /// each selected image, each from its own current rotation.
+    /// each selected image, each from its own current rotation. That is read
+    /// by the catalog as it writes, not from `images`: a second press while
+    /// the first is still writing would otherwise start from the same
+    /// rotation and lose a turn.
     public func rotateSelected(by quarterTurns: Int, onlyPrimary: Bool = false) async throws {
-        try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, record in
-            try await catalog.setUserRotation(record.userRotation + quarterTurns, forImageID: id)
+        try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in
+            try await catalog.rotate(by: quarterTurns, forImageID: id)
         }
     }
 
@@ -564,11 +693,15 @@ public final class Library: ObservableObject {
             if next != existing {
                 try await catalog.setEditStack(next, schemaVersion: schemaVersion,
                                                processVersion: processVersion, forImageID: id)
-                if next == nil { editedImageIDs.remove(id) } else { editedImageIDs.insert(id) }
+                // The badges are the open catalog's; another folder may
+                // have opened during the write.
+                if catalog === self.catalog {
+                    if next == nil { editedImageIDs.remove(id) } else { editedImageIDs.insert(id) }
+                }
                 outcome.changed += 1
             }
         }
-        if outcome.changed > 0 { startThumbnailGeneration() }
+        if outcome.changed > 0, catalog === self.catalog { startThumbnailGeneration() }
         return outcome
     }
 

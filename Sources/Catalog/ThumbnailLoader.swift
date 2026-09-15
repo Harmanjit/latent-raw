@@ -327,7 +327,10 @@ public final class ThumbnailLoader: @unchecked Sendable {
             guard let decoded = decode(job.url, key.tier) else {
                 if FileManager.default.fileExists(atPath: job.url.path) {
                     lock.withLock {
-                        if generation == (generations[key.id] ?? 0) {
+                        // As for the cache below: after `removeAll` the id
+                        // may name another catalog's image, which mustn't
+                        // inherit this one's failure.
+                        if cacheGeneration == self.cacheGeneration, generation == (generations[key.id] ?? 0) {
                             _ = failures.insert(FailureKey(id: key.id, tier: key.tier, generation: generation))
                         }
                     }

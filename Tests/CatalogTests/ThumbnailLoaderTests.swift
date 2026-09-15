@@ -219,6 +219,41 @@ final class ThumbnailLoaderTests: XCTestCase {
         XCTAssertEqual(loader.statistics.decodes, 4, "a missing file is tried again")
     }
 
+    /// A decode of the old catalog that fails after a switch: the id now
+    /// names another catalog's image, which must still be decoded.
+    func testFailureFromBeforeRemoveAllIsNotRemembered() async throws {
+        final class Hold: @unchecked Sendable {
+            let started = DispatchSemaphore(value: 0)
+            let release = DispatchSemaphore(value: 0)
+            let lock = NSLock()
+            var calls = 0
+            func waitUntilStarted() { started.wait() }
+        }
+        let hold = Hold()
+        let loader = ThumbnailLoader(memoryCacheBytes: 100_000_000, workerLimit: 1) { _, _ in
+            let call = hold.lock.withLock { hold.calls += 1; return hold.calls }
+            if call == 1 {
+                hold.started.signal()
+                hold.release.wait()
+            }
+            return nil
+        }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("latent-loader-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let broken = folder.appendingPathComponent("broken")
+        try Data([0, 1, 2]).write(to: broken)
+
+        async let old = thumbnail(loader, 30, url: broken)
+        await Task.detached { hold.waitUntilStarted() }.value
+        loader.removeAll()
+        hold.release.signal()
+        _ = await old
+
+        _ = await thumbnail(loader, 30, url: broken)
+        XCTAssertEqual(loader.statistics.decodes, 2, "the new catalog's image 30 is decoded, not refused")
+    }
+
     /// A quarter turn clockwise puts the left edge on top, in BGRA.
     func testDisplayReadyTurnsClockwise() throws {
         let context = try XCTUnwrap(CGContext(data: nil, width: 2, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
