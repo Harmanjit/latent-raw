@@ -27,6 +27,30 @@ inline float distortionFactor(int type, float3 t, float ru) {
     }
 }
 
+// A bilinear read at `q`, a point in texel units of the render's grid
+// (texel i's centre at i + 0.5), from a texture whose texel 0 is grid
+// texel `offset`. Done by hand rather than with a linear sampler for two
+// reasons. The sampler keeps only a few bits of sub-texel position, and
+// works from coordinates normalized by the texture's size, so the same
+// point read from a region-sized and a full-size texture blended its four
+// texels slightly differently; here the weights come from `q` alone, so a
+// region render reads exactly what the full render reads. And edges clamp
+// the way `clamp_to_edge` does.
+inline float4 bilinearAt(texture2d<float, access::sample> tex, float2 q, int2 offset) {
+    // Clamped first so a wild read (a keystone point near the horizon)
+    // can't overflow the integer conversion; far outside is clamped anyway.
+    float2 p = clamp(q - 0.5, float2(-1.0e6), float2(1.0e6));
+    float2 cell = floor(p);
+    float2 f = p - cell;
+    int2 last = int2(tex.get_width(), tex.get_height()) - 1;
+    int2 a = int2(cell) - offset;
+    int2 lo = clamp(a, int2(0), last);
+    int2 hi = clamp(a + 1, int2(0), last);
+    float4 t00 = tex.read(uint2(lo.x, lo.y)), t10 = tex.read(uint2(hi.x, lo.y));
+    float4 t01 = tex.read(uint2(lo.x, hi.y)), t11 = tex.read(uint2(hi.x, hi.y));
+    return mix(mix(t00, t10, f.x), mix(t01, t11, f.x), f.y);
+}
+
 kernel void lensCorrect(
     texture2d<float, access::sample> input   [[texture(0)]],
     texture2d<float, access::write>  output  [[texture(1)]],
@@ -45,12 +69,10 @@ kernel void lensCorrect(
     constant float3 &vignettingTerms         [[buffer(12)]],  // k1, k2, k3
     constant float  &manualVignetting        [[buffer(13)]],  // + brightens corners
     constant float3x3 &perspectiveInverse    [[buffer(14)]],  // keystone, output -> source, normalized
+    constant float2 &sourceOrigin            [[buffer(15)]],  // sensor px of input (0,0)
     uint2 gid                                [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
-    constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);
-
-    float2 texSize = float2(input.get_width(), input.get_height());
     float halfShort = min(sensorSize.x, sensorSize.y) * 0.5;
     float halfDiag  = length(sensorSize) * 0.5;
 
@@ -79,16 +101,19 @@ kernel void lensCorrect(
         fb = tcaBlue.x * rd * rd + tcaBlue.y * rd + tcaBlue.z;
     }
 
-    // Source sensor coordinates -> this texture's normalized coordinates.
-    float2 base = sensorSize * 0.5 - tileOrigin;
-    float2 uvG = ((cd      + base) / binSpan) / texSize;
-    float2 uvR = ((cd * fr + base) / binSpan) / texSize;
-    float2 uvB = ((cd * fb + base) / binSpan) / texSize;
-
-    float3 c;
-    c.g = input.sample(s, uvG).g;
-    c.r = (tcaEnabled != 0) ? input.sample(s, uvR).r : input.sample(s, uvG).r;
-    c.b = (tcaEnabled != 0) ? input.sample(s, uvB).b : input.sample(s, uvG).b;
+    // Source sensor coordinates -> texel units of this render's grid,
+    // then into the input texture, which may start before the output
+    // does: a region render demosaics a wider window so these reads stay
+    // on real pixels (RenderPipeline.lensSourceWindow). Its origin is a
+    // whole number of grid texels (0 for whole-frame renders).
+    float2 centre = sensorSize * 0.5;
+    int2 offset = int2(round(sourceOrigin / binSpan));
+    float4 g = bilinearAt(input, (cd + centre) / binSpan, offset);
+    float3 c = g.rgb;
+    if (tcaEnabled != 0) {
+        c.r = bilinearAt(input, (cd * fr + centre) / binSpan, offset).r;
+        c.b = bilinearAt(input, (cd * fb + centre) / binSpan, offset).b;
+    }
 
     // Vignetting: the source pixel was darkened by the lens; undo it.
     float rv = length(cd) / halfDiag * cropRatio;

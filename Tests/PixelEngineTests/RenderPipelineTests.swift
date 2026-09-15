@@ -102,6 +102,11 @@ final class RenderPipelineTests: XCTestCase {
 
         var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: true)
         var params = EditParameters()
+        // Lens corrections off: with them on, a region demosaics a window
+        // sized by how far the lens pass reads there, so the two regions
+        // below would no longer share a texture size, which the eviction
+        // check at the end relies on.
+        params.lensDistortion = false; params.lensTCA = false; params.lensVignetting = false
 
         _ = try pipeline.render(session, scale: scale, parameters: params, info: &info)
         XCTAssertFalse(info.demosaicWasCached, "first render can't be cached")

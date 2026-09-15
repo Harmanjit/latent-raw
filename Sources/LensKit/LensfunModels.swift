@@ -95,6 +95,10 @@ public struct LensfunLens: Sendable, Equatable {
     public var distortion: [DistortionPoint]
     public var tca: [TCAPoint]
     public var vignetting: [VignettingPoint]
+    /// What the lens is sold as ("17-55mm f/2.8"): read from the model
+    /// names, or from the database's `<focal>`/`<aperture>` elements where
+    /// a name doesn't say. See `LensSpec`.
+    public var spec = LensSpec()
 
     /// Nikon's lens ID, when the database encodes it as a trailing number
     /// on the model name ("... 50mm f/1.4G 160"). A Lensfun convention

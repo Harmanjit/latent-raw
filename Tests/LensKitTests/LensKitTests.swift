@@ -20,9 +20,10 @@ final class LensKitTests: XCTestCase {
         XCTAssertNotNil(LensMatcher.findCamera(make: "Nikon Corporation", model: "Nikon D750", in: Self.db))
     }
 
-    private func identity(nikonID: UInt8, min: Double, max: Double, ap: Double) -> LensIdentity {
-        LensIdentity(make: "", makerNotesName: "", makerLensID: 0, nikonLensID: nikonID, nikonLensType: 0,
-                     minFocal: min, maxFocal: max, maxApertureAtMinFocal: ap, maxApertureAtMaxFocal: ap,
+    private func identity(nikonID: UInt8, min: Double, max: Double, ap: Double,
+                          apLong: Double? = nil, lensID: UInt64 = 0, makerNotes: String = "") -> LensIdentity {
+        LensIdentity(make: "", makerNotesName: makerNotes, makerLensID: lensID, nikonLensID: nikonID, nikonLensType: 0,
+                     minFocal: min, maxFocal: max, maxApertureAtMinFocal: ap, maxApertureAtMaxFocal: apLong ?? ap,
                      cropFactor: 1)
     }
 
@@ -44,12 +45,21 @@ final class LensKitTests: XCTestCase {
         XCTAssertTrue(c.autoScale > 0.95 && c.autoScale <= 1.0, "mild barrel: tiny shrink, got \(c.autoScale)")
     }
 
-    func testMatchesTokina100MacroBySpecs() throws {
-        let match = try XCTUnwrap(LensMatcher.match(
+    func testTokina100MacroNeedsItsLensID() throws {
+        // Specs alone: the Tokina is listed under two spellings Lensfun
+        // doesn't tie together, so "100mm f/2.8" is not one lens.
+        XCTAssertNil(LensMatcher.match(
             cameraMake: "Nikon", cameraModel: "D750", lensName: "",
             identity: identity(nikonID: 141, min: 100, max: 100, ap: 2.8), focal: 100, in: Self.db))
+        // With the full 8-byte ID (nikon_d750_sample.nef's) the table says
+        // which lens it is, and the full-frame calibration wins.
+        let match = try XCTUnwrap(LensMatcher.match(
+            cameraMake: "Nikon", cameraModel: "D750", lensName: "",
+            identity: identity(nikonID: 141, min: 100, max: 100, ap: 2.8, lensID: 0x8D54_6868_2424_8702),
+            focal: 100, in: Self.db))
         XCTAssertTrue(match.lens.model.lowercased().contains("tokina"), match.lens.model)
         XCTAssertTrue(match.lens.model.contains("100"), match.lens.model)
+        XCTAssertEqual(match.lens.cropFactor, 1)
     }
 
     func testZoomInterpolatesBetweenFocals() throws {
