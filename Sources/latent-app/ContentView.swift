@@ -65,6 +65,8 @@ struct ContentView: View {
     @State private var editingText = false
     /// Compare's panes zoom and pan together (see `EditorModel.linkedPane`).
     @State private var compareSyncsView = true
+    /// What Undo and Redo would do outside Develop (see LibraryUndo.swift).
+    @StateObject private var libraryUndo = LibraryUndoObserver()
 
     var body: some View {
         NavigationSplitView(columnVisibility: sidebarVisibility) {
@@ -529,11 +531,29 @@ struct ContentView: View {
             guard let catalog = library.catalog else { return }
             library.perform("Saving history") { try await library.setHistory(steps, forImageID: imageID, in: catalog) }
         }
+        library.didRestoreImages = { ids, aspect in editorFollowUndo(ids, aspect) }
         model.onSnapshotsChanged = { imageID, snapshots in
             guard let catalog = library.catalog else { return }
             library.perform("Saving snapshots") {
                 try await library.setSnapshots(snapshots, forImageID: imageID, in: catalog)
             }
+        }
+    }
+
+    /// An undo or redo in the Library put back the rotation or stored edit
+    /// of images the editor may hold. A rotation turns the image on screen,
+    /// as rotating does; an edit is read again where the image shows, and
+    /// in the grid the hidden image is closed, to be read again when shown.
+    private func editorFollowUndo(_ ids: Set<Int64>, _ aspect: Library.RestoredAspect) {
+        guard let id = model.catalogImageID, ids.contains(id),
+              let record = library.images.first(where: { $0.id == id }) else { return }
+        switch aspect {
+        case .rotation:
+            model.setUserRotation(record.userRotation)
+        case .edits where mode.showsImage:
+            load(record)
+        case .edits:
+            model.closeImage()
         }
     }
 
@@ -570,6 +590,7 @@ struct ContentView: View {
     private var navigationShortcuts: some View {
         Group {
             BareKeyMonitor(perform: perform, onTextFocusChange: { editingText = $0 })
+            WindowUndoManagerReader { libraryUndo.attach($0, to: library) }
         }
         .opacity(0)
         .frame(width: 0, height: 0)
@@ -639,10 +660,17 @@ struct ContentView: View {
             showingExportSheet = true
         case .exportOpenImage:
             LibraryPanel.exportOpenImage(model: model, library: library)
-        case .undo:
+        // Develop undoes edits in its own history; the other modes undo
+        // library actions. The editor saves first, so an undo restoring the
+        // open image's edit isn't overwritten by an edit still waiting.
+        case .undo where mode == .develop:
             model.undo()
-        case .redo:
+        case .redo where mode == .develop:
             model.redo()
+        case .undo:
+            model.flushPendingSave(); library.undoManager?.undo()
+        case .redo:
+            model.flushPendingSave(); library.undoManager?.redo()
         case .copySettings:
             copySettings()
         case .pasteSettings:
@@ -697,6 +725,7 @@ struct ContentView: View {
         let history = model.history
         state.undoLabel = history.canUndo ? history.steps[history.cursor].label : nil
         state.redoLabel = history.canRedo ? history.steps[history.cursor + 1].label : nil
+        if mode != .develop { (state.undoLabel, state.redoLabel) = (libraryUndo.labels.undo, libraryUndo.labels.redo) }
         state.isEditingText = editingText
         state.showingBefore = model.showingBefore
         state.cropToolActive = model.cropToolActive
@@ -741,7 +770,7 @@ struct ContentView: View {
 
     private func pasteSettings() {
         guard let stack = EditorModel.clipboardStack() else { model.reportError("Nothing to paste"); return }
-        applyToSelectionOrEditor(stack, groups: model.pasteGroups, what: "Pasted")
+        applyToSelectionOrEditor(stack, groups: model.pasteGroups, what: "Pasted", undoName: "Paste Settings")
     }
 
     /// Where pasted settings and a preset go. The grid changes the stored
@@ -763,7 +792,7 @@ struct ContentView: View {
         }
     }
 
-    private func applyToSelectionOrEditor(_ stack: EditStack, groups: Set<EditGroup>, what: String) {
+    private func applyToSelectionOrEditor(_ stack: EditStack, groups: Set<EditGroup>, what: String, undoName: String) {
         let target = SettingsTarget.choose(mode: mode, editorHasImage: model.hasImage,
                                            editorImageID: model.catalogImageID, primaryID: library.selectedImageID)
         // Compare's Select pane may show the candidate's own photo. It never
@@ -781,7 +810,8 @@ struct ContentView: View {
             do {
                 outcome = try await library.transformSelectedEdits(
                     onlyPrimary: target == .primary,
-                    schemaVersion: EditStack.schemaVersion, processVersion: EditStack.processVersion
+                    schemaVersion: EditStack.schemaVersion, processVersion: EditStack.processVersion,
+                    undoName: undoName
                 ) { existing in
                     // An unreadable existing edit throws here and the image
                     // is skipped, never replaced by the pasted modules alone.
@@ -808,7 +838,8 @@ struct ContentView: View {
     }
 
     private func applyPresetToSelection(_ preset: Preset) {
-        applyToSelectionOrEditor(preset.stack, groups: preset.groups, what: "Applied “\(preset.name)” —")
+        applyToSelectionOrEditor(preset.stack, groups: preset.groups, what: "Applied “\(preset.name)” —",
+                                 undoName: "Apply Preset")
     }
 
     private func step(_ offset: Int) {

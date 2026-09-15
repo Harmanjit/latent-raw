@@ -40,7 +40,7 @@ public final class Library: ObservableObject {
     }
     /// image id → keywords, for filtering; refreshed with the image list
     /// and whenever keywords are edited.
-    private var keywordIndex: [Int64: Set<String>] = [:] {
+    var keywordIndex: [Int64: Set<String>] = [:] {
         didSet { if filter.keyword != nil, !isPatchingRecords { recomputeVisible() } }
     }
     @Published public private(set) var isBusy = false
@@ -60,7 +60,7 @@ public final class Library: ObservableObject {
     /// Cleared by the next success or by the user.
     @Published public var lastError: String?
     /// Images that have a stored edit, so the grid can badge them.
-    @Published public private(set) var editedImageIDs: Set<Int64> = [] {
+    @Published public internal(set) var editedImageIDs: Set<Int64> = [] {
         didSet { if filter.editedOnly, !isPatchingRecords { recomputeVisible() } }
     }
 
@@ -281,6 +281,12 @@ public final class Library: ObservableObject {
     /// undone, as in tests that don't set one.
     public weak var undoManager: UndoManager?
 
+    /// Called when an undo or redo has put back rotations or stored edits
+    /// of images in the open catalog, so an editor holding one catches up.
+    public var didRestoreImages: (@MainActor (Set<Int64>, RestoredAspect) -> Void)?
+    /// The undo or redo being restored last; the next waits for it.
+    var undoRestores: Task<Void, any Error>?
+
     /// Tests only: runs after a folder's list is read and before it is
     /// shown, so a test can hold one open or refresh while another finishes.
     var willPublishList: (@MainActor (Catalog) async throws -> Void)?
@@ -372,6 +378,7 @@ public final class Library: ObservableObject {
     private func publish(_ list: LoadedList, of catalog: Catalog, isNewCatalog: Bool) {
         if isNewCatalog {
             willReplaceCatalog?()
+            if let old = self.catalog, old !== catalog { dropUndo(for: old) }
             thumbnailTask?.cancel()
             // Image ids belong to a catalog: nothing decoded for the old one
             // may be shown, or cached, under the new one's ids. Ids also
@@ -418,7 +425,7 @@ public final class Library: ObservableObject {
 
     // MARK: - Thumbnails
 
-    private func startThumbnailGeneration() {
+    func startThumbnailGeneration() {
         guard let catalog else { return }
         thumbnailTask?.cancel()
         thumbnailsDone = 0
@@ -601,11 +608,27 @@ public final class Library: ObservableObject {
     }
 
     public func setRating(_ rating: Int, onlyPrimary: Bool = false) async throws {
-        try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in try await catalog.setRating(rating, forImageID: id) }
+        let written = catalog, after = min(max(rating, 0), 5), before = UndoLedger<Int>()
+        defer {
+            let changed = before.recorded.filter { $0.value != after }
+            fileFreshUndo("Rating", count: changed.count, in: written,
+                          undo: .rating(changed), redo: .rating(changed.mapValues { _ in after }))
+        }
+        try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in
+            if let previous = try await catalog.exchangeRating(rating, forImageID: id) { before.record(id, previous) }
+        }
     }
 
     public func setFlag(_ flag: ImageFlag, onlyPrimary: Bool = false) async throws {
-        try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in try await catalog.setFlag(flag, forImageID: id) }
+        let written = catalog, before = UndoLedger<Int>()
+        defer {
+            let changed = before.recorded.filter { $0.value != flag.rawValue }
+            fileFreshUndo("Flag", count: changed.count, in: written,
+                          undo: .flag(changed), redo: .flag(changed.mapValues { _ in flag.rawValue }))
+        }
+        try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in
+            if let previous = try await catalog.exchangeFlag(flag, forImageID: id) { before.record(id, previous) }
+        }
     }
 
     /// Keywords stay primary-only: the keyword field shows the primary's
@@ -614,13 +637,19 @@ public final class Library: ObservableObject {
     public func setKeywords(_ keywords: [String]) async throws {
         let written = catalog
         let target = selectedImage
+        let cleaned = Set(keywords.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        let before = UndoLedger<[String]>()
+        defer {
+            let changed = before.recorded.filter { Set($0.value) != cleaned }
+            fileFreshUndo("Keywords", count: changed.count, in: written,
+                          undo: .keywords(changed), redo: .keywords(changed.mapValues { _ in cleaned.sorted() }))
+        }
         try await change(target.map { [$0] } ?? []) { catalog, id, _ in
-            try await catalog.setKeywords(keywords, forImageID: id)
+            before.record(id, try await catalog.exchangeKeywords(keywords, forImageID: id))
         }
         // The image written, not whatever is selected after the write, and
         // only while its catalog is still the open one.
         if let id = target?.id, written === catalog {
-            let cleaned = Set(keywords.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
             keywordIndex[id] = cleaned.isEmpty ? nil : cleaned
         }
     }
@@ -631,8 +660,15 @@ public final class Library: ObservableObject {
     /// the first is still writing would otherwise start from the same
     /// rotation and lose a turn.
     public func rotateSelected(by quarterTurns: Int, onlyPrimary: Bool = false) async throws {
+        let written = catalog, turned = UndoLedger<Bool>()
+        defer {
+            let ids = quarterTurns % 4 == 0 ? [] : Array(turned.recorded.keys)
+            fileFreshUndo("Rotation", count: ids.count, in: written,
+                          undo: .rotation(ids, quarterTurns: -quarterTurns), redo: .rotation(ids, quarterTurns: quarterTurns))
+        }
         try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in
             try await catalog.rotate(by: quarterTurns, forImageID: id)
+            turned.record(id, true)
         }
     }
 
@@ -680,17 +716,25 @@ public final class Library: ObservableObject {
     /// stack's contents. An image whose existing edit can't be read, or
     /// whose transform throws, is skipped and named in the outcome.
     /// `onlyPrimary` as for ratings: a view showing one image changes that one.
+    /// Undo, under `undoName`, puts back each changed image's stored edit.
     @discardableResult
     public func transformSelectedEdits(onlyPrimary: Bool = false, schemaVersion: Int, processVersion: String,
+                                       undoName: String = "Change Settings",
                                        _ transform: (String?) throws -> String?) async throws -> TransformOutcome {
         guard let catalog else { return TransformOutcome() }
         var outcome = TransformOutcome()
+        var before: [Int64: StoredEdit?] = [:], after: [Int64: StoredEdit?] = [:]
+        defer {
+            fileFreshUndo(undoName, count: before.count, in: catalog, undo: .edits(before), redo: .edits(after))
+        }
         for record in onlyPrimary ? metadataTargets(onlyPrimary: true) : selectedImages {
             guard let id = record.id else { continue }
+            let stored: StoredEdit?
             let existing: String?
             let next: String?
             do {
-                existing = try await catalog.editStack(forImageID: id)
+                stored = try await catalog.storedEdit(forImageID: id)
+                existing = stored?.json
                 next = try transform(existing)
             } catch {
                 outcome.skipped.append(record.fileName)
@@ -700,6 +744,8 @@ public final class Library: ObservableObject {
             if next != existing {
                 try await catalog.setEditStack(next, schemaVersion: schemaVersion,
                                                processVersion: processVersion, forImageID: id)
+                before[id] = .some(stored)
+                after[id] = .some(next.map { StoredEdit(json: $0, schemaVersion: schemaVersion, processVersion: processVersion) })
                 // The badges are the open catalog's; another folder may
                 // have opened during the write.
                 if catalog === self.catalog {
