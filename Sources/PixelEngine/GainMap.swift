@@ -130,29 +130,35 @@ extension RenderOutput {
 }
 
 extension Exporter {
-    /// `write` for a JPEG or HEIC with a gain map. `texture` is the SDR
-    /// render; `hdrRender` renders the same edit for another output.
+    /// `encodableImage` for a JPEG or HEIC with a gain map. `texture` is the
+    /// SDR render; `hdrRender` renders the same edit for another output.
     ///
     /// Order matters. The pipeline pools its output textures by role, so
     /// the HDR render reuses, and overwrites, the SDR one. Everything the
     /// SDR render is needed for (the file's pixels and the map's base) is
     /// read before the HDR render runs.
-    func writeWithGainMap(_ texture: MTLTexture, to url: URL, settings: ExportSettings,
-                          colorSpace: ColorKit.OutputSpace, rotation: ImageRotation, crop: CropParameters,
-                          metadata: ExportMetadata?, maxLongEdge: Int?, replacingExisting: Bool = true,
-                          hdrRender: (RenderOutput) throws -> MTLTexture) throws -> (width: Int, height: Int) {
+    func gainMapImage(_ texture: MTLTexture, settings: ExportSettings,
+                      colorSpace: ColorKit.OutputSpace, rotation: ImageRotation, crop: CropParameters,
+                      maxLongEdge: Int?,
+                      hdrRender: (RenderOutput) throws -> MTLTexture) throws -> EncodableImage {
         let headroom = GainMap.exportHeadroom
         let base = try linearTexture(from: texture, rotation: rotation, crop: crop,
                                      maxLongEdge: maxLongEdge, sourceIsEncoded: true)
-        let image = try cgImage(from: texture, colorSpace: colorSpace, rotation: rotation, crop: crop,
-                                bitsPerComponent: settings.format.bitsPerComponent, maxLongEdge: maxLongEdge)
+        let packed = try packedTexture(from: texture, rotation: rotation, crop: crop,
+                                       bitsPerComponent: settings.format.bitsPerComponent, maxLongEdge: maxLongEdge)
+        let watermark = settings.watermark.flatMap {
+            PlacedWatermark($0, imageWidth: packed.width, imageHeight: packed.height, colorSpace: colorSpace)
+        }
+        let image = try cgImage(packed: packed, colorSpace: colorSpace,
+                                bitsPerComponent: settings.format.bitsPerComponent, watermark: watermark)
         let hdr = try hdrRender(.hdrFile(colorSpace, headroom: headroom))
         let alternate = try linearTexture(from: hdr, rotation: rotation, crop: crop,
                                           maxLongEdge: maxLongEdge, sourceIsEncoded: false)
-        let map = try gainMap(base: base, alternate: alternate, headroom: headroom)
-        try Self.write(cgImage: image, to: url, settings: settings, metadata: metadata, gainMap: map,
-                       replacingExisting: replacingExisting)
-        return (image.width, image.height)
+        var map = try gainMap(base: base, alternate: alternate, headroom: headroom)
+        if let watermark {
+            map = watermark.neutralising(map, imageWidth: image.width, imageHeight: image.height)
+        }
+        return EncodableImage(image: image, gainMap: map)
     }
 
     /// A render cropped, rotated and resampled to gain-map size (half the

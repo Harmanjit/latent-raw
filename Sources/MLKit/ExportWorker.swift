@@ -63,7 +63,7 @@ public enum ExportWorker {
         public let pixelHeight: Int
         public let seconds: TimeInterval
         public let masksGenerated: Int
-        /// Where the time went, in seconds: "unpack", "masks", "render", "write".
+        /// Where the time went, in seconds: "unpack", "masks", "render", "pack", "write".
         public let phases: [(String, TimeInterval)]
 
         public var description: String {
@@ -73,7 +73,52 @@ public enum ExportWorker {
         }
     }
 
+    /// An export's pixels and metadata, ready to encode: everything
+    /// `export` does before the file is written.
+    ///
+    /// `@unchecked Sendable`: immutable once made (see
+    /// `Exporter.EncodableImage`).
+    public struct Rendered: @unchecked Sendable {
+        /// The file's pixels, watermark included, and any gain map.
+        public let image: Exporter.EncodableImage
+        /// What the file would carry besides pixels; nil when metadata is off.
+        public let metadata: ExportMetadata?
+        /// The request's settings with the watermark's tokens filled in.
+        public let settings: ExportSettings
+        public let masksGenerated: Int
+        public let phases: [(String, TimeInterval)]
+        let start: Date
+
+        public var pixelWidth: Int { image.image.width }
+        public var pixelHeight: Int { image.image.height }
+
+        /// The file these pixels make at `settings` (another quality, say),
+        /// in memory.
+        public func encoded(with settings: ExportSettings) throws -> Data {
+            try Exporter.encode(image, settings: settings, metadata: metadata)
+        }
+    }
+
     public static func export(_ request: Request, gpu: GPUContext) async throws -> Outcome {
+        let rendered = try await render(request, gpu: gpu)
+        let mark = Date()
+        try Exporter.write(cgImage: rendered.image.image, to: request.destinationURL, settings: rendered.settings,
+                           metadata: rendered.metadata, gainMap: rendered.image.gainMap,
+                           replacingExisting: request.replacesExisting)
+        let phases = rendered.phases + [("write", Date().timeIntervalSince(mark))]
+        return Outcome(pixelWidth: rendered.pixelWidth, pixelHeight: rendered.pixelHeight,
+                       seconds: Date().timeIntervalSince(rendered.start), masksGenerated: rendered.masksGenerated,
+                       phases: phases)
+    }
+
+    /// The export's pixels and metadata without writing a file; the request's
+    /// destination is not used. The export sheet encodes the result at
+    /// several settings to estimate sizes and compare qualities, so what it
+    /// shows is what the export writes.
+    ///
+    /// Stops between phases when its task is cancelled (the queue's tasks
+    /// never are, so a started file is always finished).
+    public static func render(_ request: Request, gpu: GPUContext) async throws -> Rendered {
         let start = Date()
         var phases: [(String, TimeInterval)] = []
         var mark = Date()
@@ -83,6 +128,7 @@ public enum ExportWorker {
         let session = try ImageSession(file: file, gpu: gpu)
         let pipeline = RenderPipeline(gpu: gpu)
         lap("unpack")
+        try Task.checkCancellation()
 
         // The edit, over this image's defaults — exactly as the editor
         // would reconstruct it.
@@ -97,12 +143,14 @@ public enum ExportWorker {
         // Model-generated masks are not stored; make them again.
         let masksGenerated = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
         lap("masks")
+        try Task.checkCancellation()
 
         // Neural denoise is computed, not stored: run it for the export.
         if parameters.aiDenoise > 0, AIDenoiser.isAvailable {
             let denoiser = try await AIDenoiser.load()
             try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
             lap("denoise")
+            try Task.checkCancellation()
         }
 
         let scale = ExportPlan.scale(for: file.summary, maxLongEdge: request.maxLongEdge)
@@ -135,24 +183,28 @@ public enum ExportWorker {
             }
         }
 
+        // The watermark's tokens, for this image: its capture year (today's
+        // when the raw has none) and its name.
+        var settings = request.settings
+        settings.watermark = request.settings.watermark?.resolved(
+            fileName: request.sourceURL.deletingPathExtension().lastPathComponent,
+            captureDate: metadata.captureDate ?? Date())
+        if settings.watermark?.isEmpty == true { settings.watermark = nil }
+
         // Rotation, the final resize and the quantisation to 8 or 16 bits
-        // all happen on the GPU inside the exporter; the CPU only hands the
-        // bytes to the encoder. A gain map needs the edit rendered a second
-        // time with HDR headroom, which the exporter asks for when it's ready.
-        let exporter = Exporter(gpu: gpu)
-        let written = try exporter.write(texture, to: request.destinationURL, settings: request.settings,
-                                         colorSpace: request.colorSpace, rotation: rotation,
-                                         crop: parameters.crop,
-                                         metadata: request.includeMetadata ? metadata : nil,
-                                         maxLongEdge: request.maxLongEdge,
-                                         replacingExisting: request.replacesExisting,
-                                         hdrRender: { output in
-                                             try pipeline.render(session, scale: scale, parameters: parameters, output: output)
-                                         })
-        lap("write")
-        return Outcome(pixelWidth: written.width, pixelHeight: written.height,
-                       seconds: Date().timeIntervalSince(start), masksGenerated: masksGenerated,
-                       phases: phases)
+        // all happen on the GPU inside the exporter; the CPU only reads the
+        // bytes back, stamps the watermark into them and hands them on. A
+        // gain map needs the edit rendered a second time with HDR headroom,
+        // which the exporter asks for when it's ready.
+        let image = try Exporter(gpu: gpu).encodableImage(
+            texture, settings: settings, colorSpace: request.colorSpace, rotation: rotation,
+            crop: parameters.crop, maxLongEdge: request.maxLongEdge,
+            hdrRender: { output in
+                try pipeline.render(session, scale: scale, parameters: parameters, output: output)
+            })
+        lap("pack")
+        return Rendered(image: image, metadata: request.includeMetadata ? metadata : nil, settings: settings,
+                        masksGenerated: masksGenerated, phases: phases, start: start)
     }
 
     /// Generates pixels for every AI and prompted local, the same way the
