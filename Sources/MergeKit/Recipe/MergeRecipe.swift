@@ -1,6 +1,7 @@
 // The latent:Merge record: what a merged photo was made from and how.
 
 import Foundation
+import RawCore
 
 /// How a merged photo was made, stored as JSON inside its DNG's XMP and its
 /// .xmp sidecar (`MergeXMP`). Provenance, and what the editor needs to know
@@ -56,9 +57,16 @@ public struct MergeRecipe: Codable, Sendable, Equatable {
     /// The merge's settings (deghost amount, projection...), open-ended.
     public var options: [String: JSONValue]
     public var sources: [Source]
+    /// The reference frame's lens as its raw described it (the `"lens"`
+    /// key; see `LinearMergeInfo.Lens` for why and its JSON). Optional, so
+    /// recipes written before it existed still decode. nil here means
+    /// "take it from the DNG's metadata": the writer fills it in from
+    /// `MergeDNGMetadata.lens`.
+    public var lens: LinearMergeInfo.Lens?
 
     public init(kind: Kind, algorithmVersion: String = "1", clipLevel: Float, lensApplied: Bool,
-                baselineShift: Int = 0, reference: Int, options: [String: JSONValue] = [:], sources: [Source]) {
+                baselineShift: Int = 0, reference: Int, options: [String: JSONValue] = [:], sources: [Source],
+                lens: LinearMergeInfo.Lens? = nil) {
         self.version = Self.currentVersion
         self.kind = kind
         self.algorithmVersion = algorithmVersion
@@ -68,6 +76,7 @@ public struct MergeRecipe: Codable, Sendable, Equatable {
         self.reference = reference
         self.options = options
         self.sources = sources
+        self.lens = lens
     }
 
     /// The recipe as it describes the stored file: `clipLevel` divided like
@@ -81,6 +90,19 @@ public struct MergeRecipe: Codable, Sendable, Equatable {
         return stored
     }
 
+    /// The recipe with the lens of `reference` (the reference frame's
+    /// summary) when it has none: what the writer stores for a DNG whose
+    /// metadata came from that summary, since it fills a missing lens from
+    /// `MergeDNGMetadata.lens`. A merge that hands the recipe to the app
+    /// before the DNG is written, for the sidecar, applies this too, so the
+    /// sidecar and the DNG hold the same recipe.
+    public func withLens(of reference: RawSummary) -> MergeRecipe {
+        guard lens == nil else { return self }
+        var withLens = self
+        withLens.lens = LinearMergeInfo.Lens(summary: reference)
+        return withLens
+    }
+
     /// Compact JSON with sorted keys, so the same recipe is always the same bytes.
     public func jsonData() throws -> Data {
         let encoder = JSONEncoder()
@@ -90,6 +112,14 @@ public struct MergeRecipe: Codable, Sendable, Equatable {
 
     public init(jsonData: Data) throws {
         self = try JSONDecoder().decode(MergeRecipe.self, from: jsonData)
+    }
+}
+
+extension LinearMergeInfo.Lens {
+    /// A raw file's lens as the recipe records it: its EXIF name and its
+    /// whole identity, exactly as LibRaw read them.
+    public init(summary: RawSummary) {
+        self.init(model: summary.lensModel, identity: summary.lens)
     }
 }
 

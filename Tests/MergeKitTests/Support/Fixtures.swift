@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import RawCore
 @testable import MergeKit
 
 /// Shared inputs: a D750-like reference frame (the spike's numbers), a
@@ -24,6 +25,28 @@ enum Fixtures {
             lensMake: "Nikon", lensModel: "AF-S NIKKOR 24-70mm f/2.8E ED VR",
             lensSpecification: .init(minFocalLength: 24, maxFocalLength: 70,
                                      maxApertureAtMinFocal: 2.8, maxApertureAtMaxFocal: 2.8))
+    }
+
+    /// A reference frame's summary as the decoder service would send it
+    /// (RawSummary has no public initialiser; its wire form does), with
+    /// the D750 colour of `metadata()` and the given lens.
+    static func summary(make: String = "Nikon", model: String = "D750", lensModel: String,
+                        lens: LensIdentity, focalLength: Double = 35) throws -> RawSummary {
+        let json: [String: Any] = [
+            "width": 6016, "height": 4016, "leftMargin": 0, "topMargin": 0, "rawWidth": 6032, "rawHeight": 4032,
+            "cfaCode": 0x94, "cameraMultipliers": d750Multipliers + [0], "blackLevel": 600, "whiteLevel": 15520,
+            "channelBlackLevels": [600, 600, 600, 600], "dataMaximum": 15000, "baselineExposure": 0,
+            "cameraMake": make, "cameraModel": model, "lensModel": lensModel,
+            "iso": 100, "shutter": 1.0 / 250, "aperture": 8, "focalLength": focalLength, "timestamp": 1_789_498_800,
+            "orientation": 0, "lensMake": lens.make, "lensMakerNotesName": lens.makerNotesName,
+            "makerLensID": lens.makerLensID, "nikonLensID": lens.nikonLensID, "nikonLensType": lens.nikonLensType,
+            "minFocal": lens.minFocal, "maxFocal": lens.maxFocal,
+            "maxApertureAtMinFocal": lens.maxApertureAtMinFocal, "maxApertureAtMaxFocal": lens.maxApertureAtMaxFocal,
+            "cropFactor": lens.cropFactor,
+            "thumbnailError": 0, "isMetadataOnly": true, "planeSampleCount": 0,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        return try JSONDecoder().decode(RawSnapshotMetadata.self, from: data).summary
     }
 
     static func recipe(clipLevel: Float = 8) -> MergeRecipe {

@@ -66,7 +66,7 @@ final class DNGTagTests: XCTestCase {
         let d = try directories().ifd0
         XCTAssertEqual(d.entries.map(\.tag), [254, 256, 257, 258, 259, 262, 271, 272, 273, 274, 277, 278, 279, 284,
                                               305, 306, 330, 700, 34665, 50706, 50707, 50708, 50721, 50728, 50730,
-                                              50778], "exactly these tags, in ascending order")
+                                              50736, 50778], "exactly these tags, in ascending order")
         XCTAssertEqual(d.nextOffset, 0, "IFD0 is the only top-level directory")
 
         try integers(d, 254, type: 4, [1])
@@ -104,6 +104,9 @@ final class DNGTagTests: XCTestCase {
         // -1.5 before normalisation, and 6.0 needs 3 stops.
         let baseline = try reader.srationals(entry(d, 50730, type: 10, count: 1))
         XCTAssertEqual(Double(baseline[0].0) / Double(baseline[0].1), 1.5)
+        // DNG LensInfo: the same four values as EXIF's LensSpecification.
+        let lensInfo = try reader.rationals(entry(d, 50736, type: 5, count: 4))
+        XCTAssertEqual(lensInfo.map { Double($0.0) / Double($0.1) }, [24, 70, 2.8, 2.8])
         try integers(d, 50778, type: 3, [21])
 
         // The thumbnail strip is 8-bit RGB of the preview.

@@ -85,8 +85,10 @@
 | `AsShotNeutral` / `ColorMatrix1` | Reference frame's 1/`cam_mul` and `cam_xyz`, plus `CalibrationIlluminant1 = 21` (D65) |
 | `clipScale` | Stored explicitly (= 2^span) in a `latent:Merge` XMP block |
 | `lensApplied` | HDR: **false**, and the lens identity is kept, so Lensfun runs once on the master. Panorama: **true**, correction baked in, and `LensModel` removed from EXIF |
+| Lens tags | The reference frame's lens for other apps: EXIF `LensMake`, `LensModel` (the raw's EXIF name, else its maker-notes name, else a name built from the range such as "17-55mm f/2.8"), `LensSpecification` and DNG `LensInfo` (4 RATIONALs; unknown values are 0/0) |
 | Preview | ~1600 px JPEG in IFD0, so `Thumbnailer.swift:58` works unchanged |
 | Recipe | `latent:Merge` JSON: kind, options, algorithm version, each source's relative path, xxhash and capture time. **Provenance only**; Latent does not promise re-merge |
+| Recipe `lens` | Optional object: the reference frame's lens exactly as LibRaw read its raw. Keys `model` (EXIF name, may be empty), `make`, `makerNotesName`, `makerLensID` (integer; 18446744073709551615 = not set), `nikonLensID`, `nikonLensType`, `minFocal`, `maxFocal`, `maxApertureAtMinFocal`, `maxApertureAtMaxFocal`, `cropFactor` (0 = unknown). The writer fills it from the DNG metadata when the recipe has none. When present, a linear source's `RawSummary.lens` and `lensModel` come from it, not from the EXIF tags, because EXIF can't hold maker-notes names or lens IDs and profile matching uses them. Absent (older recipes) or unreadable: LibRaw's reading of the EXIF tags. Unknown keys are ignored |
 
 Two notes on the table:
 - **Why relative to the brightest frame.** Shadows come from that frame at their native scale. (The HDR design's "subnormal" argument was wrong in detail, but the conclusion holds.)

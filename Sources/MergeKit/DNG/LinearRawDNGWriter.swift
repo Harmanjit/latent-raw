@@ -97,7 +97,8 @@ public struct LinearRawDNGWriter: Sendable {
     ///     A sample still above 1.0 after dividing stops the write.
     ///   - metadata: the reference frame's camera and colour tags.
     ///   - recipe: in the merge's units; the writer rescales `clipLevel` and
-    ///     sets `baselineShift` (see `MergeRecipe.normalised(by:)`).
+    ///     sets `baselineShift` (see `MergeRecipe.normalised(by:)`), and
+    ///     gives a recipe without a lens the metadata's (`MergeDNGMetadata.lens`).
     ///   - preview: the merge rendered for display, unrotated; the JPEG
     ///     preview and the thumbnail are resampled from it.
     ///   - replacingExisting: false (a merge's usual case) makes a file that
@@ -110,7 +111,11 @@ public struct LinearRawDNGWriter: Sendable {
         // Half floats top out at 65504, under 2^16: a larger maximum can't
         // describe these pixels, and dividing by more would round them to 0.
         guard normalisation.shift <= 16 else { throw MergeDNGError.invalidMaximum(maximum) }
-        let storedRecipe = recipe.normalised(by: normalisation)
+        var storedRecipe = recipe.normalised(by: normalisation)
+        // The merge's code builds the recipe and the metadata separately;
+        // the lens comes with the metadata (from the reference frame's
+        // summary), so every merge records it without having to pass it twice.
+        if storedRecipe.lens == nil { storedRecipe.lens = metadata.lens }
         var layout = try TIFFLayout(topLevel: [
             try makeFile(pixels, normalisation: normalisation, metadata: metadata,
                          recipe: storedRecipe, preview: preview),
@@ -208,6 +213,9 @@ public struct LinearRawDNGWriter: Sendable {
         ifd0.set(TIFFTag.asShotNeutral, .rationals(tags.asShotNeutral))
         ifd0.set(TIFFTag.baselineExposure, .srationals([tags.baselineExposure]))
         ifd0.set(TIFFTag.calibrationIlluminant1, short: 21) // D65: the light ColorMatrix1 was measured under
+        // DNG's own copy of EXIF's LensSpecification, for readers that
+        // look for lens data in IFD0 rather than the EXIF directory.
+        if let v = tags.lensSpecification { ifd0.set(TIFFTag.lensInfo, .rationals(v)) }
         return ifd0
     }
 
@@ -369,6 +377,9 @@ struct DNGTagValues {
         }
         lensSpecification = try m.lensSpecification.map { spec in
             try [spec.minFocalLength, spec.maxFocalLength, spec.maxApertureAtMinFocal, spec.maxApertureAtMaxFocal].map {
+                // EXIF writes an unknown value as 0/0, which readers (LibRaw
+                // and ImageIO included) take as 0: "not recorded".
+                if $0 == 0 { return TIFFRational(0, 0) }
                 guard let r = TIFFRational($0, denominator: 100) else { throw invalid("lens specification value \($0)") }
                 return r
             }
