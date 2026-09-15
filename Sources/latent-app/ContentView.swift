@@ -44,6 +44,8 @@ struct ContentView: View {
     @ObservedObject private var exportQueue = MainWindowModels.shared.exportQueue
     @ObservedObject private var prefs = AppPreferences.shared
     @ObservedObject private var handOff = ExternalEditorHandOff.shared
+    @ObservedObject private var fileOperations = MainWindowModels.shared.library.fileOperations
+    @ObservedObject private var navigator = FolderNavigator.shared
     @State private var mode: AppMode = .library
     @State private var showingExportSheet = false
     /// Compare's left pane ("Select"): its own render, created the first
@@ -66,11 +68,16 @@ struct ContentView: View {
     @State private var editingText = false
     /// Compare's panes zoom and pan together (see `EditorModel.linkedPane`).
     @State private var compareSyncsView = true
+    /// The image Rename (F2) is naming, while its sheet is up.
+    @State private var renaming: ImageRecord?
 
     var body: some View {
         NavigationSplitView(columnVisibility: sidebarVisibility) {
             FolderSidebar(favourites: FavouriteFolders.shared, currentFolder: openingFolder ?? library.folderURL,
-                          onOpen: openFolder, onChooseFolder: chooseFavouriteFolder)
+                          onOpen: { openFolder($0) }, onChooseFolder: chooseFavouriteFolder,
+                          onDropImages: { fileCommands.dropImages($0, on: $1, mode: $2) },
+                          areLibraryImages: { fileCommands.areLibraryImages($0) },
+                          navigator: navigator, onStepHistory: stepFolderHistory)
                 .navigationSplitViewColumnWidth(min: 170, ideal: 220, max: 360)
         } detail: {
             mainArea
@@ -163,9 +170,21 @@ struct ContentView: View {
             }
             .motionFollowsAccessibility()
         }
+        .sheet(item: $renaming) { record in
+            RenameSheet(record: record) { name in
+                do {
+                    try await library.fileOperations.rename(record, to: name)
+                    return nil
+                } catch {
+                    return "\(error)"
+                }
+            }
+            .motionFollowsAccessibility()
+        }
         .onAppear {
             LensfunDatabase.warmUp()
             wireEditSaving()
+            wireFileOperations()
             // Quitting flushes and waits for these (AppDelegate).
             AppDelegate.register(model: model, library: library, exportQueue: exportQueue)
             if let gpu = model.gpu {
@@ -222,7 +241,7 @@ struct ContentView: View {
     /// main thread, and a refusal arrives a moment later, with the reason
     /// in the status bar and the sidebar's highlight moved back.
     @discardableResult
-    private func openFolder(_ url: URL) -> Bool {
+    private func openFolder(_ url: URL, restoring entry: FolderHistory.Entry? = nil) -> Bool {
         openingFolder = url
         // Through perform, so quitting waits for the catalog it is building.
         library.perform("Opening \(url.lastPathComponent)") {
@@ -255,7 +274,10 @@ struct ContentView: View {
             closeEditorForFolderChange()
             // And again as the new list replaces the old, for an image of the
             // old folder opened while this one loaded.
-            library.willReplaceCatalog = { closeEditorForFolderChange() }
+            library.willReplaceCatalog = {
+                FolderNavigator.shared.remember(library)
+                closeEditorForFolderChange()
+            }
             mode = .library
             await attachEditedThumbnailRenderer()
             do {
@@ -263,6 +285,13 @@ struct ContentView: View {
                 // itself as the one to reopen.
                 guard try await library.open(folder: folder, defaultSubfolderMode: prefs.defaultSubfolderMode) else {
                     return
+                }
+                // Back and Forward: a folder gone back to gets its selection
+                // back; any other becomes the newest in the history.
+                if let entry {
+                    navigator.restoreSelection(entry, in: library)
+                } else {
+                    navigator.visit(folder)
                 }
                 BookmarkStore.save(folder, key: BookmarkStore.lastFolder)
                 if let setAside = library.catalog?.damagedDatabaseSetAside {
@@ -291,6 +320,40 @@ struct ContentView: View {
         model.closeImage()
         compareModel = nil
         compareRecord = nil
+    }
+
+    // MARK: - Files
+
+    private var fileCommands: LibraryFileCommands { LibraryFileCommands(library: library) }
+
+    /// Once: undoing a copy uses the Trash, and an image about to move or be
+    /// renamed is saved and closed in the editor (its path is changing).
+    private func wireFileOperations() {
+        library.fileOperations.recycle = { urls in
+            _ = try await NSWorkspace.shared.recycle(urls)
+        }
+        library.fileOperations.willMoveImages = { ids in
+            let editorImage = model.catalogImageID.map(ids.contains) ?? false
+            let compareImage = compareRecord?.id.map(ids.contains) ?? false
+            if editorImage || compareImage { closeEditorForFolderChange() }
+        }
+    }
+
+    /// F2: the rename sheet for the selected image.
+    private func beginRename() {
+        guard let record = library.selectedImage else { return }
+        renaming = record
+    }
+
+    /// Back (-1) or Forward (+1). The history moves at once, so pressing
+    /// twice goes two folders, and the folder opens as any other does.
+    private func stepFolderHistory(_ offset: Int) {
+        guard let entry = navigator.step(offset) else { return }
+        if let open = library.folderURL, FolderAccess.samePath(open, entry.folder) {
+            navigator.restoreSelection(entry, in: library)
+            return
+        }
+        openFolder(entry.folder, restoring: entry)
     }
 
     /// Adds a folder to the sidebar's Favourites through the open panel,
@@ -351,7 +414,11 @@ struct ContentView: View {
             canPasteSettings: { EditorModel.clipboardStack() != nil },
             presets: { model.presets }, applyPreset: applyPresetToSelection,
             export: { showingExportSheet = true },
-            canExport: { !exportQueue.isRunning })
+            canExport: { !exportQueue.isRunning },
+            rename: beginRename,
+            canChangeFiles: { !fileOperations.isBusy && !exportQueue.isRunning },
+            transfer: { fileCommands.transferSelection($0, to: $1) },
+            recentDestinations: { RecentDestinations.shared.availableFolders })
     }
 
     /// Loads `record` (with its stored edit, history and snapshots) into
@@ -692,6 +759,16 @@ struct ContentView: View {
             model.showMaskOverlay.toggle()
         case .toolSize(let steps):
             model.stepToolSize(by: steps)
+        case .rename:
+            beginRename()
+        case .moveToFolder:
+            fileCommands.transferSelection(.move, to: nil)
+        case .copyToFolder:
+            fileCommands.transferSelection(.copy, to: nil)
+        case .back:
+            stepFolderHistory(-1)
+        case .forward:
+            stepFolderHistory(1)
         }
         return true
     }
@@ -725,6 +802,9 @@ struct ContentView: View {
         state.showMaskOverlay = model.showMaskOverlay
         state.filterActive = library.filter.isActive
         state.hasCompareSelect = compareRecord != nil
+        state.canGoBack = navigator.history.canGoBack
+        state.canGoForward = navigator.history.canGoForward
+        state.fileOperationRunning = fileOperations.isBusy
         return state
     }
 
@@ -1380,6 +1460,8 @@ struct ContentView: View {
                 .disabled(mode != .loupe && mode != .develop)
                 .help(filmstripVisible ? "Hide the filmstrip in Loupe and Develop" : "Show the filmstrip in Loupe and Develop")
                 .accessibilityLabel("Filmstrip")
+
+            FileOperationStatus(operations: fileOperations)
 
             if let problem = currentProblem {
                 HStack(spacing: 4) {

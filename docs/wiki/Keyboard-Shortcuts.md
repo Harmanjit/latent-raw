@@ -20,6 +20,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | ⇧X | Compare: make the candidate the Select |
 | ⇧⌘O | Open folder |
 | ⌘Return | Slideshow of the selection, or of every image the filter shows (in the show: ← and → step, Space pauses, Esc ends) |
+| ⌥⌘←, ⌥⌘→ | Back / forward through the folders opened, back to the images you had selected |
 | ⌘, | Settings |
 | ⌘? | Latent Help (these pages) |
 
@@ -57,3 +58,10 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | ⌥⌘R | Reveal the selection in Finder |
 | ⌘P | Print the selection (in Library) or the image shown |
 | ⌘E | Edit in External Editor: a 16-bit TIFF of the open or selected image, opened in the app chosen in Settings |
+
+## Files
+
+| Keys | Action |
+|---|---|
+| F2 | Rename the selected image (its sidecar and thumbnail follow) |
+| Drag images onto a sidebar folder | Move them there with their edits (hold ⌥ to copy) |

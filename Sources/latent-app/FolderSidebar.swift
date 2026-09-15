@@ -21,12 +21,26 @@ struct FolderSidebar: View {
     let onOpen: (URL) -> Bool
     /// Shows the open panel to choose a folder to add.
     let onChooseFolder: () -> Void
+    /// Images dragged from the grid onto a folder row: moved there, or
+    /// copied with Option held.
+    var onDropImages: (([URL], URL, TransferMode) -> Void)?
+    /// Whether every dragged URL is an image of the open catalog.
+    var areLibraryImages: (([URL]) -> Bool)?
+    /// Back and Forward, when given.
+    var navigator: FolderNavigator?
+    var onStepHistory: ((Int) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let navigator, let onStepHistory {
+                FolderHistoryButtons(navigator: navigator, onStep: onStepHistory)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+            }
             FolderOutline(folders: favourites.folders, currentFolder: currentFolder,
                           onOpen: open, onAdd: { urls in urls.forEach { favourites.add($0) } },
-                          onRemove: { favourites.remove($0) }, onChooseFolder: onChooseFolder)
+                          onRemove: { favourites.remove($0) }, onChooseFolder: onChooseFolder,
+                          onDropImages: onDropImages, areLibraryImages: areLibraryImages)
             Divider()
             footer
                 .padding(.horizontal, 12)
@@ -87,6 +101,8 @@ private struct FolderOutline: NSViewControllerRepresentable {
     let onAdd: ([URL]) -> Void
     let onRemove: (URL) -> Void
     let onChooseFolder: () -> Void
+    let onDropImages: (([URL], URL, TransferMode) -> Void)?
+    let areLibraryImages: (([URL]) -> Bool)?
 
     func makeNSViewController(context: Context) -> FolderOutlineController {
         let controller = FolderOutlineController()
@@ -103,6 +119,8 @@ private struct FolderOutline: NSViewControllerRepresentable {
         controller.onAdd = onAdd
         controller.onRemove = onRemove
         controller.onChooseFolder = onChooseFolder
+        controller.onDropImages = onDropImages
+        controller.areLibraryImages = areLibraryImages
         controller.setFavourites(folders)
         controller.reveal(currentFolder)
     }
@@ -159,6 +177,25 @@ private struct FoundFolder: Sendable {
             FoundFolder(url: url, title: FileManager.default.displayName(atPath: url.path),
                         hasSubfolders: FolderAccess.hasSubfolders(url), hasCatalog: FolderAccess.hasCatalog(url))
         }
+    }
+}
+
+/// How images dragged from the grid drop on a sidebar folder, apart from
+/// AppKit so the rules can be tested.
+enum FolderDrop {
+    /// A move, as Finder moves within a volume, unless Option is held (AppKit
+    /// then offers only copying) or the drag can't move. Nil when it can do
+    /// neither.
+    static func mode(allowed: NSDragOperation, optionHeld: Bool) -> TransferMode? {
+        let canMove = allowed.contains(.move) || allowed.contains(.generic)
+        let canCopy = allowed.contains(.copy)
+        if optionHeld, canCopy { return .copy }
+        return canMove ? .move : canCopy ? .copy : nil
+    }
+
+    /// Moving images into the folder they are all in does nothing.
+    static func changesAnything(_ images: [URL], folder: URL, mode: TransferMode) -> Bool {
+        mode == .copy || images.contains { !FolderAccess.samePath($0.deletingLastPathComponent(), folder) }
     }
 }
 
@@ -255,6 +292,8 @@ final class FolderOutlineController: NSViewController, NSOutlineViewDataSource, 
     var onAdd: (([URL]) -> Void)?
     var onRemove: ((URL) -> Void)?
     var onChooseFolder: (() -> Void)?
+    var onDropImages: (([URL], URL, TransferMode) -> Void)?
+    var areLibraryImages: (([URL]) -> Bool)?
 
     private let outlineView = FolderOutlineView()
     private let header = FolderNode(kind: .header, title: "Favourites", url: nil, children: [])
@@ -527,16 +566,52 @@ final class FolderOutlineController: NSViewController, NSOutlineViewDataSource, 
         }
     }
 
-    /// The whole list is the target, never a row: a dropped folder is
-    /// added to Favourites, not moved into the folder under the pointer.
+    /// The grid's images being dragged, worked out once per drag: every
+    /// URL on the pasteboard an image of the open catalog, or none.
+    private var draggedImagesCache: (sequence: Int, urls: [URL])?
+
+    private func draggedImages(_ info: NSDraggingInfo) -> [URL] {
+        if let cache = draggedImagesCache, cache.sequence == info.draggingSequenceNumber { return cache.urls }
+        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self],
+                                                       options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        let images = !urls.isEmpty && areLibraryImages?(urls) == true ? urls : []
+        draggedImagesCache = (info.draggingSequenceNumber, images)
+        return images
+    }
+
+    /// The folder row a drop of `images` would go into, and how.
+    private func imageDrop(_ info: NSDraggingInfo, item: Any?, index: Int, images: [URL]) -> (URL, TransferMode)? {
+        guard index == NSOutlineViewDropOnItemIndex, let node = item as? FolderNode, node.kind != .header,
+              node.isAvailable, let folder = node.url,
+              let mode = FolderDrop.mode(allowed: info.draggingSourceOperationMask,
+                                         optionHeld: NSEvent.modifierFlags.contains(.option)),
+              FolderDrop.changesAnything(images, folder: folder, mode: mode) else { return nil }
+        return (folder, mode)
+    }
+
+    /// Images from the grid go into the folder row they are dropped on.
+    /// Folders from Finder go to the whole list, never a row: a dropped
+    /// folder is added to Favourites, not moved into the folder under the
+    /// pointer.
     func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo, proposedItem item: Any?,
                      proposedChildIndex index: Int) -> NSDragOperation {
+        let images = draggedImages(info)
+        if !images.isEmpty {
+            guard let (_, mode) = imageDrop(info, item: item, index: index, images: images) else { return [] }
+            return mode == .move ? .move : .copy
+        }
         guard !droppedFolders(info).isEmpty else { return [] }
         outlineView.setDropItem(nil, dropChildIndex: NSOutlineViewDropOnItemIndex)
         return .link
     }
 
     func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo, item: Any?, childIndex index: Int) -> Bool {
+        let images = draggedImages(info)
+        if !images.isEmpty {
+            guard let (folder, mode) = imageDrop(info, item: item, index: index, images: images) else { return false }
+            onDropImages?(images, folder, mode)
+            return true
+        }
         let folders = droppedFolders(info)
         guard !folders.isEmpty else { return false }
         onAdd?(folders)

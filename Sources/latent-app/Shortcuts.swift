@@ -55,6 +55,7 @@ struct Shortcut {
         case .returnKey: .return
         case .delete: .delete
         case .escape: .escape
+        case .f2: KeyEquivalent(Character(Unicode.Scalar(0xF705)!))
         }
     }
 
@@ -99,6 +100,8 @@ enum Shortcuts {
         Shortcut(.makeSelect, "x", .shift, in: .compare),
         Shortcut(.openFolder, "o", [.shift, .command]),
         Shortcut(.slideshow, .returnKey, .command),
+        Shortcut(.back, .leftArrow, [.option, .command]),
+        Shortcut(.forward, .rightArrow, [.option, .command]),
         // Rating and metadata
         Shortcut(.rate(0), "0"),
         Shortcut(.rate(1), "1"),
@@ -131,6 +134,8 @@ enum Shortcuts {
         Shortcut(.revealInFinder, "r", [.option, .command]),
         Shortcut(.print, "p", .command),
         Shortcut(.editExternally, "e", .command),
+        // Files
+        Shortcut(.rename, .f2),
     ]
 
     /// The menu bar's standard items that keep their keys.
@@ -174,6 +179,7 @@ enum Shortcuts {
         case .returnKey: text += "Return"
         case .delete: text += "⌫"
         case .escape: text += "Esc"
+        case .f2: text += "F2"
         }
         return text
     }
@@ -239,6 +245,7 @@ extension Shortcuts {
             ShortcutPageRow([.makeSelect], "Compare: make the candidate the Select"),
             ShortcutPageRow([.openFolder], "Open folder"),
             ShortcutPageRow([.slideshow], "Slideshow of the selection, or of every image the filter shows (in the show: ← and → step, Space pauses, Esc ends)"),
+            ShortcutPageRow([.back, .forward], "Back / forward through the folders opened, back to the images you had selected"),
             ShortcutPageRow(keys: .system("Settings"), "Settings"),
             ShortcutPageRow(keys: .system("Latent Help"), "Latent Help (these pages)"),
         ]),
@@ -267,6 +274,10 @@ extension Shortcuts {
             ShortcutPageRow([.revealInFinder], "Reveal the selection in Finder"),
             ShortcutPageRow([.print], "Print the selection (in Library) or the image shown"),
             ShortcutPageRow([.editExternally], "Edit in External Editor: a 16-bit TIFF of the open or selected image, opened in the app chosen in Settings"),
+        ]),
+        ("Files", [
+            ShortcutPageRow([.rename], "Rename the selected image (its sidecar and thumbnail follow)"),
+            ShortcutPageRow(keys: .gesture("Drag images onto a sidebar folder"), "Move them there with their edits (hold ⌥ to copy)"),
         ]),
     ]
 

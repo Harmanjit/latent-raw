@@ -21,8 +21,9 @@ import Catalog
 ///                                               `contactsheetfile`, page 1 of the PDF it saves
 ///                                               (written to the snapshot folder, the only
 ///                                               file a step writes); `print`, the print panel;
-///                                               and `slideshow`, the slideshow's window with
-///                                               its first slide. Each writes NN-step.png
+///                                               `slideshow`, the slideshow's window with its
+///                                               first slide; and `rename`, the rename sheet.
+///                                               Each writes NN-step.png
 ///     LATENT_SNAPSHOT_SIZE=1400x900             window content size in points (default
 ///                                               1400x900, not the size it was last left at)
 ///     LATENT_SNAPSHOT_SETTLE=1                  seconds to wait after a step's work is done
@@ -379,6 +380,10 @@ enum SnapshotHarness {
                                                         outputFolder: plan.directory)
                 if found == nil { fail("\(step.rawValue): its sheet did not open") }
                 return found
+            case .rename:
+                guard library.selectedImage != nil else { fail("rename: no image selected"); return nil }
+                _ = perform(.rename)
+                _ = await wait("the rename sheet", upTo: 10) { window.attachedSheet?.isVisible == true }
             case .settings:
                 let before = Set(NSApp.windows.map(ObjectIdentifier.init))
                 // The menu item rather than its action: SwiftUI's handler
@@ -451,6 +456,7 @@ enum SnapshotHarness {
         func leave(_ step: SnapshotPlan.Step, window: NSWindow) {
             switch step {
             case .export: exportSheet.wrappedValue = false
+            case .rename: if let sheet = window.attachedSheet { window.endSheet(sheet) }
             case .settings: window.close()
             case .quality: QualityCompareWindow.close()
             case .crop, .heal, .redEye:

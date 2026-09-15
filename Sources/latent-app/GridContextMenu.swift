@@ -19,6 +19,12 @@ struct GridActions {
     var applyPreset: (Preset) -> Void = { _ in }
     var export: () -> Void = {}
     var canExport: () -> Bool = { true }
+    var rename: () -> Void = {}
+    /// Whether files can be renamed, moved or copied now.
+    var canChangeFiles: () -> Bool = { false }
+    /// Moves or copies the selection into a folder; nil asks which.
+    var transfer: (TransferMode, URL?) -> Void = { _, _ in }
+    var recentDestinations: () -> [URL] = { [] }
 }
 
 /// The grid's context menus, built fresh each time they open so every
@@ -61,7 +67,32 @@ enum GridContextMenu {
         menu.addItem(ClosureMenuItem("Reveal in Finder", enabled: !library.revealInFinderURLs.isEmpty) {
             revealInFinder(library)
         })
+        menu.addItem(.separator())
+        let canChange = hasLead && actions.canChangeFiles()
+        menu.addItem(ClosureMenuItem(Shortcuts.menuTitle("Rename…", for: .rename), enabled: canChange && count <= 1,
+                                     actions.rename))
+        menu.addItem(destinationMenu("Move to Folder", mode: .move, enabled: canChange, actions: actions))
+        menu.addItem(destinationMenu("Copy to Folder", mode: .copy, enabled: canChange, actions: actions))
         return menu
+    }
+
+    /// The last folders images went to, then Choose Folder….
+    private static func destinationMenu(_ title: String, mode: TransferMode, enabled: Bool,
+                                        actions: GridActions) -> NSMenuItem {
+        var items: [NSMenuItem] = actions.recentDestinations().map { folder in
+            let item = ClosureMenuItem(FileManager.default.displayName(atPath: folder.path), enabled: enabled) {
+                actions.transfer(mode, folder)
+            }
+            item.toolTip = folder.path
+            item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+            item.setAccessibilityLabel("\(mode == .move ? "Move" : "Copy") to \(item.title)")
+            return item
+        }
+        if !items.isEmpty { items.append(.separator()) }
+        items.append(ClosureMenuItem("Choose Folder…", enabled: enabled) { actions.transfer(mode, nil) })
+        let item = submenu(title, items)
+        item.isEnabled = enabled
+        return item
     }
 
     /// For a click between images: what applies to the folder itself.

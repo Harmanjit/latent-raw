@@ -39,6 +39,11 @@ struct CommandState: Equatable {
     var showMaskOverlay = false
     var filterActive = false
     var hasCompareSelect = false
+    /// Back and Forward have a folder to go to (FolderNavigator).
+    var canGoBack = false
+    var canGoForward = false
+    /// Images are being moved, copied or renamed.
+    var fileOperationRunning = false
 
     func isEnabled(_ command: KeyCommand) -> Bool {
         switch command {
@@ -73,6 +78,12 @@ struct CommandState: Equatable {
         case .clearFilter: filterActive
         case .slideshow: hasVisibleImages && editorReady
         case .editExternally: (hasImage || hasSelection) && editorReady && !exportingOpenImage
+        // Files change under the grid only: Loupe, Compare and Develop have
+        // one open in the editor. Not while exporting reads them.
+        case .rename: mode == .library && hasSelection && selectionCount <= 1 && !fileOperationRunning && !exportQueueRunning
+        case .moveToFolder, .copyToFolder: mode == .library && selectionCount > 0 && !fileOperationRunning && !exportQueueRunning
+        case .back: canGoBack
+        case .forward: canGoForward
         }
     }
 
@@ -176,6 +187,9 @@ struct LatentCommands: Commands {
             Divider()
             item("Contact Sheet…", .contactSheet)
             item("Print…", .print)
+            item("Rename…", .rename)
+            item("Move to Folder…", .moveToFolder)
+            item("Copy to Folder…", .copyToFolder)
         }
 
         CommandGroup(replacing: .undoRedo) {
@@ -200,6 +214,8 @@ struct LatentCommands: Commands {
             item("Next Image", .step(1))
             item("Open in Develop", .openSelection)
             item("Slideshow", .slideshow)
+            item("Back", .back)
+            item("Forward", .forward)
             Divider()
             item(state.zoomInTitle, .zoomIn)
             item(state.zoomOutTitle, .zoomOut)

@@ -10,6 +10,8 @@ struct BareKeyPress: Equatable {
         /// A printable key, lowercased; space is " ".
         case character(Character)
         case leftArrow, rightArrow, returnKey, delete, escape
+        /// F2 (Rename), with or without fn.
+        case f2
     }
 
     var key: Key
@@ -33,6 +35,7 @@ struct BareKeyPress: Equatable {
         case 0xF703: key = .rightArrow
         case 0x0D: key = .returnKey
         case 0x1B: key = .escape
+        case 0xF705: key = .f2
         // The Delete key reports DEL; SwiftUI's KeyEquivalent.delete is
         // backspace. Either means the same key.
         case 0x7F, 0x08: key = .delete
@@ -66,6 +69,9 @@ enum KeyCommand: Equatable {
     case addMask(NewMask), toggleMaskOverlay
     /// [ and ]: the armed brush or spot patch, a step smaller or larger.
     case toolSize(Int)
+    /// Files: rename the selected image, move or copy the selection to a
+    /// folder, and Back / Forward between the folders opened.
+    case rename, moveToFolder, copyToFolder, back, forward
 
     enum NewMask: Equatable { case linear, radial, brush }
 
