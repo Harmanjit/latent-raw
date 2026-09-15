@@ -48,8 +48,8 @@ extension EditorModel {
 
     // MARK: - History (undo / redo) and snapshots
 
-    var canUndo: Bool { history.canUndo }
-    var canRedo: Bool { history.canRedo }
+    var canUndo: Bool { hasImage && history.canUndo }
+    var canRedo: Bool { hasImage && history.canRedo }
 
     /// Loads stored history/snapshots after an image opens. The current
     /// edit becomes the cursor position (appended if it isn't the last
@@ -109,9 +109,11 @@ extension EditorModel {
         persistHistory()
     }
 
-    func undo() { if let stack = history.undo() { restore(stack) } }
-    func redo() { if let stack = history.redo() { restore(stack) } }
-    func jumpToHistory(index: Int) { if let stack = history.jump(to: index) { restore(stack) } }
+    // History belongs to the open image; with none open there is nothing
+    // it could be restored onto.
+    func undo() { if hasImage, let stack = history.undo() { restore(stack) } }
+    func redo() { if hasImage, let stack = history.redo() { restore(stack) } }
+    func jumpToHistory(index: Int) { if hasImage, let stack = history.jump(to: index) { restore(stack) } }
 
     func saveSnapshot(named name: String) {
         guard hasImage, !name.isEmpty else { return }

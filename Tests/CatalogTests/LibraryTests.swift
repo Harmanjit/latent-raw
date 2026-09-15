@@ -154,6 +154,24 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(storedB, "{\"schema\":1,\"pasted\":true}")
     }
 
+    /// Paste and presets in Loupe, Compare and Develop change the image
+    /// shown only, as ratings there do, never the rest of the selection.
+    func testTransformCanActOnPrimaryOnly() async throws {
+        let library = Library()
+        try await library.open(folder: folder)
+        let a = library.images.first { $0.fileName == "A.NEF" }!
+        let b = library.images.first { $0.fileName == "B.NEF" }!
+        library.setSelection([a.id!, b.id!], primary: a.id)
+
+        let outcome = try await library.transformSelectedEdits(onlyPrimary: true, schemaVersion: 1,
+                                                               processVersion: "1.0") { _ in "{\"schema\":1,\"pasted\":true}" }
+        XCTAssertEqual(outcome.changed, 1)
+        let storedA = try await library.editStack(for: a)
+        let storedB = try await library.editStack(for: b)
+        XCTAssertEqual(storedA, "{\"schema\":1,\"pasted\":true}")
+        XCTAssertNil(storedB, "the other selected image keeps its edit")
+    }
+
     /// Rating, flag and rotation apply to every selected image, each
     /// rotated from its own angle, with a sidecar per image; keywords
     /// stay with the primary.

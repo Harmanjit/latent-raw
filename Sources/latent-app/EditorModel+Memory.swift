@@ -55,15 +55,14 @@ extension EditorModel {
     /// another folder opens: the catalog id belongs to the catalog being
     /// left, and the same id in the next one is a different photo, so once
     /// the save is on its way nothing may be saved under that id again.
-    /// Opening an image starts afresh.
+    /// Opening an image starts afresh. Also runs with no image but an id
+    /// still set, so no id outlives the image it belonged to.
     func closeImage() {
-        guard hasImage else { return }
+        guard hasImage || catalogImageID != nil else { return }
         flushPendingSave()
         disarmTools()
         pendingRender?.cancel()
-        aiDenoiseTask?.cancel()
-        aiDenoiseRunning = false
-        aiDenoiseStatus = ""
+        stopAIDenoise()
         aiDenoiseReleasedUnderPressure = false
         sam2Encoding?.cancel()
         sam2Encoding = nil

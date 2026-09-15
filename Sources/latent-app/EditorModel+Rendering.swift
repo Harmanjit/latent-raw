@@ -38,7 +38,8 @@ extension EditorModel {
         return frame.sensorRect(fromCanvasRect: visibleCanvas)
     }
 
-    private func wantedTileRegion() -> (x: Int, y: Int, width: Int, height: Int) {
+    /// What the tile is rendered for: the visible area and margin.
+    private var tileViewRegion: CGRect {
         var visible = visibleSensorRect.insetBy(dx: -Self.tileMargin, dy: -Self.tileMargin)
         // Keystone reads pixels from elsewhere in the frame; widen the tile
         // to the source region so the corrected view is complete.
@@ -46,10 +47,14 @@ extension EditorModel {
             visible = parameters.perspective.sourceRect(forSensorRect: visible, sensorSize: sensorSize)
                 .insetBy(dx: -4, dy: -4)
         }
+        return visible
+    }
+
+    private func wantedTileRegion() -> (x: Int, y: Int, width: Int, height: Int) {
         // A patch on screen must be able to read its source and, for a heal,
         // the surroundings, which may lie outside the visible area: widen
         // the tile to include them.
-        visible = HealPatch.regionIncludingSources(visible, patches: parameters.heals, sensorSize: sensorSize)
+        let visible = HealPatch.regionIncludingSources(tileViewRegion, patches: parameters.heals, sensorSize: sensorSize)
         let width = min(Int(visible.width.rounded(.up)), Int(sensorSize.width))
         let height = min(Int(visible.height.rounded(.up)), Int(sensorSize.height))
         return (Int(visible.origin.x.rounded(.down)), Int(visible.origin.y.rounded(.down)),
@@ -62,7 +67,7 @@ extension EditorModel {
         guard let tile, tile.texture.width == Int(tileSize.width),
               tile.texture.height == Int(tileSize.height) else { return false }
         let visible = visibleSensorRect
-        let usable = tile.coverage.insetBy(dx: Self.tileInset, dy: Self.tileInset)
+        let usable = tileHealedCoverage.insetBy(dx: Self.tileInset, dy: Self.tileInset)
         // Only the part of the view that's actually over the image matters.
         let sensorBounds = CGRect(origin: .zero, size: sensorSize)
         return usable.contains(visible.intersection(sensorBounds))
@@ -176,6 +181,10 @@ extension EditorModel {
             parameters: renderParameters, output: displayOutput, info: &info)
         tile = PresentLayer(texture: rendered, coverage: info.sensorRect, inset: Self.tileInset,
                             headroom: displayOutput.headroom)
+        // Past the view region the tile can hold a patch that reads outside
+        // it (it wasn't needed for the view), which a pan must not reveal.
+        tileHealedCoverage = HealPatch.isSelfContained(info.sensorRect, patches: renderParameters.heals, sensorSize: sensorSize)
+            ? info.sensorRect : info.sensorRect.intersection(tileViewRegion)
         return "tile \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
 }

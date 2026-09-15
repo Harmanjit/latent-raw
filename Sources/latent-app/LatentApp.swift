@@ -9,10 +9,10 @@ import PixelEngine
 /// keeps working and there's no .xcodeproj to maintain alongside
 /// Package.swift; scripts/make_app.sh wraps the same binary in a .app.
 ///
-/// One window, not a WindowGroup: each window builds its own editor and
-/// library, and two of them on the same folder would write the same
-/// catalog and sidecars over each other. There is no New Window, and the
-/// Window menu brings this one back.
+/// One window, not a WindowGroup: two windows on the same folder would
+/// write the same catalog and sidecars over each other. There is no New
+/// Window, and the Window menu brings this one back, with the editor,
+/// library and export queue it had (`MainWindowModels`).
 @main
 struct LatentApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
@@ -59,6 +59,25 @@ private struct MainWindowOpener: View {
     }
 }
 
+/// The main window's editor, library and export queue, built once for the
+/// process rather than by the window. SwiftUI builds a Window scene's view
+/// state afresh when the window is closed and opened again (from the Dock,
+/// say, after Keep Exporting cancelled the quit that closing it started),
+/// and a second set would run beside the first: the running export with no
+/// progress or Cancel on screen and Export enabled again, the same catalog
+/// opened twice, and the old image session holding its memory.
+@MainActor
+final class MainWindowModels {
+    static let shared = MainWindowModels()
+
+    let model = EditorModel()
+    let library = Library()
+    let exportQueue = ExportQueue()
+    /// Set once the first window has opened the launch folder or file; a
+    /// window opened again finds everything as it was left.
+    var openedAtLaunch = false
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Set once the window first appears.
@@ -94,9 +113,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Quitting without losing work
 
-    /// What a window holds that quitting must not cut short. The objects
-    /// belong to ContentView (as @StateObject); the delegate can't reach
-    /// them any other way.
+    /// What a window holds that quitting must not cut short. ContentView
+    /// registers them (from `MainWindowModels`) when it appears.
     private struct WindowWork {
         let model: EditorModel
         let library: Library
@@ -105,10 +123,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Held strongly on purpose: closing the last window can release the
     /// view's objects before AppKit asks whether to terminate, and an
-    /// edit still waiting for its save would go with them. There is one
-    /// window; a second entry appears only if it is closed while Settings
-    /// stays open and then reopened, and the old objects stay so quitting
-    /// still waits for anything they were writing.
+    /// edit still waiting for its save would go with them. The window
+    /// reopened registers the same objects again, which adds nothing.
     private static var windows: [WindowWork] = []
 
     /// Called by ContentView when it appears.

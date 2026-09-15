@@ -38,9 +38,10 @@ enum AppMode: String, CaseIterable, Identifiable {
 /// until there's something to put in it — that's Phase 2, when catalogs
 /// arrive.
 struct ContentView: View {
-    @StateObject private var model = EditorModel()
-    @StateObject private var library = Library()
-    @StateObject private var exportQueue = ExportQueue()
+    // Not the window's own: reopening the window must not build a second set.
+    @ObservedObject private var model = MainWindowModels.shared.model
+    @ObservedObject private var library = MainWindowModels.shared.library
+    @ObservedObject private var exportQueue = MainWindowModels.shared.exportQueue
     @ObservedObject private var prefs = AppPreferences.shared
     @State private var mode: AppMode = .library
     @State private var showingExportSheet = false
@@ -168,6 +169,10 @@ struct ContentView: View {
             if let gpu = model.gpu {
                 library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu)
             }
+            // Once per launch: the window closed and opened again still has
+            // its folder and image, and reopening them would close the image.
+            guard !MainWindowModels.shared.openedAtLaunch else { return }
+            MainWindowModels.shared.openedAtLaunch = true
             #if DEBUG
             if SnapshotHarness.start(model: model, library: library, perform: perform, exportSheet: $showingExportSheet) { return }
             #endif
@@ -739,10 +744,34 @@ struct ContentView: View {
         applyToSelectionOrEditor(stack, groups: model.pasteGroups, what: "Pasted")
     }
 
-    /// Develop: apply to the open image. Library with several selected:
-    /// apply to each stored edit, regenerating thumbnails.
+    /// Where pasted settings and a preset go. The grid changes the stored
+    /// edit of every selected image. Loupe, Compare and Develop show one
+    /// image and change that one only, as rating does: through the editor
+    /// when it holds that image (so Undo takes it back), else its stored
+    /// edit. Compare's Select image is never written.
+    enum SettingsTarget: Equatable {
+        case editor, primary, selection
+
+        static func choose(mode: AppMode, editorHasImage: Bool, editorImageID: Int64?,
+                           primaryID: Int64?) -> SettingsTarget {
+            guard mode != .library else { return .selection }
+            // Develop may hold a file opened on its own, outside the catalog.
+            if editorHasImage, mode == .develop || (editorImageID != nil && editorImageID == primaryID) {
+                return .editor
+            }
+            return .primary
+        }
+    }
+
     private func applyToSelectionOrEditor(_ stack: EditStack, groups: Set<EditGroup>, what: String) {
-        if mode == .develop && model.hasImage {
+        let target = SettingsTarget.choose(mode: mode, editorHasImage: model.hasImage,
+                                           editorImageID: model.catalogImageID, primaryID: library.selectedImageID)
+        // Compare's Select pane may show the candidate's own photo. It never
+        // saves, so it takes the new look directly rather than going stale.
+        if target != .selection, mode == .compare, let select = compareRecord?.id, select == library.selectedImageID {
+            compareModel?.apply(stack, groups: groups)
+        }
+        if target == .editor {
             model.apply(stack, groups: groups)
             return
         }
@@ -751,6 +780,7 @@ struct ContentView: View {
             let outcome: Library.TransformOutcome
             do {
                 outcome = try await library.transformSelectedEdits(
+                    onlyPrimary: target == .primary,
                     schemaVersion: EditStack.schemaVersion, processVersion: EditStack.processVersion
                 ) { existing in
                     // An unreadable existing edit throws here and the image
@@ -771,7 +801,7 @@ struct ContentView: View {
             model.reportError(message)
             // If the open image was among them, reload its sliders.
             if let selected = library.selectedImage, model.imageTitle == selected.fileName,
-               library.selectedImageIDs.contains(selected.id ?? -1) {
+               target == .primary || library.selectedImageIDs.contains(selected.id ?? -1) {
                 model.apply(stack, groups: groups)
             }
         }

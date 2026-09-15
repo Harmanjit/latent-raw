@@ -673,12 +673,13 @@ public final class Library: ObservableObject {
     /// caller supplies the merge since the catalog doesn't know the
     /// stack's contents. An image whose existing edit can't be read, or
     /// whose transform throws, is skipped and named in the outcome.
+    /// `onlyPrimary` as for ratings: a view showing one image changes that one.
     @discardableResult
-    public func transformSelectedEdits(schemaVersion: Int, processVersion: String,
+    public func transformSelectedEdits(onlyPrimary: Bool = false, schemaVersion: Int, processVersion: String,
                                        _ transform: (String?) throws -> String?) async throws -> TransformOutcome {
         guard let catalog else { return TransformOutcome() }
         var outcome = TransformOutcome()
-        for record in selectedImages {
+        for record in onlyPrimary ? metadataTargets(onlyPrimary: true) : selectedImages {
             guard let id = record.id else { continue }
             let existing: String?
             let next: String?
