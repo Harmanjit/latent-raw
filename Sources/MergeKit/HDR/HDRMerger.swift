@@ -57,21 +57,31 @@ public final class HDRMerger: HDRMerging {
     /// recommended working set. Replaceable for tests.
     let gpuMemoryBudget: Int?
 
-    public convenience init(gpu: GPUContext) {
-        self.init(gpu: gpu, memoryPolicy: .current)
+    /// - Parameter keepsPreviewFrames: whether `analyse` keeps each frame
+    ///   reduced in memory for `preview` (HDRMerger+Preview.swift), as the
+    ///   dialog wants. Without it the first preview reads the raw files
+    ///   again; a merge with no preview (the command line, HDR Merge Without
+    ///   Dialog) needn't hold them.
+    public convenience init(gpu: GPUContext, keepsPreviewFrames: Bool = false) {
+        self.init(gpu: gpu, memoryPolicy: .current, keepsPreviewFrames: keepsPreviewFrames)
     }
 
     /// How frames fade out near their clipping; replaceable for tests.
     let clipFeather: HDRClipFeather
+    /// See `init(gpu:keepsPreviewFrames:)`.
+    let keepsPreviewFrames: Bool
+    /// The reduced frames previews merge (`HDRPreviewCache`).
+    let previewCache = HDRPreviewCache()
 
     init(gpu: GPUContext, memoryPolicy: MemoryPolicy,
          availableCapacity: @escaping @Sendable (URL) -> Int64? = LinearRawDNGWriter.volumeAvailableCapacity,
-         gpuMemoryBudget: Int? = nil, clipFeather: HDRClipFeather = .standard) {
+         gpuMemoryBudget: Int? = nil, clipFeather: HDRClipFeather = .standard, keepsPreviewFrames: Bool = false) {
         self.gpu = gpu
         self.memoryPolicy = memoryPolicy
         self.availableCapacity = availableCapacity
         self.gpuMemoryBudget = gpuMemoryBudget
         self.clipFeather = clipFeather
+        self.keepsPreviewFrames = keepsPreviewFrames
     }
 
     /// Most frames a merge takes: 9, or 5 on a Mac with 8 GB or less,
@@ -99,6 +109,8 @@ public final class HDRMerger: HDRMerging {
         let span = Self.analysisSpan(width: width, height: height)
         let alignmentSpan = Self.alignmentSpan(width: width, height: height)
         let aligner = FrameAligner()
+        let previewFactor = Self.previewFactor(width: width, height: height)
+        if keepsPreviewFrames { previewCache.prepare(for: urls) }
 
         // Only the previous frame's reduced images are kept: pairs are
         // neighbours, and a 24 MP frame's alignment pyramid alone is 40 MB.
@@ -125,6 +137,14 @@ public final class HDRMerger: HDRMerging {
                     let alignmentImage = try options.autoAlign ? Self.gpuStep {
                         try HDRMergeKernels.analysisImage(of: file, span: alignmentSpan, levels: levels, gpu: gpu)
                     } : nil
+                    // Kept for the dialog's preview while the frame is open
+                    // anyway, unless an earlier analysis of the same photos
+                    // (with Auto Align the other way) kept it already.
+                    if keepsPreviewFrames, previewCache.frame(for: member.url) == nil,
+                       let reduced = HDRPreviewFrame.reduce(file, url: member.url, levels: levels,
+                                                            factor: previewFactor) {
+                        previewCache.store(reduced)
+                    }
                     return (HDRAnalysisFrame(image, levels: levels), alignmentImage)
                 }
             }
@@ -383,25 +403,16 @@ public final class HDRMerger: HDRMerging {
         }
         let accumulated = try accumulate(frames, reference: reference, width: analysis.width,
                                          height: analysis.height, alignment: alignment, ghosts: ghosts,
-                                         report: &report) { fraction, stage in
+                                         feather: clipFeather, report: &report) { fraction, stage in
             progress(HDRMergeProgress(fraction: mergeProgress.start + mergeProgress.share * fraction, stage: stage))
         }
         let merged = accumulated.merged
 
         try Task.checkCancellation()
         progress(HDRMergeProgress(fraction: 0.8, stage: "Rendering the preview"))
-        let maximum = try ExposureNormalisation.maximum(of: merged, commandQueue: gpu.commandQueue)
-        // Where the result is clipped in every frame: the darkest merged
-        // frame's clip level on the brightest frame's scale (0.98 x 2^range
-        // when it saturates at its nominal white).
-        let range = -accumulated.darkestRelativeEV
-        let darkest = accumulated.darkestLevels
-        let darkestSaturation = (darkest.clipRaw / Self.clipFraction - darkest.channelBlack.min()) * darkest.scale
-        let recipe = MergeRecipe(kind: .hdr, clipLevel: Self.clipFraction * Float(pow(2, range)) * darkestSaturation,
-                                 lensApplied: false, reference: reference,
-                                 options: Self.recipeOptions(options, alignment: alignment), sources: sources)
-        let normalisation = try ExposureNormalisation(maximum: maximum)
-        let stored = recipe.normalised(by: normalisation).withLens(of: accumulated.reference.summary)
+        let (maximum, recipe, stored, normalisation) = try storage(for: accumulated, reference: reference,
+                                                                   options: options, alignment: alignment,
+                                                                   sources: sources)
         let referenceFrame = accumulated.reference
         let preview = try report.time("Render preview") {
             try Self.gpuStep {
@@ -446,9 +457,32 @@ public final class HDRMerger: HDRMerging {
         return (result, report)
     }
 
+    /// The recipe of a merged image and how its pixels are stored: the
+    /// largest merged value, the recipe as written (`recipe`, in merged
+    /// units) and as the DNG's pixels are read back (`stored`, normalised,
+    /// with the reference frame's lens), and the normalisation between them.
+    /// Shared by the merge and the preview, so both open the result alike.
+    func storage(for accumulated: Accumulated, reference: Int, options: HDRMergeOptions,
+                 alignment: HDRMergeAlignment.Plan?, sources: [MergeRecipe.Source])
+    throws -> (maximum: Float, recipe: MergeRecipe, stored: MergeRecipe, normalisation: ExposureNormalisation) {
+        let maximum = try ExposureNormalisation.maximum(of: accumulated.merged, commandQueue: gpu.commandQueue)
+        // Where the result is clipped in every frame: the darkest merged
+        // frame's clip level on the brightest frame's scale (0.98 x 2^range
+        // when it saturates at its nominal white).
+        let range = -accumulated.darkestRelativeEV
+        let darkest = accumulated.darkestLevels
+        let darkestSaturation = (darkest.clipRaw / Self.clipFraction - darkest.channelBlack.min()) * darkest.scale
+        let recipe = MergeRecipe(kind: .hdr, clipLevel: Self.clipFraction * Float(pow(2, range)) * darkestSaturation,
+                                 lensApplied: false, reference: reference,
+                                 options: Self.recipeOptions(options, alignment: alignment), sources: sources)
+        let normalisation = try ExposureNormalisation(maximum: maximum)
+        let stored = recipe.normalised(by: normalisation).withLens(of: accumulated.reference.summary)
+        return (maximum, recipe, stored, normalisation)
+    }
+
     /// What `accumulate` hands back: the merged image and what the rest of
     /// the merge needs from the frames it has already let go of.
-    private struct Accumulated {
+    struct Accumulated {
         let merged: MTLTexture
         let reference: (summary: RawSummary, cameraToXYZ: [Float]?)
         /// The darkest frame that went into the merge.
@@ -468,10 +502,11 @@ public final class HDRMerger: HDRMerging {
     ///   - alignment: what Auto Align decided, or nil with it off. Frames it
     ///     left out are skipped.
     ///   - ghosts: the deghosting pass's masks, or nil without deghosting.
+    ///   - feather: the clip feathering (`clipFeather`, scaled down for a preview).
     ///   - progress: the share of this step done (0...1) and a stage name.
-    private func accumulate(_ frames: [HDRMergeFrame], reference: Int, width: Int, height: Int,
-                            alignment: HDRMergeAlignment.Plan?, ghosts: GhostPass?, report: inout HDRMergeReport,
-                            progress: (Double, String) -> Void) throws -> Accumulated {
+    func accumulate(_ frames: [HDRMergeFrame], reference: Int, width: Int, height: Int,
+                    alignment: HDRMergeAlignment.Plan?, ghosts: GhostPass?, feather: HDRClipFeather,
+                    report: inout HDRMergeReport, progress: (Double, String) -> Void) throws -> Accumulated {
         let multipliers = try sharedMultipliers(frames)
         let accumulator = try Self.gpuStep { try HDRMergeAccumulator(gpu: gpu, width: width, height: height) }
         let merged = frames.indices.filter { alignment?.includes($0) ?? true }
@@ -502,7 +537,7 @@ public final class HDRMerger: HDRMerging {
                         try accumulator.add(file, levels: levels, multipliers: multipliers,
                                             relativeEV: frame.relativeEV,
                                             weightFloor: isDarkest ? 1e-4 : (warps && index == reference ? 1e-8 : 0),
-                                            feather: isDarkest ? nil : clipFeather,
+                                            feather: isDarkest ? nil : feather,
                                             ghostMask: ghosts?.masks[index],
                                             movingToReference: homography)
                     }
@@ -526,7 +561,9 @@ public final class HDRMerger: HDRMerging {
         let median = frames[(frames.count - 1) / 2].url
         let summary: RawSummary
         do {
-            summary = try RawFile(path: median.path, metadataOnly: true).summary
+            // A preview's reduced frame carries the same white balance.
+            summary = try HDRPreviewFrameSet.current?.file(for: median)?.summary
+                ?? RawFile(path: median.path, metadataOnly: true).summary
         } catch {
             throw HDRMergeError.unreadable(fileName: median.lastPathComponent, reason: String(describing: error))
         }
@@ -577,7 +614,16 @@ public final class HDRMerger: HDRMerging {
     // MARK: - Frames
 
     /// A full open (sensor data included), with its failure in the dialog's words.
+    ///
+    /// During a preview (`HDRPreviewFrameSet.current`), the frame's reduced
+    /// copy instead.
     static func open(_ url: URL) throws -> RawFile {
+        if let previewing = HDRPreviewFrameSet.current {
+            guard let file = previewing.file(for: url) else {
+                throw HDRMergeError.unreadable(fileName: url.lastPathComponent, reason: "it isn't part of the preview")
+            }
+            return file
+        }
         do {
             return try RawFile(path: url.path)
         } catch {
@@ -598,7 +644,11 @@ public final class HDRMerger: HDRMerging {
     /// photosite in 10,000 within 0.05% of it, which real clipping gives
     /// and the brightest few photosites of a noisy highlight don't.
     /// Otherwise the nominal white stands.
+    ///
+    /// **During a preview** a reduced frame's levels are those measured on
+    /// the full frame: averaging photosites smooths the plateau away.
     static func levels(for file: RawFile, gpu: GPUContext) throws -> HDRFrameLevels {
+        if let previewing = HDRPreviewFrameSet.current, let levels = previewing.levels(for: file) { return levels }
         let s = file.summary
         let black = s.channelBlackLevels
         var saturation = s.whiteLevel
@@ -623,13 +673,21 @@ public final class HDRMerger: HDRMerging {
     // MARK: - Preview
 
     /// The merge rendered as Latent will show the DNG: its pixels reduced to
-    /// about `previewLongEdge`, divided as the file stores them, opened as a
-    /// linear source with the reference frame's metadata and the file's
-    /// BaselineExposure and merge info, and rendered through the pipeline
-    /// with default settings. Unrotated, as the DNG stores its previews.
+    /// about `longEdge` (at least that, when the image is that big), divided
+    /// as the file stores them, opened as a linear source with the reference
+    /// frame's metadata and the file's BaselineExposure and merge info, and
+    /// rendered through the pipeline with default settings. Unrotated, as
+    /// the DNG stores its previews.
+    ///
+    /// - Parameters:
+    ///   - rotation: turns the picture (the dialog's preview is shown upright).
+    ///   - fitting: resizes the picture so its long edge is at most
+    ///     `longEdge`, rather than anything up to twice that.
     func renderPreview(_ merged: MTLTexture, normalisation: ExposureNormalisation, recipe: MergeRecipe,
-                       reference: RawSummary, cameraToXYZ: [Float]?, baselineExposure: Double) throws -> CGImage {
-        let span = max(1, max(merged.width, merged.height) / Self.previewLongEdge)
+                       reference: RawSummary, cameraToXYZ: [Float]?, baselineExposure: Double,
+                       longEdge: Int = HDRMerger.previewLongEdge, rotation: ImageRotation = .none,
+                       fitting: Bool = false) throws -> CGImage {
+        let span = max(1, max(merged.width, merged.height) / max(1, longEdge))
         let small = try HDRMergeKernels.downsample(merged, span: span, scale: normalisation.scale, gpu: gpu)
         let info = LinearMergeInfo(kind: recipe.kind.rawValue, clipLevel: recipe.clipLevel,
                                    lensApplied: recipe.lensApplied, baselineShift: recipe.baselineShift)
@@ -646,7 +704,8 @@ public final class HDRMerger: HDRMerging {
         let session = try ImageSession(file: file, gpu: gpu)
         let parameters = try ExportPlan.parameters(editStackJSON: nil, session: session, colorSpace: .sRGB)
         let rendered = try RenderPipeline(gpu: gpu).render(session, scale: .full, parameters: parameters)
-        return try Exporter(gpu: gpu).cgImage(from: rendered, colorSpace: .sRGB)
+        return try Exporter(gpu: gpu).cgImage(from: rendered, colorSpace: .sRGB, rotation: rotation,
+                                              maxLongEdge: fitting ? longEdge : nil)
     }
 
     // MARK: - Errors

@@ -1,4 +1,5 @@
 import XCTest
+import PixelEngine
 @testable import MergeKit
 
 /// Three 24 MP frames (6016 x 4016, a Nikon D750's size), analysed and
@@ -30,8 +31,29 @@ final class HDRMergePerformanceTests: XCTestCase {
                                               noise: true, to: folder, name: "perf24")
         print(String(format: "Generated the bracket in %.1f s", Date().timeIntervalSince(generated)))
 
-        let merger = try HDRTestSupport.merger()
+        let merger = HDRMerger(gpu: try HDRTestSupport.gpu(), memoryPolicy: MemoryPolicy(physicalMemory: 16 << 30),
+                               availableCapacity: { _ in nil }, keepsPreviewFrames: true)
         let (analysis, analysisReport) = try await merger.analyseWithReport(urls)
+
+        // The dialog's preview, twice: the second is what an option change
+        // costs once the frames are kept and the GPU's pipelines are built.
+        for deghost in [DeghostAmount.none, .medium] {
+            let options = HDRMergeOptions(deghost: deghost)
+            var seconds: [Double] = []
+            for _ in 0..<2 {
+                let clock = ContinuousClock(), started = clock.now
+                _ = try await merger.preview(analysis, options: options, longEdge: 1024,
+                                             showDeghostOverlay: deghost != .none)
+                let elapsed = clock.now - started
+                seconds.append(Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18)
+            }
+            print(String(format: "Preview of 3 x 24 MP, deghost %@: %.3f s, then %.3f s", deghost.rawValue as NSString,
+                         seconds[0], seconds[1]))
+            // The dialog wants under 0.3 s in a release build; this is a
+            // debug build on a machine that may be busy.
+            XCTAssertLessThan(seconds[1], 3)
+        }
+        merger.releasePreviews()
         let output = folder.appendingPathComponent("perf24-HDR.dng")
         try? FileManager.default.removeItem(at: output)
         let (result, mergeReport) = try await merger.mergeWithReport(

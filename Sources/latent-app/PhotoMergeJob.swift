@@ -26,7 +26,16 @@ import PixelEngine
 /// 3. If the engine throws or is cancelled after that, the sidecar is taken
 ///    back (`Library.discardMergeRecipe`). A name taken at the last moment
 ///    plans a new name and merges again, as exports do.
-/// 4. On success the folder is read again and the new photo selected.
+/// 4. On success, with Auto Settings, the result's first edit is worked out
+///    (`HDRAutoSettings`, before the GPU slot is given back); the folder is
+///    read again, the edit stored through the catalog's normal edit path
+///    (so it lands in the sidecar beside the recipe, and Develop's history
+///    starts at the merge as it came out), and the new photo selected.
+///
+/// **Without the dialog** (HDR Merge Without Dialog, ⌃⇧H), the job measures
+/// the photos itself first, with the options the dialog was last left with.
+/// A failure goes to the status bar as usual; so do the warnings the dialog
+/// would have shown, once the merge is done.
 @MainActor
 final class PhotoMergeQueue: ObservableObject {
     @Published private(set) var isRunning = false
@@ -66,24 +75,55 @@ final class PhotoMergeQueue: ObservableObject {
     /// (one each, in the analysis's order), into the open folder of
     /// `library`. Returns false, doing nothing, when a merge or an export
     /// already holds the GPU or the folder has gone.
+    ///
+    /// - Parameter autoSettings: Auto Settings: works out the result's first
+    ///   edit from the DNG at the URL it is given (nil: no edit to store);
+    ///   nil to leave the result unedited.
     @discardableResult
     func start(_ analysis: HDRMergeAnalysis, options: HDRMergeOptions = HDRMergeOptions(),
-               records: [ImageRecord], library: Library, engine: any HDRMerging) -> Bool {
+               records: [ImageRecord], library: Library, engine: any HDRMerging,
+               autoSettings: AutoSettings? = nil) -> Bool {
         let referenceIndex = options.referenceIndex ?? analysis.referenceIndex
         guard !isRunning, let catalog = library.catalog, records.count == analysis.frames.count,
               records.indices.contains(referenceIndex), gpuSlot.claimSlot() else { return false }
-        generation += 1
-        isRunning = true
-        progress = nil
-        summary = ""
         let reference = records[referenceIndex]
         name = (MergeNaming.candidate(forReference: reference.relPath, suffix: "HDR", number: 1) as NSString)
             .lastPathComponent
-        let job = jobs.begin(.photoMerge, name: reference.fileName, cancel: { [weak self] in self?.cancel() })
-        let request = Request(analysis: analysis, options: options, records: records, reference: reference,
-                              library: library, catalog: catalog, engine: engine, generation: generation)
-        // Holds the queue until the merge has tidied up, so the slot and the
-        // job are always given back.
+        begin(Request(analysis: analysis, options: options, urls: analysis.frames.map(\.url), records: records,
+                      library: library, catalog: catalog, engine: engine, autoSettings: autoSettings,
+                      withoutDialog: false, generation: generation + 1),
+              jobName: reference.fileName)
+        return true
+    }
+
+    /// Works out Auto Settings' edit for the merged photo at a URL.
+    typealias AutoSettings = @Sendable (URL) async throws -> String?
+
+    /// HDR Merge Without Dialog: measures `urls` (the files of `records`,
+    /// in the same order) with `options`, then merges as `start` does.
+    /// Returns false, doing nothing, when a merge or an export already holds
+    /// the GPU, the folder has gone or there aren't two photos.
+    @discardableResult
+    func startWithoutDialog(records: [ImageRecord], urls: [URL], options: HDRMergeOptions, library: Library,
+                            engine: any HDRMerging, autoSettings: AutoSettings? = nil) -> Bool {
+        guard !isRunning, let catalog = library.catalog, records.count >= 2, urls.count == records.count,
+              gpuSlot.claimSlot() else { return false }
+        name = ""
+        begin(Request(analysis: nil, options: options, urls: urls, records: records, library: library,
+                      catalog: catalog, engine: engine, autoSettings: autoSettings, withoutDialog: true,
+                      generation: generation + 1),
+              jobName: records[0].fileName)
+        return true
+    }
+
+    /// Runs `request` in the background, holding the GPU slot (already
+    /// claimed), a job and the queue until it has tidied up.
+    private func begin(_ request: Request, jobName: String) {
+        generation = request.generation
+        isRunning = true
+        progress = nil
+        summary = ""
+        let job = jobs.begin(.photoMerge, name: jobName, cancel: { [weak self] in self?.cancel() })
         task = Task {
             // Renders let go with an export sheet may still be stopping.
             await ExportPreviewRenderer.waitForDiscardedRenders()
@@ -94,7 +134,6 @@ final class PhotoMergeQueue: ObservableObject {
             gpuSlot.releaseSlot()
             jobs.end(job)
         }
-        return true
     }
 
     /// Stops the merge; it tidies up and ends a moment later.
@@ -110,20 +149,50 @@ final class PhotoMergeQueue: ObservableObject {
     // MARK: - The merge
 
     private struct Request {
-        let analysis: HDRMergeAnalysis
+        /// Nil without the dialog: the job measures the photos first.
+        let analysis: HDRMergeAnalysis?
         let options: HDRMergeOptions
+        /// The photos' files, as the analysis names them or will.
+        let urls: [URL]
+        /// One per file of `urls`; in the analysis's order when it is given.
         let records: [ImageRecord]
-        let reference: ImageRecord
         let library: Library
         let catalog: Catalog
         let engine: any HDRMerging
+        let autoSettings: AutoSettings?
+        /// Say the analysis's warnings when done, as the dialog would have.
+        let withoutDialog: Bool
         let generation: Int
     }
 
     private enum Outcome {
-        case merged(relPath: String)
+        /// `autoSettings`: Auto Settings' edit, or why it couldn't be worked
+        /// out; nil when not asked for or there's nothing to store.
+        case merged(relPath: String, analysis: HDRMergeAnalysis, autoSettings: Result<String, Error>?)
         case cancelled
         case failed(Error)
+    }
+
+    /// The analysis and its records in its order: the request's, or, without
+    /// the dialog, measured now.
+    private func analysed(_ request: Request) async throws -> (HDRMergeAnalysis, [ImageRecord]) {
+        if let analysis = request.analysis { return (analysis, request.records) }
+        let generation = request.generation
+        progress = HDRMergeProgress(fraction: 0, stage: "Analysing \(request.urls.count) photos")
+        let analysis = try await request.engine.analyse(request.urls, options: request.options)
+        guard self.generation == generation else { throw CancellationError() }
+        // The engine lists the photos brightest first, by its own URLs.
+        let paths = request.urls.map(HDRMergeSheetModel.comparablePath)
+        let records = analysis.frames.compactMap { frame in
+            paths.firstIndex(of: HDRMergeSheetModel.comparablePath(frame.url)).map { request.records[$0] }
+        }
+        guard records.count == analysis.frames.count else { throw MergeJobError.photosChanged }
+        return (analysis, records)
+    }
+
+    enum MergeJobError: Error, LocalizedError {
+        case photosChanged
+        var errorDescription: String? { "the photos measured aren’t the ones selected" }
     }
 
     /// Set once the result's sidecar is on disk, from the engine's thread.
@@ -136,22 +205,32 @@ final class PhotoMergeQueue: ObservableObject {
 
     private func run(_ request: Request) async -> Outcome {
         let library = request.library, catalog = request.catalog
+        let analysis: HDRMergeAnalysis, records: [ImageRecord]
+        do {
+            (analysis, records) = try await analysed(request)
+        } catch {
+            if error is CancellationError || Task.isCancelled { return .cancelled }
+            return .failed(error)
+        }
+        let referenceIndex = request.options.referenceIndex ?? analysis.referenceIndex
+        guard records.indices.contains(referenceIndex) else { return .failed(MergeJobError.photosChanged) }
+        let reference = records[referenceIndex]
         for attempt in 1...Self.attemptLimit {
             guard !Task.isCancelled else { return .cancelled }
             let relPath: String
             do {
-                relPath = try await catalog.planMergeResult(forReference: request.reference.relPath, suffix: "HDR")
+                relPath = try await catalog.planMergeResult(forReference: reference.relPath, suffix: "HDR")
             } catch {
                 return .failed(error)
             }
             name = (relPath as NSString).lastPathComponent
             let destination = await catalog.fileURL(forRelPath: relPath)
-            let sources = request.records.map { Self.source($0, forResultAt: relPath) }
+            let sources = records.map { Self.source($0, forResultAt: relPath) }
             let sidecar = SidecarWritten()
             let generation = request.generation
             do {
                 _ = try await request.engine.merge(
-                    request.analysis, options: request.options, sources: sources, to: destination,
+                    analysis, options: request.options, sources: sources, to: destination,
                     prepareSidecar: { recipe in
                         let json = String(decoding: try recipe.jsonData(), as: UTF8.self)
                         try await library.writeMergeRecipe(json, forNewImageAt: relPath, in: catalog)
@@ -166,7 +245,17 @@ final class PhotoMergeQueue: ObservableObject {
                             }
                         }
                     })
-                return .merged(relPath: relPath)
+                // Auto Settings' edit, while the GPU slot is still held.
+                var edit: Result<String, Error>?
+                if let autoSettings = request.autoSettings {
+                    progress = HDRMergeProgress(fraction: 1, stage: "Applying Auto Settings")
+                    do {
+                        if let json = try await autoSettings(destination) { edit = .success(json) }
+                    } catch {
+                        edit = .failure(error)
+                    }
+                }
+                return .merged(relPath: relPath, analysis: analysis, autoSettings: edit)
             } catch {
                 // Something took the name after it was planned: the DNG's
                 // (the engine's write found a file there) or the sidecar's.
@@ -203,18 +292,41 @@ final class PhotoMergeQueue: ObservableObject {
     private func finish(_ request: Request, outcome: Outcome, elapsed: TimeInterval) async {
         let library = request.library
         switch outcome {
-        case .merged(let relPath):
+        case .merged(let relPath, let analysis, let autoSettings):
             let fileName = (relPath as NSString).lastPathComponent
             summary = String(format: "Merged %@ in %.1f s", fileName, elapsed)
+            var problems: [String] = []
             // Another folder may be open by now; the result is catalogued
-            // when that one is opened again.
+            // when that one is opened again (without Auto Settings' edit).
             if request.catalog === library.catalog {
                 do {
                     try await library.refresh()
+                    if case .success(let json)? = autoSettings,
+                       let id = library.images.first(where: { $0.relPath == relPath })?.id {
+                        // Before it is selected, so Develop opens it with the edit.
+                        do {
+                            try await library.saveEditStack(json, schemaVersion: EditStack.schemaVersion,
+                                                            processVersion: EditStack.processVersion,
+                                                            forImageID: id, in: request.catalog)
+                        } catch {
+                            problems.append("Auto Settings couldn’t be saved: \(Self.describe(error))")
+                        }
+                    }
                     reveal(relPath, in: library)
                 } catch {
-                    library.lastError = "Reading the folder after the HDR merge failed: \(error)"
+                    problems.append("Reading the folder after the HDR merge failed: \(error)")
                 }
+            }
+            if case .failure(let error)? = autoSettings {
+                problems.append("Auto Settings couldn’t be worked out: \(Self.describe(error))")
+            }
+            if request.withoutDialog {
+                let referenceIndex = request.options.referenceIndex ?? analysis.referenceIndex
+                problems += analysis.warnings(reference: referenceIndex)
+                    .map { HDRMergeSheetModel.text(for: $0, frames: analysis.frames) }
+            }
+            if !problems.isEmpty {
+                library.lastError = "HDR merge \(fileName) finished, but: " + problems.joined(separator: " ")
             }
             Announcement.post("HDR merge finished: \(fileName)")
         case .cancelled:

@@ -69,6 +69,9 @@ enum KeyCommand: Equatable {
     case print, contactSheet
     /// Photo › Photo Merge › HDR…: the selected bracket merged into one DNG.
     case photoMergeHDR
+    /// Photo › Photo Merge › HDR Merge Without Dialog: the same, straight
+    /// away, with the options the dialog was last left with.
+    case photoMergeHDRWithoutDialog
     case slideshow, editExternally
     case undo, redo, copySettings, pasteSettings
     case rotate(Int), zoomIn, zoomOut, zoomToFit, zoomToActualSize

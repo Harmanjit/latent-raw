@@ -17,10 +17,14 @@ enum PhotoMergeEngine {
     #endif
 
     /// The HDR engine, using `gpu` for the merge.
-    static func hdr(gpu: GPUContext) -> any HDRMerging {
+    ///
+    /// - Parameter forDialog: the dialog's engine keeps each photo reduced
+    ///   while measuring it, for the preview; HDR Merge Without Dialog's
+    ///   has no preview, so it doesn't.
+    static func hdr(gpu: GPUContext, forDialog: Bool = false) -> any HDRMerging {
         #if DEBUG
         if let debugHDR { return debugHDR }
         #endif
-        return HDRMerger(gpu: gpu)
+        return HDRMerger(gpu: gpu, keepsPreviewFrames: forDialog)
     }
 }

@@ -208,7 +208,8 @@ struct ContentView: View {
         }
         .sheet(item: $hdrMergeSheet) { sheet in
             HDRMergeSheet(model: sheet, thumbnail: { await library.loadThumbnail(for: $0) },
-                          onMerge: { startHDRMerge($0, options: $1, from: sheet) }, canMerge: !exportQueue.isGPUBusy)
+                          onMerge: { startHDRMerge($0, options: $1, autoSettings: $2, from: sheet) },
+                          canMerge: !exportQueue.isGPUBusy)
                 .motionFollowsAccessibility()
         }
         .sheet(item: $renaming) { record in
@@ -773,7 +774,8 @@ struct ContentView: View {
         let urls = records.compactMap { library.fileURL(for: $0) }
         guard records.count >= 2, urls.count == records.count else { return }
         let catalog = library.catalog
-        let sheet = HDRMergeSheetModel(records: records, urls: urls, engine: PhotoMergeEngine.hdr(gpu: gpu)) { reference in
+        let sheet = HDRMergeSheetModel(records: records, urls: urls,
+                                       engine: PhotoMergeEngine.hdr(gpu: gpu, forDialog: true)) { reference in
             // The name as it would be now; the job plans it again on Merge.
             guard let catalog,
                   let relPath = try? await catalog.planMergeResult(forReference: reference.relPath, suffix: "HDR")
@@ -786,14 +788,42 @@ struct ContentView: View {
 
     /// Merge in the dialog: the job runs in the background from here, with
     /// the same engine that measured the photos and the dialog's options.
-    private func startHDRMerge(_ analysis: HDRMergeAnalysis, options: HDRMergeOptions, from sheet: HDRMergeSheetModel) {
+    private func startHDRMerge(_ analysis: HDRMergeAnalysis, options: HDRMergeOptions, autoSettings: Bool,
+                               from sheet: HDRMergeSheetModel) {
         let records = sheet.recordsInFrameOrder.compactMap { $0 }
         guard records.count == analysis.frames.count,
               photoMerge.start(analysis, options: options, records: records, library: library,
-                               engine: sheet.engine) else {
+                               engine: sheet.engine, autoSettings: autoSettings ? hdrAutoSettings() : nil) else {
             library.lastError = "HDR merge couldn’t start: an export or another merge is using the graphics processor, "
                 + "or the photos are no longer in the open folder."
             return
+        }
+    }
+
+    /// HDR Merge Without Dialog: the whole selection, measured and merged in
+    /// the background with the options the dialog was last left with.
+    private func mergeHDRWithoutDialog() {
+        guard let gpu = model.gpu else { return }
+        let records = library.selectedImages
+        let urls = records.compactMap { library.fileURL(for: $0) }
+        guard records.count >= 2, urls.count == records.count else { return }
+        let preferences = HDRMergePreferences()
+        guard photoMerge.startWithoutDialog(records: records, urls: urls, options: preferences.options,
+                                            library: library, engine: PhotoMergeEngine.hdr(gpu: gpu),
+                                            autoSettings: preferences.autoSettings ? hdrAutoSettings() : nil) else {
+            library.lastError = "HDR merge couldn’t start: an export or another merge is using the graphics processor."
+            return
+        }
+    }
+
+    /// Auto Settings' edit for a merged photo: Develop's Auto Adjust, worked
+    /// out away from the main thread.
+    private func hdrAutoSettings() -> PhotoMergeQueue.AutoSettings? {
+        guard let gpu = model.gpu else { return nil }
+        return { url in
+            try await Task.detached(priority: .userInitiated) {
+                try HDRAutoSettings.edit(forPhotoAt: url, gpu: gpu).editStackJSON
+            }.value
         }
     }
 
@@ -926,6 +956,8 @@ struct ContentView: View {
             ContactSheetPresenter.present(model: model, library: library)
         case .photoMergeHDR:
             beginHDRMerge()
+        case .photoMergeHDRWithoutDialog:
+            mergeHDRWithoutDialog()
         case .slideshow:
             SlideshowController.start(model: model, library: library)
         case .editExternally:
