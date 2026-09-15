@@ -261,7 +261,7 @@ public final class GPUContext: @unchecked Sendable {
         // won't exist in the runtime-compiled library.
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
                             "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye", "Slideshow",
-                            "LinearSource", "MergeHDR"]
+                            "LinearSource", "MergeHDR", "MergeWarp", "MergeDeghost"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound
