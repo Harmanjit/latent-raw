@@ -94,4 +94,97 @@ final class AIDenoiseTests: XCTestCase {
         let (_, halfHF) = try highFreq(half)
         XCTAssertLessThan(halfHF, baseHF); XCTAssertGreaterThan(halfHF, onHF)
     }
+
+    /// NAFNet diverges on smooth tiles just above black (encoded mean
+    /// ~0.02-0.07, little noise): the tile came out as a white or cyan
+    /// block with a grid texture, up to 10x out of range, all over the
+    /// shadows of the D750 sample. The pedestal keeps the network out of
+    /// that range. Checked on the model directly, so the per-tile fallback
+    /// can't hide a regression, and through `denoise`.
+    func testSmoothShadowsDoNotBreakTheModel() async throws {
+        try XCTSkipUnless(AIDenoiser.isAvailable, "NAFNet package not bundled")
+        let denoiser = try await AIDenoiser.load(.standard)
+        let model = try await CoreMLStore.load(AIDenoiser.Variant.standard.packageName)
+        let t = AIDenoiser.tile
+        var rng = SystemRandomNumberGenerator()
+        for encodedMean in stride(from: Float(0.0), through: 0.1, by: 0.01) {
+            for noise in [Float(0.0005), 0.004] {
+                var pixels = [Float16](repeating: 1, count: t * t * 4)
+                for i in 0..<(t * t) {
+                    for c in 0..<3 {
+                        let e = max(0, encodedMean + noise * Float.random(in: -1.7...1.7, using: &rng))
+                        pixels[i * 4 + c] = Float16(AIDenoiser.decode(e))
+                    }
+                }
+                let input = AIDenoiser.packTile(pixels, width: t, height: t, x0: 0, y0: 0, white: 1)
+                let out = AIDenoiser.unpack(try AIDenoiser.run(model, input: input))
+                XCTAssertFalse(AIDenoiser.diverged(input: input, output: out),
+                               "model diverged at encoded mean \(encodedMean), noise \(noise)")
+                let result = try await denoiser.denoise(pixels, width: t, height: t)
+                var meanIn: Float = 0, meanOut: Float = 0, peak: Float = 0
+                for i in 0..<(t * t) {
+                    let a = Float(result[i * 4 + 1]), b = Float(pixels[i * 4 + 1])
+                    if !a.isFinite { peak = .infinity }
+                    meanIn += AIDenoiser.encode(b); meanOut += AIDenoiser.encode(a); peak = max(peak, a)
+                }
+                meanIn /= Float(t * t); meanOut /= Float(t * t)
+                XCTAssertEqual(meanOut, meanIn, accuracy: 0.01, "mean \(encodedMean), noise \(noise)")
+                XCTAssertLessThan(peak, AIDenoiser.decode(encodedMean + 0.05), "no bright blocks")
+            }
+        }
+    }
+
+    /// The user's frame: every tile of the sample NEF at full resolution,
+    /// as-shot white balance and the worker's white, goes through the
+    /// network without diverging (138 of 486 tiles did), and the
+    /// denoised frame keeps the input's local means.
+    func testSampleFrameHasNoBrokenTiles() async throws {
+        let path = AIMaskTests.assetPath("nikon_d750_sample.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        try XCTSkipUnless(AIDenoiser.isAvailable, "NAFNet package not bundled")
+        let gpu = try GPUContext()
+        let session = try ImageSession(file: try RawFile(path: path), gpu: gpu)
+        let pipeline = RenderPipeline(gpu: gpu)
+        var asShot = EditParameters()
+        asShot.whiteBalance = session.asShotWhiteBalance
+        let camera = try pipeline.renderCameraRGB(session, scale: .full, parameters: asShot)
+        let w = camera.width, h = camera.height
+        let pixels = try TextureReadback.float16Pixels(of: camera, gpu: gpu)
+        let m = session.asShotMultipliers
+        let white = max(m.x, m.y, m.z, 1)
+
+        let model = try await CoreMLStore.load(AIDenoiser.Variant.standard.packageName)
+        let t = AIDenoiser.tile, step = t - AIDenoiser.overlap
+        var broken: [String] = []
+        for y0 in Swift.stride(from: 0, to: h - AIDenoiser.overlap, by: step) {
+            for x0 in Swift.stride(from: 0, to: w - AIDenoiser.overlap, by: step) {
+                let x = min(x0, w - t), y = min(y0, h - t)
+                let input = AIDenoiser.packTile(pixels, width: w, height: h, x0: x, y0: y, white: white)
+                let out = AIDenoiser.unpack(try AIDenoiser.run(model, input: input))
+                if AIDenoiser.diverged(input: input, output: out) { broken.append("(\(x), \(y))") }
+            }
+        }
+        XCTAssertEqual(broken, [], "tiles the network broke")
+
+        let denoiser = try await AIDenoiser.load(.standard)
+        let out = try await denoiser.denoise(pixels, width: w, height: h, white: white)
+        // 32x32 block means in encoded units, green channel.
+        var worst: Float = 0, outOfRange = 0
+        for by in Swift.stride(from: 0, to: h - 32, by: 32) {
+            for bx in Swift.stride(from: 0, to: w - 32, by: 32) {
+                var a: Float = 0, b: Float = 0
+                for y in by..<(by + 32) {
+                    for x in bx..<(bx + 32) {
+                        let i = (y * w + x) * 4 + 1
+                        let o = Float(out[i])
+                        if !(o >= 0 && o <= white * 1.01) { outOfRange += 1 }
+                        a += AIDenoiser.encode(o / white); b += AIDenoiser.encode(Float(pixels[i]) / white)
+                    }
+                }
+                worst = max(worst, abs(a - b) / 1024)
+            }
+        }
+        XCTAssertEqual(outOfRange, 0, "non-finite or out-of-range pixels")
+        XCTAssertLessThan(worst, 0.03, "largest local mean shift (encoded)")
+    }
 }
