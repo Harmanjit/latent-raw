@@ -164,6 +164,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Saving goes through Library.perform, so from here on the flushed
         // edit counts as pending work below.
         for window in windows { window.model.flushPendingSave() }
+        // Moves and copies stop after the image under way (which is then
+        // waited for below); the rest stay where they are.
+        for window in windows { window.library.fileOperations.cancel() }
         let libraries = windows.map(\.library)
         guard !exporting.isEmpty || !exportingOpenImage.isEmpty || libraries.contains(where: \.hasPendingWork) else {
             return .terminateNow

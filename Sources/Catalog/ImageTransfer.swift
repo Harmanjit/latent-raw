@@ -54,6 +54,17 @@ public struct CompletedTransfer: Sendable, Equatable {
     public var preservedNameChanged: Bool
     public var previousPreservedName: String?
     public var newPreservedName: String?
+
+    public init(kind: Kind, source: URL, destination: URL, destinationIdentity: FileOperations.Identity?,
+                preservedNameChanged: Bool, previousPreservedName: String?, newPreservedName: String?) {
+        self.kind = kind
+        self.source = source
+        self.destination = destination
+        self.destinationIdentity = destinationIdentity
+        self.preservedNameChanged = preservedNameChanged
+        self.previousPreservedName = previousPreservedName
+        self.newPreservedName = newPreservedName
+    }
 }
 
 /// What a batch did.
@@ -61,6 +72,11 @@ public struct TransferReport: Sendable {
     public struct Failure: Sendable, Equatable {
         public var url: URL
         public var reason: String
+
+        public init(url: URL, reason: String) {
+            self.url = url
+            self.reason = reason
+        }
     }
 
     public var completed: [CompletedTransfer] = []
@@ -137,15 +153,6 @@ public enum ImageTransfer {
                            progress: (@Sendable (Int, Int) -> Void)? = nil,
                            faults: TransferFaults = TransferFaults()) async -> TransferReport {
         var report = TransferReport()
-        // The open catalog's rows, not its sidecars, are what an image takes
-        // with it; a sidecar changed outside Latent is read into them first.
-        if let openCatalog, !requests.isEmpty {
-            do {
-                _ = try await openCatalog.reconcile()
-            } catch {
-                logger.error("Reconcile before a transfer failed: \(String(describing: error), privacy: .private)")
-            }
-        }
         var destinations: [String: CatalogLocation] = [:]
         for (index, request) in requests.enumerated() {
             if cancellation?.isCancelled == true {
@@ -437,12 +444,20 @@ public enum ImageTransfer {
         var newPreserved: String?
         var preservedChanged = false
         let record = try plan.sourceID.flatMap { id in try rows?.record(id) }
+        // The open catalog's row is what an image takes with it, unless its
+        // sidecar changed outside Latent since the row read it: then the
+        // sidecar is the truth, carried as it is for reconcile to read.
+        let sidecarChangedOutside: Bool = {
+            guard hasSidecar, let record else { return false }
+            let date = (try? fm.attributesOfItem(atPath: sourceSidecar.path))?[.modificationDate] as? Date
+            return date.map(ImageRecord.milliseconds) != record.sidecarMtime
+        }()
         let mayChange: Bool = switch plan.preservedName {
         case .keep: false
         case .recordOriginal: name != sourceName
         case .exactly: true
         }
-        if let record {
+        if let record, !sidecarChangedOutside {
             previousPreserved = record.preservedName
         } else if mayChange, hasSidecar {
             previousPreserved = (try? XMPSidecar.read(from: sourceSidecar))?.preservedFileName
@@ -461,12 +476,14 @@ public enum ImageTransfer {
             try moveWithinCatalog(plan, to: destinationURL, relPath: destinationRelPath,
                                   companions: [(sourceSidecar, destinationSidecar), (sourceThumbnail, destinationThumbnail)],
                                   rows: rows, preservedName: preservedChanged ? .some(newPreserved) : nil,
-                                  hadSidecar: hasSidecar, destinationSidecar: destinationSidecar)
+                                  hadSidecar: hasSidecar, sidecarFromRow: !sidecarChangedOutside,
+                                  destinationSidecar: destinationSidecar)
         } else if sameCatalog {
             try copyWithinCatalog(plan, to: destinationURL, relPath: destinationRelPath,
                                   sourceSidecar: hasSidecar ? sourceSidecar : nil, destinationSidecar: destinationSidecar,
                                   sourceThumbnail: sourceThumbnail, destinationThumbnail: destinationThumbnail,
-                                  rows: rows, preservedName: newPreserved, preservedChanged: preservedChanged)
+                                  rows: rows, sidecarFromRow: !sidecarChangedOutside,
+                                  preservedName: newPreserved, preservedChanged: preservedChanged)
         } else {
             // Sidecar first: until the file arrives, it waits unused beside
             // where the file will be, and the original is untouched.
@@ -475,7 +492,7 @@ public enum ImageTransfer {
                 if hasSidecar {
                     try ensureContainer(for: destination)
                     try fm.createDirectory(at: destinationSidecar.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    if let rows, let id = plan.sourceID, var fields = try rows.sidecarFields(id) {
+                    if let rows, let id = plan.sourceID, !sidecarChangedOutside, var fields = try rows.sidecarFields(id) {
                         fields.preservedFileName = newPreserved
                         try writeSidecarExclusively(fields, to: destinationSidecar)
                         created.append(destinationSidecar)
@@ -539,7 +556,7 @@ public enum ImageTransfer {
     /// one fails. `preservedName` is the new value when it changes.
     private static func moveWithinCatalog(_ plan: Plan, to destination: URL, relPath: String,
                                           companions: [(URL, URL)], rows: Rows?, preservedName: String??,
-                                          hadSidecar: Bool, destinationSidecar: URL) throws {
+                                          hadSidecar: Bool, sidecarFromRow: Bool, destinationSidecar: URL) throws {
         let fm = FileManager.default
         try placeFile(plan, at: destination)
         var moved: [(from: URL, to: URL)] = []
@@ -565,7 +582,7 @@ public enum ImageTransfer {
         }
         if plan.temporaryCopy != nil { try? fm.removeItem(at: plan.source) }
         guard let preservedName else { return }
-        if let rows, let id = plan.sourceID {
+        if let rows, let id = plan.sourceID, sidecarFromRow {
             if hadSidecar || preservedName != nil {
                 do { try rows.writeSidecar(id) } catch {
                     logger.error("Writing the renamed image's sidecar failed: \(String(describing: error), privacy: .private)")
@@ -583,7 +600,8 @@ public enum ImageTransfer {
     private static func copyWithinCatalog(_ plan: Plan, to destination: URL, relPath: String,
                                           sourceSidecar: URL?, destinationSidecar: URL,
                                           sourceThumbnail: URL, destinationThumbnail: URL,
-                                          rows: Rows?, preservedName: String?, preservedChanged: Bool) throws {
+                                          rows: Rows?, sidecarFromRow: Bool, preservedName: String?,
+                                          preservedChanged: Bool) throws {
         let fm = FileManager.default
         try placeFile(plan, at: destination)
         var created: [URL] = [destination]
@@ -603,7 +621,13 @@ public enum ImageTransfer {
                                                 ImageRecord.milliseconds(values.contentModificationDate ?? .distantPast),
                                                 thumbnailCopied)
                 insertedID = newID
-                if sourceSidecar != nil || preservedName != nil {
+                if let sourceSidecar, !sidecarFromRow {
+                    // The new row has no sidecar time, so reconcile reads this.
+                    try fm.createDirectory(at: destinationSidecar.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try FileOperations.copyExclusively(sourceSidecar, to: destinationSidecar)
+                    created.append(destinationSidecar)
+                    if preservedChanged { try rewritePreservedName(preservedName, in: destinationSidecar) }
+                } else if sourceSidecar != nil || preservedName != nil {
                     try rows.writeSidecar(newID)
                     created.append(destinationSidecar)
                 }

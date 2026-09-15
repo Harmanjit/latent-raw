@@ -251,6 +251,29 @@ final class FileTransferTests: XCTestCase {
         XCTAssertEqual(returned?.rating, 4)
     }
 
+    /// A sidecar changed by another app since the catalog last read it is
+    /// what goes with the image, not the row.
+    func testASidecarChangedOutsideLatentIsCarriedAsItIs() async throws {
+        let catalog = try await preparedCatalog()
+        var fields = try XMPSidecar.read(from: sidecar("A.NEF"))
+        fields.rating = 2
+        try await Task.sleep(for: .milliseconds(20))   // a new mtime
+        try XMPSidecar.write(fields, to: sidecar("A.NEF"))
+        let other = base.appendingPathComponent("Archive", isDirectory: true)
+        try fm.createDirectory(at: other, withIntermediateDirectories: true)
+        let day2 = root.appendingPathComponent("Day 2")
+
+        var report = await ImageTransfer.run([request("A.NEF", to: other)], mode: .copy, openCatalog: catalog)
+        XCTAssertEqual(report.completed.count, 1, report.failureDescription)
+        XCTAssertEqual(try XMPSidecar.read(from: other.appendingPathComponent("_latent/xmp/A.NEF.xmp")).rating, 2)
+
+        report = await ImageTransfer.run([request("A.NEF", to: day2)], mode: .move, openCatalog: catalog)
+        XCTAssertEqual(report.completed.count, 1, report.failureDescription)
+        _ = try await catalog.reconcile()
+        let moved = try await catalog.image(forRelPath: "Day 2/A.NEF")
+        XCTAssertEqual(moved?.rating, 2, "reconcile reads the moved sidecar")
+    }
+
     // MARK: - Interruption and cancelling
 
     struct Interrupted: Error {}

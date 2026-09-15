@@ -19,6 +19,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | ⌘0, ⌘1, ⌘=, ⌘- | Fit, 100%, zoom in, zoom out (in the grid, ⌘= and ⌘- size the thumbnails) |
 | ⇧X | Compare: make the candidate the Select |
 | ⇧⌘O | Open folder |
+| ⌥⌘←, ⌥⌘→ | Back / forward through the folders opened, back to the images you had selected |
 | ⌘, | Settings |
 | ⌘? | Latent Help (these pages) |
 
@@ -53,3 +54,10 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 |---|---|
 | ⇧⌘E | Export the selection |
 | ⌥⌘R | Reveal the selection in Finder |
+
+## Files
+
+| Keys | Action |
+|---|---|
+| F2 | Rename the selected image (its sidecar and thumbnail follow) |
+| Drag images onto a sidebar folder | Move them there with their edits (hold ⌥ to copy) |

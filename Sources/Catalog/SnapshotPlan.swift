@@ -29,6 +29,8 @@ public struct SnapshotPlan: Equatable, Sendable {
         case compare
         /// The export sheet over the window.
         case export
+        /// The rename sheet over the window, for the selected image.
+        case rename
         /// The Settings window instead of the main one.
         case settings
     }
