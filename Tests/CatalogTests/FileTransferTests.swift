@@ -30,8 +30,7 @@ final class FileTransferTests: XCTestCase {
     /// Nonisolated: `setUpWithError` reads it, and XCTest doesn't run that
     /// on the main actor.
     nonisolated static var otherNEF: String {
-        let golden = URL(fileURLWithPath: ReconcileTests.sampleNEF).deletingLastPathComponent()
-            .appendingPathComponent("golden_nikon_d750_cc0.nef").path
+        let golden = TestAssets.path(TestAssets.goldenName)
         return FileManager.default.fileExists(atPath: golden) ? golden : ReconcileTests.sampleNEF
     }
 

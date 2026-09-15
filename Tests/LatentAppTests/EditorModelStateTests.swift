@@ -7,11 +7,7 @@ import MLKit
 /// The editor's state across opening, closing and background work.
 @MainActor
 final class EditorModelStateTests: XCTestCase {
-    private static func asset(_ name: String) -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets").appendingPathComponent(name)
-    }
+    private static func asset(_ name: String) -> URL { TestAssets.url(name) }
 
     /// A file that won't open leaves the editor closed. Nothing of the
     /// photo open before may stay: with its catalog id, history or pending

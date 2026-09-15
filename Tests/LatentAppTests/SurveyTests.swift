@@ -6,11 +6,7 @@ import PixelEngine
 /// Survey (N): its commands, and its panes' models, linked views and memory.
 @MainActor
 final class SurveyTests: XCTestCase {
-    private static func asset(_ name: String) -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets").appendingPathComponent(name)
-    }
+    private static func asset(_ name: String) -> URL { TestAssets.url(name) }
 
     private func state(_ change: (inout CommandState) -> Void) -> CommandState {
         var state = CommandState()

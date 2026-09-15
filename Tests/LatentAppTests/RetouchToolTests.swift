@@ -9,11 +9,7 @@ import PixelEngine
 /// menus, the tools' exclusivity and what a drag leaves in the edit.
 @MainActor
 final class RetouchToolTests: XCTestCase {
-    private static func asset(_ name: String) -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets").appendingPathComponent(name)
-    }
+    private static func asset(_ name: String) -> URL { TestAssets.url(name) }
 
     private func openModel() async throws -> EditorModel {
         let url = Self.asset("nikon_d750_sample.nef")

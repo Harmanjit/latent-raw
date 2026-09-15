@@ -5,11 +5,7 @@ import CoreGraphics
 @testable import RawCore
 
 final class AIMaskTests: XCTestCase {
-    static func assetPath(_ name: String) -> String {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets").appendingPathComponent(name).path
-    }
+    static func assetPath(_ name: String) -> String { TestAssets.path(name) }
 
     /// A ~1000px sRGB CGImage of a sample, the way the app feeds the models.
     func smallImage(_ name: String) throws -> CGImage {

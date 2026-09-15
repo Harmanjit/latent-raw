@@ -6,11 +6,7 @@ import XCTest
 final class ReconcileTests: XCTestCase {
     var folder: URL!
 
-    static var sampleNEF: String {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets/nikon_d750_sample.nef").path
-    }
+    static var sampleNEF: String { TestAssets.path("nikon_d750_sample.nef") }
 
     override func setUpWithError() throws {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: Self.sampleNEF),

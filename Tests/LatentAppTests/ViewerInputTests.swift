@@ -62,11 +62,7 @@ final class ViewerInputTests: XCTestCase {
 
     // MARK: - Model
 
-    private static func asset(_ name: String) -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets").appendingPathComponent(name)
-    }
+    private static func asset(_ name: String) -> URL { TestAssets.url(name) }
 
     private func openedModel() async throws -> EditorModel {
         let url = Self.asset("nikon_d750_sample.nef")

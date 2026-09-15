@@ -47,9 +47,7 @@ final class FileCommandsTests: XCTestCase {
     /// Images dropped on a sidebar folder follow the menus' rule: not while
     /// files are being changed or read by an export.
     func testDropsAreRefusedWhileFilesCantChange() async throws {
-        let sample = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets/golden_nikon_d750_cc0.nef")
+        let sample = TestAssets.url(TestAssets.goldenName)
         try XCTSkipUnless(FileManager.default.fileExists(atPath: sample.path))
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("latent-drop-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }

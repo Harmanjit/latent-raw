@@ -212,11 +212,3 @@ final class RenderPipelineTests: XCTestCase {
                         file.summary.cameraModel.contains("a7iii"), true)
     }
 }
-
-enum TestAssets {
-    static func path(_ name: String) -> String {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets").appendingPathComponent(name).path
-    }
-}
