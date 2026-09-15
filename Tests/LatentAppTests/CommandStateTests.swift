@@ -85,8 +85,20 @@ final class CommandStateTests: XCTestCase {
         XCTAssertEqual(state.redoTitle, "Redo Tone, Curve")
         XCTAssertEqual(develop().undoTitle, "Undo")
         XCTAssertFalse(develop().isEnabled(.redo))
-        // Edits are undone in Develop only.
-        XCTAssertFalse(develop { $0.undoLabel = "Exposure"; $0.mode = .library }.isEnabled(.undo))
+    }
+
+    /// Outside Develop, Undo and Redo take back library actions, whose
+    /// labels ContentView puts in place of the editor's; Develop needs its
+    /// image for its own history.
+    func testLibraryUndoOutsideDevelop() {
+        let grid = develop { $0.mode = .library; $0.hasImage = false; $0.undoLabel = "Paste Settings (12 Images)" }
+        XCTAssertTrue(grid.isEnabled(.undo))
+        XCTAssertFalse(grid.isEnabled(.redo))
+        XCTAssertEqual(grid.undoTitle, "Undo Paste Settings (12 Images)")
+        XCTAssertTrue(develop { $0.mode = .loupe; $0.redoLabel = "Rating" }.isEnabled(.redo))
+        XCTAssertFalse(develop { $0.hasImage = false; $0.undoLabel = "Exposure" }.isEnabled(.undo))
+        // An action filed without a name still reads as plain Undo.
+        XCTAssertEqual(develop { $0.mode = .library; $0.undoLabel = "" }.undoTitle, "Undo")
     }
 
     func testTypingMakesUndoPlain() {

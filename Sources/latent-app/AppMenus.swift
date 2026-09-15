@@ -69,10 +69,11 @@ struct CommandState: Equatable {
         // Library prints the selection; the other modes the image shown.
         case .print: editorReady && (mode == .library ? selectionCount > 0 : hasImage || selectionCount > 0)
         case .contactSheet: editorReady && selectionCount > 0
-        // Edits are undone where they are made. Typing is undone by the
-        // Edit menu itself (see LatentCommands).
-        case .undo: mode == .develop && hasImage && undoLabel != nil
-        case .redo: mode == .develop && hasImage && redoLabel != nil
+        // Edits are undone in Develop, library actions in the other modes
+        // (the labels are those of the mode). Typing is undone by the Edit
+        // menu itself (see LatentCommands).
+        case .undo: (mode != .develop || hasImage) && undoLabel != nil
+        case .redo: (mode != .develop || hasImage) && redoLabel != nil
         case .copySettings: hasImage || hasSelection
         case .pasteSettings: hasImage || selectionCount > 0
         case .clearFilter: filterActive
@@ -101,11 +102,11 @@ struct CommandState: Equatable {
     // MARK: Titles that say what choosing the item will do
 
     var undoTitle: String {
-        isEditingText ? "Undo" : undoLabel.map { "Undo \($0)" } ?? "Undo"
+        isEditingText ? "Undo" : undoLabel.flatMap { $0.isEmpty ? nil : "Undo \($0)" } ?? "Undo"
     }
 
     var redoTitle: String {
-        isEditingText ? "Redo" : redoLabel.map { "Redo \($0)" } ?? "Redo"
+        isEditingText ? "Redo" : redoLabel.flatMap { $0.isEmpty ? nil : "Redo \($0)" } ?? "Redo"
     }
 
     var exportTitle: String {
