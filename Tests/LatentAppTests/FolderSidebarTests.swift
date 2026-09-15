@@ -34,7 +34,9 @@ final class FolderSidebarTests: XCTestCase {
 
     // MARK: The outline in a window
 
-    private var folders: [URL] = []
+    // setUp and tearDown are nonisolated overrides, so on Swift 6.1 they
+    // can only reach a fixture the class's main-actor isolation doesn't cover.
+    nonisolated(unsafe) private var folders: [URL] = []
 
     override func setUpWithError() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("FolderSidebarTests-\(UUID().uuidString)")
