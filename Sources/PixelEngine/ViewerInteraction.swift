@@ -262,17 +262,11 @@ public enum ViewerInteraction {
         /// `margin` so small moves stay inside it, snapped to whole pixels,
         /// and moved (not shrunk) to lie on the sensor. Keeping the size
         /// constant as the pointer moves lets every render reuse the same
-        /// pooled textures. A size equal to `avoiding` (the view's own tile)
-        /// grows by a pixel, since pooled textures are keyed by size and the
-        /// loupe's render must never draw into the tile on screen.
-        public static func tileRegion(covering needed: CGRect, margin: CGFloat, sensorSize: CGSize,
-                                      avoiding: CGSize = .zero) -> CGRect {
+        /// pooled textures (the magnifier's own pool, so never the tile's).
+        public static func tileRegion(covering needed: CGRect, margin: CGFloat, sensorSize: CGSize) -> CGRect {
             let sensorW = sensorSize.width.rounded(.down), sensorH = sensorSize.height.rounded(.down)
-            var width = min((needed.width + 2 * margin).rounded(.up), sensorW)
-            var height = min((needed.height + 2 * margin).rounded(.up), sensorH)
-            if width == avoiding.width, height == avoiding.height {
-                if width < sensorW { width += 1 } else if width > 1 { width -= 1 }
-            }
+            let width = min((needed.width + 2 * margin).rounded(.up), sensorW)
+            let height = min((needed.height + 2 * margin).rounded(.up), sensorH)
             func place(_ start: CGFloat, _ size: CGFloat, _ extent: CGFloat) -> CGFloat {
                 min(max(start.rounded(.down), 0), max(extent - size, 0))
             }

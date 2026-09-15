@@ -153,7 +153,7 @@ public enum ExportWorker {
             try Task.checkCancellation()
         }
 
-        let scale = ExportPlan.scale(for: file.summary, maxLongEdge: request.maxLongEdge)
+        let scale = ExportPlan.scale(for: file.summary, crop: parameters.crop, maxLongEdge: request.maxLongEdge)
         let texture = try pipeline.render(session, scale: scale,
                                           parameters: parameters, output: .file(request.colorSpace))
         let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)

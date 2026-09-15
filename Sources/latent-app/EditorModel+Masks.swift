@@ -71,9 +71,13 @@ extension EditorModel {
         let quads = max(1, Int((Double(longEdge) / 2048.0).rounded(.up)))
         var neutral = defaultParameters
         neutral.locals = []
-        let tex = try pipeline.render(session, scale: .binned(quads: quads), parameters: neutral,
-                                      output: .file(.sRGB))
-        return try Exporter(gpu: gpu).cgImage(from: tex, colorSpace: .sRGB)
+        // Its own pool, as for red-eye detection: never the preview's textures.
+        defer { session.releasePooledTextures(in: .analysis) }
+        return try session.withTexturePool(.analysis) {
+            let tex = try pipeline.render(session, scale: .binned(quads: quads), parameters: neutral,
+                                          output: .file(.sRGB))
+            return try Exporter(gpu: gpu).cgImage(from: tex, colorSpace: .sRGB)
+        }
     }
 
     private func generateAIMask(for local: LocalAdjustment) {

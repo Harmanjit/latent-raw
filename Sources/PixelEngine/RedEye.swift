@@ -36,6 +36,20 @@ public struct RedEyeSpot: Equatable, Sendable, Codable, Identifiable {
         !(radius > 0) || !(strength > 0) || !centre.x.isFinite || !centre.y.isFinite
     }
 
+    /// The spot as a render can trust it, whatever wrote the sidecar: the
+    /// centre within a sensor's width of the sensor, a radius of at most
+    /// half the short side and a strength in 0…1. Nil when a number isn't
+    /// finite. A spot the app made comes back unchanged.
+    public var sanitized: RedEyeSpot? {
+        guard centre.x.isFinite, centre.y.isFinite, radius.isFinite, strength.isFinite else { return nil }
+        var spot = self
+        spot.centre = simd_clamp(centre, SIMD2(repeating: HealPatch.coordinateRange.lowerBound),
+                                 SIMD2(repeating: HealPatch.coordinateRange.upperBound))
+        spot.radius = min(max(radius, 0), 0.5)
+        spot.strength = min(max(strength, 0), 1)
+        return spot
+    }
+
     public func radiusPixels(sensorSize s: CGSize) -> CGFloat {
         CGFloat(radius) * min(s.width, s.height)
     }
@@ -118,9 +132,7 @@ enum RedEyeStage {
         // samples the whole texture for that.
         let reach = radius + 2
         let lo = (centre - reach).rounded(.down), hi = (centre + reach).rounded(.up)
-        let x0 = max(0, Int(lo.x)), y0 = max(0, Int(lo.y))
-        let x1 = min(width, Int(hi.x)), y1 = min(height, Int(hi.y))
-        guard x1 > x0, y1 > y0, radius > 0 else { return nil }
+        guard case let (x0, y0, x1, y1)? = HealStage.box(lo, hi, width, height), radius > 0 else { return nil }
         return RedEyeSpotGPU(centre: centre, radius: radius, strength: min(max(spot.strength, 0), 1),
                              boxOrigin: SIMD2(Int32(x0), Int32(y0)), boxSize: SIMD2(Int32(x1 - x0), Int32(y1 - y0)))
     }

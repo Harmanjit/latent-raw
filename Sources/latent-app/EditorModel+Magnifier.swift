@@ -11,6 +11,8 @@ struct MagnifierRenderState {
     /// from before an edit or a before/after toggle, is never drawn.
     weak var session: ImageSession?
     var parameters: EditParameters?
+    /// The size the magnifier pool's textures were made for.
+    var poolSize: CGSize?
     var lastRender: ContinuousClock.Instant?
     var pending: Task<Void, Never>?
 }
@@ -39,14 +41,19 @@ extension EditorModel {
         requestMagnifierRender()
     }
 
-    /// An edit, or before/after, changed what the loupe should show.
+    /// Something the view renders changed: an edit or before/after, but
+    /// also the neural denoise result, a model mask or the display output,
+    /// which the tile's key doesn't hold. So the tile on hand never stays.
     func refreshMagnifier() {
-        guard let loupe = magnifierState.loupe, !magnifierTileCovers(loupe) else { return }
+        guard let loupe = magnifierState.loupe else { return }
+        magnifierState.parameters = nil
+        guard !magnifierTileCovers(loupe) else { return }
         requestMagnifierRender()
     }
 
     private func endMagnifier() {
         magnifierState.pending?.cancel()
+        magnifierState.session?.releasePooledTextures(in: .magnifier)
         magnifierState = MagnifierRenderState()
         if magnifierTile != nil { magnifierTile = nil }
     }
@@ -103,15 +110,25 @@ extension EditorModel {
         }
         let withSources = HealPatch.regionIncludingSources(view, patches: parameters.heals, sensorSize: sensorSize)
         let region = ViewerInteraction.Magnifier.tileRegion(covering: withSources, margin: Self.magnifierMargin,
-                                                            sensorSize: sensorSize, avoiding: tileSize)
+                                                            sensorSize: sensorSize)
         guard region.width > 0, region.height > 0 else { return }
+        // Keystone and heals in view change the size as the pointer moves,
+        // and every size gets a set of textures of its own: keep only the
+        // latest. The magnifier's pool is its own, so none is on screen.
+        if magnifierState.session !== session || magnifierState.poolSize != region.size {
+            magnifierState.session?.releasePooledTextures(in: .magnifier)
+            session.releasePooledTextures(in: .magnifier)
+            magnifierState.poolSize = region.size
+        }
         do {
             var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: true)
-            let rendered = try pipeline.render(
-                session,
-                scale: .region(x: Int(region.minX), y: Int(region.minY),
-                               width: Int(region.width), height: Int(region.height)),
-                parameters: parameters, output: displayOutput, info: &info)
+            let rendered = try session.withTexturePool(.magnifier) {
+                try pipeline.render(
+                    session,
+                    scale: .region(x: Int(region.minX), y: Int(region.minY),
+                                   width: Int(region.width), height: Int(region.height)),
+                    parameters: parameters, output: displayOutput, info: &info)
+            }
             magnifierTile = PresentLayer(texture: rendered, coverage: info.sensorRect,
                                          inset: Self.magnifierInset, headroom: displayOutput.headroom)
             let viewed = view.insetBy(dx: -Self.magnifierMargin, dy: -Self.magnifierMargin)

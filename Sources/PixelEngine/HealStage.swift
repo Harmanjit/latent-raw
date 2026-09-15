@@ -82,10 +82,17 @@ enum HealStage {
         blit.copy(from: input, to: output)
         blit.endEncoding()
 
-        let placed = patches.prefix(HealPatch.maximumCount).flatMap {
+        let perPatch = patches.prefix(HealPatch.maximumCount).map {
             placements($0, width: input.width, height: input.height,
                        sensorSize: sensorSize, tileOrigin: tileOrigin, binSpan: binSpan)
         }
+        let placed = perPatch.flatMap { $0 }
+        // Every piece of a stroke in more than one piece reads the image as
+        // it was before the stroke, as a circle reads the image before it,
+        // so no piece depends on another and a tile need only hold the
+        // pieces it shows (`HealPatch.regionIncludingSources`).
+        let readsBefore = perPatch.flatMap { group in group.map { _ in group.count > 1 } }
+        let startsStroke = perPatch.flatMap { group in group.indices.map { group.count > 1 && $0 == 0 } }
         let eyes = redEyes.prefix(RedEyeSpot.maximumCount).compactMap {
             RedEyeStage.place($0, width: input.width, height: input.height,
                               sensorSize: sensorSize, tileOrigin: tileOrigin, binSpan: binSpan)
@@ -118,7 +125,12 @@ enum HealStage {
             gpu.device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
         }
         if !allSegments.isEmpty, segmentBuffer == nil { throw RenderError.gpuBufferAllocationFailed }
-        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+        // The image before a stroke: the input itself for a stroke that
+        // comes first, else a copy made when the stroke starts. Circles and
+        // single pieces read the working texture, which their own pass
+        // doesn't change until it is done.
+        var before: MTLTexture?
+        guard var encoder = commandBuffer.makeComputeCommandEncoder() else {
             throw RenderError.gpuBufferAllocationFailed
         }
         var placeholder = SIMD4<Float>.zero
@@ -131,12 +143,36 @@ enum HealStage {
         }
         var sensorSize = sensorSize, tileOrigin = tileOrigin, span = binSpan
         let gridBytes = MemoryLayout<HealGridGPU>.stride
+        var reads = output
         for (k, item) in placed.enumerated() {
+            if startsStroke[k] {
+                if k == 0 {
+                    reads = input
+                } else {
+                    encoder.endEncoding()
+                    if before == nil {
+                        before = gpu.makePrivateTexture(width: output.width, height: output.height,
+                                                        pixelFormat: output.pixelFormat)
+                    }
+                    guard let before, let copy = commandBuffer.makeBlitCommandEncoder() else {
+                        throw RenderError.gpuBufferAllocationFailed
+                    }
+                    copy.copy(from: output, to: before)
+                    copy.endEncoding()
+                    guard let next = commandBuffer.makeComputeCommandEncoder() else {
+                        throw RenderError.gpuBufferAllocationFailed
+                    }
+                    encoder = next
+                    reads = before
+                }
+            } else if !readsBefore[k] {
+                reads = output
+            }
             var patch = item.patch, grid = item.grid
             let gridCells = (Int(grid.gridSize.x), Int(grid.gridSize.y))
             if patch.params.z < 0.5 {
                 encoder.setComputePipelineState(gpu.healGatherPSO)
-                encoder.setTexture(output, index: 0)
+                encoder.setTexture(reads, index: 0)
                 encoder.setTexture(fieldT, index: 1)
                 encoder.setTexture(fieldS, index: 2)
                 encoder.setBytes(&grid, length: gridBytes, index: 0)
@@ -163,6 +199,7 @@ enum HealStage {
             encoder.setTexture(fieldT, index: 1)
             encoder.setTexture(fieldS, index: 2)
             encoder.setTexture(scratch, index: 3)
+            encoder.setTexture(reads, index: 4)
             encoder.setBytes(&patch, length: MemoryLayout<HealPatchGPU>.stride, index: 0)
             encoder.setBytes(&grid, length: gridBytes, index: 1)
             encoder.setBytes(&sensorSize, length: 8, index: 2)
@@ -202,9 +239,7 @@ enum HealStage {
         for k in segments.indices {
             let lo = (bounds[k].lo - radius - 1).rounded(.down)
             let hi = (bounds[k].hi + radius + 1).rounded(.up)
-            let x0 = max(0, Int(lo.x)), y0 = max(0, Int(lo.y))
-            let x1 = min(width, Int(hi.x)), y1 = min(height, Int(hi.y))
-            guard x1 > x0, y1 > y0 else { continue }
+            guard case let (x0, y0, x1, y1)? = box(lo, hi, width, height) else { continue }
 
             var gridSize = SIMD2<Int32>(1, 1)
             var reachLo = lo, reachHi = hi
@@ -245,9 +280,7 @@ enum HealStage {
         let source = (p.source * sensorSize - tileOrigin) / binSpan
         let lo = (target - radius - 1).rounded(.down)
         let hi = (target + radius + 1).rounded(.up)
-        let x0 = max(0, Int(lo.x)), y0 = max(0, Int(lo.y))
-        let x1 = min(width, Int(hi.x)), y1 = min(height, Int(hi.y))
-        guard x1 > x0, y1 > y0, radius > 0 else { return nil }
+        guard case let (x0, y0, x1, y1)? = box(lo, hi, width, height), radius > 0 else { return nil }
 
         let layout = HealFieldLayout(radius: radius)
         let cell = Float(layout.cell), padding = Float(layout.paddingCells)
@@ -262,6 +295,17 @@ enum HealStage {
                                boxOrigin: SIMD2(Int32(x0), Int32(y0)),
                                boxSize: SIMD2(Int32(x1 - x0), Int32(y1 - y0)))
         return (HealPatchGPU(p), grid)
+    }
+
+    /// The whole pixels from `lo` to `hi` on a `width` x `height` texture,
+    /// or nil when that is empty. Clamped before converting, so a patch
+    /// placed absurdly far off the texture misses it instead of overflowing.
+    static func box(_ lo: SIMD2<Float>, _ hi: SIMD2<Float>, _ width: Int, _ height: Int) -> (Int, Int, Int, Int)? {
+        guard lo.x.isFinite, lo.y.isFinite, hi.x.isFinite, hi.y.isFinite else { return nil }
+        let size = SIMD2(Float(width), Float(height))
+        let a = simd_clamp(lo, .zero, size), b = simd_clamp(hi, .zero, size)
+        let x0 = Int(a.x), y0 = Int(a.y), x1 = Int(b.x), y1 = Int(b.y)
+        return x1 > x0 && y1 > y0 ? (x0, y0, x1, y1) : nil
     }
 
     private static func dispatch(_ encoder: MTLComputeCommandEncoder, _ pso: MTLComputePipelineState,

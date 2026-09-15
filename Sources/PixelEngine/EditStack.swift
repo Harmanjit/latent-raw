@@ -251,8 +251,11 @@ public struct EditStack: Codable, Equatable, Sendable {
         }
         if let st = modules.splittoning { p.splitToning = st }
         p.locals = modules.locals ?? []
-        p.heals = modules.heal ?? []
-        p.redEyes = modules.redeye ?? []
+        // Geometry from a file is checked before anything renders it: a
+        // hand-edited coordinate could otherwise overflow the render's pixel
+        // arithmetic, or a stroke of a million points take minutes.
+        p.heals = (modules.heal ?? []).prefix(HealPatch.maximumCount).compactMap(\.sanitized)
+        p.redEyes = (modules.redeye ?? []).prefix(RedEyeSpot.maximumCount).compactMap(\.sanitized)
         if let pr = modules.presence { p.texture = pr.texture; p.clarity = pr.clarity; p.dehaze = pr.dehaze }
         else { p.texture = 0; p.clarity = 0; p.dehaze = 0 }
         p.vibrance = modules.vibrance?.amount ?? 0

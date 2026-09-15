@@ -59,6 +59,40 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
     /// Whether this patch is a brush stroke rather than a circle.
     public var isStroke: Bool { stroke != nil }
 
+    /// Positions are kept within a sensor's width of the sensor.
+    static let coordinateRange: ClosedRange<Float> = -1...2
+
+    /// The patch as a render can trust it, whatever wrote the sidecar:
+    /// centres and stroke points within `coordinateRange`, a radius of at
+    /// most half the short side, a feather in 0…1 and a stroke of at most
+    /// `maximumStrokePoints` (every so many kept, ends included). Nil when
+    /// a number isn't finite. A patch the app made comes back unchanged.
+    public var sanitized: HealPatch? {
+        let numbers = [target.x, target.y, source.x, source.y, radius, feather]
+            + (stroke ?? []).flatMap { [$0.x, $0.y] }
+        guard numbers.allSatisfy(\.isFinite) else { return nil }
+        func clamped(_ v: SIMD2<Float>) -> SIMD2<Float> {
+            simd_clamp(v, SIMD2(repeating: Self.coordinateRange.lowerBound),
+                       SIMD2(repeating: Self.coordinateRange.upperBound))
+        }
+        var p = self
+        p.target = clamped(target)
+        p.source = clamped(source)
+        p.radius = min(max(radius, 0), 0.5)
+        p.feather = min(max(feather, 0), 1)
+        if var offsets = stroke {
+            if offsets.count > Self.maximumStrokePoints {
+                let last = offsets.count - 1, kept = Self.maximumStrokePoints
+                offsets = (0..<kept).map { offsets[$0 * last / (kept - 1)] }
+            }
+            p.stroke = offsets.map { d in
+                let point = target + d
+                return point == clamped(point) && p.target == target ? d : clamped(point) - p.target
+            }
+        }
+        return p
+    }
+
     /// The stroke's path (or the circle's centre) in normalized sensor
     /// coordinates, around the target or, with `atSource`, the source.
     public func pathPoints(atSource: Bool = false) -> [SIMD2<Float>] {
@@ -120,21 +154,60 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
     /// its off-sensor reach into extra tile width; `region` itself is kept
     /// as given.
     ///
+    /// A stroke counts piece by piece, as it is healed: a wire across the
+    /// frame adds only the pieces near `region`, not its bounding box. Its
+    /// pieces all read the image as it was before the stroke (Heal.metal),
+    /// so their reads go in once the whole stroke is walked, bringing in
+    /// earlier patches but never the stroke's other pieces.
+    ///
     /// Outside `region` the tile can hold patches that don't count, with
     /// reads it never included; `isSelfContained` says when there are none.
     public static func regionIncludingSources(_ region: CGRect, patches: [HealPatch],
                                               sensorSize s: CGSize) -> CGRect {
         var needed = [region]
         for p in patches.reversed() {
-            let target = p.targetBounds(sensorSize: s)
-            guard needed.contains(where: { $0.intersects(target) }) else { continue }
             let margin = p.readRadiusPixels(sensorSize: s) - p.radiusPixels(sensorSize: s)
-            if p.mode == .heal {
-                needed.append(clampedToSensor(target.insetBy(dx: -margin, dy: -margin), s))
+            // Pieces that count one after another share a rectangle at each
+            // end, so a stroke adds a few rectangles, not one per piece.
+            var reads: [(target: CGRect, source: CGRect)] = []
+            var previousCounted = false
+            for (target, source) in p.pieceBounds(sensorSize: s) {
+                let counts = needed.contains { $0.intersects(target) }
+                defer { previousCounted = counts }
+                guard counts else { continue }
+                let read = (target: target.insetBy(dx: -margin, dy: -margin),
+                            source: source.insetBy(dx: -margin, dy: -margin))
+                if previousCounted, let last = reads.popLast() {
+                    reads.append((last.target.union(read.target), last.source.union(read.source)))
+                } else {
+                    reads.append(read)
+                }
             }
-            needed.append(clampedToSensor(p.sourceBounds(sensorSize: s).insetBy(dx: -margin, dy: -margin), s))
+            for read in reads {
+                if p.mode == .heal { needed.append(clampedToSensor(read.target, s)) }
+                needed.append(clampedToSensor(read.source, s))
+            }
         }
         return needed.dropFirst().reduce(region) { $0.union($1) }
+    }
+
+    /// Sensor-pixel bounding boxes of what each pass writes at full
+    /// resolution, at the target and the source: the circles, or a
+    /// stroke's pieces (`strokeSegments`), each `radius` wider than its
+    /// segment.
+    func pieceBounds(sensorSize s: CGSize) -> [(target: CGRect, source: CGRect)] {
+        guard isStroke else { return [(targetBounds(sensorSize: s), sourceBounds(sensorSize: s))] }
+        let scale = SIMD2(Float(s.width), Float(s.height))
+        let r = radiusPixels(sensorSize: s)
+        let shift = CGSize(width: CGFloat((source.x - target.x) * scale.x),
+                           height: CGFloat((source.y - target.y) * scale.y))
+        let path = pathPoints().map { $0 * scale }
+        return Self.strokeSegments(path, radius: Float(r)).map { a, b in
+            let lo = simd_min(a, b), hi = simd_max(a, b)
+            let box = CGRect(x: CGFloat(lo.x) - r, y: CGFloat(lo.y) - r,
+                             width: CGFloat(hi.x - lo.x) + 2 * r, height: CGFloat(hi.y - lo.y) + 2 * r)
+            return (box, box.offsetBy(dx: shift.width, dy: shift.height))
+        }
     }
 
     /// Whether every patch touching `region` reads only inside it, so the

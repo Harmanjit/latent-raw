@@ -324,7 +324,7 @@ final class GoldenImageTests: XCTestCase {
         let exporter = Exporter(gpu: gpu)
 
         let small = try pipeline.render(
-            session, scale: ExportPlan.scale(for: file.summary, maxLongEdge: Self.overviewLongEdge),
+            session, scale: ExportPlan.scale(for: file.summary, crop: parameters.crop, maxLongEdge: Self.overviewLongEdge),
             parameters: parameters, output: .file(recipe.outputSpace))
         let overview = try GoldenImage(exporter.cgImage(
             from: small, colorSpace: recipe.outputSpace, rotation: rotation, crop: parameters.crop,
