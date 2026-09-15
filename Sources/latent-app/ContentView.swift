@@ -152,7 +152,8 @@ struct ContentView: View {
             ExportSheet(count: library.selectedImageIDs.count,
                         sample: library.selectedImages.first ?? library.selectedImage,
                         records: library.selectedImages,
-                        catalogName: library.folderURL?.lastPathComponent ?? "") { preset, destination in
+                        catalogName: library.folderURL?.lastPathComponent ?? "",
+                        preview: ExportPreviewSource(library: library, gpu: model.gpu)) { preset, destination in
                 guard let gpu = model.gpu else { return }
                 // Flush the editor's pending edit so the export sees it.
                 model.flushPendingSave()

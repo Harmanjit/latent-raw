@@ -58,10 +58,12 @@ extension EditorModel {
         // stored edit matches the file just written.
         flushPendingSave()
 
+        var settings = exportSettings
+        settings.watermark = options.watermark
         let request = ExportWorker.Request(
             sourceURL: sourceURL, destinationURL: destination,
             editStackJSON: editStackJSON, userRotation: userRotation,
-            settings: exportSettings,
+            settings: settings,
             // This export has no colour space picker; sRGB is the safe
             // default, and what it has always written.
             colorSpace: .sRGB, maxLongEdge: nil,
@@ -74,8 +76,10 @@ extension EditorModel {
 
         isExporting = true
         status = "Exporting at full resolution…"
+        let activity = ExportActivity(reason: "Exporting \(destination.lastPathComponent)")
 
         Task {
+            defer { activity.end() }
             var complete = request
             if options.includeMetadata, let readKeywords {
                 do {
@@ -122,12 +126,23 @@ extension EditorModel {
 struct OpenImageExportOptions: Equatable {
     static let includeMetadataKey = "latent.exportOpenImage.includeMetadata"
     static let includeLocationKey = "latent.exportOpenImage.includeLocation"
+    static let includeWatermarkKey = "latent.exportOpenImage.includeWatermark"
     var includeMetadata = true
     /// Only counts with `includeMetadata`.
     var includeLocation = false
+    /// The export sheet's watermark (its text and look, whether or not the
+    /// sheet has it switched on), when the panel's switch is on; nil otherwise.
+    var watermark: ExportWatermark? = nil
 
     static func load(from defaults: UserDefaults = .standard) -> OpenImageExportOptions {
-        OpenImageExportOptions(includeMetadata: defaults.object(forKey: includeMetadataKey) as? Bool ?? true,
-                               includeLocation: defaults.object(forKey: includeLocationKey) as? Bool ?? false)
+        var watermark: ExportWatermark?
+        if defaults.bool(forKey: includeWatermarkKey) {
+            let preset = defaults.data(forKey: ExportPreset.defaultsKey)
+                .flatMap { try? JSONDecoder().decode(ExportPreset.self, from: $0) } ?? ExportPreset()
+            watermark = preset.watermark.isEmpty ? nil : preset.watermark
+        }
+        return OpenImageExportOptions(includeMetadata: defaults.object(forKey: includeMetadataKey) as? Bool ?? true,
+                                      includeLocation: defaults.object(forKey: includeLocationKey) as? Bool ?? false,
+                                      watermark: watermark)
     }
 }

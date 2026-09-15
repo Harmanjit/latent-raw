@@ -90,11 +90,17 @@ public struct ExportSettings: Sendable {
     /// Also write an HDR gain map (JPEG and HEIC only; see GainMap.swift).
     /// The main image stays the ordinary SDR export either way.
     public var hdrGainMap: Bool
+    /// Text stamped into a corner after the resize (ExportWatermark.swift).
+    /// Nil, the default, draws nothing. Tokens are filled in by whoever
+    /// knows the image (`ExportWorker`); the exporter draws the text as given.
+    public var watermark: ExportWatermark?
 
-    public init(format: Format = .jpeg, quality: Float = 0.92, hdrGainMap: Bool = false) {
+    public init(format: Format = .jpeg, quality: Float = 0.92, hdrGainMap: Bool = false,
+                watermark: ExportWatermark? = nil) {
         self.format = format
         self.quality = quality
         self.hdrGainMap = hdrGainMap
+        self.watermark = watermark
     }
 
     /// Whether this export gets a gain map: asked for, and possible.
@@ -268,18 +274,53 @@ public final class Exporter {
                        maxLongEdge: Int? = nil,
                        replacingExisting: Bool = true,
                        hdrRender: ((RenderOutput) throws -> MTLTexture)? = nil) throws -> (width: Int, height: Int) {
+        let prepared = try encodableImage(texture, settings: settings, colorSpace: colorSpace, rotation: rotation,
+                                          crop: crop, maxLongEdge: maxLongEdge, hdrRender: hdrRender)
+        try Self.write(cgImage: prepared.image, to: url, settings: settings, metadata: metadata,
+                       gainMap: prepared.gainMap, replacingExisting: replacingExisting)
+        return (prepared.image.width, prepared.image.height)
+    }
+
+    /// What an encoder is handed: the file's pixels, and its gain map when
+    /// the settings ask for one.
+    ///
+    /// `@unchecked Sendable`: both are immutable once made (a CGImage over
+    /// its own copy of the pixels, and `GainMap`'s `Data`).
+    public struct EncodableImage: @unchecked Sendable {
+        public let image: CGImage
+        public let gainMap: GainMap?
+        public init(image: CGImage, gainMap: GainMap? = nil) { self.image = image; self.gainMap = gainMap }
+    }
+
+    /// Everything `write` does short of encoding: rotation, crop, resize,
+    /// quantisation, the watermark and (when asked for) the gain map. For
+    /// callers that encode the same pixels more than once, such as the
+    /// export sheet's size estimate and quality comparison.
+    public func encodableImage(_ texture: MTLTexture, settings: ExportSettings, colorSpace: ColorKit.OutputSpace,
+                               rotation: ImageRotation = .none, crop: CropParameters = .none,
+                               maxLongEdge: Int? = nil,
+                               hdrRender: ((RenderOutput) throws -> MTLTexture)? = nil) throws -> EncodableImage {
         if settings.writesGainMap, let hdrRender {
-            return try writeWithGainMap(texture, to: url, settings: settings, colorSpace: colorSpace,
-                                        rotation: rotation, crop: crop, metadata: metadata,
-                                        maxLongEdge: maxLongEdge, replacingExisting: replacingExisting,
-                                        hdrRender: hdrRender)
+            return try gainMapImage(texture, settings: settings, colorSpace: colorSpace, rotation: rotation,
+                                    crop: crop, maxLongEdge: maxLongEdge, hdrRender: hdrRender)
         }
-        let cgImage = try cgImage(from: texture, colorSpace: colorSpace, rotation: rotation, crop: crop,
-                                  bitsPerComponent: settings.format.bitsPerComponent,
-                                  maxLongEdge: maxLongEdge)
-        try Self.write(cgImage: cgImage, to: url, settings: settings, metadata: metadata,
-                       replacingExisting: replacingExisting)
-        return (cgImage.width, cgImage.height)
+        return EncodableImage(image: try cgImage(from: texture, colorSpace: colorSpace, rotation: rotation, crop: crop,
+                                                 bitsPerComponent: settings.format.bitsPerComponent,
+                                                 maxLongEdge: maxLongEdge, watermark: settings.watermark))
+    }
+
+    /// The file `write(cgImage:to:)` would write, in memory: the same
+    /// encoder and properties, so its byte count is the file's size.
+    public static func encode(_ prepared: EncodableImage, settings: ExportSettings,
+                              metadata: ExportMetadata? = nil) throws -> Data {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+                data as CFMutableData, settings.format.contentType.identifier as CFString, 1, nil) else {
+            throw ExportError.imageCreationFailed
+        }
+        addImage(prepared.image, to: destination, settings: settings, metadata: metadata, gainMap: prepared.gainMap)
+        guard CGImageDestinationFinalize(destination) else { throw ExportError.imageCreationFailed }
+        return data as Data
     }
 
     /// Writes an already-built CGImage. The image's own colour space tag
@@ -296,6 +337,17 @@ public final class Exporter {
                 pending.url as CFURL, settings.format.contentType.identifier as CFString, 1, nil) else {
             throw ExportError.destinationCreationFailed(url)
         }
+        addImage(cgImage, to: destination, settings: settings, metadata: metadata, gainMap: gainMap)
+        guard CGImageDestinationFinalize(destination) else {
+            throw ExportError.writeFailed(url)
+        }
+        try pending.commit(replacingExisting: replacingExisting)
+    }
+
+    /// The image, its properties and metadata, and any gain map, added to
+    /// a destination: shared by the file and in-memory encodes.
+    static func addImage(_ cgImage: CGImage, to destination: CGImageDestination, settings: ExportSettings,
+                         metadata: ExportMetadata?, gainMap: GainMap?) {
         let encoding = metadata?.encoding(for: cgImage)
         var properties: [CFString: Any] = encoding?.properties ?? [:]
         // An embedded thumbnail would be a second, smaller copy of the
@@ -313,10 +365,6 @@ public final class Exporter {
             CGImageDestinationAddAuxiliaryDataInfo(destination, kCGImageAuxiliaryDataTypeISOGainMap,
                                                    gainMap.auxiliaryDataInfo)
         }
-        guard CGImageDestinationFinalize(destination) else {
-            throw ExportError.writeFailed(url)
-        }
-        try pending.commit(replacingExisting: replacingExisting)
     }
 
     /// Output size after crop, rotation and resize.
@@ -381,9 +429,19 @@ public final class Exporter {
                         rotation: ImageRotation = .none,
                         crop: CropParameters = .none,
                         bitsPerComponent: Int = 8,
-                        maxLongEdge: Int? = nil) throws -> CGImage {
+                        maxLongEdge: Int? = nil,
+                        watermark: ExportWatermark? = nil) throws -> CGImage {
         let packed = try packedTexture(from: texture, rotation: rotation, crop: crop,
                                        bitsPerComponent: bitsPerComponent, maxLongEdge: maxLongEdge)
+        let placed = watermark.flatMap { PlacedWatermark($0, imageWidth: packed.width, imageHeight: packed.height,
+                                                         colorSpace: colorSpace) }
+        return try cgImage(packed: packed, colorSpace: colorSpace, bitsPerComponent: bitsPerComponent, watermark: placed)
+    }
+
+    /// The CGImage of packed file pixels, with the watermark blended into
+    /// the copy read back, before anything is encoded.
+    func cgImage(packed: MTLTexture, colorSpace: ColorKit.OutputSpace, bitsPerComponent: Int,
+                 watermark: PlacedWatermark?) throws -> CGImage {
         let w = packed.width, h = packed.height
         let bytesPerPixel = bitsPerComponent / 8 * 4
         let bytesPerRow = w * bytesPerPixel
@@ -391,6 +449,7 @@ public final class Exporter {
         data.withUnsafeMutableBytes { bytes in
             packed.getBytes(bytes.baseAddress!, bytesPerRow: bytesPerRow,
                             from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
+            watermark?.composite(into: bytes, imageWidth: w, imageHeight: h, bitsPerComponent: bitsPerComponent)
         }
 
         let cgColorSpace: CGColorSpace?

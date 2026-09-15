@@ -13,6 +13,7 @@ struct LibraryPanel: View {
     @State private var exportExpanded = true
     @AppStorage(OpenImageExportOptions.includeMetadataKey) private var openImageIncludesMetadata = true
     @AppStorage(OpenImageExportOptions.includeLocationKey) private var openImageIncludesLocation = false
+    @AppStorage(OpenImageExportOptions.includeWatermarkKey) private var openImageIncludesWatermark = false
     let onOpenFolder: () -> Void
     let onRate: (Int) -> Void
     let onFlag: (ImageFlag) -> Void
@@ -141,6 +142,10 @@ struct LibraryPanel: View {
                 .disabled(!openImageIncludesMetadata)
                 .accessibilityHint(ExportPreset.locationHelp)
                 .help(ExportPreset.locationHelp)
+            Toggle("Add watermark", isOn: $openImageIncludesWatermark)
+                .controlSize(.small)
+                .accessibilityHint(ExportPreset.openImageWatermarkHelp)
+                .help(ExportPreset.openImageWatermarkHelp)
             Button("Export open image…") { Self.exportOpenImage(model: model, library: library) }
                 .controlSize(.small)
                 .disabled(!model.hasImage || model.isExporting)
