@@ -783,8 +783,10 @@ final class SlideshowView: NSView {
         layer.pixelFormat = SlideshowRenderer.pixelFormat
         layer.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)
         layer.wantsExtendedDynamicRangeContent = false
-        // Readable, so the debug snapshot harness can picture it.
-        layer.framebufferOnly = false
+        // Readable only for the debug snapshot harness, which pictures it.
+        #if DEBUG
+        layer.framebufferOnly = !SnapshotHarness.isActive
+        #endif
         layer.isOpaque = true
         layer.needsDisplayOnBoundsChange = false
         return layer
