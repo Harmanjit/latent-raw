@@ -2,6 +2,7 @@ import Foundation
 import Metal
 import os
 import RawCore
+import Synchronization
 
 public enum GPUContextError: Error, CustomStringConvertible {
     case noMetalDevice
@@ -32,9 +33,11 @@ public enum GPUContextError: Error, CustomStringConvertible {
 /// paths only, gated with `if #available(macOS 26, *)` at the call site.
 /// Safe to share across actors: every stored property is a `let`, and
 /// Metal's device, command queue and pipeline states are documented as
-/// thread-safe. This is the one place in the codebase asserting something
-/// the compiler can't check, so it stays narrow — if GPUContext ever gains
-/// mutable state, this conformance has to go.
+/// thread-safe. The one piece of mutable state, the lazily built pipelines
+/// (`lazyPipeline(_:)`), sits inside a `Mutex`, which is itself Sendable.
+/// This is the one place in the codebase asserting something the compiler
+/// can't check, so it stays narrow — if GPUContext ever gains mutable
+/// state outside a lock, this conformance has to go.
 public final class GPUContext: @unchecked Sendable {
     public let device: MTLDevice
     public let commandQueue: MTLCommandQueue
@@ -82,6 +85,41 @@ public final class GPUContext: @unchecked Sendable {
     let rcdDirectionsPQPSO: MTLComputePipelineState
     let rcdRedBlueAtOppositePSO: MTLComputePipelineState
     let rcdRedBlueAtGreenPSO: MTLComputePipelineState
+
+    // MARK: Lazily built pipelines
+
+    /// Kernels whose pipelines are built the first time something asks for
+    /// them, not at launch. Everything above is on the path of every image
+    /// and is built eagerly; these serve rarer work (linear sources today,
+    /// Photo Merge's kernels next), so an app that never opens such a file
+    /// never pays for them. Each costs a millisecond or two with the
+    /// precompiled library, but compiling a pipeline the first time a build's
+    /// shaders are seen takes far longer, and that cost grows with every
+    /// kernel added to launch.
+    enum LazyKernel: String, CaseIterable, Sendable {
+        case linearUpload
+        case linearBinned
+    }
+
+    /// Built pipelines, by kernel. A Mutex because renders run on several
+    /// threads (the viewport, exports, thumbnails) and two could ask for the
+    /// same pipeline at once.
+    private let lazyPipelines = Mutex<[LazyKernel: MTLComputePipelineState]>([:])
+
+    /// The pipeline for `kernel`, built on first use and kept for the life
+    /// of the context. Building happens inside the lock, so a second caller
+    /// waits for the first rather than compiling the same kernel twice.
+    func lazyPipeline(_ kernel: LazyKernel) throws -> MTLComputePipelineState {
+        try lazyPipelines.withLock { built in
+            if let existing = built[kernel] { return existing }
+            guard let function = library.makeFunction(name: kernel.rawValue) else {
+                throw GPUContextError.missingShaderFunction(kernel.rawValue)
+            }
+            let pipeline = try device.makeComputePipelineState(function: function)
+            built[kernel] = pipeline
+            return pipeline
+        }
+    }
 
     public init() throws {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -216,7 +254,8 @@ public final class GPUContext: @unchecked Sendable {
         // Every kernel source file must be listed here, or its functions
         // won't exist in the runtime-compiled library.
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
-                            "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye", "Slideshow"]
+                            "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye", "Slideshow",
+                            "LinearSource"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound
@@ -243,16 +282,31 @@ public final class GPUContext: @unchecked Sendable {
     /// `makeBuffer(bytesNoCopy:)` needs; the buffer keeps the plane alive.
     /// Falls back to a copy if Metal ever refuses the memory.
     func makeSharedBuffer(wrapping plane: SensorPlane) -> MTLBuffer? {
-        if let buffer = device.makeBuffer(bytesNoCopy: plane.pointer, length: plane.allocationLength,
+        makeSharedBuffer(pointer: plane.pointer, allocationLength: plane.allocationLength,
+                         byteCount: plane.count * MemoryLayout<UInt16>.size, owner: plane)
+    }
+
+    /// The same for a linear source's pixels (`LinearPlane`): its IOSurface
+    /// is page-aligned and whole pages too.
+    func makeSharedBuffer(wrapping plane: LinearPlane) -> MTLBuffer? {
+        makeSharedBuffer(pointer: plane.pointer, allocationLength: plane.allocationLength,
+                         byteCount: plane.byteCount, owner: plane)
+    }
+
+    /// Wraps `allocationLength` bytes at `pointer` without copying, keeping
+    /// `owner` (the plane whose surface holds them) alive for as long as
+    /// the buffer is; or copies `byteCount` of them if Metal refuses.
+    private func makeSharedBuffer(pointer: UnsafeMutableRawPointer, allocationLength: Int, byteCount: Int,
+                                  owner: AnyObject & Sendable) -> MTLBuffer? {
+        if let buffer = device.makeBuffer(bytesNoCopy: pointer, length: allocationLength,
                                           options: .storageModeShared,
-                                          deallocator: { _, _ in withExtendedLifetime(plane) {} }) {
+                                          deallocator: { _, _ in withExtendedLifetime(owner) {} }) {
             return buffer
         }
-        let byteLength = plane.count * MemoryLayout<UInt16>.size
-        guard let buffer = device.makeBuffer(length: byteLength, options: .storageModeShared) else {
+        guard let buffer = device.makeBuffer(length: byteCount, options: .storageModeShared) else {
             return nil
         }
-        buffer.contents().copyMemory(from: plane.pointer, byteCount: byteLength)
+        buffer.contents().copyMemory(from: pointer, byteCount: byteCount)
         return buffer
     }
 
