@@ -51,7 +51,7 @@ Model-generated masks and AI denoise are recomputed at export time, for the queu
 
 ## Print
 
-**File > Print…** (⌘P) prints the selection in the Library, and the image shown in Loupe, Compare and Develop, with its current edit, saved or not.
+**File > Print…** (⌘P) prints the selection in the Library and Survey, and the image shown in Loupe, Compare and Develop, with its current edit, saved or not.
 
 The print panel's **Photo Layout** section sets photos per page (1, 2, 4, 6, 9, 12, 20 or 30), Fit or Fill, whether to rotate photos to fill their cells, margins, spacing, captions (file name, and optionally date and camera) and colour. The panel's preview updates as you change them, drawn from thumbnails.
 
@@ -67,6 +67,6 @@ It sets the page size (A4, A3, US Letter or Tabloid at 300 dpi, a 4K display, or
 
 ## Edit in External Editor
 
-**File > Edit in External Editor…** (⌘E; the menu item carries the application's name once one is chosen) makes a 16-bit Display P3 TIFF of the open image, or in the grid the lead selected image, with its edits, including masks and AI noise reduction. Its metadata and location follow Export open image…'s switches; no watermark is added. The file is named `<name>-Edit.tif`, numbered (`-Edit-2.tif`) rather than replacing anything.
+**File > Edit in External Editor…** (⌘E; the menu item carries the application's name once one is chosen) makes a 16-bit Display P3 TIFF of the open image, or in the grid the lead selected image (in Survey, the outlined pane), with its edits, including masks and AI noise reduction. Its metadata and location follow Export open image…'s switches; no watermark is added. The file is named `<name>-Edit.tif`, numbered (`-Edit-2.tif`) rather than replacing anything.
 
 It goes to the folder set in **Settings › External Editor**, else the default export folder, else a folder you are asked for once. It then opens in the application chosen there (by default, the one your Mac opens TIFFs with), and the status bar says where it went. Latent doesn't catalog the TIFF or watch it for changes.

@@ -7,8 +7,9 @@ import Catalog
 import LensKit
 import UniformTypeIdentifiers
 
-/// Which half of the app is showing. Same two-mode shape as Lightroom's
-/// Library and Develop modules.
+/// Which part of the app is showing: the grid (Library), one image
+/// (Loupe), two side by side (Compare), two to four (Survey) or the editor
+/// (Develop), after Lightroom's Library and Develop modules.
 enum AppMode: String, CaseIterable, Identifiable {
     case library, loupe, compare, survey, develop
     var id: String { rawValue }
@@ -23,6 +24,10 @@ enum AppMode: String, CaseIterable, Identifiable {
     }
     /// Modes that show a rendered image and so support zoom controls.
     var showsImage: Bool { self != .library }
+    /// Modes showing the editor's own image (in Compare, the Candidate).
+    /// Survey's panes have models of their own, and the editor may still
+    /// hold an image from before that nobody sees there.
+    var showsEditorImage: Bool { showsImage && self != .survey }
 }
 
 /// Layout follows Lightroom's Develop module, which is what people expect:
@@ -169,6 +174,8 @@ struct ContentView: View {
         .onChange(of: mode) { old, _ in modeDidChange(from: old) }
         .onChange(of: library.selectedImageID) { followSelectionOnSecondDisplay() }
         .onChange(of: secondDisplay.isShowing) { followSelectionOnSecondDisplay(at: .zero) }
+        // A move or rename closed the image the grid showed there.
+        .onChange(of: fileOperations.isBusy) { _, busy in if !busy { followSelectionOnSecondDisplay(at: .zero) } }
         // What a VoiceOver user would otherwise have to go and look for.
         .onChange(of: currentProblem) { _, problem in
             if let problem { Announcement.post(problem, priority: .high) }
@@ -256,7 +263,8 @@ struct ContentView: View {
                      onExport: { showingExportSheet = true },
                      presets: model.presets,
                      onApplyPreset: { applyPresetToSelection($0) },
-                     onPaste: { pasteSettings() })
+                     onPaste: { pasteSettings() },
+                     exportsOpenImage: mode != .survey)
     }
 
     // MARK: - Library wiring
@@ -364,6 +372,8 @@ struct ContentView: View {
 
     /// Once: undoing a copy uses the Trash, and an image about to move or be
     /// renamed is saved and closed in the editor (its path is changing).
+    /// Survey's panes never save and keep showing their images: an image
+    /// that left the folder is deselected, and its pane goes with it.
     private func wireFileOperations() {
         library.fileOperations.recycle = { urls in
             _ = try await NSWorkspace.shared.recycle(urls)
@@ -371,7 +381,10 @@ struct ContentView: View {
         library.fileOperations.willMoveImages = { ids in
             let editorImage = model.catalogImageID.map(ids.contains) ?? false
             let compareImage = compareRecord?.id.map(ids.contains) ?? false
-            if editorImage || compareImage { closeEditorForFolderChange() }
+            guard editorImage || compareImage else { return }
+            model.closeImage()
+            compareModel = nil
+            compareRecord = nil
         }
     }
 
@@ -521,6 +534,7 @@ struct ContentView: View {
     /// other selected image if there is one, else the same image, and
     /// arrow keys then walk the Candidate.
     private func modeDidChange(from old: AppMode) {
+        defer { secondDisplay.follow(viewedModel) }
         updateCompareLink()
         if fullScreen.isActive, !FullScreenImagePolicy.keepsFullScreen(in: mode) { fullScreen.leave() }
         if old == .develop {
@@ -621,10 +635,11 @@ struct ContentView: View {
 
     /// Entering or leaving Survey; false when there is nothing more for
     /// `modeDidChange` to do. Survey needs two to four selected images, and
-    /// asked for with any other number (only the mode picker can ask) the
-    /// mode goes back. The editor's model loads nothing for Survey, and on
-    /// a Mac with little memory its catalog image closes while Survey
-    /// shows: Loupe, Compare and Develop load it again.
+    /// asked for with any other number the mode goes back (though nothing
+    /// asks: the mode picker refuses as the command does). The editor's
+    /// model loads nothing for Survey, and on a Mac with little memory its
+    /// catalog image closes while Survey shows: Loupe, Compare and Develop
+    /// load it again.
     private func surveyModeDidChange(from old: AppMode) -> Bool {
         if old == .survey { survey.end() }
         guard mode == .survey else { return true }
@@ -697,17 +712,43 @@ struct ContentView: View {
     /// An undo or redo in the Library put back the rotation or stored edit
     /// of images the editor may hold. A rotation turns the image on screen,
     /// as rotating does; an edit is read again where the image shows, and
-    /// in the grid the hidden image is closed, to be read again when shown.
+    /// where it is hidden (the grid, Survey) the image is closed, to be read
+    /// again when shown, as the second display's Loupe does at once. Never
+    /// by `load` in Survey, which would make a hidden image the primary
+    /// selection. Survey's panes and Compare's Select pane catch up too.
     private func editorFollowUndo(_ ids: Set<Int64>, _ aspect: Library.RestoredAspect) {
+        survey.followRestore(ids, aspect, library: library, onFailure: model.reportFailure)
+        compareSelectFollowUndo(ids, aspect)
         guard let id = model.catalogImageID, ids.contains(id),
               let record = library.images.first(where: { $0.id == id }) else { return }
         switch aspect {
         case .rotation:
             model.setUserRotation(record.userRotation)
-        case .edits where mode.showsImage:
+        case .edits where mode.showsEditorImage:
             load(record)
         case .edits:
             model.closeImage()
+            followSelectionOnSecondDisplay(at: .zero)
+        }
+    }
+
+    /// Compare's Select pane never saves, so an undo that put back its
+    /// image's rotation or edit is shown on it here. Only while Compare
+    /// shows: entering Compare opens that pane again.
+    private func compareSelectFollowUndo(_ ids: Set<Int64>, _ aspect: Library.RestoredAspect) {
+        guard mode == .compare, let pane = compareModel, let id = compareRecord?.id, ids.contains(id),
+              let record = library.images.first(where: { $0.id == id }) else { return }
+        compareRecord = record
+        guard aspect == .edits else { pane.setUserRotation(record.userRotation); return }
+        let catalog = library.catalog
+        Task {
+            do {
+                let stack = try await library.editStack(for: record)
+                guard library.catalog === catalog, compareModel === pane, compareRecord?.id == id else { return }
+                pane.showStoredEdit(stack, userRotation: record.userRotation)
+            } catch {
+                model.reportFailure("Reading the edit for \(record.fileName)", error)
+            }
         }
     }
 
@@ -834,13 +875,15 @@ struct ContentView: View {
         case .exportOpenImage:
             LibraryPanel.exportOpenImage(model: model, library: library)
         case .print:
-            PrintPresenter.present(openImage: mode != .library && model.hasImage, model: model, library: library)
+            // Survey prints its panes, the selection, as the grid does.
+            PrintPresenter.present(openImage: mode.showsEditorImage && model.hasImage, model: model, library: library)
         case .contactSheet:
             ContactSheetPresenter.present(model: model, library: library)
         case .slideshow:
             SlideshowController.start(model: model, library: library)
         case .editExternally:
-            ExternalEditorHandOff.shared.start(model: model, library: library, preferOpenImage: mode.showsImage)
+            // Survey's focused pane is the lead selected image.
+            ExternalEditorHandOff.shared.start(model: model, library: library, preferOpenImage: mode.showsEditorImage)
         // Develop undoes edits in its own history; the other modes undo
         // library actions. The editor saves first, so an undo restoring the
         // open image's edit isn't overwritten by an edit still waiting.
@@ -907,7 +950,7 @@ struct ContentView: View {
             if secondDisplay.isShowing {
                 secondDisplay.close()
             } else {
-                secondDisplay.show(model: model, library: library, beside: NSApp.keyWindow ?? NSApp.mainWindow)
+                secondDisplay.show(model: viewedModel, library: library, beside: NSApp.keyWindow ?? NSApp.mainWindow)
             }
         case .panImage(let direction):
             model.panImage(direction)
@@ -917,8 +960,10 @@ struct ContentView: View {
 
     /// The second display's Loupe shows the selection. Loupe, Compare and
     /// Develop load it anyway; the grid doesn't, so while the Loupe shows,
-    /// a selection that settles for a moment is loaded for it.
+    /// a selection that settles for a moment is loaded for it. Survey's
+    /// selection is its focused pane, which the Loupe draws instead.
     private func followSelectionOnSecondDisplay(at delay: Duration = .milliseconds(150)) {
+        secondDisplay.follow(viewedModel)
         secondDisplayLoad?.cancel()
         guard secondDisplay.isShowing, mode == .library, let selected = library.selectedImage,
               model.catalogImageID != selected.id else { return }
@@ -1006,27 +1051,25 @@ struct ContentView: View {
     }
 
     /// Where pasted settings and a preset go. The grid changes the stored
-    /// edit of every selected image. Loupe, Compare and Develop show one
-    /// image and change that one only, as rating does: through the editor
-    /// when it holds that image (so Undo takes it back), else its stored
-    /// edit. Compare's Select image is never written.
+    /// edit of every selected image. Loupe, Compare, Survey and Develop show
+    /// one image (in Survey, the focused pane) and change that one only, as
+    /// rating does. Develop changes it through the editor, whose history
+    /// Undo goes back through there; the other modes change its stored
+    /// edit, filing the Library undo their Undo takes back (the editor,
+    /// when it holds the image, then shows the change). Compare's Select
+    /// image and Survey's panes are never written.
     enum SettingsTarget: Equatable {
         case editor, primary, selection
 
-        static func choose(mode: AppMode, editorHasImage: Bool, editorImageID: Int64?,
-                           primaryID: Int64?) -> SettingsTarget {
+        static func choose(mode: AppMode, editorHasImage: Bool) -> SettingsTarget {
             guard mode != .library else { return .selection }
             // Develop may hold a file opened on its own, outside the catalog.
-            if editorHasImage, mode == .develop || (editorImageID != nil && editorImageID == primaryID) {
-                return .editor
-            }
-            return .primary
+            return mode == .develop && editorHasImage ? .editor : .primary
         }
     }
 
     private func applyToSelectionOrEditor(_ stack: EditStack, groups: Set<EditGroup>, what: String, undoName: String) {
-        let target = SettingsTarget.choose(mode: mode, editorHasImage: model.hasImage,
-                                           editorImageID: model.catalogImageID, primaryID: library.selectedImageID)
+        let target = SettingsTarget.choose(mode: mode, editorHasImage: model.hasImage)
         // Compare's Select pane may show the candidate's own photo. It never
         // saves, so it takes the new look directly rather than going stale.
         if target != .selection, mode == .compare, let select = compareRecord?.id, select == library.selectedImageID {
@@ -1600,12 +1643,21 @@ struct ContentView: View {
     /// else the editor.
     private var viewedModel: EditorModel { mode == .survey ? survey.focusedModel ?? model : model }
 
+    /// The mode picker: Survey, like its command, only with two to four
+    /// selected. Picked without, it beeps and nothing changes.
+    private var modeBinding: Binding<AppMode> {
+        Binding(get: { mode }, set: { picked in
+            guard commandState.allowsChoosing(picked) else { NSSound.beep(); return }
+            mode = picked
+        })
+    }
+
     /// The failure the status bar shows in red, if any.
     private var currentProblem: String? { model.setupError ?? library.lastError ?? model.lastError }
 
     private var statusBar: some View {
         HStack(spacing: 12) {
-            Picker("Mode", selection: $mode) {
+            Picker("Mode", selection: modeBinding) {
                 ForEach(AppMode.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)

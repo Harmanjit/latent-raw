@@ -124,12 +124,12 @@ extension EditorModel {
 /// that shows the editor's image as the main window's Loupe would, while
 /// the main window keeps the grid, Compare or Develop.
 ///
-/// It draws the main editor model's preview with its own fit, so edits and
-/// selection changes appear on it as they are made, and nothing is decoded
-/// or rendered a second time (see `SecondaryPreview`). The window never
-/// becomes key: keys and menus stay with the main window. It closes when
-/// its display is disconnected or the main window closes, and follows a
-/// resolution change.
+/// It draws the main editor model's preview with its own fit (in Survey,
+/// the focused pane's), so edits and selection changes appear on it as
+/// they are made, and nothing is decoded or rendered a second time (see
+/// `SecondaryPreview`). The window never becomes key: keys and menus stay
+/// with the main window. It closes when its display is disconnected or the
+/// main window closes, and follows a resolution change.
 @MainActor
 final class SecondaryDisplay: ObservableObject {
     static let shared = SecondaryDisplay()
@@ -143,6 +143,7 @@ final class SecondaryDisplay: ObservableObject {
     private var window: NSWindow?
     private var screenID: UInt32?
     private weak var model: EditorModel?
+    private weak var library: Library?
     private var screenObserver: (any NSObjectProtocol)?
     private var mainWindowObserver: (any NSObjectProtocol)?
 
@@ -174,6 +175,7 @@ final class SecondaryDisplay: ObservableObject {
             return
         }
         self.model = model
+        self.library = library
         let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.isExcludedFromWindowsMenu = true
@@ -182,10 +184,7 @@ final class SecondaryDisplay: ObservableObject {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         window.backgroundColor = NSColor(white: AppPreferences.shared.surround.level, alpha: 1)
         window.setAccessibilityLabel("Loupe on second display")
-        let host = NSHostingView(rootView: SecondaryLoupeView(model: model, library: library, display: self))
-        // The window is the screen's size, whatever the content would like.
-        host.sizingOptions = []
-        window.contentView = host
+        window.contentView = content(model: model, library: library)
         window.setFrame(frame, display: false)
         window.orderFront(nil)
         self.window = window
@@ -200,6 +199,27 @@ final class SecondaryDisplay: ObservableObject {
         }
     }
 
+    /// Draws `model` from now on: Survey's focused pane while Survey shows,
+    /// the editor's model otherwise. The content is built again, so the
+    /// new model hears the display's size and headroom, and the old one
+    /// forgets them.
+    func follow(_ model: EditorModel) {
+        guard isShowing, let window, let library, model !== self.model else { return }
+        self.model?.secondaryDisplayDidClose()
+        self.model = model
+        window.contentView = content(model: model, library: library)
+    }
+
+    /// The model whose image the Loupe draws, while it shows.
+    var drawnModel: EditorModel? { isShowing ? model : nil }
+
+    private func content(model: EditorModel, library: Library) -> NSView {
+        let host = NSHostingView(rootView: SecondaryLoupeView(model: model, library: library, display: self))
+        // The window is the screen's size, whatever the content would like.
+        host.sizingOptions = []
+        return host
+    }
+
     func close() {
         guard isShowing else { return }
         isShowing = false
@@ -212,6 +232,7 @@ final class SecondaryDisplay: ObservableObject {
         screenID = nil
         model?.secondaryDisplayDidClose()
         model = nil
+        library = nil
     }
 
     /// The window being pictured by a snapshot run.

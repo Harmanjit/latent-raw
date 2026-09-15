@@ -390,6 +390,10 @@ final class EditorModel: ObservableObject {
     /// memory recovers rather than in the middle of the shortage.
     var aiDenoiseReleasedUnderPressure = false
 
+    /// Set on Survey's panes, which take turns: a denoise the image needs
+    /// is asked for here rather than started (`SurveyModel`).
+    var aiDenoiseTurn: (@MainActor (EditorModel) -> Void)?
+
     // MARK: - Errors
 
     /// Lets other parts of the app put a message in the status bar.

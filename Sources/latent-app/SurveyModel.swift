@@ -26,6 +26,11 @@ protocol LinkedPaneGroup: AnyObject {
 /// With more memory the panes keep their images when Survey is left (but
 /// not their pooled textures), so coming back is instant, until the system
 /// asks for memory, which closes them (`EditorModel.isOffScreen`).
+///
+/// AI denoise. A pane whose edit has it on runs it in turn, one pane at a
+/// time and the focused pane first, and only while Survey shows: each run
+/// holds full-resolution buffers and the GPU for seconds. A run under way
+/// when Survey is left stops, and starts again when Survey comes back.
 @MainActor
 final class SurveyModel: ObservableObject, LinkedPaneGroup {
     /// What is shown, nil before the first survey and after `closeAll`.
@@ -53,6 +58,10 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
 
     private var focusObservation: AnyCancellable?
     private var renderObservations: [ObjectIdentifier: AnyCancellable] = [:]
+    /// Panes waiting for their turn to run AI denoise.
+    private var denoiseWaiting: Set<ObjectIdentifier> = []
+    /// Starts a pane's AI denoise run; tests watch the turns instead.
+    var startsAIDenoise: @MainActor (EditorModel) -> Void = { $0.runAIDenoise() }
 
     init(policy: MemoryPolicy = .current) {
         self.policy = policy
@@ -94,6 +103,7 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
         updateImageAspect()
         let order = [new.focusedID] + new.ids.filter { $0 != new.focusedID }
         for id in order { if let model = models[id] { open(id, model) } }
+        startNextAIDenoise()
     }
 
     /// Survey is no longer on screen. See the type's comment for what the
@@ -112,7 +122,14 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
         }
         for model in models.values {
             model.isOffScreen = true
-            if !model.aiDenoiseRunning { model.session?.releasePooledTextures() }
+            guard model.aiDenoiseRunning else {
+                model.session?.releasePooledTextures()
+                continue
+            }
+            // Its pool is left alone: the stopped run reads it until its
+            // next tile.
+            model.stopAIDenoise()
+            denoiseWaiting.insert(ObjectIdentifier(model))
         }
     }
 
@@ -125,6 +142,7 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
         panes = nil
         isShowing = false
         focusObservation = nil
+        denoiseWaiting = []
     }
 
     // MARK: - Focus and removal
@@ -180,9 +198,12 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
         let model = EditorModel()
         // No histogram is on screen for a pane.
         model.measuresScopes = false
-        renderObservations[ObjectIdentifier(model)] = Publishers.Merge(
+        model.aiDenoiseTurn = { [weak self] model in self?.waitForAIDenoise(model) }
+        renderObservations[ObjectIdentifier(model)] = Publishers.Merge3(
             model.$preview.dropFirst().map { _ in () },
-            model.$tile.dropFirst().map { _ in () }
+            model.$tile.dropFirst().map { _ in () },
+            // A run ending, which is another pane's turn.
+            model.$aiDenoiseRunning.dropFirst().filter { !$0 }.map { _ in () }
         )
         .sink { [weak self, weak model] in
             guard let self, let model else { return }
@@ -193,6 +214,7 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
     }
 
     private func release(_ model: EditorModel) {
+        denoiseWaiting.remove(ObjectIdentifier(model))
         model.closeImage()
         model.linkedGroup = nil
         renderObservations[ObjectIdentifier(model)] = nil
@@ -203,10 +225,31 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
     /// render nothing measures.
     private func paneRendered(_ model: EditorModel) {
         guard models.values.contains(where: { $0 === model }) else { return }
+        startNextAIDenoise()
         updateImageAspect()
         guard !policy.keepsIdleImages, model.hasImage, !model.aiDenoiseRunning else { return }
         model.session?.releasePooledTextures()
         model.analysisTexture = nil
+    }
+
+    /// A pane's image needs AI denoise: it waits for its turn.
+    private func waitForAIDenoise(_ model: EditorModel) {
+        denoiseWaiting.insert(ObjectIdentifier(model))
+        startNextAIDenoise()
+    }
+
+    /// Once no pane's run is under way, starts the next waiting pane's: the
+    /// focused pane's, else the first in grid order. Only while Survey shows.
+    private func startNextAIDenoise() {
+        guard isShowing, !models.values.contains(where: \.aiDenoiseRunning) else { return }
+        let order = [focusedModel].compactMap { $0 } + linkedPanes
+        while let next = order.first(where: { denoiseWaiting.contains(ObjectIdentifier($0)) }) {
+            denoiseWaiting.remove(ObjectIdentifier(next))
+            // Its edit may have changed since it asked.
+            guard next.needsAIDenoise else { continue }
+            startsAIDenoise(next)
+            return
+        }
     }
 
     private func relink() {
@@ -265,6 +308,33 @@ extension SurveyModel {
         return true
     }
 
+    /// An undo or redo in the Library put back the rotation or stored edit
+    /// of `ids`: the panes showing them show it. Only while Survey shows,
+    /// since `begin` reads every pane's edit again on the way back in.
+    func followRestore(_ ids: Set<Int64>, _ aspect: Library.RestoredAspect, library: Library,
+                       onFailure: @escaping @MainActor (String, any Error) -> Void) {
+        guard isShowing else { return }
+        let catalog = library.catalog
+        for id in ids {
+            guard let model = models[id], let record = library.images.first(where: { $0.id == id }) else { continue }
+            guard aspect == .edits else {
+                model.setUserRotation(record.userRotation)
+                continue
+            }
+            Task { @MainActor [weak self] in
+                let stack: String?
+                do {
+                    stack = try await library.editStack(for: record)
+                } catch {
+                    onFailure("Reading the edit for \(record.fileName)", error)
+                    return
+                }
+                guard let self, self.isShowing, self.models[id] === model, library.catalog === catalog else { return }
+                model.showStoredEdit(stack, userRotation: record.userRotation)
+            }
+        }
+    }
+
     /// Makes the library's selection the panes, led by the focused one.
     func writeSelection(to library: Library) {
         guard let panes else { return }
@@ -281,8 +351,8 @@ extension SurveyModel {
 
 extension EditorModel {
     /// For a view-only pane that kept its image while away: the stored
-    /// edit and rotation as they are now, which Develop, a paste or a
-    /// rotation in the grid may have changed.
+    /// edit and rotation as they are now, which Develop, a paste, a
+    /// rotation in the grid or an undo may have changed.
     func showStoredEdit(_ json: String?, userRotation: Int) {
         guard hasImage else { return }
         setUserRotation(userRotation)
@@ -297,5 +367,6 @@ extension EditorModel {
             }
         }
         if next != parameters { parameters = next }
+        regenerateAIDenoiseIfNeeded()
     }
 }
