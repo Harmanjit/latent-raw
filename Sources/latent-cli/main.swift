@@ -79,10 +79,18 @@ if args.count >= 3, args[1] == "catalog" {
 if args.count >= 2, args[1] == "merge-hdr" {
     var positional: [String] = []
     var referenceOverride: Int?
+    var deghost = DeghostAmount.none
     var index = 2
     while index < args.count {
         if args[index] == "--reference", index + 1 < args.count, let n = Int(args[index + 1]) {
             referenceOverride = n
+            index += 2
+        } else if args[index] == "--deghost", index + 1 < args.count {
+            guard let amount = DeghostAmount(rawValue: args[index + 1]) else {
+                print("--deghost takes none, low, medium or high")
+                exit(1)
+            }
+            deghost = amount
             index += 2
         } else {
             positional.append(args[index])
@@ -90,7 +98,7 @@ if args.count >= 2, args[1] == "merge-hdr" {
         }
     }
     guard positional.count >= 3 else {
-        print("Usage: latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N]")
+        print("Usage: latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N] [--deghost none|low|medium|high]")
         exit(1)
     }
     let output = URL(fileURLWithPath: positional[0])
@@ -159,11 +167,20 @@ if args.count >= 2, args[1] == "merge-hdr" {
                 captureTime: Int64(captured.timeIntervalSince1970)))
         }
         let (result, mergeReport) = try await merger.mergeWithReport(
-            analysis, options: HDRMergeOptions(referenceIndex: referenceOverride), sources: sources, to: output,
+            analysis, options: HDRMergeOptions(referenceIndex: referenceOverride, deghost: deghost),
+            sources: sources, to: output,
             prepareSidecar: { _ in }, progress: { _ in })
         print("Timings:")
         printReport(analysisReport, title: "analysis")
         printReport(mergeReport, title: "merge")
+        if !mergeReport.ghostMaskedFractions.isEmpty {
+            let shares = zip(mergeReport.ghostFlaggedFractions, mergeReport.ghostMaskedFractions).enumerated()
+                .map { i, share in
+                    i == reference ? "\(i): reference"
+                        : String(format: "%d: %.2f%% moving, %.2f%% left out", i, share.0 * 100, share.1 * 100)
+                }
+            print("Deghosting (\(deghost.rawValue)): " + shares.joined(separator: "; "))
+        }
         let peak = max(analysisReport.peakGPUBytes, mergeReport.peakGPUBytes)
         print(String(format: "Peak GPU memory: %.2f GB (device allocations while merging)", Double(peak) / 1_073_741_824))
         print(String(format: "Wrote %@ (%.1f MB, BaselineExposure %+.2f, clip level %g)", result.url.path as NSString,
@@ -184,6 +201,7 @@ guard args.count >= 3, args[1] == "render" else {
       latent-cli render <path-to-raw-file> [options]
       latent-cli catalog <folder> [--include-subfolders]
       latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N]
+                           [--deghost none|low|medium|high]
 
     Options:
       --out <path.png>       write the result as a PNG

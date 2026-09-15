@@ -23,9 +23,9 @@ enum HDRTestSupport {
     /// A merger that sees plenty of disk and an unconstrained Mac.
     static func merger(memoryPolicy: MemoryPolicy = MemoryPolicy(physicalMemory: 16 << 30),
                        availableCapacity: @escaping @Sendable (URL) -> Int64? = { _ in nil },
-                       gpuMemoryBudget: Int? = nil) throws -> HDRMerger {
+                       gpuMemoryBudget: Int? = nil, clipFeather: HDRClipFeather = .standard) throws -> HDRMerger {
         HDRMerger(gpu: try gpu(), memoryPolicy: memoryPolicy, availableCapacity: availableCapacity,
-                  gpuMemoryBudget: gpuMemoryBudget)
+                  gpuMemoryBudget: gpuMemoryBudget, clipFeather: clipFeather)
     }
 
     /// The 1200 x 800 test scene, made once.

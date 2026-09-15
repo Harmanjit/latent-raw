@@ -124,6 +124,37 @@ enum SyntheticBracket {
         /// `SyntheticBracket.white`; a higher tag makes a sensor that
         /// saturates below its nominal white, as some cameras do.
         var whiteLevelTag = SyntheticBracket.white
+        /// Rectangles painted over the scene in this frame only: something
+        /// that moved, for the deghosting tests.
+        var patches: [Patch] = []
+    }
+
+    /// A uniform rectangle of scene radiance.
+    struct Patch {
+        let x: Int
+        let y: Int
+        let width: Int
+        let height: Int
+        let radiance: SIMD3<Float>
+
+        func contains(x px: Int, y py: Int) -> Bool {
+            (x..<(x + width)).contains(px) && (y..<(y + height)).contains(py)
+        }
+    }
+
+    /// `scene` with `patches` painted over it.
+    static func painting(_ patches: [Patch], over scene: Scene) -> Scene {
+        guard !patches.isEmpty else { return scene }
+        var rgb = scene.rgb
+        for patch in patches {
+            for y in max(0, patch.y)..<min(scene.height, patch.y + patch.height) {
+                for x in max(0, patch.x)..<min(scene.width, patch.x + patch.width) {
+                    let i = (y * scene.width + x) * 3
+                    rgb[i] = patch.radiance.x; rgb[i + 1] = patch.radiance.y; rgb[i + 2] = patch.radiance.z
+                }
+            }
+        }
+        return Scene(width: scene.width, height: scene.height, rgb: rgb)
     }
 
     /// Frames at the given true exposures, with EXIF telling the truth
@@ -169,7 +200,8 @@ enum SyntheticBracket {
                 source = self.scene(width: scene.width, height: scene.height, shiftX: frame.shiftX)
                 shiftedScenes[frame.shiftX] = source
             }
-            let raw = photosites(of: source, exposure: frame.exposure, noise: noise, seed: UInt64(index + 1) * 7919)
+            let raw = photosites(of: painting(frame.patches, over: source), exposure: frame.exposure, noise: noise,
+                                 seed: UInt64(index + 1) * 7919)
             let url = folder.appendingPathComponent("\(name)-\(index).dng")
             try writeDNG(raw, width: scene.width, height: scene.height, frame: frame, to: url)
             return url

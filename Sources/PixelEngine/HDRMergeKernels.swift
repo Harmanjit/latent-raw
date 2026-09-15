@@ -1,5 +1,6 @@
 import Foundation
 import Metal
+import MetalPerformanceShaders
 import simd
 import RawCore
 
@@ -61,8 +62,42 @@ public enum HDRMergeKernelError: Error, CustomStringConvertible, Equatable {
     }
 }
 
+/// How a frame's weight fades out near its clipped areas: the frame's usable
+/// area (where it isn't near clipping) shrunk by `erodeRadius` and then
+/// blurred with a Gaussian of `sigma`, both in quarter-size mask pixels
+/// (`HDRMergeKernels.maskSpan` photosites each). See `mergeHDRClipUsable`
+/// for why.
+///
+/// With the standard 3 and 1.5, the fade is centred about 12 photosites
+/// inside the unclipped area: a frame keeps under 3% of its weight at the
+/// edge of its clipping and all of it from about 24 photosites in.
+public struct HDRClipFeather: Sendable, Equatable {
+    public var erodeRadius: Int
+    public var sigma: Float
+
+    public init(erodeRadius: Int, sigma: Float) {
+        self.erodeRadius = erodeRadius
+        self.sigma = sigma
+    }
+
+    public static let standard = HDRClipFeather(erodeRadius: 3, sigma: 1.5)
+    /// Recorded in a merge's recipe, so a later change to the numbers above
+    /// (or to how they're used) can be told apart. 1: this version.
+    public static let version = 1
+}
+
 /// One-off merge kernels: the analysis frames and the preview's reduction.
 public enum HDRMergeKernels {
+    /// Photosites per side of a pixel of the merge's quarter-size maps: the
+    /// clip feathering and the deghosting masks.
+    public static let maskSpan = 4
+
+    /// The size of a quarter-size map for a `width x height` frame. The
+    /// last block of a row or column may be cut short.
+    public static func maskSize(width: Int, height: Int) -> (width: Int, height: Int) {
+        ((width + maskSpan - 1) / maskSpan, (height + maskSpan - 1) / maskSpan)
+    }
+
     /// A reduced frame read back to the CPU: `width x height` pixels of four
     /// Float32 each, row by row. Red, green and blue are the block's mean in
     /// normalised units at unit white balance (black subtracted, not
@@ -149,6 +184,33 @@ public enum HDRMergeKernels {
         return texture
     }
 
+    /// Encodes the erosion then the blur of `HDRClipFeather` on a one-channel
+    /// map: `source` shrunk into `eroded`, blurred into `feathered`. Both
+    /// filters repeat the edge pixels beyond the map (the default would
+    /// bring in zeros, and fade every frame out along the photo's border).
+    static func encodeFeather(_ commands: MTLCommandBuffer, gpu: GPUContext, feather: HDRClipFeather,
+                              source: MTLTexture, eroded: MTLTexture, feathered: MTLTexture) {
+        let size = 2 * max(0, feather.erodeRadius) + 1
+        let erode = MPSImageAreaMin(device: gpu.device, kernelWidth: size, kernelHeight: size)
+        erode.edgeMode = .clamp
+        erode.encode(commandBuffer: commands, sourceTexture: source, destinationTexture: eroded)
+        encodeBlur(commands, gpu: gpu, sigma: feather.sigma, source: eroded, destination: feathered)
+    }
+
+    /// A Gaussian blur of `sigma` map pixels, edges repeated; a plain copy
+    /// for a sigma too small to blur.
+    static func encodeBlur(_ commands: MTLCommandBuffer, gpu: GPUContext, sigma: Float,
+                           source: MTLTexture, destination: MTLTexture) {
+        if sigma >= 0.25 {
+            let blur = MPSImageGaussianBlur(device: gpu.device, sigma: sigma)
+            blur.edgeMode = .clamp
+            blur.encode(commandBuffer: commands, sourceTexture: source, destinationTexture: destination)
+        } else if let blit = commands.makeBlitCommandEncoder() {
+            blit.copy(from: source, to: destination)
+            blit.endEncoding()
+        }
+    }
+
     static func dispatch(_ encoder: MTLComputeCommandEncoder, pso: MTLComputePipelineState, width: Int, height: Int) {
         let tw = pso.threadExecutionWidth
         let th = max(1, pso.maxTotalThreadsPerThreadgroup / tw)
@@ -166,11 +228,12 @@ public enum HDRMergeKernels {
 /// The running sums of an HDR merge, and the textures each frame passes
 /// through on its way into them.
 ///
-/// Frames are added one at a time; each call uploads nothing (the sensor
-/// plane is wrapped in place), encodes its three stages (prepare, RCD,
-/// accumulate) into one command buffer and waits for it, so the caller can let go of the `RawFile` before
-/// opening the next. Every texture is made on the first frame and reused
-/// by the rest, so GPU memory is the same for 3 frames as for 9:
+/// Frames are added one at a time; each call uploads nothing but its small
+/// deghosting mask (the sensor plane is wrapped in place), encodes its stages
+/// (prepare, RCD, clip feathering, accumulate) into one command buffer and
+/// waits for it, so the caller can let go of the `RawFile` before opening
+/// the next. Every texture is made on the first frame and reused by the
+/// rest, so GPU memory is the same for 3 frames as for 9:
 ///
 /// | texture | format | 24 MP |
 /// |---|---|---|
@@ -178,6 +241,8 @@ public enum HDRMergeKernels {
 /// | CFA plane | r32Float | 97 MB |
 /// | clip mask | r8Unorm | 24 MB |
 /// | RCD's six intermediates | mixed | 775 MB |
+/// | clip feathering, three quarter-size maps | r16Float | 9 MB |
+/// | deghosting mask, quarter size | r8Unorm | 2 MB |
 ///
 /// `releaseScratch()` frees all but the accumulator once the last frame is
 /// in, before `resolve()` makes the half-float result (194 MB).
@@ -189,6 +254,9 @@ public final class HDRMergeAccumulator {
     private let gpu: GPUContext
     private let pipeline: RenderPipeline
     private let accumulator: MTLTexture
+    /// Bound in place of a quarter-size map a frame doesn't use, since a
+    /// kernel's every texture must be bound.
+    private let blank: MTLTexture
     /// The per-frame textures, by format and purpose.
     private var scratch: [String: MTLTexture] = [:]
     public private(set) var framesAdded = 0
@@ -205,6 +273,7 @@ public final class HDRMergeAccumulator {
         // clear, which is why this texture alone is also a render target.
         accumulator = try HDRMergeKernels.makeTexture(gpu, width: width, height: height, format: .rgba32Float,
                                                       extraUsage: .renderTarget)
+        blank = try HDRMergeKernels.makeTexture(gpu, width: 1, height: 1, format: .r8Unorm)
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = accumulator
         pass.colorAttachments[0].loadAction = .clear
@@ -224,7 +293,9 @@ public final class HDRMergeAccumulator {
         let pixels = width * height
         let accumulator = 16, cfa = 4, mask = 1, sensor = 2
         let rcd = 2 + 4 + 8 + 2 + 8 + 8
-        return pixels * (accumulator + cfa + mask + sensor + rcd)
+        let map = HDRMergeKernels.maskSize(width: width, height: height)
+        let quarterSize = map.width * map.height * (3 * 2 + 1)
+        return pixels * (accumulator + cfa + mask + sensor + rcd) + quarterSize
     }
 
     /// Demosaics `file` and adds it to the sums.
@@ -235,13 +306,23 @@ public final class HDRMergeAccumulator {
     ///   - relativeEV: stops of light relative to the brightest frame (0 or less).
     ///   - weightFloor: the least weight any pixel of this frame gets: 1e-4
     ///     for the darkest frame, 0 for the others.
+    ///   - feather: how the frame fades out near its clipping; nil for none
+    ///     (the darkest frame, which nothing darker could replace).
+    ///   - ghostMask: where the frame shows something that moved, from
+    ///     `HDRGhostDetector`; nil for no deghosting.
     public func add(_ file: RawFile, levels: HDRFrameLevels, multipliers: SIMD3<Float>,
-                    relativeEV: Double, weightFloor: Float) throws {
+                    relativeEV: Double, weightFloor: Float,
+                    feather: HDRClipFeather? = nil, ghostMask: HDRGhostMask? = nil) throws {
         guard case .bayer(let order) = file.summary.cfaPattern, let plane = file.sensorPlane,
               let buffer = gpu.makeSharedBuffer(wrapping: plane) else { throw HDRMergeKernelError.notABayerFrame }
         guard file.summary.rawWidth == width, file.summary.rawHeight == height else {
             throw HDRMergeKernelError.sizeMismatch(expected: "\(width) x \(height)",
                                                    actual: "\(file.summary.rawWidth) x \(file.summary.rawHeight)")
+        }
+        let map = HDRMergeKernels.maskSize(width: width, height: height)
+        if let ghostMask, ghostMask.width != map.width || ghostMask.height != map.height {
+            throw HDRMergeKernelError.sizeMismatch(expected: "\(map.width) x \(map.height) mask",
+                                                   actual: "\(ghostMask.width) x \(ghostMask.height)")
         }
         let cfa = try scratchTexture(.r32Float, "cfa")
         let mask = try scratchTexture(.r8Unorm, "clipMask")
@@ -272,24 +353,69 @@ public final class HDRMergeAccumulator {
             try scratchTexture(format, "rcd-\(role)")
         }
 
-        // 3. Unit white balance, radiance, weight, sums.
+        // 3. (Alignment goes here: `rgb` and `mask` warped onto the reference
+        // frame, so everything below sees the frame where it belongs.)
+
+        var inverse = SIMD4<Float>(1 / max(multipliers.x, 1e-6), 1 / max(multipliers.y, 1e-6),
+                                   1 / max(multipliers.z, 1e-6), 1)
+        var clip = SIMD4<Float>(levels.channelClip, 1)
+
+        // 4. Where the frame is safely unclipped, eroded and feathered.
+        var featherMap = blank
+        if let feather {
+            let usable = try scratchTexture(.r16Float, "usable", width: map.width, height: map.height)
+            let eroded = try scratchTexture(.r16Float, "usableEroded", width: map.width, height: map.height)
+            featherMap = try scratchTexture(.r16Float, "usableFeathered", width: map.width, height: map.height)
+            let clipUsable = try gpu.lazyPipeline(.mergeHDRClipUsable)
+            guard let encoder = commands.makeComputeCommandEncoder() else { throw RenderError.commandBufferFailed }
+            encoder.setComputePipelineState(clipUsable)
+            encoder.setTexture(rgb, index: 0)
+            encoder.setTexture(mask, index: 1)
+            encoder.setTexture(usable, index: 2)
+            var span = UInt32(HDRMergeKernels.maskSpan)
+            encoder.setBytes(&inverse, length: 16, index: 0)
+            encoder.setBytes(&clip, length: 16, index: 1)
+            encoder.setBytes(&span, length: 4, index: 2)
+            HDRMergeKernels.dispatch(encoder, pso: clipUsable, width: map.width, height: map.height)
+            encoder.endEncoding()
+            HDRMergeKernels.encodeFeather(commands, gpu: gpu, feather: feather, source: usable, eroded: eroded,
+                                          feathered: featherMap)
+        }
+
+        // 5. The deghosting mask, uploaded.
+        var ghostMap = blank
+        if let ghostMask {
+            ghostMap = try scratchTexture(.r8Unorm, "ghost", width: map.width, height: map.height, storage: .shared)
+            ghostMask.weights.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                ghostMap.replace(region: MTLRegionMake2D(0, 0, map.width, map.height), mipmapLevel: 0,
+                                 withBytes: base, bytesPerRow: map.width)
+            }
+        }
+
+        // 6. Unit white balance, radiance, weight, sums.
         let accumulate = try gpu.lazyPipeline(.mergeHDRAccumulate)
         guard let adder = commands.makeComputeCommandEncoder() else { throw RenderError.commandBufferFailed }
         adder.setComputePipelineState(accumulate)
         adder.setTexture(rgb, index: 0)
         adder.setTexture(mask, index: 1)
         adder.setTexture(accumulator, index: 2)
-        var inverse = SIMD4<Float>(1 / max(multipliers.x, 1e-6), 1 / max(multipliers.y, 1e-6),
-                                   1 / max(multipliers.z, 1e-6), 1)
-        var clip = SIMD4<Float>(levels.channelClip, 1)
+        adder.setTexture(featherMap, index: 3)
+        adder.setTexture(ghostMap, index: 4)
         var radianceScale = Float(pow(2, -relativeEV))
         var weightScale = Float(pow(2, relativeEV))
         var floor = weightFloor
+        var maskSpan = Float(HDRMergeKernels.maskSpan)
+        var featherOn: Float = feather == nil ? 0 : 1
+        var ghostOn: Float = ghostMask == nil ? 0 : 1
         adder.setBytes(&inverse, length: 16, index: 0)
         adder.setBytes(&clip, length: 16, index: 1)
         adder.setBytes(&radianceScale, length: 4, index: 2)
         adder.setBytes(&weightScale, length: 4, index: 3)
         adder.setBytes(&floor, length: 4, index: 4)
+        adder.setBytes(&maskSpan, length: 4, index: 5)
+        adder.setBytes(&featherOn, length: 4, index: 6)
+        adder.setBytes(&ghostOn, length: 4, index: 7)
         HDRMergeKernels.dispatch(adder, pso: accumulate, width: width, height: height)
         adder.endEncoding()
 
@@ -319,10 +445,13 @@ public final class HDRMergeAccumulator {
         return merged
     }
 
-    private func scratchTexture(_ format: MTLPixelFormat, _ purpose: String) throws -> MTLTexture {
+    /// A per-frame texture, full size unless told otherwise.
+    private func scratchTexture(_ format: MTLPixelFormat, _ purpose: String, width: Int? = nil, height: Int? = nil,
+                                storage: MTLStorageMode = .private) throws -> MTLTexture {
         let key = "\(purpose)-\(format.rawValue)"
         if let texture = scratch[key] { return texture }
-        let texture = try HDRMergeKernels.makeTexture(gpu, width: width, height: height, format: format)
+        let texture = try HDRMergeKernels.makeTexture(gpu, width: width ?? self.width, height: height ?? self.height,
+                                                      format: format, storage: storage)
         scratch[key] = texture
         return texture
     }

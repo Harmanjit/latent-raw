@@ -19,6 +19,15 @@ public struct HDRMergeReport: Sendable, Equatable {
     /// its textures are reused or released). It counts every allocation in
     /// the process, so it includes whatever else the process holds.
     public private(set) var peakGPUBytes = 0
+    /// With deghosting on, the share of each frame (in the analysis's
+    /// order) found disagreeing with the local reference over a whole
+    /// patch; 0 for the reference frame. Empty without deghosting.
+    public internal(set) var ghostFlaggedFractions: [Double] = []
+    /// With deghosting on, the share of each frame its ghost mask left out
+    /// by at least half: every frame's movement, widened, except where the
+    /// frame is the local reference. 0 for the reference frame, which is
+    /// never masked. Empty without deghosting.
+    public internal(set) var ghostMaskedFractions: [Double] = []
 
     public init() {}
 
@@ -45,6 +54,10 @@ public struct HDRMergeReport: Sendable, Equatable {
     mutating func append(_ other: HDRMergeReport) {
         stages += other.stages
         peakGPUBytes = max(peakGPUBytes, other.peakGPUBytes)
+        if !other.ghostMaskedFractions.isEmpty {
+            ghostFlaggedFractions = other.ghostFlaggedFractions
+            ghostMaskedFractions = other.ghostMaskedFractions
+        }
     }
 
     private mutating func record(_ name: String, since start: ContinuousClock.Instant, clock: ContinuousClock) {

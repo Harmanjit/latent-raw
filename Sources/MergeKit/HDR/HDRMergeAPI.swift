@@ -72,9 +72,23 @@ public struct HDRMergeOptions: Sendable, Equatable, Codable {
     /// Overrides the automatic reference frame (an index into
     /// `HDRMergeAnalysis.frames`); nil chooses automatically.
     public var referenceIndex: Int?
+    /// How hard the merge looks for things that moved (Phase 6b).
+    public var deghost: DeghostAmount = .none
 
-    public init(referenceIndex: Int? = nil) {
+    public init(referenceIndex: Int? = nil, deghost: DeghostAmount = .none) {
         self.referenceIndex = referenceIndex
+        self.deghost = deghost
+    }
+
+    private enum CodingKeys: String, CodingKey { case referenceIndex, deghost }
+
+    /// Written by hand so options saved before a field existed still decode,
+    /// with that field at its default: the synthesised decoder would
+    /// refuse JSON without a `deghost` key.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        referenceIndex = try container.decodeIfPresent(Int.self, forKey: .referenceIndex)
+        deghost = try container.decodeIfPresent(DeghostAmount.self, forKey: .deghost) ?? DeghostAmount.none
     }
 }
 
