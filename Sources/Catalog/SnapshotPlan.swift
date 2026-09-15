@@ -31,6 +31,10 @@ public struct SnapshotPlan: Equatable, Sendable {
         case export
         /// The Settings window instead of the main one.
         case settings
+        /// The export quality comparison window for the selection's first
+        /// image, at the saved export preset. Not in the default steps: it
+        /// renders the image at export size.
+        case quality
     }
 
     public enum Problem: Error, Equatable, CustomStringConvertible {

@@ -34,8 +34,15 @@ struct ExportPreset: Codable, Equatable {
     var revealWhenDone = true
     /// JPEG/HEIC: add an HDR gain map. Off by default, and in older presets.
     var hdrGainMap = false
+    /// Stamp `watermark` into each file. Off by default, and in older
+    /// presets; the text and look are kept while it's off.
+    var watermarkEnabled = false
+    var watermark = ExportWatermark()
 
-    var settings: ExportSettings { ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap) }
+    var settings: ExportSettings {
+        ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap,
+                       watermark: watermarkEnabled && !watermark.isEmpty ? watermark : nil)
+    }
     var colorSpace: ColorKit.OutputSpace { colorSpaceIsP3 ? .displayP3 : .sRGB }
     /// What the location switch covers, for its tooltip here and in the
     /// left panel.
@@ -66,6 +73,8 @@ struct ExportPreset: Codable, Equatable {
         includeLocation = try c.decodeIfPresent(Bool.self, forKey: .includeLocation) ?? false
         revealWhenDone = try c.decodeIfPresent(Bool.self, forKey: .revealWhenDone) ?? true
         hdrGainMap = try c.decodeIfPresent(Bool.self, forKey: .hdrGainMap) ?? false
+        watermarkEnabled = try c.decodeIfPresent(Bool.self, forKey: .watermarkEnabled) ?? false
+        watermark = (try? c.decodeIfPresent(ExportWatermark.self, forKey: .watermark)) ?? ExportWatermark()
     }
 
     var fileExtension: String {
@@ -147,8 +156,11 @@ final class ExportQueue: ObservableObject {
         stoppingForQuit = false
         done = 0; total = records.count; failures = []; summary = ""
         preset.save()
+        // Held until the loop below finishes, however it finishes.
+        let activity = ExportActivity(reason: "Exporting \(records.count) image\(records.count == 1 ? "" : "s")")
 
         task = Task { [weak self] in
+            defer { activity.end() }
             let start = Date()
             var totalPixels = 0
             let catalogName = root.lastPathComponent
@@ -219,17 +231,8 @@ final class ExportQueue: ObservableObject {
                 var outcome: Result<ExportWorker.Outcome, Error>
                 var attempts = 0
                 while true {
-                    let request = ExportWorker.Request(
-                        sourceURL: root.appendingPathComponent(record.relPath),
-                        destinationURL: target,
-                        editStackJSON: json, userRotation: record.userRotation,
-                        settings: preset.settings, colorSpace: preset.colorSpace,
-                        maxLongEdge: preset.resize ? preset.maxLongEdge : nil,
-                        keywords: preset.includeMetadata ? keywords : [],
-                        rating: preset.includeMetadata ? record.rating : 0,
-                        includeMetadata: preset.includeMetadata,
-                        includeLocation: preset.includeMetadata && preset.includeLocation,
-                        replacesExisting: preset.collision == .replace)
+                    let request = preset.workerRequest(for: record, root: root, destination: target,
+                                                       editStackJSON: json, keywords: keywords)
 
                     outcome = await Task.detached(priority: .userInitiated) {
                         do { return .success(try await ExportWorker.export(request, gpu: gpu)) }
@@ -310,7 +313,11 @@ struct ExportSheet: View {
     /// Every image to export, in order, for planning the names.
     var records: [ImageRecord] = []
     var catalogName: String = ""
+    /// For the size estimate and quality comparison; nil hides both.
+    var preview: ExportPreviewSource?
     @State var preset = ExportPreset.load()
+    @State private var renderer: ExportPreviewRenderer?
+    @StateObject private var estimate = ExportEstimateModel()
     @State private var destination: URL? = BookmarkStore.resolve(key: BookmarkStore.exportDestination)
         ?? AppPreferences.shared.defaultExportFolder
     @State private var savedPresets = ExportPresetStore.load()
@@ -359,6 +366,12 @@ struct ExportSheet: View {
                                      format: SliderValueFormat(decimals: 0, scale: 100)) { preset.quality = 0.92 }
                     Text(String(format: "%.0f", preset.quality * 100)).monospacedDigit().frame(width: 30)
                         .accessibilityHidden(true)
+                    Button("Compare…") { compareQualities() }
+                        .controlSize(.small)
+                        .disabled(renderer == nil || estimateRecords.isEmpty)
+                        .accessibilityLabel("Compare qualities")
+                        .accessibilityHint("Opens a window showing the first image encoded at several qualities side by side.")
+                        .help("See the first image encoded at several qualities side by side at 100%, with file sizes.")
                 }
             }
             if preset.format.supportsGainMap {
@@ -385,6 +398,7 @@ struct ExportSheet: View {
                     }
                 }
             }
+            ExportWatermarkSection(preset: $preset)
             Toggle("Include camera metadata, keywords and rating", isOn: $preset.includeMetadata)
             Toggle("Include location", isOn: $preset.includeLocation)
                 .disabled(!preset.includeMetadata)
@@ -459,6 +473,10 @@ struct ExportSheet: View {
             Toggle("Sort into subfolders by capture date", isOn: $preset.dateSubfolders)
             Toggle("Show in Finder when done", isOn: $preset.revealWhenDone)
             HStack {
+                ExportEstimateLabel(model: estimate)
+                    .task(id: estimateRequest) {
+                        await estimate.update(records: estimateRecords, preset: preset, renderer: renderer)
+                    }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Export") {
@@ -470,6 +488,16 @@ struct ExportSheet: View {
         }
         .padding(20)
         .frame(width: 520)
+        .onAppear {
+            if renderer == nil, let preview { renderer = ExportPreviewRenderer(source: preview) }
+        }
+        .onDisappear {
+            // The render and the comparison belong to this sheet.
+            if let renderer {
+                QualityCompareWindow.close(ifUsing: renderer)
+                renderer.discard()
+            }
+        }
         .sheet(isPresented: $showingSavePreset) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Save export preset").font(.headline)
@@ -493,6 +521,31 @@ struct ExportSheet: View {
     }
 
     private var unknownTokens: [String] { ExportNaming.unknownTokens(in: preset.template) }
+
+    /// The images the estimate covers, the first being the one rendered.
+    private var estimateRecords: [ImageRecord] { records.isEmpty ? (sample.map { [$0] } ?? []) : records }
+
+    /// Only what changes the estimate, so typing a file name doesn't encode again.
+    private var estimateRequest: EstimateRequest? {
+        guard let first = estimateRecords.first, renderer != nil else { return nil }
+        return EstimateRequest(render: ExportPreviewRenderer.Key(record: first, preset: preset),
+                               format: preset.format, quality: preset.quality,
+                               imageIDs: estimateRecords.map(\.id))
+    }
+
+    private struct EstimateRequest: Equatable {
+        var render: ExportPreviewRenderer.Key
+        var format: ExportSettings.Format
+        var quality: Float
+        var imageIDs: [Int64?]
+    }
+
+    private func compareQualities() {
+        guard let renderer, let first = estimateRecords.first else { return }
+        QualityCompareWindow.show(renderer: renderer, record: first, preset: preset) { quality in
+            preset.quality = quality
+        }
+    }
 
     private struct PlanRequest: Equatable {
         var options: ExportBatchPlanner.Options

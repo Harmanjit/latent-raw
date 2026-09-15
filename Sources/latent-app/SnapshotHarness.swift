@@ -382,6 +382,23 @@ enum SnapshotHarness {
                 }
                 guard let settings else { fail("settings: the window did not open"); return nil }
                 return settings
+            case .quality:
+                guard let record = library.selectedImages.first ?? library.selectedImage,
+                      let source = ExportPreviewSource(library: library, gpu: model.gpu)
+                else { fail("quality: no image selected"); return nil }
+                QualityCompareWindow.show(renderer: ExportPreviewRenderer(source: source), record: record,
+                                          preset: ExportPreset.load()) { _ in }
+                let ready = await wait("the quality comparison", upTo: 60) {
+                    guard let compare = QualityCompareWindow.currentModel else { return false }
+                    if case .failed = compare.phase { return true }
+                    return compare.phase == .ready && compare.panes.allSatisfy {
+                        let key = QualityCompareModel.key($0.quality)
+                        return compare.tiles[key] != nil && compare.sizes[key] != nil
+                    }
+                }
+                if case .failed(let reason) = QualityCompareWindow.currentModel?.phase { fail("quality: \(reason)") }
+                guard ready else { return nil }
+                return NSApp.windows.first { $0.identifier?.rawValue == "QualityCompare" && $0.isVisible }
             }
             return window
         }
@@ -408,6 +425,7 @@ enum SnapshotHarness {
             switch step {
             case .export: exportSheet.wrappedValue = false
             case .settings: window.close()
+            case .quality: QualityCompareWindow.close()
             case .crop, .heal:
                 _ = perform(.disarmTools)
                 scrollAdjustments(toEnd: false)
