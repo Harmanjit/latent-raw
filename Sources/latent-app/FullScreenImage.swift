@@ -133,6 +133,10 @@ final class FullScreenImageMode: ObservableObject {
     private var animatingIn = false
     private var observers: [any NSObjectProtocol] = []
 
+    /// Whether the window is where entering asked it to be, not still on
+    /// its way to full screen.
+    var hasArrived: Bool { isActive && !animatingIn }
+
     /// `window` goes full screen (unless it already is).
     func enter(window: NSWindow?) {
         guard !isActive else { return }
@@ -158,8 +162,9 @@ final class FullScreenImageMode: ObservableObject {
             },
         ]
         #if DEBUG
-        // A snapshot run pictures the layout without taking over the screen.
-        if SnapshotHarness.isActive { return }
+        // A snapshot run pictures the layout without taking over the screen,
+        // unless it was asked to.
+        if SnapshotHarness.isActive, !SnapshotHarness.usesSystemFullScreen { return }
         #endif
         if !window.styleMask.contains(.fullScreen) {
             enteredSystemFullScreen = true
@@ -338,8 +343,19 @@ struct FlyoutPanel<Content: View>: View {
 
 extension View {
     /// The full-screen image's fly-out panels and the pointer tracking that
-    /// opens them, over this view (ContentView's main area). Nothing is
-    /// added while the mode is off.
+    /// opens them, over this view (ContentView's main area), which is laid
+    /// out up to the top of the window. Nothing changes while the mode is off.
+    ///
+    /// The top safe area is ignored because the main window's toolbar keeps
+    /// it: `.toolbar(.hidden, for: .windowToolbar)` hides the toolbar's
+    /// views, but AppKit still counts the toolbar as showing and goes on
+    /// reserving its height (52 pt with the titlebar) at the top of the
+    /// content, in full screen too, where the view was laid out below an
+    /// empty strip of window background: a grey bar between the menu bar
+    /// (or a notched display's camera housing) and the image. Hiding the
+    /// NSToolbar instead doesn't hold, since SwiftUI shows it again. The
+    /// system already places a full-screen window below a camera housing,
+    /// so nothing goes under one.
     func fullScreenFlyouts<Left: View, Right: View, Bottom: View>(
         _ mode: FullScreenImageMode, available: Set<FlyoutEdge>,
         @ViewBuilder left: @escaping () -> Left,
@@ -382,6 +398,9 @@ private struct FullScreenFlyouts<Left: View, Right: View, Bottom: View>: ViewMod
                     FlyoutPanel(edge: .bottom, mode: mode, content: bottom)
                 }
             }
+            // After the panels, so they reach the top too, their contents
+            // with no inset for the toolbar either.
+            .ignoresSafeArea(.container, edges: mode.isActive ? .top : [])
             // The edges can't be reached without a pointer; VoiceOver and
             // Full Keyboard Access users open the panels from here.
             .accessibilityActions {

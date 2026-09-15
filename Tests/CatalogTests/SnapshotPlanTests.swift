@@ -18,6 +18,7 @@ final class SnapshotPlanTests: XCTestCase {
         XCTAssertEqual(plan.settle, 1)
         XCTAssertEqual(plan.timeout, 120)
         XCTAssertNil(plan.appearance)
+        XCTAssertFalse(plan.systemFullScreen)
     }
 
     func testReadsEveryVariable() throws {
@@ -29,6 +30,7 @@ final class SnapshotPlanTests: XCTestCase {
             "LATENT_SNAPSHOT_SETTLE": "0.25",
             "LATENT_SNAPSHOT_TIMEOUT": "30",
             "LATENT_SNAPSHOT_APPEARANCE": "Dark",
+            "LATENT_SNAPSHOT_FULLSCREEN": "System",
         ]))
         XCTAssertFalse(plan.directory.path.hasPrefix("~"))
         XCTAssertEqual(plan.folder?.path, "/Users/someone/Pictures/Trip")
@@ -37,6 +39,7 @@ final class SnapshotPlanTests: XCTestCase {
         XCTAssertEqual(plan.settle, 0.25)
         XCTAssertEqual(plan.timeout, 30)
         XCTAssertEqual(plan.appearance, "dark")
+        XCTAssertTrue(plan.systemFullScreen)
     }
 
     /// A typo must fail the run, not quietly picture something else.
@@ -59,12 +62,16 @@ final class SnapshotPlanTests: XCTestCase {
                        .malformed(variable: "LATENT_SNAPSHOT_TIMEOUT", value: "-5"))
         XCTAssertEqual(problem(["LATENT_SNAPSHOT_APPEARANCE": "sepia"]),
                        .malformed(variable: "LATENT_SNAPSHOT_APPEARANCE", value: "sepia"))
+        XCTAssertEqual(problem(["LATENT_SNAPSHOT_FULLSCREEN": "yes"]),
+                       .malformed(variable: "LATENT_SNAPSHOT_FULLSCREEN", value: "yes"))
         XCTAssertNil(problem(["LATENT_SNAPSHOT_STEPS": ""]), "an empty variable is unset, not an empty plan")
     }
 
     func testViewingModeSteps() throws {
         XCTAssertEqual(try SnapshotPlan.parseSteps("fullscreen; Fullscreen-Right, fullscreen-left;fullscreen-bottom;second-display"),
                        [.fullscreen, .fullscreenRight, .fullscreenLeft, .fullscreenBottom, .secondDisplay])
+        XCTAssertEqual(SnapshotPlan.Step.allCases.filter(\.isFullScreen),
+                       [.fullscreen, .fullscreenLeft, .fullscreenRight, .fullscreenBottom])
     }
 
     func testSizeParsing() {
