@@ -125,6 +125,8 @@ struct PreferencesView: View {
             exportTab.tabItem { Label("Export", systemImage: "square.and.arrow.up") }
             libraryTab.tabItem { Label("Library", systemImage: "photo.on.rectangle") }
             aiTab.tabItem { Label("AI", systemImage: "cpu") }
+            SlideshowSettingsTab().tabItem { Label("Slideshow", systemImage: "play.rectangle") }
+            ExternalEditorSettingsTab().tabItem { Label("External Editor", systemImage: "arrow.up.forward.app") }
         }
         .frame(width: 520)
         .padding(20)

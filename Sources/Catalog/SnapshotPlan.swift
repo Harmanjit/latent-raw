@@ -31,6 +31,9 @@ public struct SnapshotPlan: Equatable, Sendable {
         case export
         /// The Settings window instead of the main one.
         case settings
+        /// A slideshow of the visible images, its first slide at rest with
+        /// the caption and controls showing. Not in the default steps.
+        case slideshow
     }
 
     public enum Problem: Error, Equatable, CustomStringConvertible {

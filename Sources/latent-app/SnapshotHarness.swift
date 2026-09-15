@@ -17,7 +17,9 @@ import Catalog
 ///     LATENT_SNAPSHOT_STEPS="library;loupe"     states to picture, in order (default:
 ///                                               library;loupe;develop;crop;heal;compare;
 ///                                               export;settings). Also `next`, which moves
-///                                               the selection on. Each writes NN-step.png
+///                                               the selection on, and `slideshow`, which
+///                                               pictures the slideshow's window with its
+///                                               first slide. Each writes NN-step.png
 ///     LATENT_SNAPSHOT_SIZE=1400x900             window content size in points (default
 ///                                               1400x900, not the size it was last left at)
 ///     LATENT_SNAPSHOT_SETTLE=1                  seconds to wait after a step's work is done
@@ -96,10 +98,10 @@ enum SnapshotHarness {
     }
 
     /// The image views in `root` that are showing something, in drawing order.
-    private static func imageViews(in root: NSView) -> [MetalLayerView] {
-        var found: [MetalLayerView] = []
+    private static func imageViews(in root: NSView) -> [NSView] {
+        var found: [NSView] = []
         forEachVisibleView(in: root) { view in
-            if let view = view as? MetalLayerView, !view.visibleRect.isEmpty,
+            if view is MetalLayerView || view is SlideshowView, !view.visibleRect.isEmpty,
                presented.object(forKey: view) != nil {
                 found.append(view)
             }
@@ -111,7 +113,7 @@ enum SnapshotHarness {
 
     /// The view's last drawable as an sRGB image, upright. Read in the
     /// layer's own colour space, since that is how the compositor shows it.
-    private static func image(of view: MetalLayerView) -> CGImage? {
+    private static func image(of view: NSView) -> CGImage? {
         guard let texture = presented.object(forKey: view) as? MTLTexture,
               let layer = view.layer as? CAMetalLayer,
               let space = layer.colorspace ?? CGColorSpace(name: CGColorSpace.sRGB),
@@ -382,6 +384,18 @@ enum SnapshotHarness {
                 }
                 guard let settings else { fail("settings: the window did not open"); return nil }
                 return settings
+            case .slideshow:
+                guard !library.visibleImages.isEmpty else { fail("slideshow: no images"); return nil }
+                SlideshowController.debugCaption = .exposure
+                _ = perform(.slideshow)
+                _ = await wait("the first slide", upTo: 60) {
+                    SlideshowController.current?.isShowingSlideAtRest == true
+                }
+                guard let show = SlideshowController.current, let slideshowWindow = show.slideshowWindow else {
+                    fail("slideshow: it did not start"); return nil
+                }
+                show.debugPinControls()
+                return slideshowWindow
             }
             return window
         }
@@ -408,6 +422,7 @@ enum SnapshotHarness {
             switch step {
             case .export: exportSheet.wrappedValue = false
             case .settings: window.close()
+            case .slideshow: SlideshowController.current?.end()
             case .crop, .heal:
                 _ = perform(.disarmTools)
                 scrollAdjustments(toEnd: false)
