@@ -1,6 +1,7 @@
 import XCTest
 import SwiftUI
 import ImageIO
+import Metal
 @testable import latent_app
 @testable import Catalog
 import PixelEngine
@@ -271,5 +272,145 @@ final class ExternalEditorHandOffTests: XCTestCase {
         XCTAssertEqual(image.bitsPerComponent, 16)
         XCTAssertEqual(image.colorSpace?.name as String?, CGColorSpace.displayP3 as String)
         XCTAssertEqual(CGImageSourceGetType(source) as String?, "public.tiff")
+    }
+}
+
+/// The show's timing with slides the test makes and finishes when it says.
+@MainActor
+final class SlideshowControllerTests: XCTestCase {
+    @MainActor private final class FakeSlides {
+        var requested: [String] = []
+        var cancelled: [String] = []
+        private var waiting: [String: CheckedContinuation<SlideTexture, Error>] = [:]
+        let slide: SlideTexture
+
+        init(gpu: GPUContext) throws {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: 4, height: 4, mipmapped: false)
+            d.usage = .shaderRead
+            slide = SlideTexture(texture: try XCTUnwrap(gpu.device.makeTexture(descriptor: d)))
+        }
+
+        func make(_ name: String) async throws -> SlideTexture {
+            requested.append(name)
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    if Task.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                    } else {
+                        waiting[name] = continuation
+                    }
+                }
+            } onCancel: {
+                Task { @MainActor in self.cancel(name) }
+            }
+        }
+
+        func cancel(_ name: String) {
+            cancelled.append(name)
+            waiting.removeValue(forKey: name)?.resume(throwing: CancellationError())
+        }
+
+        func finish(_ name: String) { waiting.removeValue(forKey: name)?.resume(returning: slide) }
+        func fail(_ name: String) { waiting.removeValue(forKey: name)?.resume(throwing: CocoaError(.fileReadCorruptFile)) }
+    }
+
+    private func until(_ what: String, _ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(10)
+        while !condition() {
+            guard Date() < deadline else { return XCTFail("gave up waiting for \(what)") }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    private func records(_ count: Int) -> [ImageRecord] {
+        (0..<count).map { i in
+            ImageRecord(id: Int64(i), relPath: "IMG_\(i).NEF", preservedName: nil, size: 1, mtime: 0,
+                        xxhash: Data(count: 8), captureTime: nil, camera: nil, lens: nil, lensId: nil, iso: nil,
+                        shutter: nil, aperture: nil, focal: nil, width: nil, height: nil, orientation: nil,
+                        rating: 0, label: nil, flag: 0, sidecarMtime: nil, thumbKey: nil)
+        }
+    }
+
+    func testOnlyTheNextSlideRendersAheadAndSkippingCancelsWhatNobodyWillSee() async throws {
+        SlideshowController.current?.end()   // one left by a failed test would take this one's place
+        let gpu = try await GPUContext.shared()
+        let fake = try FakeSlides(gpu: gpu)
+        var settings = SlideshowSettings()
+        settings.interval = 60
+        settings.transition = .cut
+        let source = SlideshowController.Source(records: records(4), start: 1, library: Library(), gpu: gpu,
+                                                render: { record, _ in try await fake.make(record.fileName) })
+        let show = try XCTUnwrap(SlideshowController.start(source, from: nil, settings: settings))
+
+        try await until("the first slide to be asked for") { fake.requested == ["IMG_1.NEF"] }
+        XCTAssertEqual(show.targetIndex, 1)
+        XCTAssertTrue(show.keepsDisplayAwake)
+        fake.finish("IMG_1.NEF")
+        try await until("the first slide") { show.shownIndex == 1 }
+        try await until("the next slide, and only it") { fake.requested == ["IMG_1.NEF", "IMG_2.NEF"] }
+
+        show.controlBarCommand(.next)
+        XCTAssertEqual(show.targetIndex, 2, "waits for a slide that isn't ready")
+        XCTAssertEqual(show.shownIndex, 1)
+        show.controlBarCommand(.next)
+        XCTAssertEqual(show.targetIndex, 3, "a further step moves the target on")
+        try await until("the skipped render to be cancelled") {
+            fake.cancelled == ["IMG_2.NEF"] && fake.requested.last == "IMG_3.NEF"
+        }
+
+        fake.fail("IMG_3.NEF")
+        try await until("the show to go on past the failed slide") {
+            show.targetIndex == 0 && fake.requested.last == "IMG_0.NEF"
+        }
+        fake.finish("IMG_0.NEF")
+        try await until("the slide after it") { show.shownIndex == 0 }
+        XCTAssertTrue(show.sequence.failed.contains(3))
+
+        show.setPaused(true)
+        XCTAssertFalse(show.keepsDisplayAwake, "the display may sleep while paused")
+        show.setPaused(false)
+        XCTAssertTrue(show.keepsDisplayAwake)
+
+        show.end()
+        XCTAssertNil(SlideshowController.current)
+        XCTAssertFalse(show.keepsDisplayAwake)
+        XCTAssertNil(show.renderingIndex)
+        XCTAssertFalse(show.window?.isVisible ?? false)
+    }
+
+    func testAShowThatDoesNotLoopEndsAfterTheLastSlide() async throws {
+        SlideshowController.current?.end()   // one left by a failed test would take this one's place
+        let gpu = try await GPUContext.shared()
+        let fake = try FakeSlides(gpu: gpu)
+        var settings = SlideshowSettings()
+        settings.interval = 1
+        settings.loop = false
+        settings.transition = .cut
+        let source = SlideshowController.Source(records: records(2), start: 1, library: Library(), gpu: gpu,
+                                                render: { record, _ in try await fake.make(record.fileName) })
+        var ended = false
+        let show = try XCTUnwrap(SlideshowController.start(source, from: nil, settings: settings) { _ in ended = true })
+        try await until("the last slide to be asked for") { fake.requested == ["IMG_1.NEF"] }
+        fake.finish("IMG_1.NEF")
+        try await until("the last slide") { show.shownIndex == 1 }
+        XCTAssertNil(show.renderingIndex, "nothing comes after it")
+        try await until("the show to end after its interval") { ended }
+        XCTAssertTrue(show.hasEnded)
+    }
+
+    func testAShowWithNothingToShowEndsAndSaysSo() async throws {
+        SlideshowController.current?.end()   // one left by a failed test would take this one's place
+        let gpu = try await GPUContext.shared()
+        let fake = try FakeSlides(gpu: gpu)
+        let source = SlideshowController.Source(records: records(2), start: 0, library: Library(), gpu: gpu,
+                                                render: { record, _ in try await fake.make(record.fileName) })
+        var message: String?
+        let show = try XCTUnwrap(SlideshowController.start(source, from: nil) { message = $0 })
+        try await until("the first slide to be asked for") { fake.requested == ["IMG_0.NEF"] }
+        fake.fail("IMG_0.NEF")
+        try await until("the second") { fake.requested.last == "IMG_1.NEF" }
+        fake.fail("IMG_1.NEF")
+        try await until("the end") { show.hasEnded }
+        XCTAssertEqual(message, "The slideshow couldn’t show any of the images")
     }
 }

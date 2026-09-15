@@ -37,6 +37,9 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
     /// Pointer stillness before the control bar and cursor hide.
     static let controlsHideDelay: Duration = .seconds(2)
 
+    /// Makes one slide, for a picture area of the given pixel size.
+    typealias Render = @Sendable (ImageRecord, CGSize) async throws -> SlideTexture
+
     struct Source {
         var records: [ImageRecord]
         var start: Int
@@ -46,6 +49,28 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
         /// in the editor, whose latest change may not be saved yet. A nil
         /// value is an image at its defaults.
         var editOverrides: [Int64: String?] = [:]
+        /// Tests make slides of their own; nil renders the photos.
+        var render: Render?
+    }
+
+    /// Slides from the photos: each file with its edit (the catalog's, or
+    /// the editor's unsaved one) through `ExportWorker.renderForScreen`.
+    /// Nothing if another folder has opened meanwhile.
+    static func pipelineRender(library: Library, gpu: GPUContext, editOverrides: [Int64: String?]) -> Render {
+        let catalog = library.catalog
+        return { record, screen in
+            let url = await MainActor.run { library.catalog === catalog ? library.fileURL(for: record) : nil }
+            guard let url else { throw CocoaError(.fileNoSuchFile) }
+            let json: String?
+            if let unsaved = record.id.flatMap({ editOverrides[$0] }) {
+                json = unsaved
+            } else {
+                json = try await library.editStack(for: record)
+            }
+            try Task.checkCancellation()
+            return try await ExportWorker.renderForScreen(sourceURL: url, editStackJSON: json,
+                                                         userRotation: record.userRotation, screen: screen, gpu: gpu)
+        }
     }
 
     /// Starts a show, or brings the running one forward. `onEnd` gets a
@@ -58,8 +83,8 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
             current.window?.makeKeyAndOrderFront(nil)
             return current
         }
-        guard !source.records.isEmpty,
-              let screen = origin?.screen ?? NSScreen.main ?? NSScreen.screens.first else { return nil }
+        guard !source.records.isEmpty else { return nil }
+        let screen = origin?.screen ?? NSScreen.main ?? NSScreen.screens.first
         let controller = SlideshowController(source: source, screen: screen, origin: origin, settings: settings,
                                              onEnd: onEnd)
         current = controller
@@ -116,10 +141,8 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
 
     private let records: [ImageRecord]
     private let startIndex: Int
-    private let library: Library
-    private let catalog: Catalog?
     private let gpu: GPUContext
-    private let editOverrides: [Int64: String?]
+    private let render: Render
     private let settings: SlideshowSettings
     private let onEnd: (String?) -> Void
     private weak var origin: NSWindow?
@@ -160,23 +183,24 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
     var pinsControls = false
     #endif
 
-    private init(source: Source, screen: NSScreen, origin: NSWindow?, settings: SlideshowSettings,
+    private init(source: Source, screen: NSScreen?, origin: NSWindow?, settings: SlideshowSettings,
                  onEnd: @escaping (String?) -> Void) {
         records = source.records
         startIndex = min(max(source.start, 0), source.records.count - 1)
-        library = source.library
-        catalog = source.library.catalog
         gpu = source.gpu
-        editOverrides = source.editOverrides
+        render = source.render
+            ?? Self.pipelineRender(library: source.library, gpu: source.gpu, editOverrides: source.editOverrides)
         self.settings = settings
         self.onEnd = onEnd
         self.origin = origin
         sequence = SlideshowSequence(count: source.records.count, loops: settings.loop)
-        screenPixels = Self.pictureSize(on: screen)
-        screenNumber = Self.number(of: screen)
-        let window = SlideshowWindow(frame: screen.frame)
+        // No screen at all (a headless test run): a laptop's.
+        let frame = screen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        screenPixels = screen.map(Self.pictureSize) ?? CGSize(width: 2880, height: 1800)
+        screenNumber = screen.flatMap(Self.number)
+        let window = SlideshowWindow(frame: frame)
         super.init(window: window)
-        window.setFrame(screen.frame, display: false)
+        window.setFrame(frame, display: false)
         window.delegate = self
         window.onClose = { [weak self] in self?.end() }
         buildContent(in: window, screen: screen)
@@ -185,12 +209,12 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("made in code") }
 
-    private func buildContent(in window: NSWindow, screen: NSScreen) {
+    private func buildContent(in window: NSWindow, screen: NSScreen?) {
         window.contentView = content
         content.onKey = { [weak self] event in self?.handleKey(event) ?? false }
         content.onClick = { [weak self] in self?.end() }
         content.onPointerMoved = { [weak self] in self?.pointerMoved() }
-        content.topInset = screen.safeAreaInsets.top
+        content.topInset = screen?.safeAreaInsets.top ?? 0
 
         slideView.configure(gpu: gpu)
         slideView.frameProvider = { [weak self] in self?.currentFrame() ?? .still(nil) }
@@ -328,23 +352,11 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
         loading?.task.cancel()
         loadCount += 1
         let id = loadCount
-        let record = records[index]
-        guard library.catalog === catalog, let url = library.fileURL(for: record) else {
-            // Delivered a turn later, as a render would be.
-            let task = Task { [weak self] in _ = self?.loaded(index, id: id, .failure(CocoaError(.fileNoSuchFile))) }
-            loading = (index, id, task)
-            return
-        }
-        let library = library, gpu = gpu, screen = screenPixels, rotation = record.userRotation
-        let unsaved = record.id.flatMap { editOverrides[$0] }
+        let record = records[index], render = render, screen = screenPixels
         let task = Task.detached(priority: .userInitiated) { [weak self] in
             let result: Result<SlideTexture, Error>
             do {
-                let json: String?
-                if let unsaved { json = unsaved } else { json = try await library.editStack(for: record) }
-                try Task.checkCancellation()
-                result = .success(try await ExportWorker.renderForScreen(
-                    sourceURL: url, editStackJSON: json, userRotation: rotation, screen: screen, gpu: gpu))
+                result = .success(try await render(record, screen))
             } catch {
                 result = .failure(error)
             }
@@ -492,7 +504,8 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
         return true
     }
 
-    private func controlBarCommand(_ command: SlideshowControlBar.Command) {
+    /// The control bar's buttons; also how tests step the show.
+    func controlBarCommand(_ command: SlideshowControlBar.Command) {
         switch command {
         case .previous: move(.previous)
         case .playPause: setPaused(!isPaused)
@@ -584,9 +597,9 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
     /// The menu bar and Dock make way while the show is key and come back
     /// whenever it isn't.
     func windowDidBecomeKey(_ notification: Notification) {
-        guard !hasEnded else { return }
-        if savedPresentationOptions == nil { savedPresentationOptions = NSApp.presentationOptions }
-        NSApp.presentationOptions = [.hideDock, .hideMenuBar]
+        guard !hasEnded, let app = NSApp, app.isActive else { return }
+        if savedPresentationOptions == nil { savedPresentationOptions = app.presentationOptions }
+        app.presentationOptions = [.hideDock, .hideMenuBar]
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -594,9 +607,9 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
     }
 
     private func restorePresentationOptions() {
-        guard let saved = savedPresentationOptions else { return }
+        guard let saved = savedPresentationOptions, let app = NSApp else { return }
         savedPresentationOptions = nil
-        NSApp.presentationOptions = saved
+        app.presentationOptions = saved
     }
 
     /// A resolution change: keep covering the display. Its display gone:
@@ -631,6 +644,15 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
     private static func number(of screen: NSScreen) -> NSNumber? {
         screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
     }
+
+    // MARK: - For tests
+
+    var shownIndex: Int? { shown?.index }
+    /// The slide a move is waiting for.
+    var targetIndex: Int? { target?.index }
+    var renderingIndex: Int? { loading?.index }
+    var readyIndex: Int? { ready?.index }
+    var keepsDisplayAwake: Bool { activity != nil }
 
     #if DEBUG
     /// Snapshot harness only: a caption style for the next show.
