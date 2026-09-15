@@ -72,10 +72,18 @@ final class MainWindowModels {
 
     let model = EditorModel()
     let library = LibrarySortDefaults.attached(to: Library())
-    let exportQueue = ExportQueue()
+    let exportQueue: ExportQueue
+    /// Photo › Photo Merge, taking turns with the export queue for the GPU.
+    let photoMerge: PhotoMergeQueue
     /// Set once the first window has opened the launch folder or file; a
     /// window opened again finds everything as it was left.
     var openedAtLaunch = false
+
+    init() {
+        let queue = ExportQueue()
+        exportQueue = queue
+        photoMerge = PhotoMergeQueue(gpuSlot: queue)
+    }
 }
 
 @MainActor
@@ -159,8 +167,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 3. An export under way: ask whether to stop after the current file
     ///    and quit, or keep exporting and not quit. Export Open Image is one
     ///    file, so for it the choice is to let it finish and quit.
-    /// 4. A print rendering or a contact sheet being written (`OutputJobs`):
-    ///    ask too; a contact sheet stops unsaved, a print is waited for.
+    /// 4. A print rendering, a contact sheet being written or a Photo Merge
+    ///    (`OutputJobs`): ask too; a contact sheet and a merge stop unsaved
+    ///    (a merge takes back its sidecar before it ends), a print is
+    ///    waited for.
     ///
     /// `.terminateLater` keeps the app alive until `reply` is called.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -171,7 +181,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            !confirmStoppingExports(exporting, openImage: !exportingOpenImage.isEmpty) {
             return .terminateCancel
         }
-        // Prints and contact sheets: asked about too, then contact sheets stop.
+        // Prints, contact sheets and merges: asked about too, then contact
+        // sheets and merges stop.
         let outputs = OutputJobs.shared
         if outputs.isRunning {
             let text = OutputJobs.quitAlert(for: outputs.running)

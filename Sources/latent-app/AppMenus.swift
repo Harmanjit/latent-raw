@@ -21,6 +21,8 @@ struct CommandState: Equatable {
     var editorReady = false
     var exportingOpenImage = false
     var exportQueueRunning = false
+    /// A Photo Merge is running; it holds the GPU as an export does.
+    var photoMergeRunning = false
     /// A print or contact sheet is rendering from the files (`OutputJobs`).
     var outputJobRunning = false
     /// What Undo and Redo would change, nil when there is nothing to.
@@ -87,7 +89,12 @@ struct CommandState: Equatable {
         case .removeFromSurvey: mode == .survey && hasSelection
         case .swapCompare: mode == .compare && hasSelection && hasCompareSelect
         case .openFile: editorReady
-        case .export: selectionCount > 0 && !exportQueueRunning
+        case .export: selectionCount > 0 && !exportQueueRunning && !photoMergeRunning
+        // The whole selection, as Export takes it: from the grid, or kept
+        // from the grid in the other views. One GPU job at a time, and not
+        // while typing, where ⌃H is the text system's delete-backward.
+        case .photoMergeHDR: editorReady && selectionCount >= 2 && !exportQueueRunning && !photoMergeRunning
+            && !isEditingText
         // Survey's panes aren't the editor's image, which may be one from before.
         case .exportOpenImage: hasImage && !exportingOpenImage && mode != .survey
         // Library prints the selection, and so does Survey, whose selection
@@ -293,6 +300,10 @@ struct LatentCommands: Commands {
             Divider()
             item("Rotate Left", .rotate(-1))
             item("Rotate Right", .rotate(1))
+            Divider()
+            Menu("Photo Merge") {
+                item("HDR…", .photoMergeHDR)
+            }
         }
 
         CommandMenu("Develop") {

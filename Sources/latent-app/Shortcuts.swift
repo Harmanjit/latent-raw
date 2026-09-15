@@ -143,6 +143,10 @@ enum Shortcuts {
         Shortcut(.editExternally, "e", .command),
         // Files
         Shortcut(.rename, .f2),
+        // Photo Merge. Lightroom's key: ⌃H is otherwise only the text
+        // system's delete-backward, which the command leaves to a field
+        // being typed in (CommandState).
+        Shortcut(.photoMergeHDR, "h", .control),
     ]
 
     /// The menu bar's standard items that keep their keys.
@@ -295,6 +299,9 @@ extension Shortcuts {
         ("Files", [
             ShortcutPageRow([.rename], "Rename the selected image (its sidecar and thumbnail follow)"),
             ShortcutPageRow(keys: .gesture("Drag images onto a sidebar folder"), "Move them there with their edits (hold ⌥ to copy)"),
+        ]),
+        ("Photo Merge", [
+            ShortcutPageRow([.photoMergeHDR], "HDR merge of the selected photos into one DNG beside them (see [Photo Merge](Photo-Merge)); not while typing in a text field, where ⌃H deletes backward"),
         ]),
     ]
 

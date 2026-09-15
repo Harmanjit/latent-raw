@@ -7,6 +7,7 @@
 - [Library](Library)
 - [Develop](Develop)
 - [Export](Export)
+- [Photo Merge](Photo-Merge)
 - [Keyboard Shortcuts](Keyboard-Shortcuts)
 - [Architecture](Architecture)
 - [Security and Privacy](Security-and-Privacy)

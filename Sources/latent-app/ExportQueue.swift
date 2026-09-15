@@ -149,9 +149,31 @@ final class ExportQueue: ObservableObject {
 
     private var task: Task<Void, Never>?
 
+    /// Another full-size GPU job holds the queue's slot: a Photo Merge
+    /// (PhotoMergeQueue). Such a job is as heavy as an export, so for the
+    /// reason above the two take turns: an export doesn't start while it
+    /// runs, and it doesn't start while an export runs.
+    @Published private(set) var slotHeldByOtherJob = false
+
+    /// An export or another GPU job is running.
+    var isGPUBusy: Bool { isRunning || slotHeldByOtherJob }
+
+    /// Takes the slot for a job that isn't an export; false, taking
+    /// nothing, when an export or another job holds it. Give it back with
+    /// `releaseSlot` however the job ends.
+    func claimSlot() -> Bool {
+        guard !isGPUBusy else { return false }
+        slotHeldByOtherJob = true
+        return true
+    }
+
+    func releaseSlot() {
+        slotHeldByOtherJob = false
+    }
+
     func start(records: [ImageRecord], library: Library, preset: ExportPreset,
                destination: URL, gpu: GPUContext) {
-        guard !isRunning, !records.isEmpty, let catalog = library.catalog, let root = library.folderURL else { return }
+        guard !isGPUBusy, !records.isEmpty, let catalog = library.catalog, let root = library.folderURL else { return }
         isRunning = true
         stoppingForQuit = false
         done = 0; total = records.count; failures = []; summary = ""

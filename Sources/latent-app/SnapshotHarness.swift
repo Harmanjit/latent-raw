@@ -23,6 +23,8 @@ import Catalog
 ///                                               file a step writes); `print`, the print panel;
 ///                                               `slideshow`, the slideshow's window with its
 ///                                               first slide; `rename`, the rename sheet;
+///                                               `hdrmerge`, the HDR Merge dialog on three
+///                                               images, measured by a stand-in engine;
 ///                                               `fullscreen`, and `fullscreen-left`, `-right`
 ///                                               and `-bottom` with that edge's panel out (the
 ///                                               layout only, the window staying a window,
@@ -314,6 +316,8 @@ enum SnapshotHarness {
                 await pause(plan.settle)
                 let url = plan.output(forStepAt: index)
                 checkContentFits(target, step: step)
+                // The dialog is a window of its own over the main one.
+                if step == .hdrMerge, let sheet = target.attachedSheet { checkContentFits(sheet, step: step) }
                 if step.isFullScreen { checkFullScreenImageFills(target, step: step) }
                 if step == .contactSheetFile {
                     if let problem = await SheetSnapshots.pictureContactSheetFile(to: url) {
@@ -432,6 +436,10 @@ enum SnapshotHarness {
                                                         outputFolder: plan.directory)
                 if found == nil { fail("\(step.rawValue): its sheet did not open") }
                 return found
+            case .hdrMerge:
+                let found = await PhotoMergeSnapshots.enter(window: window, library: library, perform: perform)
+                if let problem = found.problem { fail("hdrmerge: \(problem)") }
+                return found.window
             case .rename:
                 guard library.selectedImage != nil else { fail("rename: no image selected"); return nil }
                 _ = perform(.rename)
@@ -575,6 +583,7 @@ enum SnapshotHarness {
             switch step {
             case .export: exportSheet.wrappedValue = false
             case .rename: if let sheet = window.attachedSheet { window.endSheet(sheet) }
+            case .hdrMerge: PhotoMergeSnapshots.leave(window: window)
             case .settings: window.close()
             case .quality: QualityCompareWindow.close()
             case .contactSheet, .contactSheetFile, .print: SheetSnapshots.leave(step, window: window)

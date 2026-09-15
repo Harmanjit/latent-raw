@@ -7,6 +7,7 @@ import PixelEngine
 struct LibraryPanel: View {
     @ObservedObject var library: Library
     @ObservedObject var exportQueue: ExportQueue
+    @ObservedObject var photoMerge: PhotoMergeQueue
     @ObservedObject var model: EditorModel
     @State private var metadataExpanded = true
     @State private var historyExpanded = false
@@ -113,7 +114,7 @@ struct LibraryPanel: View {
             let n = library.selectedImageIDs.count
             Button(n <= 1 ? "Export selection…" : "Export \(n) images…", action: onExport)
                 .controlSize(.small)
-                .disabled(n == 0 || exportQueue.isRunning)
+                .disabled(n == 0 || exportQueue.isGPUBusy)
 
             // The open image, straight from the editor's render.
             Picker("Format", selection: $model.exportSettings.format) {
@@ -152,6 +153,7 @@ struct LibraryPanel: View {
             Button("Export open image…") { Self.exportOpenImage(model: model, library: library) }
                 .controlSize(.small)
                 .disabled(!model.hasImage || model.isExporting || !exportsOpenImage)
+            photoMergeProgress
             if exportQueue.isRunning {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
@@ -175,6 +177,34 @@ struct LibraryPanel: View {
                         .accessibilityLabel("Failed: \(f.name): \(f.reason)")
                 }
             }
+        }
+    }
+
+    /// A Photo Merge under way, where export progress shows (they take
+    /// turns, so only one of the two is ever running), or how the last ended.
+    @ViewBuilder private var photoMergeProgress: some View {
+        if photoMerge.isRunning {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text("HDR merge").font(.caption2)
+                    Spacer()
+                    Button("Cancel") { photoMerge.cancel() }
+                        .controlSize(.mini)
+                        .accessibilityLabel("Cancel HDR merge")
+                }
+                ProgressView(value: photoMerge.progress?.fraction ?? 0, total: 1)
+                    .controlSize(.small)
+                    .accessibilityLabel("HDR merge progress")
+                    .accessibilityValue(PhotoMergeQueue.spokenProgress(photoMerge.progress))
+                Text(photoMerge.progress?.stage ?? "Starting…").font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.tail)
+                    .accessibilityHidden(true)
+                Text(photoMerge.name).font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+        } else if !photoMerge.summary.isEmpty {
+            Text(photoMerge.summary).font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

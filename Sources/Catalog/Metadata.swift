@@ -183,8 +183,8 @@ extension Catalog {
         guard !trimmed.isEmpty else { throw MergeRecipeError.empty }
         let name = (relPath as NSString).lastPathComponent
         let sidecar = sidecarURL(forRelPath: relPath)
-        let rowExists = try image(forRelPath: relPath) != nil
-        if rowExists || FileOperations.itemExists(fileURL(forRelPath: relPath)) || FileOperations.itemExists(sidecar) {
+        // The same test the merge job plans its name with (MergeNaming).
+        if try mergeResultNameIsTaken(relPath) {
             throw FileOperations.NameProblem.taken(name)
         }
         try FileManager.default.createDirectory(at: sidecar.deletingLastPathComponent(),
@@ -196,8 +196,13 @@ extension Catalog {
     /// arrived (its name was taken at the last moment, or the merge was
     /// cancelled). Only while neither the file nor a row exists: once
     /// either does, the sidecar belongs to a catalogued photo.
-    public func discardMergeSidecar(forRelPath relPath: String) throws {
-        guard !FileOperations.itemExists(fileURL(forRelPath: relPath)),
+    ///
+    /// `fileTookTheName`: the merge's own write found another file under
+    /// the name (`SafeFileWriter.DestinationExists`). That file isn't the
+    /// merge result, so the sidecar still goes, as long as no row has been
+    /// made for it; left, it would give the other file the merge's recipe.
+    public func discardMergeSidecar(forRelPath relPath: String, fileTookTheName: Bool = false) throws {
+        guard fileTookTheName || !FileOperations.itemExists(fileURL(forRelPath: relPath)),
               try image(forRelPath: relPath) == nil else { return }
         let sidecar = sidecarURL(forRelPath: relPath)
         if FileOperations.itemExists(sidecar) { try FileManager.default.removeItem(at: sidecar) }

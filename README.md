@@ -11,7 +11,7 @@ Repository: `Harmanjit/latent-raw`.
   `xcodebuild -downloadComponent MetalToolchain`) the shaders compile at first
   launch.
 - **License:** GPLv3. See `LICENSE`.
-- **Status:** beta (Phase 7). Editing (with red-eye and brush healing), a catalog with a folder sidebar, Custom sort, Finder tags, moving and renaming images with their edits, undo in the Library, AI masks, Loupe, Compare and Survey, full-screen and second-display viewing, export (with optional HDR gain maps and a watermark), soft-proofing, printing, contact sheets, a slideshow and hand-off to an external editor work; DNG export does not exist. Expect rough edges.
+- **Status:** beta (Phase 7). Editing (with red-eye and brush healing), a catalog with a folder sidebar, Custom sort, Finder tags, moving and renaming images with their edits, undo in the Library, AI masks, Loupe, Compare and Survey, full-screen and second-display viewing, export (with optional HDR gain maps and a watermark), soft-proofing, printing, contact sheets, a slideshow, hand-off to an external editor and HDR Photo Merge of tripod brackets (Photo › Photo Merge › HDR…, ⌃H, writing a DNG) work; DNG export does not exist. Expect rough edges.
 - **Name:** the project was called *rawhead* until September 2026. Folders
   catalogued by those builds have a `_rawhead/` container; opening them in
   Latent renames it to `_latent/` in place, keeping every edit and sidecar.
