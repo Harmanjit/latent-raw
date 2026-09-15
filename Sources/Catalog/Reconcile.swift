@@ -10,6 +10,8 @@ public struct ReconcileReport: Sendable, CustomStringConvertible {
     public var removed = 0
     public var unchanged = 0
     public var sidecarsRead = 0
+    /// Unchanged files whose Finder tags changed since the last pass.
+    public var tagsChanged = 0
     /// Subfolders with no decision yet (mode `ask`), relative paths.
     public var undecidedSubfolders: [String] = []
     /// Files that couldn't be read, with the reason. They're skipped, not
@@ -44,6 +46,8 @@ extension Catalog {
         let relPath: String
         let size: Int64
         let mtime: Int64
+        /// Finder tags in their stored form (`FinderTag.encode`).
+        var finderTags: String? = nil
     }
 
     /// Brings the database in line with the folder (DESIGN.md §5.3).
@@ -68,10 +72,16 @@ extension Catalog {
         // 3. Sort into buckets.
         var newFiles: [DiskFile] = []
         var modifiedFiles: [(DiskFile, ImageRecord)] = []
+        var tagChanges: [(id: Int64, tags: String?)] = []
         for file in onDisk {
             if let record = knownByPath.removeValue(forKey: file.relPath) {
                 if record.size == file.size && record.mtime == file.mtime {
                     report.unchanged += 1
+                    // Tagging in Finder moves no mtime, so tags are compared
+                    // on every pass; only changed rows are written.
+                    if record.finderTags != file.finderTags, let id = record.id {
+                        tagChanges.append((id, file.finderTags))
+                    }
                 } else {
                     modifiedFiles.append((file, record))
                 }
@@ -153,7 +163,12 @@ extension Catalog {
                 moved.relPath = file.relPath
                 moved.size = file.size
                 moved.mtime = file.mtime
+                moved.finderTags = file.finderTags
                 try moved.update(db)
+            }
+            for change in tagChanges {
+                try db.execute(sql: "UPDATE images SET finder_tags = ? WHERE id = ?",
+                               arguments: [change.tags, change.id])
             }
             for record in removals {
                 try record.delete(db)
@@ -163,6 +178,16 @@ extension Catalog {
         report.modified = updates.count
         report.renamed = renames.count
         report.removed = removals.count
+        report.tagsChanged = tagChanges.count
+
+        // A file renamed outside Latent keeps its place in the custom order.
+        if !renames.isEmpty {
+            do {
+                try renameInCustomOrder(renames.map { ($0.from.relPath, $0.to.relPath) })
+            } catch {
+                report.failures.append((CustomOrder.fileName, "custom order not updated: \(error)"))
+            }
+        }
 
         // 7. Sidecars: re-read only those whose mtime moved.
         report.sidecarsRead = try syncSidecars(report: &report)
@@ -232,7 +257,8 @@ extension Catalog {
             files.append(DiskFile(
                 relPath: relPath,
                 size: Int64(values.fileSize ?? 0),
-                mtime: ImageRecord.milliseconds(values.contentModificationDate ?? .distantPast)))
+                mtime: ImageRecord.milliseconds(values.contentModificationDate ?? .distantPast),
+                finderTags: FinderTag.encode(FinderTag.read(from: entry))))
         }
     }
 
@@ -258,7 +284,8 @@ extension Catalog {
             aperture: s.aperture > 0 ? s.aperture : nil,
             focal: s.focalLength > 0 ? s.focalLength : nil,
             width: s.width, height: s.height, orientation: s.orientation,
-            rating: 0, label: nil, flag: 0, sidecarMtime: nil, thumbKey: nil)
+            rating: 0, label: nil, flag: 0, sidecarMtime: nil, thumbKey: nil,
+            finderTags: file.finderTags)
     }
 
     // MARK: - Renames

@@ -71,7 +71,7 @@ final class MainWindowModels {
     static let shared = MainWindowModels()
 
     let model = EditorModel()
-    let library = Library()
+    let library = LibrarySortDefaults.attached(to: Library())
     let exportQueue = ExportQueue()
     /// Set once the first window has opened the launch folder or file; a
     /// window opened again finds everything as it was left.

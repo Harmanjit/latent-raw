@@ -16,12 +16,15 @@ public struct LibraryFilter: Equatable, Sendable {
     public var keyword: String?
     /// Case-insensitive substring of the file name.
     public var text = ""
+    /// Show only files carrying the Finder tag of this name.
+    public var finderTag: String?
 
     public init() {}
 
     public var isActive: Bool {
         minRating > 0 || !flags.isEmpty || editedOnly || camera != nil
             || lens != nil || keyword != nil || !text.trimmingCharacters(in: .whitespaces).isEmpty
+            || finderTag != nil
     }
 
     /// Whether `record` passes every active criterion. Keywords and the
@@ -33,6 +36,7 @@ public struct LibraryFilter: Equatable, Sendable {
         if let camera, record.camera != camera { return false }
         if let lens, record.lens != lens { return false }
         if let keyword, !keywords.contains(keyword) { return false }
+        if let finderTag, !FinderTag.stored(record.finderTags, contains: finderTag) { return false }
         let needle = text.trimmingCharacters(in: .whitespaces)
         if !needle.isEmpty, record.fileName.range(of: needle, options: .caseInsensitive) == nil {
             return false
@@ -43,6 +47,8 @@ public struct LibraryFilter: Equatable, Sendable {
 
 public enum LibrarySortKey: String, CaseIterable, Sendable {
     case captureTime, fileName, rating, modified
+    /// The arrangement the user makes by dragging (see `CustomOrder`).
+    case custom
 
     public var title: String {
         switch self {
@@ -50,6 +56,7 @@ public enum LibrarySortKey: String, CaseIterable, Sendable {
         case .fileName: "File name"
         case .rating: "Rating"
         case .modified: "Modified"
+        case .custom: "Custom"
         }
     }
 }
@@ -72,7 +79,13 @@ public extension Array where Element == ImageRecord {
     /// two frames shot in the same second keep a fixed order. Images with
     /// no value for the key (no capture time, unrated) sort last either
     /// way, so they never crowd the top of a descending list.
-    func sorted(by sort: LibrarySort) -> [ImageRecord] {
+    ///
+    /// `customPositions` is the saved arrangement for the Custom key
+    /// (`CustomOrder.positions`); other keys ignore it.
+    func sorted(by sort: LibrarySort, customPositions: [String: Int] = [:]) -> [ImageRecord] {
+        if sort.key == .custom {
+            return CustomOrder.arranged(self, positions: customPositions, ascending: sort.ascending)
+        }
         let sorted = self.sorted { a, b in
             switch sort.key {
             case .captureTime:
@@ -86,6 +99,8 @@ public extension Array where Element == ImageRecord {
                 let c = a.fileName.localizedStandardCompare(b.fileName)
                 if c == .orderedSame { return a.relPath < b.relPath }
                 return sort.ascending ? c == .orderedAscending : c == .orderedDescending
+            case .custom:
+                return false   // handled above
             }
         }
         return sorted

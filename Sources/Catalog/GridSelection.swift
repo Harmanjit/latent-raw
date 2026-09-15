@@ -124,6 +124,7 @@ extension LibraryFilter {
         if camera != nil, old.camera != new.camera { return true }
         if lens != nil, old.lens != new.lens { return true }
         if !text.trimmingCharacters(in: .whitespaces).isEmpty, old.relPath != new.relPath { return true }
+        if finderTag != nil, old.finderTags != new.finderTags { return true }
         return false
     }
 }
@@ -137,7 +138,7 @@ extension LibrarySort {
         case .captureTime: return old.captureTime != new.captureTime
         case .rating: return old.rating != new.rating
         case .modified: return old.mtime != new.mtime
-        case .fileName: return false
+        case .fileName, .custom: return false
         }
     }
 }
