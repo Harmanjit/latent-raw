@@ -61,8 +61,8 @@ struct CommandState: Equatable {
         case .exportOpenImage: hasImage && !exportingOpenImage
         // Edits are undone where they are made. Typing is undone by the
         // Edit menu itself (see LatentCommands).
-        case .undo: mode == .develop && undoLabel != nil
-        case .redo: mode == .develop && redoLabel != nil
+        case .undo: mode == .develop && hasImage && undoLabel != nil
+        case .redo: mode == .develop && hasImage && redoLabel != nil
         case .copySettings: hasImage || hasSelection
         case .pasteSettings: hasImage || selectionCount > 0
         case .clearFilter: filterActive
@@ -146,8 +146,15 @@ extension FocusedValues {
 /// act on and the items are disabled.
 struct LatentCommands: Commands {
     @FocusedValue(\.commandContext) private var context
+    @ObservedObject private var keyWindowText = KeyWindowTextFocus.shared
 
-    private var state: CommandState { context?.state ?? CommandState() }
+    private var state: CommandState {
+        var state = context?.state ?? CommandState()
+        // Typing is undone in any window: the export sheet, Help's search
+        // field, Settings. Only the main window reports its state.
+        state.isEditingText = state.isEditingText || keyWindowText.isEditingText
+        return state
+    }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -271,5 +278,47 @@ struct LatentCommands: Commands {
         }
         .menuKeyEquivalent(for: command)
         .disabled(!(state.isEditingText || isEnabled(command)))
+    }
+}
+
+/// Whether text is being typed in the key window, whichever it is. The
+/// main window's key monitor watches only that window, so a field in a
+/// sheet or another window would leave Undo and Redo disabled and ⌘Z
+/// would beep instead of undoing the typing.
+@MainActor
+final class KeyWindowTextFocus: ObservableObject {
+    static let shared = KeyWindowTextFocus()
+
+    @Published private(set) var isEditingText = false
+    private var keyWindowObserver: (any NSObjectProtocol)?
+    private var responderObservation: NSKeyValueObservation?
+
+    init() {
+        keyWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // The window is key by now, and asking AppKit keeps the
+            // notification itself on this side of the actor boundary.
+            MainActor.assumeIsolated { self?.watch(NSApp.keyWindow) }
+        }
+        watch(NSApp?.keyWindow)
+    }
+
+    /// Follows `window`'s first responder until another window becomes key.
+    func watch(_ window: NSWindow?) {
+        responderObservation = window?.observe(\.firstResponder, options: [.initial, .new]) { [weak self] window, _ in
+            MainActor.assumeIsolated { self?.firstResponderChanged(window.firstResponder) }
+        }
+        if window == nil { firstResponderChanged(nil) }
+    }
+
+    /// Published a turn later: the first responder can change in the
+    /// middle of a SwiftUI update, which must not change state itself.
+    private func firstResponderChanged(_ responder: NSResponder?) {
+        let editing = KeyFocus(responder) == .text
+        Task { @MainActor [weak self] in
+            guard let self, self.isEditingText != editing else { return }
+            self.isEditingText = editing
+        }
     }
 }

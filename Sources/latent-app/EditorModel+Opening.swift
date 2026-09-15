@@ -36,11 +36,13 @@ extension EditorModel {
             return
         }
         flushPendingSave()
-        self.catalogImageID = catalogImageID
         status = "Opening \(url.lastPathComponent)…"
         do {
             let file = try RawFile(path: url.path)
             let newSession = try ImageSession(file: file, gpu: gpu)
+            // Only once the image has opened: until then the parameters and
+            // history on hand are the previous photo's.
+            self.catalogImageID = catalogImageID
             session = newSession
             sourceURL = url
             imageTitle = url.lastPathComponent
@@ -94,19 +96,16 @@ extension EditorModel {
             sam2Status = ""
             history = EditHistory(initial: EditStack(parameters: parameters))
             snapshots = []
-            aiDenoiseTask?.cancel()
-            aiDenoiseRunning = false
-            aiDenoiseStatus = ""
+            stopAIDenoise()
+            aiDenoiseReleasedUnderPressure = false
             rerender()
             regenerateMissingAIMasks()
             regenerateAIDenoiseIfNeeded()
         } catch {
-            session = nil
-            sourceURL = nil
-            preview = nil
-            tile = nil
-            histogram = nil
-            imageTitle = nil
+            // Nothing of the previous photo may outlive a failed open: with
+            // its id, history or denoise run still here, Undo or a history
+            // load would write that photo's edit onto this one.
+            closeImage()
             status = "Could not open: \(error)"
         }
     }

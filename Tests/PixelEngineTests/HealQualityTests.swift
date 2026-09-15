@@ -252,6 +252,43 @@ final class HealQualityTests: XCTestCase {
         XCTAssertEqual(out(90, 10).z, 0.6, accuracy: 1e-3, "outside both patches untouched")
     }
 
+    /// A tile grown only for the patches that can change the view heals
+    /// the view exactly as the whole frame does, although a later patch
+    /// that reads outside it lands in the tile, and so does a heal at the
+    /// sensor edge whose reach was cut at the edge.
+    func testTileLeavingOutLaterPatchesMatchesFullResolution() throws {
+        let gpu = try GPUContext()
+        let w = 256, h = 128
+        let size = SIMD2<Float>(Float(w), Float(h)), sensor = CGSize(width: w, height: h)
+        let gradient: (Int, Int) -> SIMD3<Double> = { x, y in SIMD3(Double(x) / 256, 0.2 + Double(y) / 512, 0.3) }
+        let cases: [[HealPatch]] = [
+            // The second clone writes where the first reads, after it has read.
+            [HealPatch(target: SIMD2(40, 64) / size, source: SIMD2(100, 64) / size, radius: 10 / 128, feather: 0, mode: .clone),
+             HealPatch(target: SIMD2(104, 64) / size, source: SIMD2(220, 64) / size, radius: 10 / 128, feather: 0, mode: .clone)],
+            // A heal whose surroundings run off the left edge.
+            [HealPatch(target: SIMD2(14, 64) / size, source: SIMD2(60, 64) / size, radius: 12 / 128, mode: .heal)],
+        ]
+        for patches in cases {
+            let full = try Self.healed(try Self.texture(width: w, height: h, gpu: gpu, gradient),
+                                       patches: patches, sensorSize: size, gpu: gpu)
+            let visible = patches[0].targetBounds(sensorSize: sensor).insetBy(dx: 2, dy: 2)
+            let grown = HealPatch.regionIncludingSources(visible, patches: patches, sensorSize: sensor)
+            XCTAssertGreaterThanOrEqual(grown.minX, 0)
+            XCTAssertLessThan(grown.maxX, 200, "the second clone's source isn't needed")
+            let tx = Int(grown.minX.rounded(.down)), ty = Int(grown.minY.rounded(.down))
+            let tw = Int(grown.maxX.rounded(.up)) - tx, th = Int(grown.maxY.rounded(.up)) - ty
+            let tile = try Self.healed(try Self.texture(width: tw, height: th, gpu: gpu) { gradient($0 + tx, $1 + ty) },
+                                       patches: patches, sensorSize: size, tileOrigin: SIMD2(Float(tx), Float(ty)), gpu: gpu)
+            var worst = 0.0
+            for y in Int(visible.minY)..<Int(visible.maxY) {
+                for x in Int(visible.minX)..<Int(visible.maxX) {
+                    worst = max(worst, simd_reduce_max(simd_abs(tile(x - tx, y - ty) - full(x, y))))
+                }
+            }
+            XCTAssertLessThan(worst, 1e-3, "tile agrees with the whole frame over the view (\(patches.count) patches)")
+        }
+    }
+
     /// A tile grown by `regionIncludingSources` heals exactly as the whole
     /// frame does, and a 2 x 2 binned render matches the full-resolution
     /// heal averaged down, so the preview predicts the export.

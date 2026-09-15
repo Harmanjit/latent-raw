@@ -48,6 +48,8 @@ final class EditorModel: ObservableObject {
     @Published var aiDenoiseStatus = ""
     @Published var aiDenoiseRunning = false
     var aiDenoiseTask: Task<Void, Never>?
+    /// Numbers the runs, so only the current one may report back.
+    var aiDenoiseRun = 0
     static var sharedDenoisers: [AIDenoiser.Variant: AIDenoiser] = [:]
 
     /// Which network to use. Changing it drops the cached result and, if
@@ -56,10 +58,8 @@ final class EditorModel: ObservableObject {
         didSet {
             guard aiDenoiseVariant != oldValue else { return }
             AIDenoiser.preferredVariant = aiDenoiseVariant
-            aiDenoiseTask?.cancel()
-            aiDenoiseRunning = false
+            stopAIDenoise()
             session?.setAIDenoised(nil, model: nil)
-            aiDenoiseStatus = ""
             if parameters.aiDenoise > 0 { runAIDenoise() } else { rerender() }
         }
     }
@@ -244,6 +244,9 @@ final class EditorModel: ObservableObject {
     /// anything actually needs re-rendering.
     var previewQuads = 0
     var tileSize = CGSize.zero
+    /// The part of the tile that heals as the whole frame does, so a pan
+    /// may reuse it (`HealPatch.isSelfContained`).
+    var tileHealedCoverage = CGRect.null
 
     /// An image asked for before the GPU was ready, opened when it is.
     var openWhenGPUReady: (() -> Void)?

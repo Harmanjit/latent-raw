@@ -15,11 +15,12 @@ final class HealTests: XCTestCase {
         XCTAssertEqual(HealPatch.regionIncludingSources(region, patches: [far], sensorSize: s), region)
         XCTAssertEqual(p.radiusPixels(sensorSize: s), 40, accuracy: 1e-4)
         // A heal also reads the surroundings of both circles, well past
-        // their edges; a clone only its source.
+        // their edges (as far as the sensor goes); a clone only its source.
         let reach = p.readRadiusPixels(sensorSize: s)
         XCTAssertGreaterThan(reach, 40 + 3 * 20)
-        XCTAssertTrue(grown.contains(p.targetBounds(sensorSize: s).insetBy(dx: 40.5 - reach, dy: 40.5 - reach)))
-        XCTAssertTrue(grown.contains(p.sourceBounds(sensorSize: s).insetBy(dx: 40.5 - reach, dy: 40.5 - reach)))
+        let sensor = CGRect(origin: .zero, size: s)
+        XCTAssertTrue(grown.contains(p.targetBounds(sensorSize: s).insetBy(dx: 40.5 - reach, dy: 40.5 - reach).intersection(sensor)))
+        XCTAssertTrue(grown.contains(p.sourceBounds(sensorSize: s).insetBy(dx: 40.5 - reach, dy: 40.5 - reach).intersection(sensor)))
         var clone = p
         clone.mode = .clone
         XCTAssertEqual(clone.readRadiusPixels(sensorSize: s), 42, accuracy: 1e-4)
@@ -28,6 +29,46 @@ final class HealTests: XCTestCase {
         let earlier = HealPatch(target: [0.9, 0.9], source: [0.5, 0.1], radius: 0.02, mode: .clone)
         let chained = HealPatch.regionIncludingSources(region, patches: [earlier, p], sensorSize: s)
         XCTAssertTrue(chained.contains(earlier.sourceBounds(sensorSize: s)))
+    }
+
+    /// Only patches that can change the region count. A later patch whose
+    /// target lies where an earlier one reads can't change that read, so
+    /// its source stays out; otherwise spots cleaned one after another
+    /// across a sky chain the tile across the whole frame.
+    func testRegionLeavesOutLaterPatchesAndChains() {
+        let s = CGSize(width: 6000, height: 4000)
+        let region = CGRect(x: 1000, y: 1800, width: 400, height: 400)
+        // Each spot's source sits where the next spot is.
+        let spots = (0..<6).map { i in
+            HealPatch(target: [Float(1200 + 500 * i) / 6000, 0.5], source: [Float(1700 + 500 * i) / 6000, 0.5], radius: 0.02)
+        }
+        let grown = HealPatch.regionIncludingSources(region, patches: spots, sensorSize: s)
+        XCTAssertTrue(grown.contains(spots[0].sourceBounds(sensorSize: s)))
+        XCTAssertLessThan(grown.maxX, spots[1].sourceBounds(sensorSize: s).minX, "the next spot's source isn't read")
+        // Its target is in the tile, reading outside it, so the tile beyond
+        // the region isn't all healed as the frame is.
+        XCTAssertFalse(HealPatch.isSelfContained(grown, patches: spots, sensorSize: s))
+        // The same spots in the other order do read each other.
+        let chained = HealPatch.regionIncludingSources(region, patches: spots.reversed(), sensorSize: s)
+        XCTAssertTrue(chained.contains(spots[5].sourceBounds(sensorSize: s)))
+        XCTAssertTrue(HealPatch.isSelfContained(chained, patches: spots.reversed(), sensorSize: s))
+        XCTAssertTrue(HealPatch.isSelfContained(region, patches: [], sensorSize: s))
+    }
+
+    /// A heal's reach past the sensor edge adds no width: the render would
+    /// otherwise keep the width and shift the tile further into the frame.
+    func testRegionReachStopsAtTheSensor() {
+        let s = CGSize(width: 6000, height: 4000)
+        let big = HealPatch(target: [Float(700) / 6000, 0.5], source: [0.2, 0.5], radius: 0.15)
+        XCTAssertGreaterThan(big.readRadiusPixels(sensorSize: s), 1300)
+        let region = CGRect(x: 500, y: 1800, width: 400, height: 400)
+        let grown = HealPatch.regionIncludingSources(region, patches: [big], sensorSize: s)
+        XCTAssertEqual(grown.minX, 0)
+        XCTAssertGreaterThanOrEqual(grown.minY, 0)
+        XCTAssertLessThanOrEqual(grown.maxY, 4000)
+        // The region asked for is kept as it is, off the sensor or not.
+        let offEdge = CGRect(x: -128, y: 1800, width: 400, height: 400)
+        XCTAssertEqual(HealPatch.regionIncludingSources(offEdge, patches: [big], sensorSize: s).minX, -128)
     }
 
     func testEditStackRoundTrip() throws {

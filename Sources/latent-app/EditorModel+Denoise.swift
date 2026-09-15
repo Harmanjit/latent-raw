@@ -51,9 +51,7 @@ extension EditorModel {
             aiDenoiseStatus = "NAFNet model not bundled — see Sources/MLKit/Resources/Models/README.md"
             return
         }
-        aiDenoiseRunning = true
-        aiDenoiseStatus = "Loading model…"
-        let imageID = catalogImageID
+        let run = beginAIDenoiseRun()
         aiDenoiseTask = Task { [weak self] in
             do {
                 let variant = AIDenoiser.preferredVariant
@@ -66,21 +64,49 @@ extension EditorModel {
                     session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser
                 ) { [weak self] done, total in
                     Task { @MainActor in
+                        guard self?.aiDenoiseRun == run else { return }
                         self?.aiDenoiseStatus = "Denoising… \(done) of \(total) tiles"
                     }
                 }
-                guard let model = self, model.catalogImageID == imageID || model.session === session else { return }
-                model.aiDenoiseStatus = String(format: "Denoised in %.1f s (%@)", seconds, denoiser.variant.displayName)
-                model.aiDenoiseRunning = false
+                let summary = String(format: "Denoised in %.1f s (%@)", seconds, denoiser.variant.displayName)
+                guard let model = self, model.endAIDenoiseRun(run, status: summary) else { return }
                 if model.parameters.aiDenoise == 0 { model.parameters.aiDenoise = 1 } else { model.rerender() }
             } catch is CancellationError {
-                self?.aiDenoiseRunning = false
-                self?.aiDenoiseStatus = ""
+                self?.endAIDenoiseRun(run, status: "")
             } catch {
-                self?.aiDenoiseRunning = false
-                self?.aiDenoiseStatus = "Denoise failed: \(error)"
+                self?.endAIDenoiseRun(run, status: "Denoise failed: \(error)")
             }
         }
+    }
+
+    /// Marks a new run as the current one and returns its number.
+    func beginAIDenoiseRun() -> Int {
+        aiDenoiseRun += 1
+        aiDenoiseRunning = true
+        aiDenoiseStatus = "Loading model…"
+        return aiDenoiseRun
+    }
+
+    /// Ends `run` if it is still the current one, and says whether it was.
+    /// A cancelled run only notices at its next tile, by which time
+    /// another image may have started its own; clearing the flag then
+    /// would let memory pressure release the session that run is reading,
+    /// and let a second run start beside it.
+    @discardableResult
+    func endAIDenoiseRun(_ run: Int, status: String) -> Bool {
+        guard run == aiDenoiseRun else { return false }
+        aiDenoiseRunning = false
+        aiDenoiseStatus = status
+        return true
+    }
+
+    /// Cancels the current run, if any, and disowns it, so nothing it
+    /// reports afterwards lands on the image open by then.
+    func stopAIDenoise() {
+        aiDenoiseTask?.cancel()
+        aiDenoiseRun += 1
+        aiDenoiseRunning = false
+        aiDenoiseStatus = ""
     }
 
     func cancelAIDenoise() {

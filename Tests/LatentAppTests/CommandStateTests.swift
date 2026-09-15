@@ -135,4 +135,15 @@ final class CommandStateTests: XCTestCase {
         XCTAssertEqual(a, b)
         XCTAssertNotEqual(a, CommandContext(state: develop { $0.showingBefore = true }) { _ in })
     }
+
+    /// With no image open, Undo would restore the history left from the
+    /// previous photo onto whatever id is set: a failed open, say.
+    func testUndoNeedsAnOpenImage() {
+        let edited = develop { $0.undoLabel = "Exposure"; $0.redoLabel = "Contrast" }
+        XCTAssertTrue(edited.isEnabled(.undo))
+        XCTAssertTrue(edited.isEnabled(.redo))
+        let closed = develop { $0.undoLabel = "Exposure"; $0.redoLabel = "Contrast"; $0.hasImage = false }
+        XCTAssertFalse(closed.isEnabled(.undo))
+        XCTAssertFalse(closed.isEnabled(.redo))
+    }
 }

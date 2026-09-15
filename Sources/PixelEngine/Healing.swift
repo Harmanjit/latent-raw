@@ -71,29 +71,50 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
     }
 
     /// The sensor region a render of `region` must include so every patch
-    /// whose target it touches can also read its source and, for a heal,
-    /// the surroundings of both circles. A tile that only covers the
-    /// visible area would otherwise have nothing to copy from. Patches
-    /// read the ones before them, so the region grows until no further
-    /// patch is touched. Not clipped to the sensor; the render clamps.
+    /// that can change a pixel of `region` reads what the whole frame would
+    /// give it: its source and, for a heal, the surroundings of both
+    /// circles. A tile that only covers the visible area would otherwise
+    /// have nothing to copy from.
+    ///
+    /// Patches apply in order, each reading the result of the ones before,
+    /// so walking them last to first finds exactly those: a patch counts
+    /// when its target touches `region` or what a later counted patch
+    /// reads. A later patch whose target merely lies in an earlier one's
+    /// read area can't change what that one read, and pulling it in would
+    /// chain across the frame from spot to spot. Reads are clamped to the
+    /// sensor, as the render's are, so a patch at the edge doesn't turn
+    /// its off-sensor reach into extra tile width; `region` itself is kept
+    /// as given.
+    ///
+    /// Outside `region` the tile can hold patches that don't count, with
+    /// reads it never included; `isSelfContained` says when there are none.
     public static func regionIncludingSources(_ region: CGRect, patches: [HealPatch],
                                               sensorSize s: CGSize) -> CGRect {
-        var out = region
-        var included = [Bool](repeating: false, count: patches.count)
-        var grew = true
-        while grew {
-            grew = false
-            for (i, p) in patches.enumerated() where !included[i] && p.targetBounds(sensorSize: s).intersects(out) {
-                included[i] = true
-                grew = true
-                let margin = p.readRadiusPixels(sensorSize: s) - p.radiusPixels(sensorSize: s)
-                if p.mode == .heal {
-                    out = out.union(p.targetBounds(sensorSize: s).insetBy(dx: -margin, dy: -margin))
-                }
-                out = out.union(p.sourceBounds(sensorSize: s).insetBy(dx: -margin, dy: -margin))
+        var needed = [region]
+        for p in patches.reversed() {
+            let target = p.targetBounds(sensorSize: s)
+            guard needed.contains(where: { $0.intersects(target) }) else { continue }
+            let margin = p.readRadiusPixels(sensorSize: s) - p.radiusPixels(sensorSize: s)
+            if p.mode == .heal {
+                needed.append(clampedToSensor(target.insetBy(dx: -margin, dy: -margin), s))
             }
+            needed.append(clampedToSensor(p.sourceBounds(sensorSize: s).insetBy(dx: -margin, dy: -margin), s))
         }
-        return out
+        return needed.dropFirst().reduce(region) { $0.union($1) }
+    }
+
+    /// Whether every patch touching `region` reads only inside it, so the
+    /// whole of a render of `region` heals as the whole frame does.
+    public static func isSelfContained(_ region: CGRect, patches: [HealPatch], sensorSize s: CGSize) -> Bool {
+        region.contains(regionIncludingSources(region, patches: patches, sensorSize: s))
+    }
+
+    /// The sensor pixels a read of `rect` touches once clamped to the
+    /// edge: at least a one-pixel strip, even for a read wholly outside.
+    private static func clampedToSensor(_ rect: CGRect, _ s: CGSize) -> CGRect {
+        let x0 = min(max(rect.minX, 0), s.width - 1), y0 = min(max(rect.minY, 0), s.height - 1)
+        let x1 = max(min(rect.maxX, s.width), x0 + 1), y1 = max(min(rect.maxY, s.height), y0 + 1)
+        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
     }
 }
 
