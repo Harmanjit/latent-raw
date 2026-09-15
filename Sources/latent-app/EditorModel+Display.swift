@@ -10,7 +10,8 @@ extension EditorModel {
     /// the screen shows at the moment, so the look stays put as the
     /// brightness changes.
     var effectiveHeadroom: Float {
-        DisplayHeadroom.rendered(potential: displayHeadroom, hdrDisplayEnabled: hdrDisplayEnabled)
+        DisplayHeadroom.rendered(potential: SecondaryPreview.renderPotential(main: displayHeadroom, secondary: secondaryDisplayHeadroom),
+                                 hdrDisplayEnabled: hdrDisplayEnabled)
     }
     /// Whether the viewport is rendered with room above SDR white, so the
     /// histogram's "above SDR white" readout means something.

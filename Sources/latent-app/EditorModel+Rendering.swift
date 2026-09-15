@@ -17,8 +17,9 @@ extension EditorModel {
     /// zoomed in, it's the soft backdrop under the tile, and half-size is
     /// plenty.
     private var wantedPreviewQuads: Int {
-        guard drawableSize.width > 0 else { return 1 }
-        return max(1, Int((1 / viewport.zoom) / 2))
+        // The Loupe on a second display draws the same preview.
+        SecondaryPreview.previewQuads(mainZoom: drawableSize.width > 0 ? viewport.zoom : nil,
+                                      secondaryZoom: secondaryFitZoom)
     }
 
     /// Whether the current zoom needs a full-resolution tile at all. At 1.5

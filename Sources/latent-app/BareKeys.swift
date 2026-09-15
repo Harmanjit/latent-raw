@@ -74,6 +74,8 @@ enum KeyCommand: Equatable {
     /// Files: rename the selected image, move or copy the selection to a
     /// folder, and Back / Forward between the folders opened.
     case rename, moveToFolder, copyToFolder, back, forward
+    /// F: the image alone, full screen. The second display's Loupe is menu only.
+    case fullScreenImage, secondaryDisplay
 
     enum NewMask: Equatable { case linear, radial, brush }
 

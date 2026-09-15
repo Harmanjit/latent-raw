@@ -185,6 +185,11 @@ final class EditorModel: ObservableObject {
     /// headroom, which doesn't move with brightness). Exactly 1.0 on an
     /// SDR display, in which case the toggle has nothing to do.
     @Published var displayHeadroom: CGFloat = 1
+    /// The Loupe on a second display (SecondaryDisplay.swift), while it
+    /// shows: its drawable size in pixels and its screen's potential
+    /// headroom. It draws this model's preview, so that is rendered for it too.
+    var secondaryDrawableSize: CGSize = .zero
+    var secondaryDisplayHeadroom: CGFloat?
 
     // MARK: - Soft proofing
 
