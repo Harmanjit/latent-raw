@@ -128,3 +128,56 @@ public struct ViewportTransform: Equatable, Sendable {
         zoom <= Self.fitZoom(imageSize: imageSize, drawableSize: drawableSize) + 1e-6
     }
 }
+
+/// One pane's zoom and pan in terms another pane can use, for Compare:
+/// zoom as a multiple of fitting the image, and the view's centre as a
+/// fraction of the image. Two photos with different pixel sizes, crops or
+/// rotations then show the same part of the scene at the same size
+/// relative to their panes, which replaying gesture deltas cannot do: a
+/// screen-pixel pan moves a small image further than a large one.
+///
+/// "Image" is whatever the pane's `ViewportTransform` works in (the
+/// cropped, straightened and rotated canvas in the editor), so a fraction
+/// always means a place in the picture as the user sees it.
+public struct RelativeView: Equatable, Sendable {
+    /// Fitted, and following the pane as it resizes.
+    public var isFit: Bool
+    /// Zoom divided by the fitted zoom; 1 when fitted.
+    public var zoomFactor: CGFloat
+    /// The image point at the view's centre, 0...1 on each axis.
+    public var center: CGPoint
+
+    public static let fit = RelativeView(isFit: true, zoomFactor: 1, center: CGPoint(x: 0.5, y: 0.5))
+
+    public init(isFit: Bool, zoomFactor: CGFloat, center: CGPoint) {
+        self.isFit = isFit
+        self.zoomFactor = zoomFactor
+        self.center = center
+    }
+
+    /// The relative form of `transform`. `isFit` is the pane's own fit
+    /// flag rather than a comparison of zooms, so a pane that follows
+    /// window resizes keeps doing so in the other pane.
+    public init(transform: ViewportTransform, isFit: Bool, imageSize: CGSize, drawableSize: CGSize) {
+        guard !isFit, imageSize.width > 0, imageSize.height > 0,
+              drawableSize.width > 0, drawableSize.height > 0 else {
+            self = .fit
+            return
+        }
+        let fitted = ViewportTransform.fitZoom(imageSize: imageSize, drawableSize: drawableSize)
+        self.init(isFit: false, zoomFactor: transform.zoom / fitted,
+                  center: CGPoint(x: transform.center.x / imageSize.width,
+                                  y: transform.center.y / imageSize.height))
+    }
+
+    /// The same view of an image of `imageSize` in a view of `drawableSize`.
+    /// Not clamped: the caller clamps as it does for any gesture, so a
+    /// centre near one image's edge stops at the other image's edge.
+    public func transform(imageSize: CGSize, drawableSize: CGSize) -> ViewportTransform {
+        let fitted = ViewportTransform.fit(imageSize: imageSize, drawableSize: drawableSize)
+        guard !isFit else { return fitted }
+        return ViewportTransform(zoom: fitted.zoom * zoomFactor,
+                                 center: CGPoint(x: center.x * imageSize.width,
+                                                 y: center.y * imageSize.height))
+    }
+}

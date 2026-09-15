@@ -21,10 +21,9 @@ public final class SegmentationModel: @unchecked Sendable {
     private let inputName: String
     private let outputName: String
 
-    /// Loaded once per process; nil when the package isn't bundled.
-    public static let shared: Task<SegmentationModel?, Never> = Task.detached(priority: .utility) {
-        try? await SegmentationModel.load()
-    }
+    /// Loaded on first use and shared; nil when the package isn't
+    /// bundled. Released under memory pressure (see `SharedModel`).
+    public static let shared = SharedModel<SegmentationModel> { try? await SegmentationModel.load() }
 
     public static var isAvailable: Bool { CoreMLStore.isAvailable(packageName) }
 

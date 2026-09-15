@@ -5,9 +5,10 @@ import PixelEngine
 /// The rendered image for one editor model, with the placeholder shown
 /// when nothing is open. Shared by Develop, Loupe and both Compare panes.
 ///
-/// `mirror` receives every zoom, pan and double-click this pane gets, so
-/// two side-by-side panes move together. It's a one-way tap: the mirror's
-/// own view mirrors back to this one, so both are always symmetric.
+/// `mirror` is the other Compare pane, if any. Zoom and pan reach it
+/// through `EditorModel.linkedPane` as a relative view rather than from
+/// here, since replaying this pane's gesture there drifts apart as soon
+/// as the two images differ in size, crop or rotation.
 struct ImageViewport: View {
     @ObservedObject var model: EditorModel
     @ObservedObject private var prefs = AppPreferences.shared
@@ -32,15 +33,12 @@ struct ImageViewport: View {
                                 backgroundLevel: prefs.surroundLinear,
                                 onZoom: { factor, point in
                                     model.zoom(by: factor, about: point)
-                                    mirror?.zoom(by: factor, about: point)
                                 },
                                 onPan: { delta in
                                     model.pan(by: delta)
-                                    mirror?.pan(by: delta)
                                 },
                                 onDoubleClick: { point in
                                     model.toggleZoom(at: point)
-                                    mirror?.toggleZoom(at: point)
                                 },
                                 toolActive: allowsTools && model.imageToolActive,
                                 onToolBegan: { model.imageToolBegan(at: $0, exclude: $1) },

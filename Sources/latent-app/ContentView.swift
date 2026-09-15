@@ -62,6 +62,8 @@ struct ContentView: View {
     @State private var openingFolder: URL?
     /// A text field in the window has the keyboard (BareKeyMonitor says).
     @State private var editingText = false
+    /// Compare's panes zoom and pan together (see `EditorModel.linkedPane`).
+    @State private var compareSyncsView = true
 
     var body: some View {
         NavigationSplitView(columnVisibility: sidebarVisibility) {
@@ -342,7 +344,10 @@ struct ContentView: View {
     /// so that model never writes edits; it's a viewer.
     private func loadCompareSelect(_ record: ImageRecord) {
         guard let url = library.fileURL(for: record) else { return }
-        if compareModel == nil { compareModel = EditorModel() }
+        if compareModel == nil {
+            compareModel = EditorModel()
+            updateCompareLink()
+        }
         compareRecord = record
         let catalog = library.catalog
         Task {
@@ -362,6 +367,7 @@ struct ContentView: View {
     /// other selected image if there is one, else the same image, and
     /// arrow keys then walk the Candidate.
     private func modeDidChange(from old: AppMode) {
+        updateCompareLink()
         if old == .develop {
             model.flushPendingSave()
             // Loupe and Compare share the viewport; a click there must
@@ -374,6 +380,29 @@ struct ContentView: View {
             let other = library.selectedImages.first { $0.id != selected.id }
             loadCompareSelect(other ?? compareRecord ?? selected)
         }
+    }
+
+    /// Links the two panes' views while Compare shows and Sync is on, and
+    /// tells the Select pane whether it's on screen. Leaving Compare on a
+    /// Mac with little memory closes its image straight away, since
+    /// Compare reloads it on the way back in; elsewhere it waits for the
+    /// system to ask for memory.
+    private func updateCompareLink() {
+        let showing = mode == .compare
+        let linked = showing && compareSyncsView
+        model.linkedPane = linked ? compareModel : nil
+        compareModel?.linkedPane = linked ? model : nil
+        compareModel?.isOffScreen = !showing
+        if !showing, !MemoryPolicy.current.keepsIdleImages { compareModel?.closeImage() }
+    }
+
+    /// Turning Sync on lines the Select pane up with the candidate.
+    private var compareSyncBinding: Binding<Bool> {
+        Binding(get: { compareSyncsView }, set: { syncs in
+            compareSyncsView = syncs
+            updateCompareLink()
+            if syncs { compareModel?.takeLinkedView(model.relativeView) }
+        })
     }
 
     /// Promote the candidate to the Select side, or swap the two.
@@ -412,7 +441,11 @@ struct ContentView: View {
                     .help("Promote the candidate to the left pane (⇧X)")
                 Button("Swap") { compareSwap() }
                     .help("Exchange the two panes")
-                Text("← → step the candidate · rating and flag keys act on it · zoom and pan move both")
+                Toggle("Sync", isOn: compareSyncBinding)
+                    .toggleStyle(.checkbox)
+                    .help("Zoom and pan both panes together, matched by position in each picture")
+                    .accessibilityLabel("Sync zoom and pan")
+                Text("← → step the candidate · rating and flag keys act on it")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()

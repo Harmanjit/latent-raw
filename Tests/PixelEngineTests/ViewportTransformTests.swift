@@ -87,4 +87,81 @@ final class ViewportTransformTests: XCTestCase {
             .clamped(imageSize: image, drawableSize: drawable)
         XCTAssertEqual(nudged.center.y, 2016, accuracy: 1e-9)
     }
+
+    // MARK: - Relative view (Compare)
+
+    func testRelativeViewCarriesZoomAndCentreAcrossImageSizes() {
+        let view = CGSize(width: 1000, height: 800)
+        let big = CGSize(width: 6000, height: 4000)    // fits at 1/6
+        let small = CGSize(width: 3000, height: 2000)  // fits at 1/3
+
+        // 100% on the big image, looking at its upper-left quarter point.
+        let transform = ViewportTransform(zoom: 1, center: CGPoint(x: 1500, y: 1000))
+        let relative = RelativeView(transform: transform, isFit: false, imageSize: big, drawableSize: view)
+        XCTAssertFalse(relative.isFit)
+        XCTAssertEqual(relative.zoomFactor, 6, accuracy: 1e-9)
+        XCTAssertEqual(relative.center, CGPoint(x: 0.25, y: 0.25))
+
+        // The same image in the same view comes back unchanged.
+        let same = relative.transform(imageSize: big, drawableSize: view)
+        XCTAssertEqual(same.zoom, 1, accuracy: 1e-9)
+        XCTAssertEqual(same.center, transform.center)
+
+        // A half-size photo: six times its fit is 200%, at the same place.
+        let other = relative.transform(imageSize: small, drawableSize: view)
+        XCTAssertEqual(other.zoom, 2, accuracy: 1e-9)
+        XCTAssertEqual(other.center, CGPoint(x: 750, y: 500))
+
+        // Both panes then show the same fraction of their images.
+        let bigVisible = same.visibleSensorRect(drawableSize: view)
+        let smallVisible = other.visibleSensorRect(drawableSize: view)
+        XCTAssertEqual(bigVisible.minX / big.width, smallVisible.minX / small.width, accuracy: 1e-9)
+        XCTAssertEqual(bigVisible.width / big.width, smallVisible.width / small.width, accuracy: 1e-9)
+    }
+
+    func testRelativeViewFollowsACropAndARotation() {
+        let view = CGSize(width: 1200, height: 800)
+        let landscape = CGSize(width: 6000, height: 4000)
+        // The other pane shows the same shot cropped tighter and turned a
+        // quarter: its canvas is a different shape and size.
+        let croppedPortrait = CGSize(width: 2400, height: 3600)
+
+        let t = ViewportTransform(zoom: 0.5, center: CGPoint(x: 4500, y: 1000))
+        let relative = RelativeView(transform: t, isFit: false, imageSize: landscape, drawableSize: view)
+        let fitA = ViewportTransform.fitZoom(imageSize: landscape, drawableSize: view)
+        XCTAssertEqual(relative.zoomFactor, 0.5 / fitA, accuracy: 1e-9)
+
+        let other = relative.transform(imageSize: croppedPortrait, drawableSize: view)
+        let fitB = ViewportTransform.fitZoom(imageSize: croppedPortrait, drawableSize: view)
+        XCTAssertEqual(other.zoom / fitB, relative.zoomFactor, accuracy: 1e-9)
+        XCTAssertEqual(other.center.x, 0.75 * 2400, accuracy: 1e-9)
+        XCTAssertEqual(other.center.y, 0.25 * 3600, accuracy: 1e-9)
+
+        // Carried back, the first pane lands where it started.
+        let back = RelativeView(transform: other, isFit: false, imageSize: croppedPortrait, drawableSize: view)
+            .transform(imageSize: landscape, drawableSize: view)
+        XCTAssertEqual(back.zoom, t.zoom, accuracy: 1e-9)
+        XCTAssertEqual(back.center.x, t.center.x, accuracy: 1e-6)
+        XCTAssertEqual(back.center.y, t.center.y, accuracy: 1e-6)
+    }
+
+    func testFittedRelativeViewStaysFitted() {
+        let view = CGSize(width: 1000, height: 800)
+        let big = CGSize(width: 6000, height: 4000)
+        let small = CGSize(width: 3000, height: 2000)
+        let fitted = RelativeView(transform: .fit(imageSize: big, drawableSize: view), isFit: true,
+                                  imageSize: big, drawableSize: view)
+        XCTAssertEqual(fitted, .fit)
+        XCTAssertEqual(fitted.transform(imageSize: small, drawableSize: view),
+                       .fit(imageSize: small, drawableSize: view))
+
+        // A pane that hasn't been laid out, or has no image, has nothing
+        // to share but fit, and never divides by zero.
+        let unsized = RelativeView(transform: ViewportTransform(zoom: 2, center: .zero), isFit: false,
+                                   imageSize: big, drawableSize: .zero)
+        XCTAssertEqual(unsized, .fit)
+        let empty = RelativeView(transform: ViewportTransform(zoom: 2, center: .zero), isFit: false,
+                                 imageSize: .zero, drawableSize: view)
+        XCTAssertEqual(empty, .fit)
+    }
 }

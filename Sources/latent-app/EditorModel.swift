@@ -934,6 +934,7 @@ final class EditorModel: ObservableObject {
             self.setupError = String(describing: error)
             self.status = "Metal setup failed"
         }
+        watchMemoryPressure()
     }
 
     var isReady: Bool { gpuContext != nil }
@@ -1089,6 +1090,7 @@ final class EditorModel: ObservableObject {
             parameters = restored   // triggers rerender via didSet
             pendingSave?.cancel()
             pendingSave = nil
+            joinLinkedPane()   // after the crop is restored: it sets the canvas
 
             if newSession.profile == nil {
                 status = "No colour profile for \(file.summary.cameraModel) — cannot render"
@@ -1164,6 +1166,7 @@ final class EditorModel: ObservableObject {
     /// appearing for the first time).
     func viewportDidResize(to size: CGSize) {
         guard size != drawableSize else { return }
+        let oldSize = drawableSize
         drawableSize = size
         guard hasImage else { return }
         if fitMode {
@@ -1171,6 +1174,9 @@ final class EditorModel: ObservableObject {
         } else {
             viewport = viewport.clamped(imageSize: imageSize, drawableSize: size)
         }
+        // Compare: a pane laid out for the first time joins the other; a
+        // zoomed pane that changed size keeps the other lined up with it.
+        if oldSize == .zero { joinLinkedPane() } else if !fitMode { carryViewToLinkedPane() }
         scheduleRender()
     }
 
@@ -1202,10 +1208,11 @@ final class EditorModel: ObservableObject {
     }
 
     func zoomToFit() {
-        guard hasImage else { return }
+        guard hasImage, !tookLinkedViewThisTurn else { return }
         fitMode = true
         viewport = .fit(imageSize: imageSize, drawableSize: drawableSize)
         rerenderForViewport()
+        carryViewToLinkedPane()
     }
 
     func zoomToActualSize() {
@@ -1228,11 +1235,13 @@ final class EditorModel: ObservableObject {
     /// Every gesture lands here: clamp, publish (the view redraws at once),
     /// and queue a render for when the gesture settles.
     private func apply(_ proposed: ViewportTransform) {
+        guard !tookLinkedViewThisTurn else { return }
         let clamped = proposed.clamped(imageSize: imageSize, drawableSize: drawableSize)
         fitMode = clamped.isFit(imageSize: imageSize, drawableSize: drawableSize)
         guard clamped != viewport else { return }
         viewport = clamped
         scheduleRender()
+        carryViewToLinkedPane()
     }
 
     /// Coalesces a burst of gesture events into one render, shortly after
@@ -1246,6 +1255,145 @@ final class EditorModel: ObservableObject {
             guard !Task.isCancelled else { return }
             self?.rerenderForViewport()
         }
+    }
+
+    // MARK: - Compare: linked view
+
+    /// Compare's other pane while Sync is on; ContentView sets it on both.
+    /// Every zoom and pan made here is shown there as the same
+    /// `RelativeView`, so both panes show the same part of the scene even
+    /// when their crops, rotations or pixel sizes differ.
+    weak var linkedPane: EditorModel?
+
+    /// Set when this pane has just taken the linked pane's view, until the
+    /// main queue next turns. Compare's zoom buttons and Z key send each
+    /// command to both panes; once the first has carried it over, the copy
+    /// arriving here must not apply it again (Z would toggle straight back
+    /// to fit, and + would zoom twice).
+    private var tookLinkedViewThisTurn = false
+
+    /// This pane's zoom and pan in terms another pane can apply.
+    var relativeView: RelativeView {
+        RelativeView(transform: viewport, isFit: fitMode, imageSize: imageSize, drawableSize: drawableSize)
+    }
+
+    /// Shows `view` of this pane's own image. Never carried back.
+    func takeLinkedView(_ view: RelativeView) {
+        if !tookLinkedViewThisTurn {
+            tookLinkedViewThisTurn = true
+            Task { @MainActor [weak self] in self?.tookLinkedViewThisTurn = false }
+        }
+        show(view)
+    }
+
+    private func show(_ view: RelativeView) {
+        guard hasImage, drawableSize.width > 0, drawableSize.height > 0 else { return }
+        let target = view.transform(imageSize: imageSize, drawableSize: drawableSize)
+            .clamped(imageSize: imageSize, drawableSize: drawableSize)
+        fitMode = view.isFit || target.isFit(imageSize: imageSize, drawableSize: drawableSize)
+        guard target != viewport else { return }
+        viewport = target
+        scheduleRender()
+    }
+
+    private func carryViewToLinkedPane() {
+        linkedPane?.takeLinkedView(relativeView)
+    }
+
+    /// An image that opens (or is first laid out) while the other pane is
+    /// zoomed in joins it, so stepping the candidate keeps the same detail
+    /// in view. A fitted pane has nothing to share: images open fitted.
+    private func joinLinkedPane() {
+        guard let other = linkedPane, other.hasImage, !other.fitMode else { return }
+        show(other.relativeView)
+    }
+
+    // MARK: - Memory pressure
+
+    private var memoryPressureMonitor: MemoryPressureMonitor?
+
+    /// True while this model's image isn't on screen (Compare's Select pane
+    /// outside Compare). Under pressure such a model closes its image
+    /// outright: Compare loads it again on the way back in anyway.
+    var isOffScreen = false
+
+    /// Critical pressure took the neural denoise result; run it again once
+    /// memory recovers rather than in the middle of the shortage.
+    private var aiDenoiseReleasedUnderPressure = false
+
+    private func watchMemoryPressure() {
+        memoryPressureMonitor = MemoryPressureMonitor { [weak self] level in
+            self?.releaseMemory(for: level)
+        }
+    }
+
+    /// Gives back what can be rebuilt when macOS runs short of memory.
+    ///
+    /// Warning: the session's pooled textures and demosaic cache (one render
+    /// to rebuild), the shared Core ML models (they reload from compiled
+    /// copies on disk), and the SAM 2 image encoding unless click-to-select
+    /// is in use. Critical adds the encoding regardless, brush mask rasters
+    /// and the neural denoise result, which takes about 11 s to recompute.
+    /// The layers on screen keep their own textures, so the picture doesn't
+    /// change and nothing re-renders until the user acts.
+    func releaseMemory(for level: MemoryPressureLevel) {
+        guard level >= .warning else {
+            if aiDenoiseReleasedUnderPressure {
+                aiDenoiseReleasedUnderPressure = false
+                regenerateAIDenoiseIfNeeded()
+            }
+            return
+        }
+        if isOffScreen {
+            closeImage()
+            return
+        }
+        // Dropping these caches never disturbs work in flight: a running
+        // denoise or encode holds its own reference to the model.
+        Self.sharedDenoisers.removeAll()
+        SAM2Models.shared.release()
+        SegmentationModel.shared.release()
+        if level == .critical || maskTool != .prompt {
+            sam2Session = nil
+        }
+        // The denoise worker renders from this session off the main thread
+        // when it starts, so its pool is left alone until the run is done.
+        guard let session, !aiDenoiseRunning else { return }
+        if session.releaseMemory(for: level) {
+            aiDenoiseReleasedUnderPressure = true
+            if parameters.aiDenoise > 0 {
+                status = "Memory is low: AI denoise will run again when memory recovers"
+            }
+        }
+    }
+
+    /// Lets go of the open image and everything built from it, for a pane
+    /// nobody is looking at. Opening an image starts afresh.
+    func closeImage() {
+        guard hasImage else { return }
+        flushPendingSave()
+        pendingRender?.cancel()
+        aiDenoiseTask?.cancel()
+        aiDenoiseRunning = false
+        aiDenoiseStatus = ""
+        aiDenoiseReleasedUnderPressure = false
+        sam2Encoding?.cancel()
+        sam2Encoding = nil
+        sam2Session = nil
+        sam2Status = ""
+        session = nil
+        sourceURL = nil
+        catalogImageID = nil
+        preview = nil
+        tile = nil
+        previewQuads = 0
+        tileSize = .zero
+        analysisTexture = nil
+        histogram = nil
+        waveform = nil
+        vectorscope = nil
+        imageTitle = nil
+        status = "Open a raw file to begin"
     }
 
     // MARK: - Rendering
