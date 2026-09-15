@@ -14,6 +14,7 @@ let package = Package(
         .library(name: "Catalog", targets: ["Catalog"]),
         .library(name: "MLKit", targets: ["MLKit"]),
         .library(name: "HelpKit", targets: ["HelpKit"]),
+        .library(name: "MergeKit", targets: ["MergeKit"]),
         .executable(name: "latent-cli", targets: ["latent-cli"]),
         .executable(name: "latent-app", targets: ["latent-app"]),
         .executable(name: "latent-rawdecoder", targets: ["latent-rawdecoder"]),
@@ -70,6 +71,18 @@ let package = Package(
             name: "MLKitTests",
             dependencies: ["MLKit", "PixelEngine", "RawCore"],
             path: "Tests/MLKitTests"
+        ),
+        // Photo Merge: HDR and panorama merging, and the float DNG writer
+        // their results are saved with (docs/PhotoMerge.md).
+        .target(
+            name: "MergeKit",
+            dependencies: ["PixelEngine", "RawCore", "ColorKit"],
+            path: "Sources/MergeKit"
+        ),
+        .testTarget(
+            name: "MergeKitTests",
+            dependencies: ["MergeKit", "PixelEngine", "RawCore"],
+            path: "Tests/MergeKitTests"
         ),
         // Help > Latent Help: the wiki's Markdown as blocks, and search.
         // No resources: scripts/make_app.sh copies docs/wiki into the app.
