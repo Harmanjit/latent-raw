@@ -78,7 +78,7 @@ final class EditorModel: ObservableObject {
     @Published var healToolActive = false {
         didSet {
             guard healToolActive != oldValue else { return }
-            if healToolActive { cropToolActive = false; maskTool = .none } else { selectedHealIndex = nil }
+            if healToolActive { cropToolActive = false; maskTool = .none; redEyeToolActive = false } else { selectedHealIndex = nil }
         }
     }
     @Published var selectedHealIndex: Int?
@@ -87,8 +87,28 @@ final class EditorModel: ObservableObject {
     @Published var healFeather: Float = 0.35
     @Published var healMode: HealPatch.Mode = .heal
 
-    enum HealDrag { case placing(Int), movingTarget(Int, SIMD2<Float>), movingSource(Int, SIMD2<Float>) }
+    enum HealDrag { case placing(Int), movingTarget(Int, SIMD2<Float>), movingSource(Int, SIMD2<Float>), painting }
     var healDrag: HealDrag?
+    /// Whether a drag on empty image paints a stroke instead of placing a circle.
+    @Published var healShape: HealShape = .spot
+    /// The stroke being painted, in normalized sensor coordinates. Drawn by
+    /// the overlay and committed as one patch when the drag ends, so the
+    /// image isn't re-rendered for every mouse move.
+    @Published var paintingHealStroke: [SIMD2<Float>] = []
+
+    // MARK: - Red-eye tool (EditorModel+RedEye.swift)
+
+    @Published var redEyeToolActive = false {
+        didSet {
+            guard redEyeToolActive != oldValue else { return }
+            if redEyeToolActive { cropToolActive = false; maskTool = .none; healToolActive = false } else { selectedRedEyeIndex = nil }
+        }
+    }
+    @Published var selectedRedEyeIndex: Int?
+    /// Default size of the next spot; editing a selected spot updates it too.
+    @Published var redEyeRadius: Float = RedEyeSpot.defaultRadius
+    @Published var detectingRedEyes = false
+    var redEyeDrag: RedEyeDrag?
 
     // MARK: - Crop and straighten
 
@@ -97,7 +117,7 @@ final class EditorModel: ObservableObject {
     @Published var cropToolActive = false {
         didSet {
             guard cropToolActive != oldValue else { return }
-            if !cropToolActive { straightenBase = nil } else { healToolActive = false }
+            if !cropToolActive { straightenBase = nil } else { healToolActive = false; redEyeToolActive = false }
             canvasDidChange()
             rerenderForViewport()
         }

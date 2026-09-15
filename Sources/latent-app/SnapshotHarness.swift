@@ -17,7 +17,7 @@ import Catalog
 ///     LATENT_SNAPSHOT_STEPS="library;loupe"     states to picture, in order (default:
 ///                                               library;loupe;develop;crop;heal;compare;
 ///                                               export;settings). Also `next`, which moves
-///                                               the selection on. Each writes NN-step.png
+///                                               the selection on, and `redeye`. Each writes NN-step.png
 ///     LATENT_SNAPSHOT_SIZE=1400x900             window content size in points (default
 ///                                               1400x900, not the size it was last left at)
 ///     LATENT_SNAPSHOT_SETTLE=1                  seconds to wait after a step's work is done
@@ -335,17 +335,18 @@ enum SnapshotHarness {
                 let showing = window.contentView?.superview.map { SnapshotHarness.imageViews(in: $0).count } ?? 0
                 _ = perform(.step(1))
                 if showing > 0 { await waitForImage(views: showing) }
-            case .loupe, .develop, .crop, .heal:
+            case .loupe, .develop, .crop, .heal, .redEye:
                 guard library.selectedImage != nil else { fail("\(step.rawValue): no image selected"); return nil }
                 _ = perform(step == .loupe ? .loupe : .develop)
                 await waitForImage(views: 1)
                 // Tools arm only once there is an image to use them on.
                 if step == .crop, !model.cropToolActive { _ = perform(.crop) }
                 if step == .heal, !model.healToolActive { _ = perform(.heal) }
+                if step == .redEye, !model.redEyeToolActive { _ = perform(.redEye) }
                 // The tools' sections open below the everyday ones, out of
                 // sight; the panel's end shows both, with only collapsed
                 // groups after them.
-                if step == .crop || step == .heal { await pause(0.2); scrollAdjustments(toEnd: true) }
+                if step == .crop || step == .heal || step == .redEye { await pause(0.2); scrollAdjustments(toEnd: true) }
             case .compare:
                 guard let selected = library.selectedImage else { fail("compare: no image selected"); return nil }
                 // Compare's left pane takes the other selected image; with
@@ -408,7 +409,7 @@ enum SnapshotHarness {
             switch step {
             case .export: exportSheet.wrappedValue = false
             case .settings: window.close()
-            case .crop, .heal:
+            case .crop, .heal, .redEye:
                 _ = perform(.disarmTools)
                 scrollAdjustments(toEnd: false)
             default: break

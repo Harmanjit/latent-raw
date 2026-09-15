@@ -623,7 +623,12 @@ struct ContentView: View {
             guard mode == .develop, model.hasImage else { break }
             model.healToolActive.toggle()
             if model.healToolActive { healExpanded = true }
+        case .redEye:
+            guard mode == .develop, model.hasImage else { break }
+            model.redEyeToolActive.toggle()
+            if model.redEyeToolActive { healExpanded = true }
         case .deleteHeal:
+            if model.redEyeToolActive { model.deleteSelectedRedEye(); break }
             guard model.healToolActive else { return false }
             model.deleteSelectedHeal()
         case .disarmTools:
@@ -702,6 +707,8 @@ struct ContentView: View {
         state.cropToolActive = model.cropToolActive
         state.healToolActive = model.healToolActive
         state.hasSelectedHeal = model.selectedHeal != nil
+        state.redEyeToolActive = model.redEyeToolActive
+        state.hasSelectedRedEye = model.selectedRedEye != nil
         state.toolSizeAdjustable = model.toolSizeAdjustable
         state.canAddMask = model.hasImage && model.parameters.locals.count < LocalAdjustment.maximumCount
         state.hasSelectedMask = model.selectedLocal != nil
@@ -881,7 +888,7 @@ struct ContentView: View {
                 } label: {
                     HStack {
                         disclosureLabel("Spot Removal")
-                        if model.healToolActive { activeToolBadge }
+                        if model.healToolActive || model.redEyeToolActive { activeToolBadge }
                     }
                 }
 
@@ -1257,7 +1264,7 @@ struct ContentView: View {
                     Text(model.healToolActive ? "Healing: on" : "Heal…")
                 }
                 .toggleStyle(.button)
-                .help("Arm the tool, then click a spot to remove it; drag to pick the source (H)")
+                .help("Arm the tool, then click a spot to remove it; drag to pick the source, or paint with Brush (H)")
                 Picker("Heal mode", selection: Binding(get: { model.activeHealMode },
                                                   set: { model.activeHealMode = $0 })) {
                     Text("Heal").tag(HealPatch.Mode.heal)
@@ -1273,6 +1280,8 @@ struct ContentView: View {
             }
             .controlSize(.small)
             .disabled(!model.hasImage)
+
+            HealShapePicker(model: model)
 
             sliderRow(title: "Size",
                       value: Binding(get: { model.activeHealRadiusPixels },
@@ -1294,6 +1303,9 @@ struct ContentView: View {
                     Button("Clear all") { model.clearHeals() }.controlSize(.mini)
                 }
             }
+
+            Divider()
+            RedEyeSection(model: model)
         }
     }
 

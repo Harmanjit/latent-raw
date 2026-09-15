@@ -21,7 +21,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .lens:         return "Lens Corrections & Defringe"
         case .locals:       return "Local Adjustments"
         case .crop:         return "Crop, Straighten & Perspective"
-        case .heal:         return "Spot Removal"
+        case .heal:         return "Spot Removal & Red-Eye"
         }
     }
 
@@ -71,6 +71,7 @@ extension EditStack {
                 result.modules.perspective = other.modules.perspective
             case .heal:
                 result.modules.heal = other.modules.heal
+                result.modules.redeye = other.modules.redeye
             }
         }
         return result
@@ -97,7 +98,7 @@ extension EditStack {
         if m.lens != nil || m.defringe != nil { g.insert(.lens) }
         if m.locals != nil { g.insert(.locals) }
         if m.crop != nil || m.perspective != nil { g.insert(.crop) }
-        if m.heal != nil { g.insert(.heal) }
+        if m.heal != nil || m.redeye != nil { g.insert(.heal) }
         return g
     }
 }

@@ -33,6 +33,15 @@ using namespace metal;
 // every full-resolution pixel. Radius, sigma and cell size are in texture
 // pixels (sensor pixels / binSpan), so a binned preview, a tile and an
 // export agree.
+//
+// A brush stroke is healed in pieces, each a short segment of its path
+// with a grid of its own (HealStroke.swift), since one grid over a wire
+// across the frame would be most of the frame. Each piece reads a list of
+// the stroke's segments near it: the distance to the nearest one gives
+// the surroundings mask and the feathered edge, so both follow the whole
+// stroke as one shape, and a piece writes only the pixels nearer its own
+// segment than any other, so the pieces tile the stroke without overlap.
+// A circle has no list and takes the original path through every kernel.
 
 struct HealPatchGPU {
     float4 geometry;   // target.xy, source.xy, normalized sensor
@@ -51,7 +60,16 @@ struct HealGridGPU {
     int2 gridSize;       // cells
     int2 boxOrigin;      // texel at the scratch's top-left
     int2 boxSize;        // texels
+    int maskCount;       // a stroke piece: segments in its list; 0 for a circle
+    int ownIndex;        // the piece's own segment in that list
 };
+
+// Distance from `q` to the segment a-b (seg.xy, seg.zw), texture pixels.
+inline float healSegmentDistance(float2 q, float4 seg) {
+    float2 a = seg.xy, ab = seg.zw - seg.xy;
+    float t = clamp(dot(q - a, ab) / max(dot(ab, ab), 1e-12), 0.0, 1.0);
+    return length(q - (a + t * ab));
+}
 
 inline float2 healSensorToTexture(float2 sensorPx, float2 tileOrigin, float binSpan) {
     return (sensorPx - tileOrigin) / binSpan;
@@ -79,6 +97,7 @@ kernel void healGather(
     texture2d<float, access::write>  target  [[texture(1)]],
     texture2d<float, access::write>  source  [[texture(2)]],
     constant HealGridGPU &g                  [[buffer(0)]],
+    constant float4 *segments                [[buffer(1)]],
     uint2 gid                                [[thread_position_in_grid]])
 {
     if (int(gid.x) >= g.gridSize.x || int(gid.y) >= g.gridSize.y) return;
@@ -90,7 +109,14 @@ kernel void healGather(
     for (int j = 0; j < k; j++) {
         for (int i = 0; i < k; i++) {
             float2 q = corner + float2(i, j) + 0.5;
-            float w = healFillWeight(length(q - g.target), g.radius, g.feather);
+            float dist;
+            if (g.maskCount > 0) {
+                dist = 1e30;
+                for (int m = 0; m < g.maskCount; m++) dist = min(dist, healSegmentDistance(q, segments[m]));
+            } else {
+                dist = length(q - g.target);
+            }
+            float w = healFillWeight(dist, g.radius, g.feather);
             if (w <= 0.0) continue;
             sumT += w * state.sample(s, q).rgb;
             sumS += w * state.sample(s, q + g.offset).rgb;
@@ -155,6 +181,7 @@ kernel void healApply(
     constant float2 &sensorSize              [[buffer(2)]],
     constant float2 &tileOrigin              [[buffer(3)]],
     constant float &binSpan                  [[buffer(4)]],
+    constant float4 *segments                [[buffer(5)]],
     uint2 gid                                [[thread_position_in_grid]])
 {
     if (int(gid.x) >= g.boxSize.x || int(gid.y) >= g.boxSize.y) return;
@@ -162,13 +189,32 @@ kernel void healApply(
 
     float2 here = float2(int2(gid) + g.boxOrigin) + 0.5;
     float4 c = state.sample(s, here);
-    float2 sensorPx = tileOrigin + here * binSpan;
-    float shortSide = min(sensorSize.x, sensorSize.y);
-    float r = p.params.x * shortSide;
-    float2 d = sensorPx - p.geometry.xy * sensorSize;
-    float dist = length(d);
-    float2 src = healSensorToTexture(p.geometry.zw * sensorSize + d, tileOrigin, binSpan);
-    if (dist < r && healInsideTexture(src, state)) {
+    float r, dist;
+    float2 src;
+    bool owned = true;
+    if (g.maskCount > 0) {
+        // A stroke piece, in texture pixels: the nearest segment decides
+        // the edge; the piece writes only what is nearest its own (ties go
+        // to the earlier piece, which lists before it).
+        r = g.radius;
+        float own = healSegmentDistance(here, segments[g.ownIndex]);
+        dist = own;
+        for (int m = 0; m < g.maskCount; m++) {
+            if (m == g.ownIndex) continue;
+            float other = healSegmentDistance(here, segments[m]);
+            dist = min(dist, other);
+            if (m < g.ownIndex ? other <= own : other < own) owned = false;
+        }
+        src = here + g.offset;
+    } else {
+        float2 sensorPx = tileOrigin + here * binSpan;
+        float shortSide = min(sensorSize.x, sensorSize.y);
+        r = p.params.x * shortSide;
+        float2 d = sensorPx - p.geometry.xy * sensorSize;
+        dist = length(d);
+        src = healSensorToTexture(p.geometry.zw * sensorSize + d, tileOrigin, binSpan);
+    }
+    if (owned && dist < r && healInsideTexture(src, state)) {
         float4 v = state.sample(s, src);
         if (p.params.z < 0.5) {
             // Heal. A ratio in linear light, because texture is mostly

@@ -12,6 +12,7 @@ enum ToolSizeStep {
     /// under Spot Removal, so a key never takes a size past its slider.
     static let brushRadius: ClosedRange<Float> = 0.005...0.2
     static let healRadiusPixels: ClosedRange<Float> = 4...600
+    static let redEyeRadiusPixels: ClosedRange<Float> = 2...400
 
     static func stepped(_ value: Float, by steps: Int, within range: ClosedRange<Float>) -> Float {
         let scaled = value * pow(factor, Float(steps))
@@ -22,7 +23,7 @@ enum ToolSizeStep {
 extension EditorModel {
     /// The spot tool, or the mask brush (painting or erasing), is armed.
     var toolSizeAdjustable: Bool {
-        healToolActive || (maskToolActive && (maskTool == .brush || maskTool == .erase))
+        healToolActive || redEyeToolActive || (maskToolActive && (maskTool == .brush || maskTool == .erase))
     }
 
     /// Steps the armed tool's size: the spot tool's next patch and the
@@ -32,6 +33,11 @@ extension EditorModel {
         if healToolActive {
             activeHealRadiusPixels = ToolSizeStep.stepped(activeHealRadiusPixels, by: steps,
                                                           within: ToolSizeStep.healRadiusPixels)
+            return true
+        }
+        if redEyeToolActive {
+            activeRedEyeRadiusPixels = ToolSizeStep.stepped(activeRedEyeRadiusPixels, by: steps,
+                                                            within: ToolSizeStep.redEyeRadiusPixels)
             return true
         }
         guard toolSizeAdjustable else { return false }

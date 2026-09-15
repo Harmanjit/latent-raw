@@ -54,6 +54,7 @@ enum KeyCommand: Equatable {
     case library, develop, loupe, compare, toggleLoupe, toggleZoom
     case rate(Int), pick, reject, unflag
     case beforeAfter, crop, heal, deleteHeal, disarmTools
+    case redEye
     case makeSelect
     // Reached from the menus, most with a Command shortcut as well.
     case openFolder, openFile, export, exportOpenImage

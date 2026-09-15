@@ -89,6 +89,8 @@ public struct EditHistory: Equatable, Sendable, Codable {
         if a.modules.demosaic != b.modules.demosaic { names.append("Demosaic") }
         if a.modules.lens != b.modules.lens { names.append("Lens") }
         if a.modules.locals != b.modules.locals { names.append("Local Adjustments") }
+        if a.modules.heal != b.modules.heal { names.append("Spot Removal") }
+        if a.modules.redeye != b.modules.redeye { names.append("Red-Eye") }
         return names.isEmpty ? "Edit" : names.joined(separator: ", ")
     }
 
