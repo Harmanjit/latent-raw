@@ -53,8 +53,10 @@ public struct SnapshotPlan: Equatable, Sendable {
     /// The folder to open as a catalog. Nil pictures the window as launched.
     public var folder: URL?
     public var steps: [Step] = Self.defaultSteps
-    /// Window content size in points.
-    public var windowSize: CGSize?
+    /// Window content size in points. Always set, so a picture doesn't
+    /// depend on the size the window was last left at, which it reopens
+    /// at otherwise.
+    public var windowSize = Self.defaultWindowSize
     /// Seconds to wait once a step's work is done (image rendered,
     /// thumbnails made) before picturing, for animations and late layout.
     public var settle: Double = 1
@@ -63,6 +65,8 @@ public struct SnapshotPlan: Equatable, Sendable {
     /// "light" or "dark"; nil keeps the app's own setting.
     public var appearance: String?
 
+    /// The app's own default window size (LatentApp's `defaultSize`).
+    public static let defaultWindowSize = CGSize(width: 1400, height: 900)
     public static let defaultSteps: [Step] = [.library, .loupe, .develop, .crop, .heal, .compare, .export, .settings]
 
     /// Nil unless LATENT_SNAPSHOT_DIR is set. Throws for a value that is

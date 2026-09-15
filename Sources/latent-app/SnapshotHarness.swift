@@ -18,7 +18,8 @@ import Catalog
 ///                                               library;loupe;develop;crop;heal;compare;
 ///                                               export;settings). Also `next`, which moves
 ///                                               the selection on. Each writes NN-step.png
-///     LATENT_SNAPSHOT_SIZE=1400x900             window content size in points
+///     LATENT_SNAPSHOT_SIZE=1400x900             window content size in points (default
+///                                               1400x900, not the size it was last left at)
 ///     LATENT_SNAPSHOT_SETTLE=1                  seconds to wait after a step's work is done
 ///     LATENT_SNAPSHOT_TIMEOUT=120               seconds before the whole run gives up
 ///     LATENT_SNAPSHOT_APPEARANCE=dark           light or dark instead of the app's setting
@@ -28,7 +29,10 @@ import Catalog
 ///     LATENT_SNAPSHOT_DIR=.build/snapshots LATENT_SNAPSHOT_FOLDER=/tmp/shoot swift run latent-app
 ///
 /// Exit status is 0 when every step was pictured, 1 when a step or the
-/// setup failed (the reason goes to standard error), 2 on timeout.
+/// setup failed (the reason goes to standard error), 2 on timeout. A step
+/// whose window content is laid out larger than the window counts as
+/// failed: it is pictured as it is, cut off, which is easy to mistake for
+/// the picture being wrong.
 ///
 /// The steps only look: they switch modes, arm tools and open sheets, but
 /// never change an edit, a rating or a file. The catalog in the opened
@@ -264,7 +268,7 @@ enum SnapshotHarness {
             // there may be no key window; the frontmost visible one is next.
             mainWindow = NSApp.keyWindow ?? NSApp.orderedWindows.first { $0.isVisible && $0.sheetParent == nil }
             guard let window = mainWindow else { fail("no visible window"); finish() }
-            if let size = plan.windowSize { window.setContentSize(size) }
+            window.setContentSize(plan.windowSize)
             if let folder = plan.folder { await open(folder) }
 
             for index in plan.steps.indices {
@@ -273,6 +277,7 @@ enum SnapshotHarness {
                 guard let target else { continue }
                 await pause(plan.settle)
                 let url = plan.output(forStepAt: index)
+                checkContentFits(target, step: step)
                 if let image = capture(target), write(image, to: url) {
                     report("wrote \(url.path) (\(image.width)x\(image.height) px)")
                 } else {
@@ -379,6 +384,22 @@ enum SnapshotHarness {
                 return settings
             }
             return window
+        }
+
+        /// Fails the step when the window's root view is laid out beyond
+        /// the window, as when a view's minimum size is larger than the
+        /// window: SwiftUI then centres the oversized content, cutting off
+        /// its top under the titlebar and its bottom below the window, on
+        /// screen as in the picture.
+        func checkContentFits(_ window: NSWindow, step: SnapshotPlan.Step) {
+            guard let content = window.contentView else { return }
+            content.layoutSubtreeIfNeeded()
+            let bounds = content.bounds.insetBy(dx: -1, dy: -1)
+            for view in content.subviews where !view.isHidden && !bounds.contains(view.frame) {
+                fail("\(step.rawValue): the window's content is laid out at "
+                     + "\(Int(view.frame.width))x\(Int(view.frame.height)) pt in a "
+                     + "\(Int(content.bounds.width))x\(Int(content.bounds.height)) pt window, so its edges are cut off")
+            }
         }
 
         /// Undoes what a step put over the window, so the next step

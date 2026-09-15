@@ -14,7 +14,7 @@ final class SnapshotPlanTests: XCTestCase {
         XCTAssertEqual(plan.directory.path, "/tmp/shots")
         XCTAssertNil(plan.folder)
         XCTAssertEqual(plan.steps, SnapshotPlan.defaultSteps)
-        XCTAssertNil(plan.windowSize)
+        XCTAssertEqual(plan.windowSize, SnapshotPlan.defaultWindowSize)
         XCTAssertEqual(plan.settle, 1)
         XCTAssertEqual(plan.timeout, 120)
         XCTAssertNil(plan.appearance)
