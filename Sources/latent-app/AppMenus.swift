@@ -61,6 +61,9 @@ struct CommandState: Equatable {
         case .openFile: editorReady
         case .export: selectionCount > 0 && !exportQueueRunning
         case .exportOpenImage: hasImage && !exportingOpenImage
+        // Library prints the selection; the other modes the image shown.
+        case .print: editorReady && (mode == .library ? selectionCount > 0 : hasImage || selectionCount > 0)
+        case .contactSheet: editorReady && selectionCount > 0
         // Edits are undone where they are made. Typing is undone by the
         // Edit menu itself (see LatentCommands).
         case .undo: mode == .develop && hasImage && undoLabel != nil
@@ -166,6 +169,9 @@ struct LatentCommands: Commands {
             item(state.exportTitle, .export)
             item("Export Open Image…", .exportOpenImage)
             item("Reveal in Finder", .revealInFinder)
+            Divider()
+            item("Contact Sheet…", .contactSheet)
+            item("Print…", .print)
         }
 
         CommandGroup(replacing: .undoRedo) {
