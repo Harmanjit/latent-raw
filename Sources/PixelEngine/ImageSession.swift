@@ -84,14 +84,32 @@ public final class ImageSession {
         case aiDenoised, aiDenoisedPreview // camera RGB after the neural denoiser is blended in
     }
 
+    /// Which set of pooled textures a render draws from. Pools never share
+    /// storage, so a render in one can't overwrite a texture another shows
+    /// or holds, whatever their sizes, and each can be released on its own.
+    public enum TexturePool: Hashable, Sendable {
+        /// The editor's preview, tile and scopes; exports and thumbnails.
+        case view
+        /// The magnifier's tile, whose size follows the loupe's keystone
+        /// and heal reach as the pointer moves.
+        case magnifier
+        /// One-off renders read back for analysis (red-eye detection, model
+        /// input), which must leave the textures on screen alone.
+        case analysis
+    }
+
     private struct TextureKey: Hashable {
         let width: Int
         let height: Int
         let pixelFormat: UInt
         let role: TextureRole
+        let pool: TexturePool
     }
 
     private var texturePool: [TextureKey: MTLTexture] = [:]
+    /// The pool `texture(width:height:pixelFormat:role:)` hands out from;
+    /// set around a render by `withTexturePool`.
+    private var currentPool = TexturePool.view
 
     /// Rasterized brush masks, created on first use.
     private var brushMasks: BrushMaskSet?
@@ -220,16 +238,17 @@ public final class ImageSession {
     }
 
     /// Returns a texture of the requested shape and role, reusing a pooled
-    /// one when both match a previous request.
+    /// one when both match a previous request in the current pool.
     ///
     /// Caveat: a texture handed back here stays owned by the session, so a
-    /// second render at the same size and role overwrites the first result.
+    /// second render at the same size and role, in the same pool,
+    /// overwrites the first result.
     /// That suits a viewport, which draws each frame immediately. Anything
     /// needing to hold a result while rendering again must copy it out.
     func texture(width: Int, height: Int,
                   pixelFormat: MTLPixelFormat, role: TextureRole) throws -> MTLTexture {
         let key = TextureKey(width: width, height: height,
-                              pixelFormat: pixelFormat.rawValue, role: role)
+                              pixelFormat: pixelFormat.rawValue, role: role, pool: currentPool)
         if let existing = texturePool[key] {
             return existing
         }
@@ -278,6 +297,24 @@ public final class ImageSession {
     public func releasePooledTextures() {
         texturePool.removeAll()
         stageCache.removeAll()
+    }
+
+    /// Runs `body` (normally one or more `RenderPipeline.render` calls) with
+    /// its pooled textures taken from `pool`.
+    public func withTexturePool<T>(_ pool: TexturePool, _ body: () throws -> T) rethrows -> T {
+        let saved = currentPool
+        currentPool = pool
+        defer { currentPool = saved }
+        return try body()
+    }
+
+    /// Drops one pool's textures, and any demosaic cached in them, leaving
+    /// the other pools as they are.
+    public func releasePooledTextures(in pool: TexturePool) {
+        let released = texturePool.filter { $0.key.pool == pool }.map(\.value)
+        guard !released.isEmpty else { return }
+        texturePool = texturePool.filter { $0.key.pool != pool }
+        stageCache = stageCache.filter { entry in !released.contains { $0 === entry.value } }
     }
 
     /// Gives memory back when macOS runs short, keeping the session usable:

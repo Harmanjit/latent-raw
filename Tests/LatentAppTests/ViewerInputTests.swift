@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import Metal
 import PixelEngine
 @testable import latent_app
 
@@ -136,5 +137,53 @@ final class ViewerInputTests: XCTestCase {
         model.magnifierChanged(nil)
         XCTAssertNil(model.magnifierTile)
         XCTAssertNil(model.magnifierState.loupe)
+    }
+
+    /// The view renders again with the same edit when a neural denoise
+    /// result, a model mask or the display output changes; the loupe must
+    /// follow rather than keep the tile it has.
+    func testMagnifierRendersAgainWhenTheViewDoes() async throws {
+        let model = try await openedModel()
+        let zoom = ViewerInteraction.Magnifier.zoom(backingScale: 2, viewZoom: model.viewport.zoom)
+        model.magnifierChanged(ViewerInteraction.Magnifier(center: CGPoint(x: 600, y: 400), radius: 220, zoom: zoom))
+        let first = try XCTUnwrap(model.magnifierTile).generation
+        try await Task.sleep(for: .milliseconds(50))
+        model.rerender()
+        XCTAssertNotEqual(model.magnifierTile?.generation, first)
+    }
+
+    /// With keystone the loupe's tile changes size as the pointer moves,
+    /// and each size has textures of its own. Only the latest size's are
+    /// kept, and none once the loupe goes, so holding it never piles up
+    /// GPU memory.
+    func testMagnifierKeepsOneSizeOfTexturesAndFreesThemWhenItGoes() async throws {
+        let model = try await openedModel()
+        model.parameters.perspective = PerspectiveCorrection(vertical: 0.6, horizontal: -0.4)
+        try await Task.sleep(for: .milliseconds(200))
+        let session = try XCTUnwrap(model.session)
+        let before = session.approximateBytesHeld
+        let zoom = ViewerInteraction.Magnifier.zoom(backingScale: 2, viewZoom: model.viewport.zoom)
+
+        weak var earlier: MTLTexture?
+        var sizes = Set<[Int]>(), previous: [Int]?
+        for (x, y) in [(200, 150), (1000, 650), (250, 700), (950, 120)] {
+            try await Task.sleep(for: .milliseconds(50))
+            autoreleasepool {
+                model.magnifierChanged(ViewerInteraction.Magnifier(center: CGPoint(x: x, y: y), radius: 220, zoom: zoom))
+            }
+            let tile = try XCTUnwrap(model.magnifierTile)
+            let size = [tile.texture.width, tile.texture.height]
+            if let previous, previous != size {
+                XCTAssertNil(earlier, "the previous size's textures are gone")
+            }
+            sizes.insert(size)
+            previous = size
+            autoreleasepool { earlier = tile.texture }
+        }
+        XCTAssertGreaterThan(sizes.count, 2, "keystone changes the tile's size: \(sizes)")
+        XCTAssertGreaterThan(session.approximateBytesHeld, before)
+
+        autoreleasepool { model.magnifierChanged(nil) }
+        XCTAssertEqual(session.approximateBytesHeld, before, "letting go frees the magnifier's textures")
     }
 }

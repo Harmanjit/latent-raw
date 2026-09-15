@@ -44,6 +44,35 @@ final class RetouchToolTests: XCTestCase {
         XCTAssertEqual(SpokenText.redEyesFound(added: 2, detected: 2), "Fixed 2 red eyes")
     }
 
+    /// Auto red-eye looks for faces in a small sRGB render of the edit. At
+    /// the preview's bin factor that render must not land in the preview's
+    /// textures: the view would show it washed out, and if no eyes are
+    /// found nothing renders the preview again.
+    func testRedEyeDetectionLeavesThePreviewOnScreenAlone() async throws {
+        let model = try await openModel()
+        let gpu = try XCTUnwrap(model.gpuContext)
+        let summary = try XCTUnwrap(model.session).file.summary
+        let longEdge = max(summary.rawWidth, summary.rawHeight)
+        let detectionQuads = Int((Double(longEdge) / 3200).rounded(.up))
+        // A view that bins the preview as far as detection does.
+        let side = CGFloat(longEdge) / CGFloat(2 * detectionQuads + 1)
+        model.viewportDidResize(to: CGSize(width: side, height: side))
+        model.rerenderForViewport()
+        XCTAssertEqual(model.previewQuads, detectionQuads, "the case where the pools would collide")
+        let preview = try XCTUnwrap(model.preview)
+        func pixels() throws -> Data? {
+            try Exporter(gpu: gpu).cgImage(from: preview.texture, colorSpace: .displayP3).dataProvider?.data as Data?
+        }
+        let shown = try XCTUnwrap(try pixels())
+
+        model.autoDetectRedEyes()
+        XCTAssertTrue(model.preview?.texture === preview.texture)
+        XCTAssertEqual(try pixels(), shown)
+        for _ in 0..<100 where model.detectingRedEyes {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
     func testOnlyOneOnImageToolAtATime() async throws {
         let model = try await openModel()
         model.healToolActive = true

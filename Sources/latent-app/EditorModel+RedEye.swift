@@ -176,9 +176,14 @@ extension EditorModel {
         look.perspective = .none
         let image: CGImage
         do {
-            let texture = try pipeline.render(session, scale: .binned(quads: quads), parameters: look,
-                                              output: .file(.sRGB))
-            image = try Exporter(gpu: gpu).cgImage(from: texture, colorSpace: .sRGB)
+            // In a pool of its own: at the preview's bin factor the preview's
+            // pooled textures, on screen, would take this render's pixels.
+            defer { session.releasePooledTextures(in: .analysis) }
+            image = try session.withTexturePool(.analysis) {
+                let texture = try pipeline.render(session, scale: .binned(quads: quads), parameters: look,
+                                                  output: .file(.sRGB))
+                return try Exporter(gpu: gpu).cgImage(from: texture, colorSpace: .sRGB)
+            }
         } catch {
             status = "Red-eye detection failed: \(error)"
             return

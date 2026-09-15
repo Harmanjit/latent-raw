@@ -168,11 +168,6 @@ final class ViewerInteractionTests: XCTestCase {
         let corner = VI.Magnifier.tileRegion(covering: CGRect(x: -50, y: 3900, width: 220, height: 220),
                                              margin: 96, sensorSize: sensor)
         XCTAssertEqual(corner, CGRect(x: 0, y: 4016 - 412, width: 412, height: 412))
-        // Never the view tile's size, whose pooled textures are on screen.
-        let avoided = VI.Magnifier.tileRegion(covering: CGRect(x: 1000, y: 900, width: 220, height: 220),
-                                              margin: 96, sensorSize: sensor,
-                                              avoiding: CGSize(width: 412, height: 412))
-        XCTAssertEqual(avoided.size, CGSize(width: 413, height: 412))
         // Larger than a small sensor: the whole sensor.
         let tiny = VI.Magnifier.tileRegion(covering: CGRect(x: 10, y: 10, width: 220, height: 220),
                                            margin: 96, sensorSize: CGSize(width: 300, height: 200))
