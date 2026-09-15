@@ -36,11 +36,15 @@ public struct ImageRecord: Codable, FetchableRecord, MutablePersistableRecord,
     public var thumbKey: Data?
     /// Manual rotation in quarter turns clockwise, on top of `orientation`.
     public var userRotation: Int = 0
+    /// The file's Finder tags in their stored form (see `FinderTag.encode`),
+    /// nil for none. Read from the file during reconcile, never written to it.
+    public var finderTags: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, size, mtime, xxhash, camera, lens, iso, shutter, aperture, focal
         case width, height, orientation, rating, label, flag
         case userRotation = "user_rotation"
+        case finderTags = "finder_tags"
         case relPath = "rel_path"
         case preservedName = "preserved_name"
         case captureTime = "capture_time"

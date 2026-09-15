@@ -253,6 +253,10 @@ struct LibraryPanel: View {
                     library.perform("Saving keywords") { try await library.setKeywords(keywords) }
                 }
 
+            if image.finderTags != nil {
+                FinderTagList(tags: image.tags)
+            }
+
             if image.userRotation != 0 {
                 Text("rotated \(image.userRotation * 90)°")
                     .font(.caption2)

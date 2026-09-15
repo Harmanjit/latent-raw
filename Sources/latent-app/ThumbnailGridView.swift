@@ -43,6 +43,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         collection.menuProvider = { [weak coordinator] indexPath in coordinator?.menu(at: indexPath) }
         collection.onScreenChange = { [weak coordinator] in coordinator?.screenChanged() }
         collection.setAccessibilityLabel("Thumbnails")
+        GridDragAndDrop.configure(collection)
         coordinator.collectionView = collection
 
         let scroll = NSScrollView()
@@ -82,6 +83,11 @@ struct ThumbnailGridView: NSViewRepresentable {
         /// with the item each was asked for.
         private var prefetches: [Int64: (request: ThumbnailRequest, item: Int)] = [:]
         private var backingScale: CGFloat = 2
+        /// The paths of the images being dragged from this grid, in grid
+        /// order; empty when no drag started here.
+        var draggedPaths: [String] = []
+        /// The images the grid shows, in order (for the drag code).
+        var shownImages: [ImageRecord] { images }
 
         init(library: Library, onOpen: @escaping (ImageRecord) -> Void) {
             self.library = library
@@ -181,6 +187,10 @@ struct ThumbnailGridView: NSViewRepresentable {
             let record = images[indexPath.item]
             cell.configure(record: record, isEdited: record.id.map(library.editedImageIDs.contains) ?? false,
                            library: library, layout: layout, pixelSize: layout.pixelSize(backingScale: backingScale))
+            cell.onRate = { [weak self, weak cell] star in
+                guard let self, let cell else { return }
+                self.rate(cell, clickedStar: star)
+            }
             return cell
         }
 
@@ -339,6 +349,24 @@ struct ThumbnailGridView: NSViewRepresentable {
             }
             return GridContextMenu.itemMenu(library: library, actions: actions)
         }
+
+        /// A star under a thumbnail was clicked. On a selected image it rates
+        /// the whole selection, as the number keys do; on another image it
+        /// selects that image first, as a right-click does, so a rating never
+        /// lands on images the user can't see selected. Clicking the image's
+        /// own rating clears it.
+        func rate(_ cell: ThumbnailItem, clickedStar star: Int) {
+            guard let collectionView, let record = cell.record,
+                  let indexPath = collectionView.indexPath(for: cell), images.indices.contains(indexPath.item)
+            else { return }
+            if !collectionView.selectionIndexPaths.contains(indexPath) {
+                isApplyingSelection = true
+                collectionView.selectionIndexPaths = [indexPath]
+                isApplyingSelection = false
+                reportSelection(added: [indexPath])
+            }
+            actions.rate(ThumbnailGridLayout.rating(afterClicking: star, current: record.rating))
+        }
     }
 }
 
@@ -411,6 +439,11 @@ final class ThumbnailItem: NSCollectionViewItem {
 
     private(set) var record: ImageRecord?
     private(set) var isEdited = false
+    /// One of the cell's stars was clicked (1...5).
+    var onRate: ((Int) -> Void)? {
+        get { cellView.onRate }
+        set { cellView.onRate = newValue }
+    }
     private weak var library: Library?
     private var cellView: ThumbnailCellView { view as! ThumbnailCellView }
     private var request: ThumbnailRequest?
@@ -452,6 +485,7 @@ final class ThumbnailItem: NSCollectionViewItem {
         self.record = record
         self.isEdited = isEdited
         cellView.setMarks(name: record.fileName, rating: record.rating, flag: record.flag, isEdited: isEdited)
+        cellView.setTags(stored: record.finderTags)
         loadIfNeeded()
     }
 
@@ -530,6 +564,7 @@ final class ThumbnailItem: NSCollectionViewItem {
         record = nil
         shown = nil
         cellView.setImage(nil)
+        cellView.isHovered = false
     }
 
     private func want(_ record: ImageRecord) -> Want {
@@ -566,6 +601,10 @@ final class ThumbnailCellView: NSView {
     private let imageLayer = CALayer()
     private let nameField = NSTextField(labelWithString: "")
     private let badgeField = NSTextField(labelWithString: "")
+    private let starsView = StarRatingView()
+    private let tagDotsView = TagDotsView()
+    private var storedTags: String?
+    private var hoverArea: NSTrackingArea?
     private var imagePixels: CGSize?
     /// The cached image the layer's copy was made from.
     private weak var sourceImage: CGImage?
@@ -607,11 +646,13 @@ final class ThumbnailCellView: NSView {
         nameField.alignment = .center
         badgeField.font = .systemFont(ofSize: 9)
         badgeField.textColor = .tertiaryLabelColor
-        badgeField.alignment = .center
+        badgeField.alignment = .left
         for field in [nameField, badgeField] {
             field.maximumNumberOfLines = 1
             addSubview(field)
         }
+        addSubview(starsView)
+        addSubview(tagDotsView)
 
         // VoiceOver reads the cell as one image (name, flag, stars, edited)
         // rather than scraps of it.
@@ -628,7 +669,59 @@ final class ThumbnailCellView: NSView {
     override var wantsUpdateLayer: Bool { true }
 
     override func accessibilityLabel() -> String? {
-        Self.accessibilityText(name: nameField.stringValue, rating: rating, flag: flag, isEdited: isEdited)
+        let text = Self.accessibilityText(name: nameField.stringValue, rating: rating, flag: flag, isEdited: isEdited)
+        let tags = SpokenText.finderTags(tagDotsView.tags)
+        return tags.isEmpty ? text : text + ", " + tags
+    }
+
+    /// The stars' clicks, for VoiceOver: one action per rating.
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        guard onRate != nil else { return nil }
+        return (0...ThumbnailGridLayout.starCount).map { stars in
+            NSAccessibilityCustomAction(name: stars == 0 ? "Clear rating" : "Rate \(SpokenText.stars(stars).lowercased())") { [weak self] in
+                guard let self, let onRate = self.onRate else { return false }
+                // The click that sets this rating: clearing is a click on the current one.
+                if stars == 0 {
+                    if self.rating > 0 { onRate(self.rating) }
+                } else if stars != self.rating {
+                    onRate(stars)
+                }
+                return true
+            }
+        }
+    }
+
+    /// A star was clicked (1...5).
+    var onRate: ((Int) -> Void)? {
+        get { starsView.onClick }
+        set { starsView.onClick = newValue }
+    }
+
+    /// The pointer is over the cell: the stars show their empty places.
+    var isHovered: Bool {
+        get { starsView.isCellHovered }
+        set { starsView.isCellHovered = newValue }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    /// Finder tags in their stored form; decoded only when they changed.
+    func setTags(stored: String?) {
+        guard stored != storedTags else { return }
+        storedTags = stored
+        tagDotsView.tags = FinderTag.decode(stored)
+        tagDotsView.isHidden = tagDotsView.tags.isEmpty
+        needsLayout = true
     }
 
     override func isAccessibilitySelected() -> Bool { selectionStyle == .selected }
@@ -654,8 +747,8 @@ final class ThumbnailCellView: NSView {
         if isEdited { badges.append("✎") }
         if flag > 0 { badges.append("✓") }
         if flag < 0 { badges.append("✗") }
-        if rating > 0 { badges.append(String(repeating: "★", count: min(rating, 5))) }
         badgeField.stringValue = badges.joined(separator: "  ")
+        starsView.rating = min(max(rating, 0), ThumbnailGridLayout.starCount)
         badgeField.textColor = flag < 0 ? .systemRed : flag > 0 ? .systemGreen : .tertiaryLabelColor
     }
 
@@ -680,8 +773,11 @@ final class ThumbnailCellView: NSView {
         let info = layoutInfo
         placeholderLayer.frame = info.thumbnailArea
         imageLayer.frame = imagePixels.map(info.imageFrame(for:)) ?? info.thumbnailArea
-        nameField.frame = info.nameFrame
-        badgeField.frame = info.badgeFrame
+        let tagCount = tagDotsView.tags.count
+        nameField.frame = info.nameFrame(tagCount: tagCount)
+        tagDotsView.frame = info.tagDotsFrame(tagCount: tagCount)
+        badgeField.frame = info.flagBadgeFrame
+        starsView.frame = info.starsFrame
     }
 
     /// Colours resolve here, against the view's appearance.

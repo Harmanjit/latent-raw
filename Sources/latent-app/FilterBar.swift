@@ -32,6 +32,7 @@ struct FilterBar: View {
             attributeMenu("Camera", selection: $library.filter.camera, options: library.availableCameras)
             attributeMenu("Lens", selection: $library.filter.lens, options: library.availableLenses)
             attributeMenu("Keyword", selection: $library.filter.keyword, options: library.availableKeywords)
+            FinderTagFilterMenu(selection: $library.filter.finderTag, tags: library.availableFinderTags)
 
             TextField("Search file names", text: $library.filter.text)
                 .textFieldStyle(.roundedBorder)
@@ -145,13 +146,15 @@ struct FilterBar: View {
 
     private var sortMenu: some View {
         HStack(spacing: 4) {
-            Picker("Sort", selection: $library.sort.key) {
+            // Each key comes back in the direction it was last left in.
+            Picker("Sort", selection: Binding(get: { library.sort.key }, set: { library.chooseSortKey($0) })) {
                 ForEach(LibrarySortKey.allCases, id: \.self) { key in
                     Text(key.title).tag(key)
                 }
             }
             .labelsHidden()
             .frame(width: 110)
+            .help(library.sort.key == .custom ? "Drag thumbnails to arrange them" : "Sort by")
             Button {
                 library.sort.ascending.toggle()
             } label: {

@@ -36,8 +36,27 @@ public final class Library: ObservableObject {
         didSet { if filter != oldValue { recomputeVisible() } }
     }
     @Published public var sort = LibrarySort.default {
-        didSet { if sort != oldValue { recomputeVisible() } }
+        didSet {
+            guard sort != oldValue else { return }
+            recomputeVisible()
+            sortDidChange?(sort, sortMemory)
+        }
     }
+    /// The directions of the sort keys not showing (see `chooseSortKey`).
+    public var sortMemory = LibrarySortMemory()
+    /// Called after every change of `sort`, with the directions to keep.
+    /// The app saves both here so the choice outlives the launch; tests and
+    /// a Library without the app keep them in memory only.
+    public var sortDidChange: (@MainActor (LibrarySort, LibrarySortMemory) -> Void)?
+    /// The open catalog's saved Custom arrangement (see `CustomOrder`):
+    /// catalog-relative paths, empty when none was ever made.
+    public internal(set) var customOrder: [String] = [] {
+        didSet {
+            customPositions = CustomOrder.positions(customOrder)
+            if sort.key == .custom, !isPatchingRecords { recomputeVisible() }
+        }
+    }
+    private var customPositions: [String: Int] = [:]
     /// image id → keywords, for filtering; refreshed with the image list
     /// and whenever keywords are edited.
     private var keywordIndex: [Int64: Set<String>] = [:] {
@@ -182,7 +201,7 @@ public final class Library: ObservableObject {
                                keywords: record.id.flatMap { index[$0] } ?? [])
             }
             : images
-        let next = passing.sorted(by: sort)
+        let next = passing.sorted(by: sort, customPositions: customPositions)
         if next != visibleImages {
             if !next.elementsEqual(visibleImages, by: { $0.id == $1.id }) {
                 visibleListVersion += 1
@@ -245,6 +264,15 @@ public final class Library: ObservableObject {
     }
     public var availableKeywords: [String] {
         Array(keywordIndex.values.reduce(into: Set<String>()) { $0.formUnion($1) }).sorted()
+    }
+    /// Every Finder tag in the folder, by name, each in the colour its
+    /// first file shows it in.
+    public var availableFinderTags: [FinderTag] {
+        var byName: [String: FinderTag] = [:]
+        for record in images where record.finderTags != nil {
+            for tag in record.tags where byName[tag.name] == nil { byName[tag.name] = tag }
+        }
+        return byName.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     public func fileURL(for record: ImageRecord) -> URL? {
@@ -350,6 +378,7 @@ public final class Library: ObservableObject {
         var images: [ImageRecord]
         var editedImageIDs: Set<Int64>
         var keywordIndex: [Int64: Set<String>]
+        var customOrder: [String]
     }
 
     /// Reconciles `catalog` and reads its list, touching nothing shown:
@@ -361,7 +390,8 @@ public final class Library: ObservableObject {
                               thumbnailDirectory: await catalog.thumbnailDirectory,
                               images: try await catalog.allImages(),
                               editedImageIDs: try await catalog.editedImageIDs(),
-                              keywordIndex: try await catalog.allImageKeywords())
+                              keywordIndex: try await catalog.allImageKeywords(),
+                              customOrder: await catalog.customOrder())
         try await willPublishList?(catalog)
         return list
     }
@@ -393,6 +423,7 @@ public final class Library: ObservableObject {
         images = list.images
         editedImageIDs = list.editedImageIDs
         keywordIndex = list.keywordIndex
+        customOrder = list.customOrder
         isPatchingRecords = false
         recomputeVisible()
         if let selected = selectedImageID, !images.contains(where: { $0.id == selected }) {

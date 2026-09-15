@@ -105,6 +105,15 @@ enum Schema {
             }
         }
 
+        migrator.registerMigration("v3_finder_tags") { db in
+            // The file's Finder tags as reconcile last read them (see
+            // FinderTag). A cache of the file's own attribute, refreshed on
+            // every reconcile, so a rebuilt database loses nothing.
+            try db.alter(table: "images") { t in
+                t.add(column: "finder_tags", .text)
+            }
+        }
+
         return migrator
     }
 }
