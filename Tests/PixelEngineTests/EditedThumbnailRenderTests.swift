@@ -8,8 +8,7 @@ import Catalog
 /// PipelineThumbnailRenderer in the app target.
 final class EditedThumbnailRenderTests: XCTestCase {
     func testPipelineThumbnailHasTargetSizeAndReflectsTheEdit() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let path = try TestAssets.d750Path()
 
         let gpu = try GPUContext()
         let file = try RawFile(path: path)

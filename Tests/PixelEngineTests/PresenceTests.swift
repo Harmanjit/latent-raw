@@ -54,8 +54,7 @@ final class PresenceTests: XCTestCase {
     /// GPU, on the sample NEF: each control moves the statistic it is
     /// meant to move, and zero settings reproduce the baseline exactly.
     func testControlsMoveTheRightStatistics() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let path = try TestAssets.d750Path()
         let gpu = try GPUContext()
         let file = try RawFile(path: path)
         let session = try ImageSession(file: file, gpu: gpu)

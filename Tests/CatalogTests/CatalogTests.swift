@@ -79,13 +79,12 @@ final class CatalogTests: XCTestCase {
     /// The point of setting the database aside: ratings and edits come back
     /// from the sidecars on the next reconcile.
     func testRebuiltCatalogRecoversSidecarMetadata() async throws {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
-                          "Drop a D750 NEF in TestAssets/")
+        let sample = try TestAssets.d750Path()
         let fm = FileManager.default
         let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tmp) }
-        try fm.copyItem(atPath: ReconcileTests.sampleNEF, toPath: tmp.appendingPathComponent("A.NEF").path)
+        try fm.copyItem(atPath: sample, toPath: tmp.appendingPathComponent("A.NEF").path)
 
         do {
             let catalog = try Catalog.open(at: tmp)

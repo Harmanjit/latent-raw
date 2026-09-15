@@ -125,8 +125,7 @@ final class LinearSourceRenderTests: XCTestCase {
             }
         }
         // A Bayer raw's BaselineExposure is not applied.
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        if FileManager.default.fileExists(atPath: path) {
+        if let path = try? TestAssets.d750Path() {
             let session = try ImageSession(file: try RawFile(path: path), gpu: try gpu())
             XCTAssertEqual(session.sourceGain, 1)
             XCTAssertEqual(session.highlightClipScale, 1)

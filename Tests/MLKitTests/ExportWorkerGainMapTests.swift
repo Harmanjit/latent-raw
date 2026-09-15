@@ -8,8 +8,7 @@ import ColorKit
 /// HDR half itself when the settings ask for one.
 final class ExportWorkerGainMapTests: XCTestCase {
     func testHDRGainMapOptionWritesAnISOGainMap() async throws {
-        let path = AIMaskTests.assetPath("HSB_2615.NEF")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let path = try TestAssets.d750Path()
         let gpu = try GPUContext()
         for format in [ExportSettings.Format.jpeg, .png] {
             let out = FileManager.default.temporaryDirectory

@@ -62,11 +62,8 @@ final class ViewerInputTests: XCTestCase {
 
     // MARK: - Model
 
-    private static func asset(_ name: String) -> URL { TestAssets.url(name) }
-
     private func openedModel() async throws -> EditorModel {
-        let url = Self.asset("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path))
+        let url = try TestAssets.d750URL()
         _ = try await GPUContext.shared()
         let model = EditorModel()
         model.open(url: url)

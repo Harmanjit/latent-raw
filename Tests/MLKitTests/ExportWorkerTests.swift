@@ -115,8 +115,7 @@ final class ExportWorkerTests: XCTestCase {
     }
 
     func testFullSizeTIFFKeeps16BitsAndRegeneratesAIMask() async throws {
-        let path = AIMaskTests.assetPath("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let path = try TestAssets.d750Path()
         try XCTSkipUnless(SegmentationModel.isAvailable)
         let gpu = try GPUContext()
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("latent-export-\(UUID().uuidString).tif")

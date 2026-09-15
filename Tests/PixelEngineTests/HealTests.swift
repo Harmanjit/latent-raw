@@ -85,9 +85,13 @@ final class HealTests: XCTestCase {
     /// the source, and leaves the rest of the frame alone. A heal patch
     /// on a uniform area is close to the original (it copies texture but
     /// matches the rim), which is the property that hides seams.
+    ///
+    /// Only on the private sample: its spots are chosen for that picture.
+    /// On the golden raw the source lands on the ball's fine pattern, where
+    /// one pixel of a copy isn't the same pixel of the source.
     func testClonePatchCopiesSourceAndLeavesRestAlone() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let path = TestAssets.path(TestAssets.privateSampleName)
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path), "needs \(TestAssets.privateSampleName)")
         let gpu = try GPUContext()
         let file = try RawFile(path: path)
         let session = try ImageSession(file: file, gpu: gpu)

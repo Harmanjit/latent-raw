@@ -4,14 +4,13 @@ import XCTest
 import ColorKit
 
 // Render sanity checks on real sample files, which aren't committed (see
-// TestAssets/README.md); they skip until the files are dropped in locally.
+// TestAssets/README.md). Any D750 raw will do for most, so they run on the
+// golden raw CI downloads; the rest skip until their files are dropped in.
 // Pixel-exact comparisons against references are in GoldenImageTests.
 final class RenderPipelineTests: XCTestCase {
 
     func testBayerFileRendersWithoutCrashing() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
-                           "Drop a D750 NEF at \(path) — see TestAssets/README.md")
+        let path = try TestAssets.d750Path()
 
         let file = try RawFile(path: path)
         let gpu = try GPUContext()
@@ -26,9 +25,7 @@ final class RenderPipelineTests: XCTestCase {
     }
 
     func testViewportRenderIsSmallerThanSensor() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
-                           "Drop a D750 NEF at \(path) — see TestAssets/README.md")
+        let path = try TestAssets.d750Path()
 
         let file = try RawFile(path: path)
         let gpu = try GPUContext()
@@ -50,9 +47,7 @@ final class RenderPipelineTests: XCTestCase {
     /// This is what makes tiled 100% zoom trustworthy: the tile isn't an
     /// approximation of the export, it *is* the export, cropped.
     func testRegionRenderMatchesFullResolutionCrop() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
-                           "Drop a D750 NEF at \(path) — see TestAssets/README.md")
+        let path = try TestAssets.d750Path()
 
         let file = try RawFile(path: path)
         let gpu = try GPUContext()
@@ -97,9 +92,7 @@ final class RenderPipelineTests: XCTestCase {
     /// Exposure changes must reuse the demosaic; white balance changes
     /// must not (the multipliers feed the demosaic input).
     func testStageCacheSkipsDemosaicWhenOnlyToneChanges() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
-                           "Drop a D750 NEF at \(path) — see TestAssets/README.md")
+        let path = try TestAssets.d750Path()
 
         let file = try RawFile(path: path)
         let gpu = try GPUContext()
@@ -136,9 +129,7 @@ final class RenderPipelineTests: XCTestCase {
     /// EDR output must exceed 1.0 where the scene is bright, never exceed
     /// the headroom, and leave the file path bounded at 1.0.
     func testEDROutputUsesHeadroom() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
-                           "Drop a D750 NEF at \(path) — see TestAssets/README.md")
+        let path = try TestAssets.d750Path()
 
         let file = try RawFile(path: path)
         let gpu = try GPUContext()
@@ -171,9 +162,7 @@ final class RenderPipelineTests: XCTestCase {
     /// must equal the pixel count — the cheapest check that the binning
     /// arithmetic isn't dropping or double-counting anything.
     func testScopesCountEveryPixelOnce() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
-                           "Drop a D750 NEF at \(path) — see TestAssets/README.md")
+        let path = try TestAssets.d750Path()
 
         let file = try RawFile(path: path)
         let gpu = try GPUContext()

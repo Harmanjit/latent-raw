@@ -45,9 +45,11 @@ final class LocalAdjustmentTests: XCTestCase {
         XCTAssertFalse(EditStack.isDefault(p, relativeTo: EditParameters()))
     }
 
+    /// Only on the private sample: the tone-range check needs its bright
+    /// sky at the top of the frame, where the golden raw has dark fabric.
     func testMasksBrightenOnlyWhereTheyShould() throws {
-        let path = TestAssets.path("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let path = TestAssets.path(TestAssets.privateSampleName)
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path), "needs \(TestAssets.privateSampleName)")
         let gpu = try GPUContext()
         let session = try ImageSession(file: try RawFile(path: path), gpu: gpu)
         let pipeline = RenderPipeline(gpu: gpu)

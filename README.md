@@ -172,7 +172,9 @@ Sample RAW files are intentionally not committed (they're large and mostly
 redistributable-but-not-ours). `scripts/fetch_test_assets.sh` downloads
 the public-domain D750 raw the golden-image tests render, which is all CI
 uses. `TestAssets/README.md` describes the optional samples; tests whose
-sample is missing skip themselves.
+sample is missing skip themselves, and tests that need any D750 raw use the
+public-domain one. `LATENT_CI_ASSETS_ONLY=1 swift test` hides every other
+file, so a local run skips what CI skips.
 
 ## Contributing
 

@@ -7,15 +7,12 @@ import MLKit
 /// The editor's state across opening, closing and background work.
 @MainActor
 final class EditorModelStateTests: XCTestCase {
-    private static func asset(_ name: String) -> URL { TestAssets.url(name) }
-
     /// A file that won't open leaves the editor closed. Nothing of the
     /// photo open before may stay: with its catalog id, history or pending
     /// save still set, Undo or the history load that follows would write
     /// that photo's edit (or its deletion) onto the one that failed.
     func testAFailedOpenLeavesNothingOfThePreviousPhoto() async throws {
-        let url = Self.asset("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path))
+        let url = try TestAssets.d750URL()
         _ = try await GPUContext.shared()
         let model = EditorModel()
         XCTAssertTrue(model.isReady)
@@ -67,7 +64,7 @@ final class EditorModelStateTests: XCTestCase {
     /// Noise reduction takes seconds to minutes and is often left to run:
     /// the Mac stays awake for it, as for an export.
     func testDenoiseKeepsTheMacAwakeWhileItRuns() async throws {
-        let url = Self.asset("golden_nikon_d750_cc0.nef")
+        let url = TestAssets.url(TestAssets.goldenName)
         try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path) && AIDenoiser.isAvailable)
         _ = try await GPUContext.shared()
         let model = EditorModel()

@@ -59,6 +59,8 @@ final class AIDenoiseTests: XCTestCase {
     /// End to end on the sample NEF: the worker fills the session, the
     /// pipeline blends it, and strength 1 shows less pixel-to-pixel noise
     /// than strength 0 while strength 0 is bit-identical to no denoise.
+    /// Not on CI's golden raw: it passes there, but a full-frame denoise
+    /// takes 40 s on an M-series Mac and far longer on a CI runner.
     func testPipelineBlendsTheResult() async throws {
         let path = AIMaskTests.assetPath("nikon_d750_sample.nef")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path))

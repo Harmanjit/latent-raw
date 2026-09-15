@@ -6,14 +6,13 @@ final class LibraryTests: XCTestCase {
     nonisolated(unsafe) var folder: URL!
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
-                          "Drop a D750 NEF in TestAssets/")
+        let sample = try TestAssets.d750Path()
         folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("latent-library-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("Day 2"),
                                                 withIntermediateDirectories: true)
         for name in ["A.NEF", "B.NEF", "Day 2/C.NEF"] {
-            try FileManager.default.copyItem(atPath: ReconcileTests.sampleNEF,
+            try FileManager.default.copyItem(atPath: sample,
                                              toPath: folder.appendingPathComponent(name).path)
         }
     }
@@ -253,7 +252,7 @@ final class LibraryTests: XCTestCase {
     /// One image whose sidecar can't be written doesn't stop the others,
     /// and the failure is reported by name rather than dropped.
     func testSelectionChangeReportsFailuresAndFinishesTheRest() async throws {
-        try FileManager.default.copyItem(atPath: ReconcileTests.sampleNEF,
+        try FileManager.default.copyItem(atPath: try TestAssets.d750Path(),
                                          toPath: folder.appendingPathComponent("E.NEF").path)
         let library = Library()
         try await library.open(folder: folder)

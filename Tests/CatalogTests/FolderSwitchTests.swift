@@ -39,15 +39,14 @@ final class FolderSwitchTests: XCTestCase {
     nonisolated(unsafe) var second: URL!
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: ReconcileTests.sampleNEF),
-                          "Drop a D750 NEF in TestAssets/")
+        let sample = try TestAssets.d750Path()
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent("latent-switch-\(UUID().uuidString)", isDirectory: true)
         first = base.appendingPathComponent("First", isDirectory: true)
         second = base.appendingPathComponent("Second", isDirectory: true)
         for (folder, name) in [(first!, "A.NEF"), (second!, "Z.NEF")] {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-            try fm.copyItem(atPath: ReconcileTests.sampleNEF, toPath: folder.appendingPathComponent(name).path)
+            try fm.copyItem(atPath: sample, toPath: folder.appendingPathComponent(name).path)
         }
     }
 

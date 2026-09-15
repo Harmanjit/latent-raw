@@ -105,8 +105,7 @@ final class AIMaskTests: XCTestCase {
     }
 
     func testAIMaskDrivesALocalAdjustment() throws {
-        let path = Self.assetPath("nikon_d750_sample.nef")
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        let path = try TestAssets.d750Path()
         let gpu = try GPUContext()
         let session = try ImageSession(file: try RawFile(path: path), gpu: gpu)
         let pipeline = RenderPipeline(gpu: gpu)
