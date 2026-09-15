@@ -131,6 +131,246 @@ final class ViewingModesTests: XCTestCase {
         XCTAssertEqual(image.top, reserved, "leaving puts the image back below the toolbar")
     }
 
+    // MARK: Full screen against the window's own
+
+    /// F again on the way in: AppKit ignores a toggle until the window has
+    /// arrived (even from inside didEnter), which left the window full
+    /// screen with the mode gone.
+    func testLeavingOnTheWayInTakesTheWindowBackOnceItArrives() {
+        let (mode, window) = fullScreenFixture()
+        mode.enter(window: window)
+        XCTAssertEqual(window.animation, .entering)
+        mode.leave()
+        XCTAssertFalse(mode.isActive)
+        window.finishAnimation()
+        settle { window.animation == .exiting }
+        XCTAssertEqual(window.animation, .exiting, "asked out once it arrived")
+        window.finishAnimation()
+        XCTAssertFalse(window.styleMask.contains(.fullScreen))
+        XCTAssertEqual(window.ignoredToggles, 0)
+        XCTAssertFalse(mode.isActive)
+    }
+
+    /// F on the way out: a toggle then cuts the animation short and starts
+    /// an enter AppKit abandons, so the mode waits for the window to be out
+    /// and then takes it back in.
+    func testEnteringOnTheWayOutGoesBackInOnceOut() {
+        let (mode, window) = fullScreenFixture()
+        mode.enter(window: window)
+        window.finishAnimation()
+        XCTAssertTrue(mode.hasArrived)
+        mode.leave()
+        XCTAssertEqual(window.animation, .exiting)
+        mode.enter(window: window)
+        XCTAssertTrue(mode.isActive)
+        XCTAssertFalse(mode.hasArrived, "still on its way out")
+        XCTAssertEqual(window.animation, .exiting, "not asked while it animates")
+        window.finishAnimation()
+        settle { window.animation == .entering }
+        XCTAssertEqual(window.animation, .entering, "asked in once out")
+        window.finishAnimation()
+        XCTAssertTrue(window.styleMask.contains(.fullScreen))
+        XCTAssertTrue(mode.isActive)
+        XCTAssertTrue(mode.hasArrived)
+        XCTAssertEqual(window.interruptedExits, 0)
+    }
+
+    /// ⌃⌘F out of full screen, then F before the animation ends.
+    func testEnteringWhileTheWindowLeavesFullScreenByItselfWaitsForIt() {
+        let (mode, window) = fullScreenFixture()
+        window.toggleFullScreen(nil)
+        window.finishAnimation()
+        window.toggleFullScreen(nil)
+        XCTAssertEqual(window.animation, .exiting)
+        mode.enter(window: window)
+        XCTAssertEqual(window.animation, .exiting)
+        mode.checkAnimation()
+        XCTAssertEqual(mode.state.phase, .exiting, "an animation begun before F is not taken as overdue")
+        window.finishAnimation()
+        settle { window.animation == .entering }
+        window.finishAnimation()
+        XCTAssertTrue(window.styleMask.contains(.fullScreen))
+        XCTAssertTrue(mode.hasArrived)
+        mode.leave()
+        XCTAssertEqual(window.animation, .exiting, "the mode made it full screen, so leaving undoes it")
+        window.finishAnimation()
+        XCTAssertEqual(window.interruptedExits, 0)
+    }
+
+    /// The green button, then F before the window has arrived: the mode
+    /// asks nothing of it, and leaves it full screen after.
+    func testEnteringOnAWayInStartedElsewhereLeavesTheWindowFullScreen() {
+        let (mode, window) = fullScreenFixture()
+        window.toggleFullScreen(nil)
+        mode.enter(window: window)
+        XCTAssertFalse(mode.hasArrived)
+        window.finishAnimation()
+        XCTAssertTrue(mode.hasArrived)
+        mode.leave()
+        settle { window.animation != .none }
+        XCTAssertEqual(window.animation, .none)
+        XCTAssertTrue(window.styleMask.contains(.fullScreen), "it was full screen before the mode")
+        XCTAssertEqual(window.ignoredToggles, 0)
+    }
+
+    /// F, Esc and F again, all on the way in, end full screen; ⌃⌘F then
+    /// takes the panels back as the window starts out, and F on that way
+    /// out goes back in once it is out.
+    func testQuickPressesAndControlCommandFEndWhereTheWindowIs() {
+        let (mode, window) = fullScreenFixture()
+        mode.enter(window: window)
+        mode.leave()
+        mode.enter(window: window)
+        window.finishAnimation()
+        settle { window.animation != .none }
+        XCTAssertEqual(window.animation, .none, "not asked out: F came back before it arrived")
+        XCTAssertTrue(mode.hasArrived)
+        window.toggleFullScreen(nil)
+        XCTAssertFalse(mode.isActive, "the panels come back as the window starts out")
+        mode.enter(window: window)
+        XCTAssertEqual(window.animation, .exiting)
+        window.finishAnimation()
+        settle { window.animation == .entering }
+        window.finishAnimation()
+        XCTAssertTrue(mode.hasArrived)
+        XCTAssertEqual(window.ignoredToggles, 0)
+        XCTAssertEqual(window.interruptedExits, 0)
+    }
+
+    /// ⌃⌘F on the mode's own way out cuts it short into an enter AppKit
+    /// drops without a word: the mode notices the window back in a
+    /// window and is off, and F then works again.
+    func testAnEnterTheWindowDropsEndsTheMode() {
+        let (mode, window) = fullScreenFixture()
+        mode.enter(window: window)
+        window.finishAnimation()
+        mode.leave()
+        mode.enter(window: window)
+        window.toggleFullScreen(nil)
+        XCTAssertEqual(window.interruptedExits, 1)
+        window.finishAnimation()
+        XCTAssertFalse(window.styleMask.contains(.fullScreen))
+        mode.checkAnimation()
+        XCTAssertFalse(mode.isActive, "no image alone in a window")
+        mode.enter(window: window)
+        XCTAssertEqual(window.animation, .entering)
+        window.finishAnimation()
+        XCTAssertTrue(mode.hasArrived)
+    }
+
+    func testClosingTheWindowOnTheWayInEndsTheMode() {
+        let (mode, window) = fullScreenFixture()
+        mode.enter(window: window)
+        window.close()
+        XCTAssertFalse(mode.isActive)
+        XCTAssertFalse(mode.state.needsToggle)
+    }
+
+    /// An animation whose did notification never comes is taken as ended
+    /// where the style mask says, rather than waited on for ever.
+    func testAnAnimationThatNeverEndsIsNotWaitedOnForEver() {
+        let (mode, window) = fullScreenFixture()
+        mode.enter(window: window)
+        mode.checkAnimation()
+        XCTAssertFalse(mode.hasArrived)
+        mode.checkAnimation(now: Date().addingTimeInterval(FullScreenImageMode.animationTimeout + 1))
+        XCTAssertTrue(mode.hasArrived)
+    }
+
+    /// The mode asks the window to change only while it is still, and
+    /// follows what it does meanwhile.
+    func testTheStateWaitsForTheWindowToBeStill() {
+        var state = FullScreenImageState()
+        state.handle(.enter(drivesWindow: true))
+        XCTAssertTrue(state.needsToggle)
+        XCTAssertFalse(state.hasArrived)
+        state.handle(.willEnter)
+        state.handle(.leave)
+        XCTAssertFalse(state.needsToggle, "not on the way in")
+        state.handle(.didEnter)
+        XCTAssertTrue(state.needsToggle, "out once arrived")
+        state.handle(.willExit(byMode: true))
+        state.handle(.enter(drivesWindow: true))
+        XCTAssertTrue(state.isActive)
+        XCTAssertFalse(state.needsToggle, "not on the way out")
+        XCTAssertFalse(state.hasArrived)
+        state.handle(.didExit)
+        XCTAssertTrue(state.needsToggle, "back in once out")
+        state.handle(.willEnter)
+        state.handle(.didEnter)
+        XCTAssertTrue(state.hasArrived)
+        XCTAssertTrue(state.ownsFullScreen)
+    }
+
+    func testTheStateKeepsToFullScreenMadeElsewhere() {
+        var state = FullScreenImageState(phase: .entering)
+        state.handle(.enter(drivesWindow: true))
+        XCTAssertFalse(state.ownsFullScreen)
+        XCTAssertFalse(state.hasArrived)
+        state.handle(.didEnter)
+        XCTAssertTrue(state.hasArrived)
+        state.handle(.willExit(byMode: false))
+        XCTAssertFalse(state.isActive, "⌃⌘F takes the mode with it")
+        state.handle(.enter(drivesWindow: true))
+        XCTAssertTrue(state.ownsFullScreen, "F on that way out makes it full screen again")
+        state.handle(.didExit)
+        XCTAssertTrue(state.needsToggle)
+    }
+
+    func testTheStateGivesUpOnAWindowThatWontChange() {
+        var state = FullScreenImageState()
+        state.handle(.enter(drivesWindow: true))
+        state.handle(.failed(isFullScreen: false))
+        XCTAssertFalse(state.isActive)
+        XCTAssertFalse(state.needsToggle)
+        state = FullScreenImageState(phase: .fullScreen)
+        state.handle(.enter(drivesWindow: true))
+        state.handle(.leave)
+        XCTAssertFalse(state.needsToggle, "not the mode's to undo")
+        state = FullScreenImageState()
+        for event: FullScreenImageState.Event in [.enter(drivesWindow: true), .willEnter, .didEnter, .leave] {
+            state.handle(event)
+        }
+        state.handle(.failed(isFullScreen: true))
+        XCTAssertFalse(state.needsToggle, "not asked again")
+        XCTAssertEqual(state.phase, .fullScreen)
+        state.handle(.enter(drivesWindow: false))
+        XCTAssertTrue(state.hasArrived)
+        state = FullScreenImageState()
+        state.handle(.enter(drivesWindow: false))
+        XCTAssertTrue(state.hasArrived, "no window: only the layout")
+        state.handle(.closed)
+        XCTAssertFalse(state.isActive)
+    }
+
+    /// Every sequence of eight of F, ⌃⌘F, the window's animation ending and
+    /// the window closing, against a model of AppKit's full screen: the mode
+    /// never asks an animating window, and once all is still it is on only
+    /// in a full-screen window and owns no full screen when off.
+    func testEveryInterleavingEndsWhereTheWindowIs() {
+        let length = 8
+        for sequence in 0..<Int(pow(4, Double(length))) {
+            var sim = FullScreenSimulation()
+            var code = sequence
+            for _ in 0..<length {
+                switch code % 4 {
+                case 0: sim.pressF()
+                case 1: sim.toggle(byMode: false)
+                case 2: sim.finishAnimation()
+                default: sim.close()
+                }
+                code /= 4
+            }
+            sim.settle()
+            guard sim.requestsWhileAnimating == 0, sim.state.phase == sim.window,
+                  !sim.state.isActive || sim.window == .fullScreen,
+                  sim.state.isActive || !sim.state.ownsFullScreen else {
+                return XCTFail("sequence \(sequence): \(sim.state), window \(sim.window), "
+                               + "\(sim.requestsWhileAnimating) requests while animating")
+            }
+        }
+    }
+
     func testCommandsEnable() {
         var state = CommandState()
         XCTAssertFalse(state.isEnabled(.fullScreenImage))
@@ -224,6 +464,13 @@ final class ViewingModesTests: XCTestCase {
         XCTAssertEqual(SecondaryPreview.renderPotential(main: 5, secondary: 1), 5)
     }
 
+    private func fullScreenFixture() -> (FullScreenImageMode, FullScreenWindowDouble) {
+        let window = FullScreenWindowDouble(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+                                            styleMask: [.titled, .resizable], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        return (FullScreenImageMode(), window)
+    }
+
     /// Lets SwiftUI lay out until `done`, for up to two seconds.
     private func settle(until done: () -> Bool) {
         let deadline = Date().addingTimeInterval(2)
@@ -249,5 +496,152 @@ private struct Probe: View {
             let _ = into.inset = proxy.safeAreaInsets.top
             Color.black
         }
+    }
+}
+
+/// A window that goes in and out of full screen as AppKit's do, as far as
+/// full-screen image mode can tell, without taking over the screen. Its
+/// animations end when the test says. Measured on macOS 15: the style mask
+/// changes as soon as a toggle starts; a toggle on the way in (even from
+/// inside didEnter) is ignored; a toggle on the way out posts didExit at
+/// once and willEnter, then the enter fails and the window drops back
+/// with no notification (only the delegate hears of it).
+@MainActor
+private final class FullScreenWindowDouble: NSWindow {
+    enum Animation { case none, entering, exiting }
+    private(set) var animation = Animation.none
+    private(set) var ignoredToggles = 0
+    private(set) var interruptedExits = 0
+    private var isFull = false
+    private var postingDidEnter = false
+    private var enterFails = false
+
+    override var styleMask: NSWindow.StyleMask {
+        get { isFull ? super.styleMask.union(.fullScreen) : super.styleMask }
+        set { super.styleMask = newValue.subtracting(.fullScreen) }
+    }
+
+    override func toggleFullScreen(_ sender: Any?) {
+        switch animation {
+        case .entering:
+            ignoredToggles += 1
+        case .none where postingDidEnter:
+            ignoredToggles += 1
+        case .none:
+            if isFull { begin(.exiting) } else { begin(.entering) }
+        case .exiting:
+            interruptedExits += 1
+            animation = .none
+            post(NSWindow.didExitFullScreenNotification)
+            begin(.entering)
+            enterFails = true
+        }
+    }
+
+    /// The animation under way ends: the window arrives, or an enter that
+    /// cut a way out short drops back to a window unannounced.
+    func finishAnimation() {
+        switch animation {
+        case .none:
+            return
+        case .entering where enterFails:
+            enterFails = false
+            animation = .none
+            isFull = false
+        case .entering:
+            animation = .none
+            postingDidEnter = true
+            post(NSWindow.didEnterFullScreenNotification)
+            postingDidEnter = false
+        case .exiting:
+            animation = .none
+            post(NSWindow.didExitFullScreenNotification)
+        }
+    }
+
+    private func begin(_ next: Animation) {
+        animation = next
+        if next == .entering {
+            post(NSWindow.willEnterFullScreenNotification)
+            isFull = true
+        } else {
+            post(NSWindow.willExitFullScreenNotification)
+            isFull = false
+        }
+    }
+
+    private func post(_ name: Notification.Name) {
+        NotificationCenter.default.post(name: name, object: self)
+    }
+}
+
+/// AppKit's full screen as the mode sees it, for `FullScreenImageState`
+/// alone: the real mode's requests after a did notification run a turn
+/// later, and its check notices a dropped enter.
+private struct FullScreenSimulation {
+    var state = FullScreenImageState()
+    var window = FullScreenImageState.Phase.windowed
+    var requestsWhileAnimating = 0
+    private var enterFails = false
+
+    mutating func pressF() {
+        state.handle(state.isActive ? .leave : .enter(drivesWindow: true))
+        request()
+    }
+
+    mutating func toggle(byMode: Bool) {
+        switch window {
+        case .windowed:
+            window = .entering
+            state.handle(.willEnter)
+        case .fullScreen:
+            window = .exiting
+            state.handle(.willExit(byMode: byMode))
+        case .entering:
+            if byMode { requestsWhileAnimating += 1 }
+        case .exiting:
+            if byMode { requestsWhileAnimating += 1 }
+            state.handle(.didExit)
+            window = .entering
+            state.handle(.willEnter)
+            enterFails = true
+        }
+        if !byMode { request() }
+    }
+
+    mutating func finishAnimation() {
+        switch window {
+        case .entering where enterFails:
+            enterFails = false
+            window = .windowed
+            state.handle(.failed(isFullScreen: false))
+        case .entering:
+            window = .fullScreen
+            state.handle(.didEnter)
+        case .exiting:
+            window = .windowed
+            state.handle(.didExit)
+        case .windowed, .fullScreen:
+            return
+        }
+        request()
+    }
+
+    mutating func close() {
+        state.handle(.closed)
+        state = FullScreenImageState()
+        window = .windowed
+        enterFails = false
+    }
+
+    mutating func settle() {
+        for _ in 0..<8 {
+            request()
+            finishAnimation()
+        }
+    }
+
+    private mutating func request() {
+        if state.needsToggle { toggle(byMode: true) }
     }
 }
