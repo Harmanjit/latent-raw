@@ -26,6 +26,12 @@ public struct MergeDNGWriteResult: Sendable, Equatable {
     public let recipe: MergeRecipe
     /// The BaselineExposure written: the metadata's plus the shift.
     public let baselineExposure: Double
+
+    public init(url: URL, byteCount: Int, normalisation: ExposureNormalisation, recipe: MergeRecipe,
+                baselineExposure: Double) {
+        self.url = url; self.byteCount = byteCount; self.normalisation = normalisation
+        self.recipe = recipe; self.baselineExposure = baselineExposure
+    }
 }
 
 /// Writes a merged image as a DNG that Latent (through LibRaw), Apple's
