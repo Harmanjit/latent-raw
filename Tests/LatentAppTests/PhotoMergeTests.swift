@@ -346,8 +346,8 @@ final class HDRMergeSheetModelTests: XCTestCase {
         struct Odd: Error {}
         let other = HDRMergeSheetModel.message(for: Odd())
         XCTAssertTrue(other.hasPrefix("These photos couldn’t be read for an HDR merge."), other)
-        XCTAssertEqual(HDRMergeSheetModel.message(for: UnavailableHDRMerger.error),
-                       "The graphics processor couldn't run the merge: The HDR engine isn't built into this version yet")
+        XCTAssertEqual(HDRMergeSheetModel.message(for: HDRMergeError.gpuUnavailable(reason: "out of memory")),
+                       "The graphics processor couldn't run the merge: out of memory")
     }
 
     /// Closing the dialog while the photos are read stops the analysis and
@@ -364,13 +364,10 @@ final class HDRMergeSheetModelTests: XCTestCase {
         XCTAssertEqual(model.phase, .analysing)
     }
 
-    /// The placeholder the app ships until the engine lands says so in the dialog.
-    func testTheUnavailableEngineSaysSo() async {
-        let (model, _) = model(FakeHDREngine(analysis: .failure(UnavailableHDRMerger.error)))
-        model.start()
-        await waitUntil("the error") { model.phase != .analysing }
-        guard case .failed(let message) = model.phase else { return XCTFail("\(model.phase)") }
-        XCTAssertTrue(message.contains("isn't built into this version yet"))
+    /// The app builds the real engine, not a stand-in.
+    func testTheAppUsesTheRealEngine() async throws {
+        let gpu = try await GPUContext.shared()
+        XCTAssertTrue(PhotoMergeEngine.hdr(gpu: gpu) is HDRMerger)
     }
 
     func testStops() {

@@ -21,23 +21,6 @@ enum PhotoMergeEngine {
         #if DEBUG
         if let debugHDR { return debugHDR }
         #endif
-        return UnavailableHDRMerger() // LEAD: construct HDRMerger(gpu:) here when merge/hdr-core lands
-    }
-}
-
-/// The engine this build has until the real one is part of it: every
-/// request fails with a message the sheet shows in place of the photos.
-struct UnavailableHDRMerger: HDRMerging {
-    static let error = HDRMergeError.gpuUnavailable(reason: "The HDR engine isn't built into this version yet")
-
-    func analyse(_ urls: [URL]) async throws -> HDRMergeAnalysis {
-        throw Self.error
-    }
-
-    func merge(_ analysis: HDRMergeAnalysis, options: HDRMergeOptions, sources: [MergeRecipe.Source],
-               to destination: URL,
-               prepareSidecar: @escaping @Sendable (MergeRecipe) async throws -> Void,
-               progress: @escaping @Sendable (HDRMergeProgress) -> Void) async throws -> MergeDNGWriteResult {
-        throw Self.error
+        return HDRMerger(gpu: gpu)
     }
 }
