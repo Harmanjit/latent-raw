@@ -406,6 +406,28 @@ public final class RenderPipeline {
         let rawH = summary.rawHeight
         let plan = Self.plan(rawWidth: rawW, rawHeight: rawH, scale: scale)
 
+        // A region render with lens corrections must demosaic more than the
+        // region. Distortion, TCA and keystone make each output pixel read
+        // from somewhere else in the frame, up to tens of pixels away near
+        // the edges, and anything read from outside the demosaiced texture
+        // clamps to its edge row: a band of smeared streaks along the
+        // region's border. So the stages up to and including the lens pass
+        // run over `sourcePlan`, the region widened to every point the lens
+        // pass reads (`lensSourceWindow`); the lens pass writes exactly the
+        // requested region, and everything after it runs at that size.
+        var sourcePlan = plan
+        var widened = false
+        if !cameraRGBOnly, case .fullResolution(let origin, let size) = plan,
+           size.width < rawW || size.height < rawH,
+           Self.wantsLensCorrection(session: session, parameters: parameters) {
+            let window = Self.lensSourceWindow(
+                for: CGRect(x: origin.x, y: origin.y, width: size.width, height: size.height),
+                sampling: LensSampling(session: session, parameters: parameters))
+            sourcePlan = .fullResolution(origin: (Int(window.minX), Int(window.minY)),
+                                         size: (Int(window.width), Int(window.height)))
+            widened = true
+        }
+
         // Every stage of this render is encoded into ONE command buffer and
         // submitted once. The GPU runs the stages back to back and the CPU
         // waits a single time at the end. Submitting each stage separately
@@ -418,7 +440,7 @@ public final class RenderPipeline {
         // demosaiced result for exactly these inputs, skip straight to the
         // colour stage. Exposure and tone edits hit this every time; white
         // balance and zoom changes miss.
-        let stageKey = Self.stageKey(plan: plan, source: summary.sourceKind, multipliers: multipliers,
+        let stageKey = Self.stageKey(plan: sourcePlan, source: summary.sourceKind, multipliers: multipliers,
                                      demosaic: parameters.demosaic)
         let cached = session.cachedCameraRGB(for: stageKey)
 
@@ -431,9 +453,10 @@ public final class RenderPipeline {
         // its BaselineExposure gain. Every stage after this point works on
         // that texture alone and never asks which kind of source made it.
         let cameraRGB: MTLTexture
-        let renderInfo: RenderInfo
+        // What the camera-RGB texture covers: `sourcePlan`'s rectangle.
+        let sourceInfo: RenderInfo
         let displayRole: ImageSession.TextureRole
-        switch plan {
+        switch sourcePlan {
         case .fullResolution(let origin, let size):
             displayRole = .display
             if let bayerOrder {
@@ -446,7 +469,7 @@ public final class RenderPipeline {
                     session: session, cmdBuffer: cmdBuffer, multipliers: multipliers,
                     origin: origin, size: size)
             }
-            renderInfo = RenderInfo(outputWidth: cameraRGB.width,
+            sourceInfo = RenderInfo(outputWidth: cameraRGB.width,
                                      outputHeight: cameraRGB.height,
                                      binQuads: 1, isFullResolution: true,
                                      // Nothing to demosaic in a linear source.
@@ -465,7 +488,7 @@ public final class RenderPipeline {
                     session: session, cmdBuffer: cmdBuffer, binQuads: quads, multipliers: multipliers)
             }
             let span = quads * 2
-            renderInfo = RenderInfo(outputWidth: cameraRGB.width,
+            sourceInfo = RenderInfo(outputWidth: cameraRGB.width,
                                      outputHeight: cameraRGB.height,
                                      binQuads: quads, isFullResolution: false,
                                      demosaicUsed: nil,
@@ -482,13 +505,23 @@ public final class RenderPipeline {
             cmdBuffer.commit()
             cmdBuffer.waitUntilCompleted()
             if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
-            info?.pointee = renderInfo
+            info?.pointee = sourceInfo
             return cameraRGB
+        }
+
+        // What this render returns: the requested region. The same as
+        // `sourceInfo` unless the lens pass needed a wider source.
+        var renderInfo = sourceInfo
+        if widened, case .fullResolution(let origin, let size) = plan {
+            renderInfo = RenderInfo(outputWidth: size.width, outputHeight: size.height, binQuads: 1,
+                                    isFullResolution: true, demosaicUsed: sourceInfo.demosaicUsed,
+                                    sensorRect: CGRect(x: origin.x, y: origin.y, width: size.width, height: size.height),
+                                    demosaicWasCached: sourceInfo.demosaicWasCached)
         }
 
         // How many sensor pixels each output pixel spans, for scaling the
         // detail stages so the preview predicts the full-size result.
-        let binSpan: Float = renderInfo.isFullResolution ? 1 : Float(renderInfo.binQuads * 2)
+        let binSpan: Float = sourceInfo.isFullResolution ? 1 : Float(sourceInfo.binQuads * 2)
 
         var colourInput = cameraRGB
 
@@ -499,7 +532,7 @@ public final class RenderPipeline {
         if parameters.aiDenoise > 0, session.supportsAIDenoise, let denoised = session.aiDenoisedCameraRGB {
             colourInput = try applyAIDenoise(session: session, cmdBuffer: cmdBuffer, input: cameraRGB,
                                              denoised: denoised, strength: parameters.aiDenoise,
-                                             multipliers: multipliers, renderInfo: renderInfo,
+                                             multipliers: multipliers, renderInfo: sourceInfo,
                                              outputRole: displayRole == .display ? .aiDenoised : .aiDenoisedPreview)
         }
 
@@ -513,23 +546,23 @@ public final class RenderPipeline {
 
         // Spot removal, in camera space, before the lens stage moves pixels.
         let activeHeals = parameters.heals.filter {
-            $0.targetBounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(renderInfo.sensorRect)
+            $0.targetBounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(sourceInfo.sensorRect)
         }
         // Red eyes, on the same working texture.
         let activeRedEyes = parameters.redEyes.filter {
-            !$0.isIdentity && $0.bounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(renderInfo.sensorRect)
+            !$0.isIdentity && $0.bounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(sourceInfo.sensorRect)
         }
         if !activeHeals.isEmpty || !activeRedEyes.isEmpty {
             colourInput = try applyHeal(session: session, cmdBuffer: cmdBuffer, input: colourInput,
                                         patches: activeHeals, redEyes: activeRedEyes, cameraToWorking: cameraToWorking,
-                                        renderInfo: renderInfo, binSpan: binSpan)
+                                        renderInfo: sourceInfo, binSpan: binSpan)
         }
 
         // Stage 7: lens corrections, still in camera space.
         if Self.wantsLensCorrection(session: session, parameters: parameters) {
             colourInput = try applyLensCorrection(session: session, cmdBuffer: cmdBuffer,
                                                   input: colourInput, parameters: parameters,
-                                                  renderInfo: renderInfo, binSpan: binSpan)
+                                                  source: sourceInfo, output: renderInfo, binSpan: binSpan)
         }
 
         var final = try applyColorAndTone(session: session, cmdBuffer: cmdBuffer,
@@ -590,36 +623,150 @@ public final class RenderPipeline {
             || (p.lensVignetting && c.vignetting != nil)
     }
 
+    /// Everything the lens pass needs to know to map an output pixel to
+    /// the place it reads from, resolved from the session's profile and
+    /// the edit's switches. The GPU kernel (LensCorrect.metal) and
+    /// `sourcePoints` below do the same arithmetic with these values.
+    struct LensSampling {
+        var sensorSize: SIMD2<Float>
+        var cropRatio: Float
+        var autoScale: Float
+        var distortion: DistortionModel?
+        var manualDistortion: Float
+        var tca: TCAModel?
+        var vignetting: VignettingModel?
+        var manualVignetting: Float
+        var perspectiveInverse: simd_float3x3
+
+        init(sensorSize: SIMD2<Float>, cropRatio: Float = 1, autoScale: Float = 1,
+             distortion: DistortionModel? = nil, manualDistortion: Float = 0, tca: TCAModel? = nil,
+             vignetting: VignettingModel? = nil, manualVignetting: Float = 0,
+             perspectiveInverse: simd_float3x3 = matrix_identity_float3x3) {
+            self.sensorSize = sensorSize
+            self.cropRatio = cropRatio
+            self.autoScale = autoScale
+            self.distortion = distortion
+            self.manualDistortion = manualDistortion
+            self.tca = tca
+            self.vignetting = vignetting
+            self.manualVignetting = manualVignetting
+            self.perspectiveInverse = perspectiveInverse
+        }
+
+        init(session: ImageSession, parameters p: EditParameters) {
+            let c = session.lensCorrection
+            let summary = session.file.summary
+            sensorSize = SIMD2(Float(summary.rawWidth), Float(summary.rawHeight))
+            cropRatio = c?.cropRatio ?? 1
+            distortion = p.lensDistortion ? c?.distortion : nil
+            autoScale = distortion != nil ? (c?.autoScale ?? 1) : 1
+            manualDistortion = p.manualDistortion
+            tca = p.lensTCA ? c?.tca : nil
+            vignetting = p.lensVignetting ? c?.vignetting : nil
+            manualVignetting = p.manualVignetting
+            perspectiveInverse = p.perspective.inverseMatrix
+        }
+
+        /// Where the corrected image's sensor point `sensor` reads from in
+        /// the uncorrected one: green, red and blue (TCA pulls red and blue
+        /// to slightly different radii). A Swift twin of the kernel.
+        func sourcePoints(forSensorPoint sensor: SIMD2<Float>) -> [SIMD2<Float>] {
+            let halfShort = min(sensorSize.x, sensorSize.y) * 0.5
+            var cu = (sensor - sensorSize * 0.5) * autoScale
+            let q = perspectiveInverse * SIMD3(cu / halfShort, 1)
+            cu = SIMD2(q.x, q.y) / max(q.z, 1e-4) * halfShort
+            let ru = simd_length(cu) / halfShort * cropRatio
+            var f = distortion?.factor(atUndistortedRadius: ru) ?? 1
+            if manualDistortion != 0 { f *= 1 - manualDistortion + manualDistortion * ru * ru }
+            let cd = cu * f
+            let centre = sensorSize * 0.5
+            guard let tca else { return [cd + centre] }
+            let rd = simd_length(cd) / halfShort * cropRatio
+            let fr = tca.red.x * rd * rd + tca.red.y * rd + tca.red.z
+            let fb = tca.blue.x * rd * rd + tca.blue.y * rd + tca.blue.z
+            return [cd + centre, cd * fr + centre, cd * fb + centre]
+        }
+    }
+
+    /// Sensor pixels of apron kept around the lens pass's reads: one for
+    /// the bilinear sample, the rest so the region demosaic's own edge
+    /// (where RCD mirrors instead of reading real neighbours, up to 11
+    /// pixels in) stays outside everything the lens pass reads.
+    static let lensApron: CGFloat = 16
+
+    /// The sensor rectangle a full-resolution render of `region` must
+    /// demosaic for the lens pass to read only real pixels: the bounds of
+    /// every point it samples, plus `lensApron`, clamped to the sensor and
+    /// with an even origin (the Bayer parity rule in `plan`).
+    ///
+    /// The reads are measured on a grid over the region, not just its
+    /// corners: with barrel distortion the edge midpoints move furthest,
+    /// and a moustache profile can peak anywhere. The map is smooth, so a
+    /// grid of at most 64 steps a side is within a fraction of a pixel of
+    /// the true bounds; the apron absorbs the rest.
+    static func lensSourceWindow(for region: CGRect, sampling: LensSampling) -> CGRect {
+        var lo = SIMD2<Float>(Float(region.minX), Float(region.minY))
+        var hi = SIMD2<Float>(Float(region.maxX), Float(region.maxY))
+        let columns = max(2, min(64, Int(region.width / 16) + 1))
+        let rows = max(2, min(64, Int(region.height / 16) + 1))
+        for j in 0...rows {
+            for i in 0...columns {
+                // Pixel centres from the first to the last, as the kernel reads.
+                let x = Float(region.minX) + 0.5 + Float(i) / Float(columns) * Float(region.width - 1)
+                let y = Float(region.minY) + 0.5 + Float(j) / Float(rows) * Float(region.height - 1)
+                for p in sampling.sourcePoints(forSensorPoint: SIMD2(x, y)) {
+                    lo = simd_min(lo, p)
+                    hi = simd_max(hi, p)
+                }
+            }
+        }
+        let sensor = CGRect(x: 0, y: 0, width: CGFloat(sampling.sensorSize.x), height: CGFloat(sampling.sensorSize.y))
+        let reads = CGRect(x: CGFloat(lo.x), y: CGFloat(lo.y),
+                           width: CGFloat(hi.x - lo.x), height: CGFloat(hi.y - lo.y))
+            .insetBy(dx: -lensApron, dy: -lensApron)
+            .intersection(sensor)
+        // Whole pixels, the origin snapped down to even, never smaller than
+        // the region itself.
+        let minX = (Int(reads.minX.rounded(.down)) & ~1), minY = (Int(reads.minY.rounded(.down)) & ~1)
+        let maxX = min(Int(reads.maxX.rounded(.up)), Int(sensor.width))
+        let maxY = min(Int(reads.maxY.rounded(.up)), Int(sensor.height))
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY).union(region)
+    }
+
+    /// The lens pass. Reads `input`, which covers `source.sensorRect`, and
+    /// writes a texture covering `output.sensorRect`; the two are the same
+    /// rectangle except for a widened region render (`lensSourceWindow`).
     private func applyLensCorrection(session: ImageSession, cmdBuffer: MTLCommandBuffer,
                                      input: MTLTexture, parameters p: EditParameters,
-                                     renderInfo: RenderInfo, binSpan: Float) throws -> MTLTexture {
-        let output = try session.texture(width: input.width, height: input.height,
+                                     source: RenderInfo, output info: RenderInfo,
+                                     binSpan: Float) throws -> MTLTexture {
+        let outputWidth = info.isFullResolution ? info.outputWidth : input.width
+        let outputHeight = info.isFullResolution ? info.outputHeight : input.height
+        let output = try session.texture(width: outputWidth, height: outputHeight,
                                          pixelFormat: .rgba16Float, role: .lensCorrected)
         guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             throw RenderError.commandBufferFailed
         }
-        let c = session.lensCorrection
-        let summary = session.file.summary
+        let sampling = LensSampling(session: session, parameters: p)
 
-        var sensorSize = SIMD2<Float>(Float(summary.rawWidth), Float(summary.rawHeight))
-        var tileOrigin = SIMD2<Float>(Float(renderInfo.sensorRect.origin.x),
-                                      Float(renderInfo.sensorRect.origin.y))
+        var sensorSize = sampling.sensorSize
+        var tileOrigin = SIMD2<Float>(Float(info.sensorRect.origin.x), Float(info.sensorRect.origin.y))
+        var sourceOrigin = SIMD2<Float>(Float(source.sensorRect.origin.x), Float(source.sensorRect.origin.y))
         var span = binSpan
-        var cropRatio = c?.cropRatio ?? 1
-        let useDistortion = p.lensDistortion && c?.distortion != nil
-        var autoScale = useDistortion ? (c?.autoScale ?? 1) : 1
+        var cropRatio = sampling.cropRatio
+        var autoScale = sampling.autoScale
         var distType: Int32 = 0
         var distTerms = SIMD3<Float>(0, 0, 0)
-        if useDistortion, let d = c?.distortion {
+        if let d = sampling.distortion {
             (distType, distTerms) = d.packed
         }
-        var manualDist = p.manualDistortion
-        var tcaOn: Int32 = (p.lensTCA && c?.tca != nil) ? 1 : 0
-        var tcaRed = c?.tca?.red ?? SIMD3(0, 0, 1)
-        var tcaBlue = c?.tca?.blue ?? SIMD3(0, 0, 1)
-        var vigOn: Int32 = (p.lensVignetting && c?.vignetting != nil) ? 1 : 0
-        var vig = c?.vignetting.map { SIMD3<Float>($0.k1, $0.k2, $0.k3) } ?? SIMD3(0, 0, 0)
-        var manualVig = p.manualVignetting
+        var manualDist = sampling.manualDistortion
+        var tcaOn: Int32 = sampling.tca != nil ? 1 : 0
+        var tcaRed = sampling.tca?.red ?? SIMD3(0, 0, 1)
+        var tcaBlue = sampling.tca?.blue ?? SIMD3(0, 0, 1)
+        var vigOn: Int32 = sampling.vignetting != nil ? 1 : 0
+        var vig = sampling.vignetting.map { SIMD3<Float>($0.k1, $0.k2, $0.k3) } ?? SIMD3(0, 0, 0)
+        var manualVig = sampling.manualVignetting
 
         encoder.setComputePipelineState(gpu.lensCorrectPSO)
         encoder.setTexture(input, index: 0)
@@ -638,9 +785,10 @@ public final class RenderPipeline {
         encoder.setBytes(&vigOn, length: 4, index: 11)
         encoder.setBytes(&vig, length: 16, index: 12)
         encoder.setBytes(&manualVig, length: 4, index: 13)
-        var perspective = p.perspective.inverseMatrix
+        var perspective = sampling.perspectiveInverse
         encoder.setBytes(&perspective, length: MemoryLayout<simd_float3x3>.size, index: 14)
-        dispatch(encoder, pso: gpu.lensCorrectPSO, width: input.width, height: input.height)
+        encoder.setBytes(&sourceOrigin, length: 8, index: 15)
+        dispatch(encoder, pso: gpu.lensCorrectPSO, width: outputWidth, height: outputHeight)
         encoder.endEncoding()
         return output
     }
