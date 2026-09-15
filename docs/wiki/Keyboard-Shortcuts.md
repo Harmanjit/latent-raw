@@ -53,3 +53,4 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 |---|---|
 | ⇧⌘E | Export the selection |
 | ⌥⌘R | Reveal the selection in Finder |
+| ⌘P | Print the selection (in Library) or the image shown |

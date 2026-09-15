@@ -31,6 +31,13 @@ public struct SnapshotPlan: Equatable, Sendable {
         case export
         /// The Settings window instead of the main one.
         case settings
+        /// The Contact Sheet dialog over the window, for the selection.
+        case contactSheet = "contactsheet"
+        /// The contact sheet saved as a PDF into the snapshot folder, then
+        /// page 1 of it pictured instead of the window.
+        case contactSheetFile = "contactsheetfile"
+        /// The print panel over the window (Print, ⌘P).
+        case print
     }
 
     public enum Problem: Error, Equatable, CustomStringConvertible {

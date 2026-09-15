@@ -16,6 +16,10 @@
        destination can be reopened on the next launch without asking. -->
   <key>com.apple.security.files.bookmarks.app-scope</key>
   <true/>
+  <!-- Printing (File > Print): the sandbox refuses print jobs without
+       it. It reaches the printing system only; no network or file access. -->
+  <key>com.apple.security.print</key>
+  <true/>
   <!-- Deliberately absent: com.apple.security.network.client. The app
        has no network code in use, and without this key it cannot
        open a socket at all. Add it back only with the model download. -->

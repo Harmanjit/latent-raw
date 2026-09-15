@@ -17,7 +17,11 @@ import Catalog
 ///     LATENT_SNAPSHOT_STEPS="library;loupe"     states to picture, in order (default:
 ///                                               library;loupe;develop;crop;heal;compare;
 ///                                               export;settings). Also `next`, which moves
-///                                               the selection on. Each writes NN-step.png
+///                                               the selection on; `contactsheet`, the dialog;
+///                                               `contactsheetfile`, page 1 of the PDF it saves
+///                                               (written to the snapshot folder, the only
+///                                               file a step writes); and `print`, the print
+///                                               panel. Each writes NN-step.png
 ///     LATENT_SNAPSHOT_SIZE=1400x900             window content size in points (default
 ///                                               1400x900, not the size it was last left at)
 ///     LATENT_SNAPSHOT_SETTLE=1                  seconds to wait after a step's work is done
@@ -278,7 +282,13 @@ enum SnapshotHarness {
                 await pause(plan.settle)
                 let url = plan.output(forStepAt: index)
                 checkContentFits(target, step: step)
-                if let image = capture(target), write(image, to: url) {
+                if step == .contactSheetFile {
+                    if let problem = await SheetSnapshots.pictureContactSheetFile(to: url) {
+                        fail("\(step.rawValue): \(problem)")
+                    } else {
+                        report("wrote \(url.path)")
+                    }
+                } else if let image = capture(target), write(image, to: url) {
                     report("wrote \(url.path) (\(image.width)x\(image.height) px)")
                 } else {
                     fail("\(step.rawValue): could not capture or write \(url.path)")
@@ -362,6 +372,11 @@ enum SnapshotHarness {
                 guard !library.selectedImageIDs.isEmpty else { fail("export: no image selected"); return nil }
                 exportSheet.wrappedValue = true
                 _ = await wait("the export sheet", upTo: 10) { window.attachedSheet?.isVisible == true }
+            case .contactSheet, .contactSheetFile, .print:
+                let found = await SheetSnapshots.enter(step, window: window, library: library, perform: perform,
+                                                        outputFolder: plan.directory)
+                if found == nil { fail("\(step.rawValue): its sheet did not open") }
+                return found
             case .settings:
                 let before = Set(NSApp.windows.map(ObjectIdentifier.init))
                 // The menu item rather than its action: SwiftUI's handler
@@ -408,6 +423,7 @@ enum SnapshotHarness {
             switch step {
             case .export: exportSheet.wrappedValue = false
             case .settings: window.close()
+            case .contactSheet, .contactSheetFile, .print: SheetSnapshots.leave(step, window: window)
             case .crop, .heal:
                 _ = perform(.disarmTools)
                 scrollAdjustments(toEnd: false)

@@ -639,6 +639,10 @@ struct ContentView: View {
             showingExportSheet = true
         case .exportOpenImage:
             LibraryPanel.exportOpenImage(model: model, library: library)
+        case .print:
+            PrintPresenter.present(openImage: mode != .library && model.hasImage, model: model, library: library)
+        case .contactSheet:
+            ContactSheetPresenter.present(model: model, library: library)
         case .undo:
             model.undo()
         case .redo:

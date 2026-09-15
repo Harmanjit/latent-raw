@@ -127,6 +127,7 @@ enum Shortcuts {
         // Export
         Shortcut(.export, "e", [.shift, .command]),
         Shortcut(.revealInFinder, "r", [.option, .command]),
+        Shortcut(.print, "p", .command),
     ]
 
     /// The menu bar's standard items that keep their keys.
@@ -259,6 +260,7 @@ extension Shortcuts {
         ("Export", [
             ShortcutPageRow([.export], "Export the selection"),
             ShortcutPageRow([.revealInFinder], "Reveal the selection in Finder"),
+            ShortcutPageRow([.print], "Print the selection (in Library) or the image shown"),
         ]),
     ]
 
