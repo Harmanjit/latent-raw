@@ -74,6 +74,7 @@ struct ContentView: View {
             mainArea
         }
         .navigationSplitViewStyle(.balanced)
+        .motionFollowsAccessibility()
     }
 
     private var sidebarVisibility: Binding<NavigationSplitViewVisibility> {
@@ -134,6 +135,18 @@ struct ContentView: View {
             _ = perform(command)
         })
         .onChange(of: mode) { old, _ in modeDidChange(from: old) }
+        // What a VoiceOver user would otherwise have to go and look for.
+        .onChange(of: currentProblem) { _, problem in
+            if let problem { Announcement.post(problem, priority: .high) }
+        }
+        .onChange(of: exportQueue.isRunning) { wasRunning, running in
+            guard wasRunning, !running else { return }
+            let failed = exportQueue.failures.count
+            Announcement.post(exportQueue.summary + (failed == 0 ? "" : ", \(failed) failed"))
+        }
+        .onChange(of: model.isExporting) { wasExporting, exporting in
+            if wasExporting, !exporting { Announcement.post(model.status) }
+        }
         .sheet(isPresented: $showingExportSheet) {
             ExportSheet(count: library.selectedImageIDs.count,
                         sample: library.selectedImages.first ?? library.selectedImage,
@@ -145,6 +158,7 @@ struct ContentView: View {
                 exportQueue.start(records: library.selectedImages, library: library,
                                   preset: preset, destination: destination, gpu: gpu)
             }
+            .motionFollowsAccessibility()
         }
         .onAppear {
             LensfunDatabase.warmUp()
@@ -440,11 +454,15 @@ struct ContentView: View {
                     Divider()
                     ImageCaption(record: compareRecord, title: "Select")
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Select pane")
                 VStack(spacing: 0) {
                     ImageViewport(model: model, mirror: compareModel, allowsTools: false)
                     Divider()
                     ImageCaption(record: library.selectedImage, title: "Candidate")
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Candidate pane")
             }
             Divider()
             HStack(spacing: 10) {
@@ -459,6 +477,7 @@ struct ContentView: View {
                 Text("← → step the candidate · rating and flag keys act on it")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel("Left and right arrow keys step the candidate; rating and flag keys act on it")
                 Spacer()
             }
             .controlSize(.small)
@@ -946,7 +965,7 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle("Soft proof", isOn: $model.proofEnabled)
                             .toggleStyle(.switch).controlSize(.small)
-                        Picker("Target", selection: Binding(
+                        Picker("Soft proof target", selection: Binding(
                             get: { model.proofTarget == .sRGB ? 0 : model.proofTarget == .displayP3 ? 1 : 2 },
                             set: { v in
                                 if v == 0 { model.proofTarget = .sRGB }
@@ -989,6 +1008,7 @@ struct ContentView: View {
     /// image's as-shot value rather than being fixed — see ColorKit.
     private var temperatureRow: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // The slider carries the name and the Kelvin reading for VoiceOver.
             HStack {
                 Text("Temperature").font(.subheadline)
                 Spacer()
@@ -996,9 +1016,14 @@ struct ContentView: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
+            .accessibilityHidden(true)
             ResettableSlider(value: model.temperatureSliderBinding,
-                             in: model.temperatureSliderRange) { model.resetWhiteBalance() }
-                .help("Double-click for the camera's white balance")
+                             in: model.temperatureSliderRange, label: "Temperature",
+                             accessibilityValue: String(format: "%.0f kelvin",
+                                                        model.parameters.whiteBalance.temperature)) {
+                model.resetWhiteBalance()
+            }
+            .help("Double-click for the camera's white balance")
         }
         .disabled(!model.hasImage)
     }
@@ -1009,6 +1034,7 @@ struct ContentView: View {
             .fontWeight(.semibold)
             .foregroundStyle(.secondary)
             .textCase(.uppercase)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private var whiteBalanceSection: some View {
@@ -1127,6 +1153,7 @@ struct ContentView: View {
             .padding(.vertical, 1)
             .background(Color.accentColor.opacity(0.85), in: RoundedRectangle(cornerRadius: 3))
             .foregroundStyle(.white)
+            .accessibilityLabel("tool on")
     }
 
     /// Crop & straighten. R opens and closes the tool; the rectangle is
@@ -1181,7 +1208,7 @@ struct ContentView: View {
                 }
                 .toggleStyle(.button)
                 .help("Arm the tool, then click a spot to remove it; drag to pick the source (H)")
-                Picker("Mode", selection: Binding(get: { model.activeHealMode },
+                Picker("Heal mode", selection: Binding(get: { model.activeHealMode },
                                                   set: { model.activeHealMode = $0 })) {
                     Text("Heal").tag(HealPatch.Mode.heal)
                     Text("Clone").tag(HealPatch.Mode.clone)
@@ -1233,7 +1260,8 @@ struct ContentView: View {
                             defaultValue: Float = 0) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(title).font(.subheadline)
+                // The field and slider are both named, so VoiceOver skips this.
+                Text(title).font(.subheadline).accessibilityHidden(true)
                 Spacer()
                 SliderValueField(value: value, in: range, format: SliderValueFormat(printf: format), label: title)
             }
@@ -1246,6 +1274,9 @@ struct ContentView: View {
 
     /// In Compare, zoom buttons drive both panes.
     private var mirrorModel: EditorModel? { mode == .compare ? compareModel : nil }
+
+    /// The failure the status bar shows in red, if any.
+    private var currentProblem: String? { model.setupError ?? library.lastError ?? model.lastError }
 
     private var statusBar: some View {
         HStack(spacing: 12) {
@@ -1263,7 +1294,9 @@ struct ContentView: View {
 
             HStack(spacing: 4) {
                 Button("↺") { rotate(by: -1) }
+                    .accessibilityLabel("Rotate left")
                 Button("↻") { rotate(by: 1) }
+                    .accessibilityLabel("Rotate right")
             }
             .controlSize(.small)
             .disabled(library.selectedImage == nil)
@@ -1276,21 +1309,25 @@ struct ContentView: View {
                 .help(filmstripVisible ? "Hide the filmstrip in Loupe and Develop" : "Show the filmstrip in Loupe and Develop")
                 .accessibilityLabel("Filmstrip")
 
-            if let problem = model.setupError ?? library.lastError ?? model.lastError {
+            if let problem = currentProblem {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
+                        .accessibilityHidden(true)
                     Text(problem)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(problem)
+                        .accessibilityLabel("Error: \(problem)")
                     if model.setupError == nil {
                         Button { library.lastError = nil; model.lastError = nil } label: {
                             Image(systemName: "xmark.circle.fill")
                         }
                         .buttonStyle(.plain)
                         .help("Dismiss")
+                        .accessibilityLabel("Dismiss error")
                     }
                 }
+                .accessibilityElement(children: .contain)
                 .font(.caption)
                 .foregroundStyle(Color.red)
             } else {
@@ -1308,12 +1345,19 @@ struct ContentView: View {
             // keyboard and for people who like buttons.
             HStack(spacing: 6) {
                 Button("−") { model.zoomOut(); mirrorModel?.zoomOut() }
+                    .accessibilityLabel("Zoom out")
                 Text(model.zoomLabel)
                     .font(.system(.caption, design: .monospaced))
                     .frame(minWidth: 40)
+                    .accessibilityLabel("Zoom")
+                    .accessibilityValue(SpokenText.zoom(model.zoomLabel))
+                    .accessibilityHidden(model.zoomLabel.isEmpty)
                 Button("+") { model.zoomIn(); mirrorModel?.zoomIn() }
+                    .accessibilityLabel("Zoom in")
                 Button("Fit") { model.zoomToFit(); mirrorModel?.zoomToFit() }
+                    .accessibilityLabel("Zoom to fit")
                 Button("100%") { model.zoomToActualSize(); mirrorModel?.zoomToActualSize() }
+                    .accessibilityLabel("Actual size")
             }
             .controlSize(.small)
             .disabled(!model.hasImage || !mode.showsImage)

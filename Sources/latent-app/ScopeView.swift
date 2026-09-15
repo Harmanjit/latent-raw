@@ -96,6 +96,10 @@ struct WaveformView: View {
             }
         }
         .frame(height: 110)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isImage)
+        .accessibilityLabel("Waveform")
+        .accessibilityValue(waveform.map { $0.peak > 0 ? "" : "No data" } ?? "No data")
     }
 
     /// Row 0 of the data is darkest but bitmaps start at the top, so the
@@ -144,6 +148,10 @@ struct VectorscopeView: View {
             }
         }
         .aspectRatio(1, contentMode: .fit)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isImage)
+        .accessibilityLabel("Vectorscope")
+        .accessibilityValue(vectorscope.map { $0.peak > 0 ? "" : "No data" } ?? "No data")
     }
 
     /// Each cell is tinted with the hue it represents (from its Cb/Cr

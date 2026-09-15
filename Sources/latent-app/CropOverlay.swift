@@ -63,7 +63,21 @@ struct CropOverlay: View {
                     .contentShape(Rectangle())
                     .gesture(dragGesture(scale: scale))
             }
+            // The rectangle is dragged with the mouse; VoiceOver reads its
+            // size, aspect and angle, and can reset it.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Crop rectangle")
+            .accessibilityValue(accessibilityValue)
+            .accessibilityHint("Drag inside the rectangle to move it, or its edges and corners to resize it")
+            .accessibilityAction(named: "Reset crop") { model.resetCrop() }
         }
+    }
+
+    private var accessibilityValue: String {
+        let size = model.croppedPixelSize
+        let aspect = CropAspectOption.matching(model.cropAspectDisplayRatio, original: model.originalDisplayRatio)
+        return SpokenText.crop(width: Int(size.width.rounded()), height: Int(size.height.rounded()),
+                               aspect: aspect.title, angle: model.parameters.crop.angle)
     }
 
     // MARK: - Coordinate conversion

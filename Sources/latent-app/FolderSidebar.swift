@@ -473,6 +473,10 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
         return true
     }
 
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        (item as? FolderNode)?.kind == .header ? nil : FolderRowView()
+    }
+
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let node = item as? FolderNode else { return nil }
         let isHeader = node.kind == .header
@@ -594,5 +598,33 @@ private final class FolderOutlineController: NSViewController, NSOutlineViewData
 
     @objc private func chooseFolderClicked(_ sender: NSMenuItem) {
         onChooseFolder?()
+    }
+}
+
+/// A folder row whose selection also gets a solid accent outline while
+/// Increase Contrast is on: the source list's own highlight is a pale fill.
+private final class FolderRowView: NSTableRowView {
+    private var displayOptionsObserver: NSObjectProtocol?
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        super.drawSelection(in: dirtyRect)
+        let width = Contrast.selectionOutlineWidth(selected: isSelected)
+        guard width > 0 else { return }
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 4 + width / 2, dy: width / 2), xRadius: 5, yRadius: 5)
+        path.lineWidth = width
+        NSColor.controlAccentColor.setStroke()
+        path.stroke()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let displayOptionsObserver { NSWorkspace.shared.notificationCenter.removeObserver(displayOptionsObserver) }
+        displayOptionsObserver = nil
+        guard window != nil else { return }
+        displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.needsDisplay = true }
+        }
     }
 }

@@ -44,6 +44,11 @@ struct ImageViewport: View {
                                 onToolBegan: { model.imageToolBegan(at: $0, exclude: $1) },
                                 onToolMoved: { model.imageToolMoved(to: $0) },
                                 onToolEnded: { model.imageToolEnded() })
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(.isImage)
+                    .accessibilityLabel(model.imageTitle ?? "Image")
+                    .accessibilityValue(model.showingBefore ? "\(SpokenText.zoom(model.zoomLabel)), before editing"
+                                                            : SpokenText.zoom(model.zoomLabel))
                 if allowsTools && model.cropToolActive {
                     CropOverlay(model: model)
                 }
@@ -96,5 +101,10 @@ struct ImageCaption: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
         .background(Color(nsColor: .windowBackgroundColor))
+        // One line, not scraps of glyphs: "Candidate, DSC_0107.NEF, 1/250 s, picked, 3 stars".
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(SpokenText.caption(title: title, name: record?.fileName,
+                                               exposure: record?.exposureLine ?? "",
+                                               rating: record?.rating ?? 0, flag: record?.flag ?? 0))
     }
 }

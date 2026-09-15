@@ -33,20 +33,33 @@ struct HistoryPanel: View {
                     .padding(.vertical, 2).padding(.horizontal, 6)
                     .background(index == model.history.cursor ? Color.accentColor.opacity(0.25) : Color.clear,
                                 in: RoundedRectangle(cornerRadius: 3))
+                    .selectionOutline(index == model.history.cursor, cornerRadius: 3)
                     .opacity(index > model.history.cursor ? 0.5 : 1)   // redo-able steps are dimmed
                     .contentShape(Rectangle())
                     .onTapGesture { model.jumpToHistory(index: index) }
+                    // A row VoiceOver can press, saying which step is current
+                    // and which are undone.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(step.label)
+                    .accessibilityValue(index == model.history.cursor ? "current"
+                                        : index > model.history.cursor ? "undone" : "")
+                    .accessibilityAddTraits(index == model.history.cursor ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { model.jumpToHistory(index: index) }
                 }
             }
 
             if !model.snapshots.isEmpty {
                 Text("Snapshots").font(.caption2).foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
                 ForEach(model.snapshots) { snapshot in
                     HStack {
                         Button(snapshot.name) { model.restoreSnapshot(snapshot) }.buttonStyle(.plain)
+                            .accessibilityHint("Restores this snapshot")
                         Spacer()
                         Button { model.deleteSnapshot(snapshot) } label: { Image(systemName: "trash") }
                             .buttonStyle(.plain).foregroundStyle(.secondary)
+                            .help("Delete this snapshot")
+                            .accessibilityLabel("Delete snapshot \(snapshot.name)")
                     }
                     .font(.caption)
                 }

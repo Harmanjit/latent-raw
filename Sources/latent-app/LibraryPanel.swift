@@ -49,6 +49,7 @@ struct LibraryPanel: View {
 
             if library.isBusy {
                 ProgressView().controlSize(.small)
+                    .accessibilityLabel("Working")
             }
 
             if library.thumbnailsTotal > 0 && library.thumbnailsDone < library.thumbnailsTotal {
@@ -60,6 +61,9 @@ struct LibraryPanel: View {
                                  total: Double(library.thumbnailsTotal))
                         .controlSize(.small)
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Making thumbnails")
+                .accessibilityValue("\(library.thumbnailsDone) of \(library.thumbnailsTotal)")
             }
 
             if !library.undecidedSubfolders.isEmpty {
@@ -117,11 +121,13 @@ struct LibraryPanel: View {
             if model.exportSettings.format.supportsQuality {
                 HStack {
                     Text("Quality").font(.caption)
-                    ResettableSlider(value: $model.exportSettings.quality, in: 0.3...1.0) {
+                    ResettableSlider(value: $model.exportSettings.quality, in: 0.3...1.0, label: "Export quality",
+                                     format: SliderValueFormat(decimals: 2)) {
                         model.exportSettings.quality = 0.92
                     }
                     Text(String(format: "%.2f", model.exportSettings.quality))
                         .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
                 .controlSize(.small)
             }
@@ -137,6 +143,8 @@ struct LibraryPanel: View {
                     }
                     ProgressView(value: Double(exportQueue.done), total: Double(max(exportQueue.total, 1)))
                         .controlSize(.small)
+                        .accessibilityLabel("Export progress")
+                        .accessibilityValue("\(exportQueue.done) of \(exportQueue.total)")
                     Text(exportQueue.currentName).font(.caption2).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
                 }
@@ -146,6 +154,7 @@ struct LibraryPanel: View {
                 ForEach(exportQueue.failures) { f in
                     Text("✗ \(f.name): \(f.reason)").font(.caption2).foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Failed: \(f.name): \(f.reason)")
                 }
             }
         }
@@ -190,31 +199,46 @@ struct LibraryPanel: View {
                 .truncationMode(.middle)
 
             HStack(spacing: 2) {
-                ForEach(1...5, id: \.self) { star in
-                    Button {
-                        onRate(star == image.rating ? 0 : star)
-                    } label: {
-                        Text(star <= image.rating ? "★" : "☆")
-                            .foregroundStyle(star <= image.rating ? Color.yellow : Color.secondary)
+                HStack(spacing: 2) {
+                    ForEach(1...5, id: \.self) { star in
+                        Button {
+                            onRate(star == image.rating ? 0 : star)
+                        } label: {
+                            Text(star <= image.rating ? "★" : "☆")
+                                .foregroundStyle(star <= image.rating ? Color.yellow : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                }
+                // One adjustable rating rather than five star glyphs.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Rating")
+                .accessibilityValue(SpokenText.stars(image.rating))
+                .accessibilityAdjustableAction { direction in
+                    switch direction {
+                    case .increment: if image.rating < 5 { onRate(image.rating + 1) }
+                    case .decrement: if image.rating > 0 { onRate(image.rating - 1) }
+                    @unknown default: break
+                    }
                 }
                 Spacer()
                 Picker("Flag", selection: Binding(
                     get: { ImageFlag(rawValue: image.flag) ?? .none },
                     set: { onFlag($0) })) {
-                    Text("–").tag(ImageFlag.none)
-                    Text("✓").tag(ImageFlag.picked)
-                    Text("✗").tag(ImageFlag.rejected)
+                    Text("–").tag(ImageFlag.none).accessibilityLabel(SpokenText.flag(0))
+                    Text("✓").tag(ImageFlag.picked).accessibilityLabel(SpokenText.flag(1))
+                    Text("✗").tag(ImageFlag.rejected).accessibilityLabel(SpokenText.flag(-1))
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.mini)
                 .frame(width: 80)
+                .accessibilityValue(SpokenText.flag(image.flag))
             }
 
             TextField("Keywords, comma separated", text: $keywordText)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Keywords")
                 .controlSize(.small)
                 .onSubmit {
                     let keywords = keywordText.split(separator: ",").map(String.init)
@@ -306,5 +330,6 @@ struct LibraryPanel: View {
             .fontWeight(.semibold)
             .foregroundStyle(.secondary)
             .textCase(.uppercase)
+            .accessibilityAddTraits(.isHeader)
     }
 }
