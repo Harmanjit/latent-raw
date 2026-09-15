@@ -218,7 +218,8 @@ CREATE TABLE images (
   sidecar_mtime INTEGER,
   thumb_key BLOB,                       -- hash of the edit that produced the thumbnail
   user_rotation INTEGER NOT NULL DEFAULT 0, -- migration v2: manual quarter turns clockwise
-  finder_tags TEXT                      -- migration v3: the file's Finder tags as last read, "6Red\n0Work"
+  finder_tags TEXT,                     -- migration v3: the file's Finder tags as last read, "6Red\n0Work"
+  merge_json TEXT                       -- migration v4: latent:Merge recipe of a Photo Merge result, else NULL
 );
 CREATE TABLE edits      (image_id INTEGER PRIMARY KEY REFERENCES images ON DELETE CASCADE,
                          schema_version INTEGER, process_version TEXT,
@@ -239,7 +240,7 @@ CREATE TABLE lens_overrides (camera TEXT, lens_id TEXT, lensfun_model TEXT,
 CREATE TABLE settings   (key TEXT PRIMARY KEY, value TEXT);
 ```
 
-Migrations are in `Sources/Catalog/Schema.swift` (`v1_initial`, `v2_user_rotation`, `v3_finder_tags`). `user_rotation` is kept apart from `orientation` (what the camera recorded) so re-reading EXIF never clobbers a manual fix. `finder_tags` is a cache of the file's own attribute (§5.3): one line per tag, Finder's colour digit then the name, a plain string because the filter reads it for every row. The `lens_overrides` table exists but nothing reads or writes it yet.
+Migrations are in `Sources/Catalog/Schema.swift` (`v1_initial`, `v2_user_rotation`, `v3_finder_tags`, `v4_merge_recipe`). `user_rotation` is kept apart from `orientation` (what the camera recorded) so re-reading EXIF never clobbers a manual fix. `finder_tags` is a cache of the file's own attribute (§5.3): one line per tag, Finder's colour digit then the name, a plain string because the filter reads it for every row. The `lens_overrides` table exists but nothing reads or writes it yet.
 
 No pixel data and no absolute paths are ever stored in the database.
 
@@ -267,12 +268,13 @@ Search across catalogs was planned with SQLite's `ATTACH`; it is not implemented
    <latent:EditStack><![CDATA[ { ...edit JSON... } ]]></latent:EditStack>
    <latent:Snapshots><![CDATA[ [ ... ] ]]></latent:Snapshots>
    <latent:History><![CDATA[ [ ... ] ]]></latent:History>
+   <latent:Merge><![CDATA[ { ...merge recipe JSON... } ]]></latent:Merge>
   </rdf:Description>
  </rdf:RDF>
 </x:xmpmeta>
 ```
 
-`latent:Flag` is -1 rejected, 0 none, 1 picked. `latent:Rotation` is the manual quarter turns clockwise (the `user_rotation` column). `latent:Snapshots` and `latent:History` are JSON, omitted when empty. Readers match properties by local name, so sidecars written before the rename with the `rawhead:` prefix still load.
+`latent:Flag` is -1 rejected, 0 none, 1 picked. `latent:Rotation` is the manual quarter turns clockwise (the `user_rotation` column). `latent:Snapshots` and `latent:History` are JSON, omitted when empty. `latent:Merge` is the recipe of a Photo Merge result (`docs/PhotoMerge.md`), omitted for every other photo; the catalog mirrors it in `images.merge_json`, because every sidecar write renders the whole file from the database. JSON containing `]]>` is written as two adjacent CDATA sections (`]]]]><![CDATA[>`), which readers join back. Readers match properties by local name, so sidecars written before the rename with the `rawhead:` prefix still load.
 
 The namespace URI never needs to resolve to a real page, but once released it must never change. Standard XMP properties are used wherever they exist.
 

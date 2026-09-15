@@ -114,6 +114,21 @@ enum Schema {
             }
         }
 
+        migrator.registerMigration("v4_merge_recipe") { db in
+            // The latent:Merge JSON of a Photo Merge result, NULL for every
+            // other photo. The sidecar holds the truth (DESIGN.md §5.3), but
+            // every sidecar write renders the whole file from the database,
+            // so a recipe the database didn't keep would be dropped by the
+            // next rating. A column on the row rather than a table of its own
+            // like `edits`: it travels with the row through copies and undo
+            // for free, and the grid can badge merges from the list it
+            // already loads. Existing rows get NULL, which is right: nothing
+            // before this migration was a merge.
+            try db.alter(table: "images") { t in
+                t.add(column: "merge_json", .text)
+            }
+        }
+
         return migrator
     }
 }

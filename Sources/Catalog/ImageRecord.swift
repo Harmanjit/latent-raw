@@ -39,12 +39,17 @@ public struct ImageRecord: Codable, FetchableRecord, MutablePersistableRecord,
     /// The file's Finder tags in their stored form (see `FinderTag.encode`),
     /// nil for none. Read from the file during reconcile, never written to it.
     public var finderTags: String? = nil
+    /// The latent:Merge recipe JSON when this image is a Photo Merge result,
+    /// nil otherwise. Mirrors the sidecar, which holds the truth; kept on
+    /// the row so every sidecar written from the row carries it.
+    public var mergeJSON: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, size, mtime, xxhash, camera, lens, iso, shutter, aperture, focal
         case width, height, orientation, rating, label, flag
         case userRotation = "user_rotation"
         case finderTags = "finder_tags"
+        case mergeJSON = "merge_json"
         case relPath = "rel_path"
         case preservedName = "preserved_name"
         case captureTime = "capture_time"

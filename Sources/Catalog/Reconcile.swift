@@ -133,6 +133,7 @@ extension Catalog {
                 fresh.flag = previous.flag
                 fresh.userRotation = previous.userRotation
                 fresh.preservedName = previous.preservedName
+                fresh.mergeJSON = previous.mergeJSON
                 fresh.sidecarMtime = previous.sidecarMtime
                 fresh.thumbKey = nil   // pixels changed; thumbnail is stale
                 updates.append(fresh)
@@ -269,6 +270,13 @@ extension Catalog {
         let url = fileURL(forRelPath: file.relPath)
         let raw = try RawFile(path: url.path, metadataOnly: true)
         let s = raw.summary
+        // TODO(Photo Merge): a merge result copied in from Finder arrives
+        // without its sidecar, but the DNG carries the same latent:Merge
+        // block in its embedded XMP packet (tag 700). Once RawCore hands
+        // that packet over, read the block here into `mergeJSON`, so the
+        // recipe isn't lost; `syncSidecars` leaves a row with no sidecar
+        // alone, and the next write from the row puts it in a sidecar.
+        // Until then such a file is catalogued as a plain DNG.
         let camera = [s.cameraMake, s.cameraModel]
             .filter { !$0.isEmpty }.joined(separator: " ")
         return ImageRecord(
@@ -342,6 +350,9 @@ extension Catalog {
                 row.flag = fields?.flag ?? 0
                 row.userRotation = fields?.rotation ?? 0
                 row.preservedName = fields?.preservedFileName ?? row.preservedName
+                // A merge result's recipe, like its edit, comes from the
+                // sidecar; an image whose sidecar has none isn't a merge.
+                row.mergeJSON = fields.flatMap { $0.mergeJSON.isEmpty ? nil : $0.mergeJSON }
                 row.sidecarMtime = mtime
                 try row.update(db)
 
