@@ -122,10 +122,10 @@ public actor Catalog {
         do {
             try fm.moveItem(at: database, to: target)
         } catch let moveError {
-            logger.error("Catalog database is damaged and could not be moved aside: \(String(describing: moveError), privacy: .public)")
+            logger.error("Catalog database is damaged and could not be moved aside: \(String(describing: moveError), privacy: .private)")
             throw error
         }
-        logger.error("Catalog database was damaged (\(String(describing: error), privacy: .public)); moved to \(target.lastPathComponent, privacy: .public) and started afresh")
+        logger.error("Catalog database was damaged (\(String(describing: error), privacy: .private)); moved to \(target.lastPathComponent, privacy: .private) and started afresh")
         return target
     }
 

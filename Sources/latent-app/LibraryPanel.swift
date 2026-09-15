@@ -11,6 +11,8 @@ struct LibraryPanel: View {
     @State private var metadataExpanded = true
     @State private var historyExpanded = false
     @State private var exportExpanded = true
+    @AppStorage(OpenImageExportOptions.includeMetadataKey) private var openImageIncludesMetadata = true
+    @AppStorage(OpenImageExportOptions.includeLocationKey) private var openImageIncludesLocation = false
     let onOpenFolder: () -> Void
     let onRate: (Int) -> Void
     let onFlag: (ImageFlag) -> Void
@@ -131,6 +133,14 @@ struct LibraryPanel: View {
                 }
                 .controlSize(.small)
             }
+            Toggle("Include camera metadata", isOn: $openImageIncludesMetadata)
+                .controlSize(.small)
+                .help("Camera and lens details, capture time, artist, copyright, keywords and rating.")
+            Toggle("Include location", isOn: $openImageIncludesLocation)
+                .controlSize(.small)
+                .disabled(!openImageIncludesMetadata)
+                .accessibilityHint(ExportPreset.locationHelp)
+                .help(ExportPreset.locationHelp)
             Button("Export open image…") { Self.exportOpenImage(model: model, library: library) }
                 .controlSize(.small)
                 .disabled(!model.hasImage || model.isExporting)
@@ -161,31 +171,29 @@ struct LibraryPanel: View {
     }
 
     /// Exports the image open in the editor, which need not be the
-    /// selection. Its keywords and rating are read from the catalog after
-    /// the Save panel closes, so the file carries the same metadata a
+    /// selection, with the metadata switches above. Its keywords and rating
+    /// come from the catalog, so the file carries the same metadata a
     /// queued export of it would. A file opened outside this catalog has
     /// neither, and still gets its camera metadata; the file name check
     /// matters because the editor keeps its image when another folder is
     /// opened, and the same id there is a different photo.
     static func exportOpenImage(model: EditorModel, library: Library) {
-        guard let destination = model.chooseExportDestination() else { return }
-        guard let id = model.catalogImageID, let catalog = library.catalog,
-              library.images.contains(where: { $0.id == id && $0.fileName == model.imageTitle }) else {
-            model.export(to: destination, keywords: [], rating: 0)
+        guard !model.isExporting, let source = model.sourceURL,
+              let destination = model.chooseExportDestination() else { return }
+        // The panel's name came from `source`. An image that finished
+        // loading while the panel was up would be written under that name.
+        guard model.sourceURL == source else {
+            model.status = "Export cancelled: another image opened while choosing where to save it"
             return
         }
-        Task {
-            let keywords: [String]
-            do {
-                keywords = try await catalog.keywords(forImageID: id)
-            } catch {
-                // Exporting without them would silently drop metadata.
-                model.reportFailure("Reading keywords for export", error)
-                return
-            }
-            let rating = library.images.first { $0.id == id }?.rating ?? 0
-            model.export(to: destination, keywords: keywords, rating: rating)
+        let options = OpenImageExportOptions.load()
+        guard let id = model.catalogImageID, let catalog = library.catalog,
+              let record = library.images.first(where: { $0.id == id && $0.fileName == model.imageTitle }) else {
+            model.export(to: destination, options: options, rating: 0, readKeywords: nil)
+            return
         }
+        model.export(to: destination, options: options, rating: record.rating,
+                     readKeywords: { try await catalog.keywords(forImageID: id) })
     }
 
     /// Rating, flag and keywords for the selected image. Keys do the same

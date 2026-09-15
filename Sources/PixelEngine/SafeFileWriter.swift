@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Writes export files so that a crash, a full disk, an encoder error or a
 /// cancelled export never leaves a half-written picture behind, and never
@@ -21,7 +22,24 @@ import Foundation
 /// Replacing goes through `FileManager.replaceItemAt`, which carries the old
 /// file's creation date, permissions and extended attributes (Finder tags)
 /// over to the new one.
+///
+/// A write that must not replace anything (a batch export whose policy is
+/// Add a number or Skip) is committed with an exclusive rename instead, so
+/// a file that appeared under the name while the image rendered is never
+/// replaced; the commit throws `DestinationExists` and the caller settles
+/// the name again.
 public enum SafeFileWriter {
+    /// A commit that may not replace found a file (or a link) under the name.
+    public struct DestinationExists: Error, CustomStringConvertible {
+        public let url: URL
+        public var description: String { "a file named “\(url.lastPathComponent)” is already there" }
+    }
+
+    /// Writes begun and not yet committed or discarded, by temporary URL,
+    /// so quitting can remove their files (`abandonPendingWrites`). Commits
+    /// and abandoning take the lock, so neither sees the other half done.
+    private static let inFlight = OSAllocatedUnfairLock<[URL: PendingWrite]>(initialState: [:])
+
     /// A file on its way to `destination`: write the complete file to `url`,
     /// then `commit()`. `discard()` (in a `defer`) removes whatever wasn't
     /// committed, so every early exit, thrown error or cancellation cleans
@@ -35,20 +53,30 @@ public enum SafeFileWriter {
 
         /// Puts the written file in place of `destination` (creating it if
         /// nothing is there). Throws, leaving `destination` as it was, if the
-        /// file wasn't written or can't be moved.
-        public func commit() throws {
+        /// file wasn't written or can't be moved. With `replacingExisting`
+        /// false, anything under the name makes it throw `DestinationExists`.
+        public func commit(replacingExisting: Bool = true) throws {
             try SafeFileWriter.refuseFolder(at: destination)
             try SafeFileWriter.synchronize(url)
-            if FileManager.default.fileExists(atPath: destination.path) {
-                _ = try FileManager.default.replaceItemAt(destination, withItemAt: url,
-                                                          backupItemName: nil, options: [])
-            } else {
-                try FileManager.default.moveItem(at: url, to: destination)
+            let (url, destination) = (url, destination)
+            try SafeFileWriter.inFlight.withLock { writes in
+                // Quitting gave up on this write and deleted its file.
+                guard writes[url] != nil else { throw CocoaError(.fileNoSuchFile, userInfo: [NSURLErrorKey: url]) }
+                if !replacingExisting {
+                    try SafeFileWriter.moveExclusively(url, to: destination)
+                } else if FileManager.default.fileExists(atPath: destination.path) {
+                    _ = try FileManager.default.replaceItemAt(destination, withItemAt: url,
+                                                              backupItemName: nil, options: [])
+                } else {
+                    try FileManager.default.moveItem(at: url, to: destination)
+                }
+                writes[url] = nil
             }
         }
 
         /// Deletes the temporary file if it's still there, and the scratch folder.
         public func discard() {
+            _ = SafeFileWriter.inFlight.withLock { $0.removeValue(forKey: url) }
             if FileManager.default.fileExists(atPath: url.path) { try? FileManager.default.removeItem(at: url) }
             if let scratchFolder { try? FileManager.default.removeItem(at: scratchFolder) }
         }
@@ -66,7 +94,47 @@ public enum SafeFileWriter {
         let url = url.resolvingSymlinksInPath()
         try refuseFolder(at: url)
         let (temp, scratchFolder) = temporaryLocation(for: url, canCreateSibling: canCreateSibling)
-        return PendingWrite(url: temp, destination: url, scratchFolder: scratchFolder)
+        let pending = PendingWrite(url: temp, destination: url, scratchFolder: scratchFolder)
+        inFlight.withLock { $0[temp] = pending }
+        return pending
+    }
+
+    /// For quitting when an export can't be waited for any longer: deletes
+    /// the temporary file of every write not yet committed, and makes those
+    /// commits fail, so the exit leaves neither a hidden temporary file nor
+    /// a file moved into place at the last moment. Returns how many.
+    @discardableResult
+    public static func abandonPendingWrites() -> Int {
+        inFlight.withLock { writes in
+            let abandoned = writes.values
+            for write in abandoned {
+                try? FileManager.default.removeItem(at: write.url)
+                if let folder = write.scratchFolder { try? FileManager.default.removeItem(at: folder) }
+            }
+            writes.removeAll()
+            return abandoned.count
+        }
+    }
+
+    /// Moves `source` to `destination` only if nothing is there, in one step
+    /// (`renamex_np` with `RENAME_EXCL`), so a file that appears at the last
+    /// moment is never replaced. A volume that can't rename that way (some
+    /// network and FAT volumes) gets a check just before an ordinary move,
+    /// which refuses an existing destination too.
+    static func moveExclusively(_ source: URL, to destination: URL) throws {
+        if renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 { return }
+        let code = errno
+        if code == EEXIST { throw DestinationExists(url: destination) }
+        guard code == ENOTSUP || code == EINVAL else {
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+        var info = stat()
+        if lstat(destination.path, &info) == 0 { throw DestinationExists(url: destination) }
+        do {
+            try FileManager.default.moveItem(at: source, to: destination)
+        } catch CocoaError.fileWriteFileExists {
+            throw DestinationExists(url: destination)
+        }
     }
 
     /// Calls `fill` with a temporary URL, which it must create and write the

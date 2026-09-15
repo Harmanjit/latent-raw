@@ -34,7 +34,7 @@ Thumbnails come from the cameras' embedded previews; a few cameras write none, a
 Models compile on first use, once, into the app container. Subsequent runs are fast. If macOS ran short of memory, a model is loaded again from that compiled copy, which takes well under a second, and AI noise reduction may run again.
 
 **Quitting takes a few seconds.**
-Latent saves the last edit and waits for catalog writes to reach the sidecars before it quits, at most 10 seconds. During an export it first asks whether to finish the image being written; that can take up to a minute for a large image with AI noise reduction.
+Latent saves the last edit and waits for catalog writes to reach the sidecars before it quits, at most 10 seconds. During an export (a batch or Export open image…) it first asks whether to finish the image being written; that can take up to a minute for a large image with AI noise reduction.
 
 **The Help window is empty or out of date.**
 Help shows the pages copied into the app by `scripts/make_app.sh`; rebuild the app after changing `docs/wiki`. A `swift run` build reads `docs/wiki` directly.

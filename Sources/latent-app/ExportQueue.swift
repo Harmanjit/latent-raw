@@ -26,12 +26,21 @@ struct ExportPreset: Codable, Equatable {
     /// Put each image in a yyyy-MM-dd subfolder of the destination.
     var dateSubfolders = false
     var includeMetadata = true
+    /// With metadata, also keep the GPS position, place names and the camera
+    /// and lens serial numbers (`SourceMetadata.locationTags`). Off by
+    /// default, and in presets saved before it existed: those were agreed to
+    /// as "camera metadata, keywords and rating", not location.
+    var includeLocation = false
     var revealWhenDone = true
     /// JPEG/HEIC: add an HDR gain map. Off by default, and in older presets.
     var hdrGainMap = false
 
     var settings: ExportSettings { ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap) }
     var colorSpace: ColorKit.OutputSpace { colorSpaceIsP3 ? .displayP3 : .sRGB }
+    /// What the location switch covers, for its tooltip here and in the
+    /// left panel.
+    static let locationHelp = "The GPS position, place names, and the camera and lens serial numbers. "
+        + "Off, the file doesn't say where the photo was taken or which camera took it."
 
     // Lenient decoding: every field is optional on the way in, so a preset
     // saved by an older build (or a hand-edited one) still loads.
@@ -54,6 +63,7 @@ struct ExportPreset: Codable, Equatable {
         collision = try c.decodeIfPresent(ExportNaming.Collision.self, forKey: .collision) ?? .addNumber
         dateSubfolders = try c.decodeIfPresent(Bool.self, forKey: .dateSubfolders) ?? false
         includeMetadata = try c.decodeIfPresent(Bool.self, forKey: .includeMetadata) ?? true
+        includeLocation = try c.decodeIfPresent(Bool.self, forKey: .includeLocation) ?? false
         revealWhenDone = try c.decodeIfPresent(Bool.self, forKey: .revealWhenDone) ?? true
         hdrGainMap = try c.decodeIfPresent(Bool.self, forKey: .hdrGainMap) ?? false
     }
@@ -151,7 +161,7 @@ final class ExportQueue: ObservableObject {
             var plan = await Task.detached(priority: .userInitiated) {
                 ExportBatchPlanner.plan(records, into: destination, options: options)
             }.value
-            for (index, record) in records.enumerated() {
+            images: for (index, record) in records.enumerated() {
                 if Task.isCancelled { break }
                 let name = record.fileName
                 await MainActor.run { self?.currentName = name }
@@ -189,7 +199,7 @@ final class ExportQueue: ObservableObject {
                     }
                     continue
                 }
-                let target = output.url
+                var target = output.url
                 let folder = target.deletingLastPathComponent()
                 if preset.dateSubfolders {
                     do {
@@ -202,20 +212,48 @@ final class ExportQueue: ObservableObject {
                         continue
                     }
                 }
-                let request = ExportWorker.Request(
-                    sourceURL: root.appendingPathComponent(record.relPath),
-                    destinationURL: target,
-                    editStackJSON: json, userRotation: record.userRotation,
-                    settings: preset.settings, colorSpace: preset.colorSpace,
-                    maxLongEdge: preset.resize ? preset.maxLongEdge : nil,
-                    keywords: preset.includeMetadata ? keywords : [],
-                    rating: preset.includeMetadata ? record.rating : 0,
-                    includeMetadata: preset.includeMetadata)
+                // Only Replace replaces. Otherwise the file is moved into place
+                // only if its name is still free, so one that appeared while
+                // the image rendered is kept, and the name is settled again by
+                // the policy: numbered (rendered again, rarely), or skipped.
+                var outcome: Result<ExportWorker.Outcome, Error>
+                var attempts = 0
+                while true {
+                    let request = ExportWorker.Request(
+                        sourceURL: root.appendingPathComponent(record.relPath),
+                        destinationURL: target,
+                        editStackJSON: json, userRotation: record.userRotation,
+                        settings: preset.settings, colorSpace: preset.colorSpace,
+                        maxLongEdge: preset.resize ? preset.maxLongEdge : nil,
+                        keywords: preset.includeMetadata ? keywords : [],
+                        rating: preset.includeMetadata ? record.rating : 0,
+                        includeMetadata: preset.includeMetadata,
+                        includeLocation: preset.includeMetadata && preset.includeLocation,
+                        replacesExisting: preset.collision == .replace)
 
-                let outcome: Result<ExportWorker.Outcome, Error> = await Task.detached(priority: .userInitiated) {
-                    do { return .success(try await ExportWorker.export(request, gpu: gpu)) }
-                    catch { return .failure(error) }
-                }.value
+                    outcome = await Task.detached(priority: .userInitiated) {
+                        do { return .success(try await ExportWorker.export(request, gpu: gpu)) }
+                        catch { return .failure(error) }
+                    }.value
+                    attempts += 1
+                    guard case .failure(let error) = outcome, error is SafeFileWriter.DestinationExists,
+                          attempts < 3, !Task.isCancelled else { break }
+                    let settled = plan.recheck(index)
+                    switch settled.action {
+                    case .write, .replace:
+                        target = settled.url
+                    case .skip:
+                        skipped += 1
+                        await MainActor.run { self?.done += 1 }
+                        continue images
+                    case .fail(let reason):
+                        await MainActor.run {
+                            self?.failures.append(Failure(name: name, reason: reason))
+                            self?.done += 1
+                        }
+                        continue images
+                    }
+                }
 
                 await MainActor.run {
                     guard let self else { return }
@@ -347,7 +385,12 @@ struct ExportSheet: View {
                     }
                 }
             }
-            Toggle("Include camera metadata, location, keywords and rating", isOn: $preset.includeMetadata)
+            Toggle("Include camera metadata, keywords and rating", isOn: $preset.includeMetadata)
+            Toggle("Include location", isOn: $preset.includeLocation)
+                .disabled(!preset.includeMetadata)
+                .padding(.leading, 20)
+                .accessibilityHint(ExportPreset.locationHelp)
+                .help(ExportPreset.locationHelp)
 
             groupLabel("Naming")
             HStack {

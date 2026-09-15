@@ -185,18 +185,73 @@ public struct SourceMetadata: Sendable, Equatable {
 
     /// The carried dictionaries, decoded for the export. Filtered again to
     /// the expected keys and shapes: the data came from another process.
-    public func imageProperties() -> [String: Any] {
+    /// Without `includingLocation`, the tags in `locationTags` are left out.
+    public func imageProperties(includingLocation: Bool) -> [String: Any] {
         guard let decoded = try? PropertyListSerialization.propertyList(from: properties, format: nil)
                 as? [String: Any] else { return [:] }
         var result: [String: Any] = [:]
         for key in Self.carriedValues {
             if let value = decoded[key] as? NSNumber { result[key] = value }
         }
+        let location = includingLocation ? [:] : Self.locationTags
         for key in Self.carriedDictionaries {
-            if let value = decoded[key] as? [String: Any] { result[key] = value }
+            guard var value = decoded[key] as? [String: Any] else { continue }
+            if let tags = location[key] {
+                // An empty list means the whole dictionary.
+                if tags.isEmpty { continue }
+                for tag in tags { value[tag] = nil }
+                if value.isEmpty { continue }
+            }
+            result[key] = value
         }
         return result
     }
+
+    // MARK: - Location
+
+    /// What an export leaves out unless it includes location: where the
+    /// photo was taken, and the serial numbers of the camera body and lens.
+    /// A serial number ties every photo to one camera, and so to its owner,
+    /// as surely as a position ties it to a place; photos posted from home
+    /// and from a trip can be linked by it. Artist, copyright and the
+    /// camera owner's name stay: they are credits the photographer chose.
+    ///
+    /// - Position: the whole GPS dictionary (an empty list below).
+    /// - Place names: IPTC city, sublocation, province or state, country,
+    ///   content location, and IPTC Extension LocationCreated/LocationShown.
+    /// - Serial numbers: Exif BodySerialNumber and LensSerialNumber, ExifAux
+    ///   SerialNumber and LensSerialNumber.
+    ///
+    /// `locationXMPTags` lists the XMP forms. exif:GPS* and exifEX's serial
+    /// numbers never reach the export as XMP (`namespacesFromDictionaries`),
+    /// so the dictionaries above cover them.
+    static var locationTags: [String: [String]] {
+        [
+            kCGImagePropertyGPSDictionary as String: [],
+            kCGImagePropertyExifDictionary as String: [
+                kCGImagePropertyExifBodySerialNumber, kCGImagePropertyExifLensSerialNumber,
+            ].map { $0 as String },
+            kCGImagePropertyExifAuxDictionary as String: [
+                kCGImagePropertyExifAuxSerialNumber, kCGImagePropertyExifAuxLensSerialNumber,
+            ].map { $0 as String },
+            kCGImagePropertyIPTCDictionary as String: [
+                kCGImagePropertyIPTCCity, kCGImagePropertyIPTCSubLocation, kCGImagePropertyIPTCProvinceState,
+                kCGImagePropertyIPTCCountryPrimaryLocationCode, kCGImagePropertyIPTCCountryPrimaryLocationName,
+                kCGImagePropertyIPTCContentLocationCode, kCGImagePropertyIPTCContentLocationName,
+                kCGImagePropertyIPTCExtLocationCreated, kCGImagePropertyIPTCExtLocationShown,
+            ].map { $0 as String },
+        ]
+    }
+    /// The same, as top-level XMP tags ("namespace name").
+    static let locationXMPTags: Set<String> = [
+        "http://ns.adobe.com/photoshop/1.0/ City", "http://ns.adobe.com/photoshop/1.0/ State",
+        "http://ns.adobe.com/photoshop/1.0/ Country",
+        "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/ Location",
+        "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/ CountryCode",
+        "http://iptc.org/std/Iptc4xmpExt/2008-02-29/ LocationCreated",
+        "http://iptc.org/std/Iptc4xmpExt/2008-02-29/ LocationShown",
+        "http://ns.adobe.com/exif/1.0/aux/ SerialNumber", "http://ns.adobe.com/exif/1.0/aux/ LensSerialNumber",
+    ]
 
     // MARK: - XMP
 
@@ -280,8 +335,9 @@ public struct SourceMetadata: Sendable, Equatable {
     }
 
     /// The carried XMP rebuilt as metadata for the export, through
-    /// ImageIO's tag API (no XMP parsing). nil when there is none.
-    public func xmpMetadata() -> CGMutableImageMetadata? {
+    /// ImageIO's tag API (no XMP parsing). nil when there is none. Without
+    /// `includingLocation`, the tags in `locationXMPTags` are left out.
+    public func xmpMetadata(includingLocation: Bool) -> CGMutableImageMetadata? {
         guard let xmpTags,
               let nodes = try? PropertyListSerialization.propertyList(from: xmpTags, format: nil)
                 as? [[String: Any]] else { return nil }
@@ -290,7 +346,9 @@ public struct SourceMetadata: Sendable, Equatable {
         for node in nodes {
             guard let prefix = node["prefix"] as? String, let name = node["name"] as? String,
                   Self.isXMLName(prefix), Self.isXMLName(name),
-                  let rawType = node["type"] as? Int, Self.register(node, in: metadata) else { continue }
+                  let rawType = node["type"] as? Int,
+                  includingLocation || !Self.locationXMPTags.contains("\(node["namespace"] as? String ?? "") \(name)"),
+                  Self.register(node, in: metadata) else { continue }
             let path = "\(prefix):\(name)" as CFString
             if rawType == Int(CGImageMetadataType.alternateText.rawValue) {
                 guard let string = node["value"] as? String else { continue }

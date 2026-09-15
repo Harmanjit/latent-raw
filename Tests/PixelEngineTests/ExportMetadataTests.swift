@@ -13,7 +13,7 @@ final class ExportMetadataTests: XCTestCase {
         let path = TestAssets.path("golden_nikon_d750_cc0.nef")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
         let source = try SourceMetadata(path: path)
-        let props = source.imageProperties()
+        let props = source.imageProperties(includingLocation: true)
 
         let tiff = try XCTUnwrap(props[kCGImagePropertyTIFFDictionary as String] as? [String: Any])
         XCTAssertEqual(tiff[kCGImagePropertyTIFFArtist as String] as? String, "grodovsky@gmail.com")
@@ -37,7 +37,7 @@ final class ExportMetadataTests: XCTestCase {
         XCTAssertNil(props[kCGImagePropertyPixelWidth as String])
 
         // XMP carries only what the dictionaries don't rebuild.
-        let xmp = try XCTUnwrap(source.xmpMetadata())
+        let xmp = try XCTUnwrap(source.xmpMetadata(includingLocation: true))
         XCTAssertNotNil(CGImageMetadataCopyTagWithPath(xmp, nil, "dc:creator" as CFString))
         let prefixes = (CGImageMetadataCopyTags(xmp) as? [CGImageMetadataTag] ?? [])
             .compactMap { CGImageMetadataTagCopyPrefix($0) as String? }
@@ -88,7 +88,7 @@ final class ExportMetadataTests: XCTestCase {
             ["namespace": "http://example.com/a/", "prefix": "a", "name": "c[1]", "type": 1, "value": "x"],
         ]
         let plist = try PropertyListSerialization.data(fromPropertyList: nodes, format: .binary, options: 0)
-        XCTAssertNil(try SourceMetadata(properties: Data(), xmpTags: plist).xmpMetadata())
+        XCTAssertNil(try SourceMetadata(properties: Data(), xmpTags: plist).xmpMetadata(includingLocation: true))
         XCTAssertFalse(SourceMetadata.isXMLName("1abc"))
         XCTAssertTrue(SourceMetadata.isXMLName("Iptc4xmpExt"))
     }
@@ -105,6 +105,7 @@ final class ExportMetadataTests: XCTestCase {
         metadata.lensModel = "Matched lens profile"  // the file has none: fills in
         metadata.keywords = ["latent", "source"]
         metadata.rating = 4
+        metadata.includeLocation = true
 
         let image = try Self.image(width: 64, height: 48, space: CGColorSpace.displayP3)
         for format in ExportSettings.Format.allCases {
@@ -157,6 +158,82 @@ final class ExportMetadataTests: XCTestCase {
         }
     }
 
+    /// Unless location is asked for, the file doesn't say where the photo
+    /// was taken or which camera body and lens took it, neither in the
+    /// dictionaries nor in XMP. Credits, captions and keywords stay.
+    func testLocationAndSerialNumbersAreLeftOutUnlessAsked() throws {
+        let source = SourceMetadata(imageData: try Self.richSourceJPEG())
+        XCTAssertFalse(ExportMetadata().includeLocation, "off unless asked for")
+
+        let kept = source.imageProperties(includingLocation: true)
+        let stripped = source.imageProperties(includingLocation: false)
+        func tag(_ props: [String: Any], _ dictionary: CFString, _ key: CFString) -> Any? {
+            (props[dictionary as String] as? [String: Any])?[key as String]
+        }
+        XCTAssertNotNil(kept[kCGImagePropertyGPSDictionary as String])
+        XCTAssertNil(stripped[kCGImagePropertyGPSDictionary as String])
+        for (dictionary, key) in [(kCGImagePropertyExifDictionary, kCGImagePropertyExifBodySerialNumber),
+                                  (kCGImagePropertyExifDictionary, kCGImagePropertyExifLensSerialNumber),
+                                  (kCGImagePropertyExifAuxDictionary, kCGImagePropertyExifAuxSerialNumber),
+                                  (kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCCity)] {
+            XCTAssertNotNil(tag(kept, dictionary, key), "\(key)")
+            XCTAssertNil(tag(stripped, dictionary, key), "\(key)")
+        }
+        XCTAssertEqual(tag(stripped, kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFArtist) as? String,
+                       "A. Photographer")
+        XCTAssertEqual(tag(stripped, kCGImagePropertyExifDictionary, kCGImagePropertyExifMeteringMode) as? Int, 5)
+
+        var metadata = ExportMetadata()
+        metadata.source = source
+        metadata.keywords = ["latent"]
+        let image = try Self.image(width: 64, height: 48, space: CGColorSpace.sRGB)
+        for format in ExportSettings.Format.allCases {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("latent-location-\(UUID().uuidString).\(format.fileExtension)")
+            defer { try? FileManager.default.removeItem(at: url) }
+            try Exporter.write(cgImage: image, to: url, settings: ExportSettings(format: format), metadata: metadata)
+
+            let out = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+            let props = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(out, 0, nil) as? [String: Any])
+            let label = format.rawValue
+            XCTAssertNil(props[kCGImagePropertyGPSDictionary as String], label)
+            XCTAssertNil(tag(props, kCGImagePropertyExifDictionary, kCGImagePropertyExifBodySerialNumber), label)
+            XCTAssertNil(tag(props, kCGImagePropertyExifDictionary, kCGImagePropertyExifLensSerialNumber), label)
+            XCTAssertNil(tag(props, kCGImagePropertyExifAuxDictionary, kCGImagePropertyExifAuxSerialNumber), label)
+            XCTAssertNil(tag(props, kCGImagePropertyExifAuxDictionary, kCGImagePropertyExifAuxLensSerialNumber), label)
+            XCTAssertNil(tag(props, kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCCity), label)
+            XCTAssertEqual(tag(props, kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFArtist) as? String,
+                           "A. Photographer", label)
+
+            let xmp = try XCTUnwrap(CGImageSourceCopyMetadataAtIndex(out, 0, nil), label)
+            let prefixes = (CGImageMetadataCopyTags(xmp) as? [CGImageMetadataTag] ?? [])
+                .map { "\(CGImageMetadataTagCopyPrefix($0) as String? ?? ""):\(CGImageMetadataTagCopyName($0) as String? ?? "")" }
+            for gone in ["Iptc4xmpExt:LocationCreated", "photoshop:City", "aux:SerialNumber", "aux:LensSerialNumber"] {
+                XCTAssertFalse(prefixes.contains(gone), "\(gone) in \(label): \(prefixes)")
+            }
+            XCTAssertFalse(prefixes.contains { $0.hasPrefix("exif:GPS") }, "\(label): \(prefixes)")
+            XCTAssertEqual(CGImageMetadataCopyStringValueWithPath(xmp, nil, "dc:title[x-default]" as CFString) as String?,
+                           "A title", label)
+        }
+    }
+
+    /// The capture date written when the raw's own can't be read: EXIF's
+    /// form in the Gregorian calendar, whatever the Mac's region uses.
+    func testFallbackCaptureDateIgnoresTheUsersCalendarAndLocale() throws {
+        let utc = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let formatter = ExportMetadata.exifDateFormatter(timeZone: utc)
+        XCTAssertEqual(formatter.locale.identifier, "en_US_POSIX")
+        XCTAssertEqual(formatter.calendar.identifier, .gregorian)
+        XCTAssertEqual(formatter.string(from: Date(timeIntervalSince1970: 1_700_000_000)), "2023:11:14 22:13:20")
+
+        var metadata = ExportMetadata()
+        metadata.captureDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let exif = try XCTUnwrap(metadata.imageIOProperties[kCGImagePropertyExifDictionary] as? [String: Any])
+        XCTAssertEqual(exif[kCGImagePropertyExifDateTimeOriginal as String] as? String,
+                       ExportMetadata.exifDateFormatter().string(from: metadata.captureDate!))
+        XCTAssertTrue((exif[kCGImagePropertyExifDateTimeOriginal as String] as? String ?? "").hasPrefix("2023:11:1"))
+    }
+
     /// Exif ColorSpace 1 only for sRGB, and no embedded thumbnail.
     func testSRGBJPEGIsTaggedAndHasNoThumbnail() throws {
         var metadata = ExportMetadata()
@@ -196,8 +273,9 @@ final class ExportMetadataTests: XCTestCase {
         <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"
           xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
           xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/"
-          xmlns:aux="http://ns.adobe.com/exif/1.0/aux/"
-          xmp:Rating="2" crs:Exposure2012="+1.00" aux:SerialNumber="12345">
+          xmlns:aux="http://ns.adobe.com/exif/1.0/aux/" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"
+          xmp:Rating="2" crs:Exposure2012="+1.00" aux:SerialNumber="12345" aux:LensSerialNumber="L678"
+          photoshop:City="Oslo">
         <dc:title><rdf:Alt><rdf:li xml:lang="x-default">A title</rdf:li></rdf:Alt></dc:title>
         <Iptc4xmpExt:LocationCreated><rdf:Bag><rdf:li rdf:parseType="Resource">
           <Iptc4xmpExt:City>Oslo</Iptc4xmpExt:City></rdf:li></rdf:Bag></Iptc4xmpExt:LocationCreated>
@@ -223,8 +301,11 @@ final class ExportMetadataTests: XCTestCase {
                 kCGImagePropertyExifMeteringMode as String: 5,
                 kCGImagePropertyExifSubjectArea as String: [100, 80, 20, 20],
                 kCGImagePropertyExifColorSpace as String: 1,
+                kCGImagePropertyExifBodySerialNumber as String: "B999",
+                kCGImagePropertyExifLensSerialNumber as String: "L678",
             ],
-            kCGImagePropertyIPTCDictionary as String: [kCGImagePropertyIPTCKeywords as String: ["source"]],
+            kCGImagePropertyIPTCDictionary as String: [kCGImagePropertyIPTCKeywords as String: ["source"],
+                                                       kCGImagePropertyIPTCCity as String: "Oslo"],
         ]
         let data = NSMutableData()
         let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil))

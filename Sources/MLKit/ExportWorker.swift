@@ -38,14 +38,23 @@ public enum ExportWorker {
         public var rating: Int
         /// False writes pixels only: no camera, date, location, keywords or rating.
         public var includeMetadata: Bool
+        /// With metadata, also keep where the photo was taken and the camera
+        /// and lens serial numbers (`ExportMetadata.includeLocation`).
+        public var includeLocation: Bool
+        /// False never replaces a file at `destinationURL`, even one that
+        /// appeared during the render: the export throws
+        /// `SafeFileWriter.DestinationExists` instead.
+        public var replacesExisting: Bool
 
         public init(sourceURL: URL, destinationURL: URL, editStackJSON: String?, userRotation: Int,
                     settings: ExportSettings, colorSpace: ColorKit.OutputSpace, maxLongEdge: Int?,
-                    keywords: [String] = [], rating: Int = 0, includeMetadata: Bool = true) {
+                    keywords: [String] = [], rating: Int = 0, includeMetadata: Bool = true,
+                    includeLocation: Bool = false, replacesExisting: Bool = true) {
             self.sourceURL = sourceURL; self.destinationURL = destinationURL
             self.editStackJSON = editStackJSON; self.userRotation = userRotation
             self.settings = settings; self.colorSpace = colorSpace; self.maxLongEdge = maxLongEdge
             self.keywords = keywords; self.rating = rating; self.includeMetadata = includeMetadata
+            self.includeLocation = includeLocation; self.replacesExisting = replacesExisting
         }
     }
 
@@ -114,6 +123,7 @@ public enum ExportWorker {
         metadata.captureDate = s.captureTime.timeIntervalSince1970 > 0 ? s.captureTime : nil
         metadata.keywords = request.keywords
         metadata.rating = request.rating
+        metadata.includeLocation = request.includeLocation
         if request.includeMetadata {
             // GPS, copyright, exposure details and the rest, read from the
             // raw in the decoder service. A file it can't read still gets
@@ -121,7 +131,7 @@ public enum ExportWorker {
             do {
                 metadata.source = try SourceMetadata(path: request.sourceURL.path)
             } catch {
-                exportLogger.error("source metadata unavailable for \(request.sourceURL.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+                exportLogger.error("source metadata unavailable for \(request.sourceURL.lastPathComponent, privacy: .private): \(String(describing: error), privacy: .private)")
             }
         }
 
@@ -135,6 +145,7 @@ public enum ExportWorker {
                                          crop: parameters.crop,
                                          metadata: request.includeMetadata ? metadata : nil,
                                          maxLongEdge: request.maxLongEdge,
+                                         replacingExisting: request.replacesExisting,
                                          hdrRender: { output in
                                              try pipeline.render(session, scale: scale, parameters: parameters, output: output)
                                          })
