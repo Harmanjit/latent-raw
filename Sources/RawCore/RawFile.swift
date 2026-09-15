@@ -412,6 +412,11 @@ public final class RawFile {
                 mergeInfo = LinearMergeInfo.parse(xmpPacket: Data(bytes: xmp, count: xmpLength))
             }
         }
+        // A merge's recipe carries its reference frame's lens exactly as
+        // that raw described it, maker-notes name and IDs included. EXIF,
+        // all a DNG can hold, has no room for those, so LibRaw's reading of
+        // this file would match lens profiles on less than the source did.
+        let recipeLens = mergeInfo?.lens
         return RawSummary(
             activeArea: SensorActiveArea(
                 left: Int(c.left_margin), top: Int(c.top_margin), width: Int(c.width), height: Int(c.height),
@@ -422,11 +427,11 @@ public final class RawFile {
             channelBlackLevels: SIMD4(c.channel_black.0, c.channel_black.1, c.channel_black.2, c.channel_black.3),
             dataMaximum: c.data_maximum, baselineExposure: c.baseline_exposure, mergeInfo: mergeInfo,
             cameraMake: str(c.camera_make, 64), cameraModel: str(c.camera_model, 64),
-            lensModel: str(c.lens_model, 64),
+            lensModel: recipeLens?.model ?? str(c.lens_model, 64),
             iso: c.iso, shutter: c.shutter, aperture: c.aperture, focalLength: c.focal_length,
             captureTime: Date(timeIntervalSince1970: TimeInterval(c.timestamp)),
             orientation: Int(c.orientation),
-            lens: LensIdentity(
+            lens: recipeLens?.identity ?? LensIdentity(
                 make: str(c.lens_make, 64), makerNotesName: str(c.lens_makernotes, 128),
                 makerLensID: c.lens_id, nikonLensID: c.nikon_lens_id, nikonLensType: c.nikon_lens_type,
                 minFocal: Double(c.lens_min_focal), maxFocal: Double(c.lens_max_focal),

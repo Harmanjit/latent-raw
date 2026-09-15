@@ -45,17 +45,27 @@ public struct MergeDNGMetadata: Sendable, Equatable {
     public var exposureTime: Double?
     public var fNumber: Double?
     public var iso: Double?
-    /// Millimetres.
+    /// Millimetres: the focal length the reference frame was taken at.
     public var focalLength: Double?
+    /// EXIF LensMake.
     public var lensMake: String?
+    /// EXIF LensModel: the name other apps show and match profiles on.
     /// Leave nil when lens corrections are baked in (panoramas), so no
     /// reader corrects the lens a second time.
     public var lensModel: String?
+    /// EXIF LensSpecification and DNG LensInfo, which hold the same four values.
     public var lensSpecification: LensSpecification?
+    /// The reference frame's lens exactly as its raw described it, for
+    /// Latent itself: the writer puts it into the recipe (`MergeRecipe.lens`)
+    /// when the recipe has none. The three tags above are what other apps
+    /// can read, but they can't carry maker-notes names or lens IDs, and
+    /// Latent matches lens profiles on those (see `LinearMergeInfo.Lens`).
+    public var lens: LinearMergeInfo.Lens?
     /// The part of the stored image to show (DNG DefaultCrop); nil is all of it.
     public var defaultCrop: PixelRegion?
 
-    /// EXIF LensSpecification: the lens's focal range and widest aperture at each end.
+    /// EXIF LensSpecification: the lens's focal range and widest aperture
+    /// at each end. 0 means unknown, and is written as EXIF's 0/0.
     public struct LensSpecification: Sendable, Equatable {
         public var minFocalLength: Double
         public var maxFocalLength: Double
@@ -77,7 +87,8 @@ public struct MergeDNGMetadata: Sendable, Equatable {
                 captureDate: Date? = nil, timeZone: TimeZone = .current,
                 exposureTime: Double? = nil, fNumber: Double? = nil, iso: Double? = nil,
                 focalLength: Double? = nil, lensMake: String? = nil, lensModel: String? = nil,
-                lensSpecification: LensSpecification? = nil, defaultCrop: PixelRegion? = nil) {
+                lensSpecification: LensSpecification? = nil, lens: LinearMergeInfo.Lens? = nil,
+                defaultCrop: PixelRegion? = nil) {
         self.make = make
         self.model = model
         self.uniqueCameraModel = uniqueCameraModel ?? Self.uniqueCameraModel(make: make, model: model)
@@ -96,6 +107,7 @@ public struct MergeDNGMetadata: Sendable, Equatable {
         self.lensMake = lensMake
         self.lensModel = lensModel
         self.lensSpecification = lensSpecification
+        self.lens = lens
         self.defaultCrop = defaultCrop
     }
 
@@ -107,13 +119,16 @@ public struct MergeDNGMetadata: Sendable, Equatable {
     ///
     /// `softwareVersion` is the app's version ("1.2"). Zero or unknown
     /// exposure values are left out rather than written as 0.
+    ///
+    /// The lens is kept whole (`lens`), and the EXIF lens tags get the best
+    /// the raw offers: see `lensName(model:identity:)` and
+    /// `lensSpecification(for:)`.
     public init(summary: RawSummary, cameraToXYZ: [Float]?, softwareVersion: String,
                 baselineExposure: Double = 0) throws {
         guard let cameraToXYZ else { throw MergeDNGError.invalidMetadata("the reference frame has no colour matrix") }
         let multipliers = [summary.cameraMultipliers.0, summary.cameraMultipliers.1, summary.cameraMultipliers.2]
         let lens = summary.lens
-        let hasLensRange = lens.minFocal > 0 && lens.maxFocal >= lens.minFocal
-            && lens.maxApertureAtMinFocal > 0 && lens.maxApertureAtMaxFocal > 0
+        let lensMake = lens.make.trimmingCharacters(in: .whitespaces)
         self.init(
             make: summary.cameraMake, model: summary.cameraModel,
             colorMatrix1: try Self.colorMatrix(fromCamXYZ: cameraToXYZ),
@@ -126,13 +141,61 @@ public struct MergeDNGMetadata: Sendable, Equatable {
             fNumber: summary.aperture > 0 ? summary.aperture : nil,
             iso: summary.iso > 0 ? summary.iso : nil,
             focalLength: summary.focalLength > 0 ? summary.focalLength : nil,
-            lensMake: lens.make.isEmpty ? nil : lens.make,
-            lensModel: summary.lensModel.isEmpty ? nil : summary.lensModel,
-            lensSpecification: hasLensRange
-                ? LensSpecification(minFocalLength: lens.minFocal, maxFocalLength: lens.maxFocal,
-                                    maxApertureAtMinFocal: lens.maxApertureAtMinFocal,
-                                    maxApertureAtMaxFocal: lens.maxApertureAtMaxFocal)
-                : nil)
+            lensMake: lensMake.isEmpty ? nil : lensMake,
+            lensModel: Self.lensName(model: summary.lensModel, identity: lens),
+            lensSpecification: Self.lensSpecification(for: lens),
+            lens: LinearMergeInfo.Lens(summary: summary))
+    }
+
+    // MARK: - Lens
+
+    /// The best name for EXIF LensModel, or nil when the raw says nothing
+    /// usable: the raw's own EXIF name, else its maker-notes name (Canon
+    /// raws often have only that: "EF 50mm f/1.4 USM"), else a name built
+    /// from the focal range and apertures ("17-55mm f/2.8"), so other apps
+    /// at least show what kind of lens it was.
+    public static func lensName(model: String, identity: LensIdentity) -> String? {
+        for name in [model, identity.makerNotesName] {
+            let trimmed = name.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        let (minFocal, maxFocal) = (identity.minFocal, identity.maxFocal)
+        guard minFocal.isFinite, minFocal > 0 else { return nil }
+        var name = identity.isZoom && maxFocal.isFinite
+            ? "\(number(minFocal))-\(number(maxFocal))mm" : "\(number(minFocal))mm"
+        let (wide, long) = (identity.maxApertureAtMinFocal, identity.maxApertureAtMaxFocal)
+        if wide.isFinite, wide > 0 {
+            // A zoom whose widest aperture shrinks as it zooms: "f/3.5-5.6".
+            let varies = identity.isZoom && long.isFinite && long > 0 && number(long) != number(wide)
+            name += varies ? " f/\(number(wide))-\(number(long))" : " f/\(number(wide))"
+        }
+        return name
+    }
+
+    /// The lens's focal range and apertures, or nil when the raw doesn't
+    /// know the focal range. Unknown apertures stay 0 (a Canon prime often
+    /// reports 50-50mm with no apertures), which the writer stores as 0/0,
+    /// EXIF's "unknown".
+    public static func lensSpecification(for identity: LensIdentity) -> LensSpecification? {
+        func known(_ v: Double) -> Double { v.isFinite && v > 0 ? v : 0 }
+        let minFocal = known(identity.minFocal)
+        guard minFocal > 0 else { return nil }
+        // A missing or smaller long end means a prime: its range is one focal length.
+        let maxFocal = max(minFocal, known(identity.maxFocal))
+        return LensSpecification(minFocalLength: minFocal, maxFocalLength: maxFocal,
+                                 maxApertureAtMinFocal: known(identity.maxApertureAtMinFocal),
+                                 maxApertureAtMaxFocal: known(identity.maxApertureAtMaxFocal))
+    }
+
+    /// A focal length or f-number as lens names print it: at most one
+    /// decimal, none when whole ("50", "2.8"). LibRaw's values are Floats,
+    /// so 2.8 arrives as 2.7999999523 and has to be rounded.
+    static func number(_ value: Double) -> String {
+        // Past a million millimetres the file is damaged; don't trap on it.
+        guard value.isFinite, abs(value) < 1_000_000 else { return String(format: "%g", value) }
+        let tenths = (value * 10).rounded()
+        return tenths.truncatingRemainder(dividingBy: 10) == 0
+            ? String(Int(tenths / 10)) : String(format: "%.1f", tenths / 10)
     }
 
     // MARK: - Conversions

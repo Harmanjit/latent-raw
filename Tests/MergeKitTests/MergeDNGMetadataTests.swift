@@ -44,6 +44,7 @@ final class MergeDNGMetadataTests: XCTestCase {
         XCTAssertEqual(m.lensModel, "NIKKOR Z 24-70mm f/4 S")
         XCTAssertEqual(m.lensSpecification, .init(minFocalLength: 24, maxFocalLength: 70,
                                                   maxApertureAtMinFocal: 4, maxApertureAtMaxFocal: 4))
+        XCTAssertEqual(m.lens, .init(model: "NIKKOR Z 24-70mm f/4 S", identity: try summary().lens))
         XCTAssertNil(m.defaultCrop)
     }
 
@@ -59,7 +60,8 @@ final class MergeDNGMetadataTests: XCTestCase {
     func testMissingValuesAreLeftOut() throws {
         let m = try MergeDNGMetadata(summary: summary(lensModel: "", timestamp: 0),
                                      cameraToXYZ: Fixtures.d750CamXYZ, softwareVersion: "")
-        XCTAssertNil(m.lensModel)
+        XCTAssertEqual(m.lensModel, "24-70mm f/4", "no name: one built from the range")
+        XCTAssertEqual(m.lens?.model, "", "the recipe keeps the raw's own (empty) name")
         XCTAssertNil(m.captureDate)
         XCTAssertEqual(m.software, "Latent")
     }

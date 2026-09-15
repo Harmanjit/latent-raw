@@ -276,7 +276,7 @@ public final class HDRMerger: HDRMerging {
                                  lensApplied: false, reference: reference,
                                  options: Self.recipeOptions(options), sources: sources)
         let normalisation = try ExposureNormalisation(maximum: maximum)
-        let stored = recipe.normalised(by: normalisation)
+        let stored = recipe.normalised(by: normalisation).withLens(of: accumulated.reference.summary)
         let referenceFrame = accumulated.reference
         let preview = try report.time("Render preview") {
             try Self.gpuStep {

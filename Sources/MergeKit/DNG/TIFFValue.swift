@@ -157,6 +157,7 @@ enum TIFFTag {
     static let colorMatrix1: UInt16 = 50721
     static let asShotNeutral: UInt16 = 50728
     static let baselineExposure: UInt16 = 50730
+    static let lensInfo: UInt16 = 50736
     static let calibrationIlluminant1: UInt16 = 50778
     static let previewColorSpace: UInt16 = 50970
 }
