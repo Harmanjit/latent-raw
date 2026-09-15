@@ -47,6 +47,8 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// Highlights, Shadows, Whites, Blacks. Absent when all are zero,
         /// so edits that never touched them encode exactly as before.
         public var toneranges: ToneRanges?
+        /// Red-eye corrections. Absent when there are none.
+        public var redeye: [RedEyeSpot]?
     }
 
     public struct AIDenoise: Codable, Equatable, Sendable {
@@ -184,6 +186,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.splittoning = p.splitToning
         modules.locals = p.locals.isEmpty ? nil : p.locals
         modules.heal = p.heals.isEmpty ? nil : p.heals
+        modules.redeye = p.redEyes.isEmpty ? nil : p.redEyes
         modules.presence = (p.texture == 0 && p.clarity == 0 && p.dehaze == 0) ? nil
             : Presence(texture: p.texture, clarity: p.clarity, dehaze: p.dehaze)
         modules.vibrance = p.vibrance == 0 ? nil : Vibrance(amount: p.vibrance)
@@ -249,6 +252,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         if let st = modules.splittoning { p.splitToning = st }
         p.locals = modules.locals ?? []
         p.heals = modules.heal ?? []
+        p.redEyes = modules.redeye ?? []
         if let pr = modules.presence { p.texture = pr.texture; p.clarity = pr.clarity; p.dehaze = pr.dehaze }
         else { p.texture = 0; p.clarity = 0; p.dehaze = 0 }
         p.vibrance = modules.vibrance?.amount ?? 0

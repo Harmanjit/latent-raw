@@ -2,7 +2,10 @@ import SwiftUI
 import PixelEngine
 
 /// Shows the spot-removal patches: a solid circle on the target, a
-/// dashed one on the source, a line between them. Purely visual; the
+/// dashed one on the source, a line between them. A stroke is drawn as
+/// its outline, solid on the target and dashed on the source, with a dot
+/// on the source to drag it by, and the stroke being painted as a plain
+/// outline until the mouse is let go. Purely visual; the
 /// Metal view underneath owns the mouse and the model does the hit
 /// testing, so this can never disagree with what a drag actually grabs.
 struct HealOverlay: View {
@@ -19,6 +22,10 @@ struct HealOverlay: View {
                     let r = CGFloat(patch.radius) * short * model.viewport.zoom / scale
                     let t = point(patch.target, scale: scale)
                     let s = point(patch.source, scale: scale)
+                    if patch.isStroke {
+                        drawStroke(patch, radius: r, selected: selected, scale: scale, in: &context)
+                        continue
+                    }
 
                     var link = Path()
                     link.move(to: t); link.addLine(to: s)
@@ -45,6 +52,13 @@ struct HealOverlay: View {
                         context.stroke(halo, with: .color(.accentColor), lineWidth: ring)
                     }
                 }
+                if !model.paintingHealStroke.isEmpty {
+                    let r = CGFloat(model.healRadius) * short * model.viewport.zoom / scale
+                    // Redrawn on every mouse move: one stroked path, not a union.
+                    let outline = outlinePath(model.paintingHealStroke, radius: r, scale: scale, merged: false)
+                    context.stroke(outline, with: .color(.black.opacity(0.5)), lineWidth: 3)
+                    context.stroke(outline, with: .color(.white), lineWidth: 1.5)
+                }
             }
             .allowsHitTesting(false)
             // Patches are placed with the mouse; VoiceOver can count them,
@@ -53,7 +67,7 @@ struct HealOverlay: View {
             .accessibilityLabel("Spot removal patches")
             .accessibilityValue(SpokenText.healPatches(count: model.parameters.heals.count,
                                                        selected: model.selectedHealIndex))
-            .accessibilityHint("Click a spot on the image to remove it")
+            .accessibilityHint("Click a spot on the image to remove it, or paint along a long blemish with the Brush shape")
             .accessibilityAdjustableAction { direction in
                 let count = model.parameters.heals.count
                 guard count > 0 else { return }
@@ -63,6 +77,65 @@ struct HealOverlay: View {
             }
             .accessibilityAction(named: "Delete selected patch") { model.deleteSelectedHeal() }
         }
+    }
+
+    /// A stroke patch: the outline of its path on the target, solid, and on
+    /// the source, dashed, with a line and a handle dot between them.
+    private func drawStroke(_ patch: HealPatch, radius r: CGFloat, selected: Bool, scale: CGFloat,
+                            in context: inout GraphicsContext) {
+        let colour: Color = selected ? .accentColor : .white
+        let t = point(patch.target, scale: scale), s = point(patch.source, scale: scale)
+        var link = Path()
+        link.move(to: t); link.addLine(to: s)
+        context.stroke(link, with: .color(.white.opacity(selected ? 0.9 : 0.5)),
+                       style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+
+        let target = outlinePath(patch.pathPoints(), radius: r, scale: scale)
+        context.stroke(target, with: .color(.black.opacity(0.5)), lineWidth: 3)
+        context.stroke(target, with: .color(colour), lineWidth: selected ? 2 : 1.5)
+        let source = outlinePath(patch.pathPoints(atSource: true), radius: r, scale: scale)
+        context.stroke(source, with: .color(.black.opacity(0.5)), lineWidth: 3)
+        context.stroke(source, with: .color(colour), style: StrokeStyle(lineWidth: selected ? 2 : 1.5, dash: [4, 3]))
+
+        let handle = Path(ellipseIn: CGRect(x: s.x - 4, y: s.y - 4, width: 8, height: 8))
+        context.fill(handle, with: .color(colour))
+        context.stroke(handle, with: .color(.black.opacity(0.6)), lineWidth: 1)
+
+        let ring = Contrast.selectionOutlineWidth(selected: selected, increased: contrast == .increased)
+        if ring > 0 {
+            let halo = outlinePath(patch.pathPoints(), radius: r + 3 + ring, scale: scale)
+            context.stroke(halo, with: .color(.black), lineWidth: ring + 2)
+            context.stroke(halo, with: .color(.accentColor), lineWidth: ring)
+        }
+    }
+
+    /// The outline of a path `radius` view points wide, round at the ends:
+    /// the union of one capsule per segment, since a single stroked path
+    /// keeps a fold inside each join that would draw as a notch. Without
+    /// `merged`, the quick single stroked path, folds and all.
+    private func outlinePath(_ points: [SIMD2<Float>], radius r: CGFloat, scale: CGFloat, merged: Bool = true) -> Path {
+        let viewPoints = points.map { point($0, scale: scale) }
+        guard let first = viewPoints.first else { return Path() }
+        let style = StrokeStyle(lineWidth: max(2 * r, 1), lineCap: .round, lineJoin: .round)
+        if !merged {
+            var centre = Path()
+            centre.move(to: first)
+            for p in viewPoints.dropFirst() { centre.addLine(to: p) }
+            if viewPoints.count == 1 { centre.addLine(to: first) }
+            return centre.strokedPath(style)
+        }
+        func capsule(_ a: CGPoint, _ b: CGPoint) -> Path {
+            var line = Path()
+            line.move(to: a)
+            line.addLine(to: b)
+            return line.strokedPath(style)
+        }
+        guard viewPoints.count > 1 else { return capsule(first, first) }
+        var shape = capsule(viewPoints[0], viewPoints[1])
+        for i in 2..<max(viewPoints.count, 2) {
+            shape = shape.union(capsule(viewPoints[i - 1], viewPoints[i]))
+        }
+        return shape
     }
 
     /// Normalized sensor -> view points, through the crop frame and viewport.

@@ -65,6 +65,8 @@ public final class GPUContext: @unchecked Sendable {
     let exportGainMapPSO: MTLComputePipelineState
     let healApplyPSO: MTLComputePipelineState
     let healPastePSO: MTLComputePipelineState
+    let redEyeApplyPSO: MTLComputePipelineState
+    let redEyePastePSO: MTLComputePipelineState
     let lcPreparePSO: MTLComputePipelineState
     let lcDownsamplePSO: MTLComputePipelineState
     let lcBlurHPSO: MTLComputePipelineState
@@ -120,6 +122,8 @@ public final class GPUContext: @unchecked Sendable {
         let gainMapPipeline = try makePipeline("exportGainMap")
         let healApplyPipeline = try makePipeline("healApply")
         let healPastePipeline = try makePipeline("healPaste")
+        let redEyeApplyPipeline = try makePipeline("redEyeApply")
+        let redEyePastePipeline = try makePipeline("redEyePaste")
         let lcPrepare = try makePipeline("lcPrepare")
         let lcDownsample = try makePipeline("lcDownsample")
         let lcBlurH = try makePipeline("lcBlurH")
@@ -160,6 +164,8 @@ public final class GPUContext: @unchecked Sendable {
         self.exportGainMapPSO = gainMapPipeline
         self.healApplyPSO = healApplyPipeline
         self.healPastePSO = healPastePipeline
+        self.redEyeApplyPSO = redEyeApplyPipeline
+        self.redEyePastePSO = redEyePastePipeline
         self.lcPreparePSO = lcPrepare
         self.lcDownsamplePSO = lcDownsample
         self.lcBlurHPSO = lcBlurH
@@ -210,7 +216,7 @@ public final class GPUContext: @unchecked Sendable {
         // Every kernel source file must be listed here, or its functions
         // won't exist in the runtime-compiled library.
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
-                            "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise"]
+                            "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound

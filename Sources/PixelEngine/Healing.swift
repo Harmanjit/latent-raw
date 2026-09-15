@@ -14,6 +14,11 @@ import simd
 /// included) while the texture is the source's. That hides the seam the
 /// way a Poisson blend would, at the cost of a few small blurs. Patches
 /// apply in order, each reading the result of the ones before.
+///
+/// A patch can also be a brush stroke (`stroke`), for blemishes a circle
+/// can't cover: a wire, a hair, a dust streak. The stroke is a path of
+/// points drawn `radius` wide; its source is the same path moved by
+/// `source - target`, so the whole length copies from one offset.
 public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
     public enum Mode: String, Codable, Sendable, CaseIterable {
         case heal, clone
@@ -27,19 +32,40 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
     /// 0 (hard edge) … 1 (fades from the centre).
     public var feather: Float
     public var mode: Mode
+    /// A brush stroke's path, as offsets from `target` (normalized sensor
+    /// coordinates, the first normally zero). Nil for a circle, and absent
+    /// from the JSON then, so circles encode exactly as before strokes.
+    public var stroke: [SIMD2<Float>]?
 
     public init(id: UUID = UUID(), target: SIMD2<Float>, source: SIMD2<Float>,
-                radius: Float, feather: Float = 0.35, mode: Mode = .heal) {
+                radius: Float, feather: Float = 0.35, mode: Mode = .heal,
+                stroke: [SIMD2<Float>]? = nil) {
         self.id = id
         self.target = target
         self.source = source
         self.radius = radius
         self.feather = feather
         self.mode = mode
+        self.stroke = stroke
     }
 
-    /// The GPU-side array is fixed; more patches would need a buffer.
+    /// Patches per image; a stroke counts as one, however long.
     public static let maximumCount = 32
+    /// Points per stroke once simplified (`simplifiedStroke`). A straight
+    /// wire needs two; the limit only bites on a long scribble, which is
+    /// simplified harder to fit.
+    public static let maximumStrokePoints = 256
+
+    /// Whether this patch is a brush stroke rather than a circle.
+    public var isStroke: Bool { stroke != nil }
+
+    /// The stroke's path (or the circle's centre) in normalized sensor
+    /// coordinates, around the target or, with `atSource`, the source.
+    public func pathPoints(atSource: Bool = false) -> [SIMD2<Float>] {
+        let anchor = atSource ? source : target
+        guard let stroke, !stroke.isEmpty else { return [anchor] }
+        return stroke.map { anchor + $0 }
+    }
 
     public func radiusPixels(sensorSize s: CGSize) -> CGFloat {
         CGFloat(radius) * min(s.width, s.height)
@@ -55,8 +81,16 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
 
     private func circleBounds(_ c: SIMD2<Float>, sensorSize s: CGSize) -> CGRect {
         let r = radiusPixels(sensorSize: s)
-        return CGRect(x: CGFloat(c.x) * s.width - r, y: CGFloat(c.y) * s.height - r,
-                      width: 2 * r, height: 2 * r)
+        guard let stroke, !stroke.isEmpty else {
+            return CGRect(x: CGFloat(c.x) * s.width - r, y: CGFloat(c.y) * s.height - r,
+                          width: 2 * r, height: 2 * r)
+        }
+        // A stroke: the box of its path, `radius` wider on every side.
+        var lo = SIMD2<Float>(repeating: .infinity), hi = SIMD2<Float>(repeating: -.infinity)
+        for d in stroke { lo = simd_min(lo, c + d); hi = simd_max(hi, c + d) }
+        return CGRect(x: CGFloat(lo.x) * s.width - r, y: CGFloat(lo.y) * s.height - r,
+                      width: CGFloat(hi.x - lo.x) * s.width + 2 * r,
+                      height: CGFloat(hi.y - lo.y) * s.height + 2 * r)
     }
 
     /// How far from its centres the patch reads, in sensor pixels at full

@@ -25,6 +25,8 @@ public struct SnapshotPlan: Equatable, Sendable {
         case crop
         /// Develop with the spot removal tool armed and its panel open.
         case heal
+        /// Develop with the red-eye tool armed, under Spot Removal.
+        case redEye = "redeye"
         /// Compare, on the selection and the image after it.
         case compare
         /// The export sheet over the window.

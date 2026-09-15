@@ -158,6 +158,26 @@ final class GoldenImageTests: XCTestCase {
         })
     }
 
+    /// A brush stroke healed piece by piece across the bright rim beside
+    /// the ball and on into the dark behind it, where a seam between
+    /// pieces or a tone mismatch along the stroke's edge would show.
+    func testHealStroke() throws {
+        try check(Recipe(name: "heal-stroke", overview: false, detail: Self.ballCentre) {
+            $0.heals = [HealPatch(id: Self.uuid(6), target: [0.4998, 0.551], source: [0.4998, 0.541],
+                                  radius: 0.002, mode: .heal,
+                                  stroke: [[0, 0], [0.0058, -0.00125], [0.0133, -0.00375]])]
+        })
+    }
+
+    /// Red-eye removal on the red cloth, the reddest thing in the frame:
+    /// the red inside each circle turns a neutral dark, the rest stays.
+    func testRedEye() throws {
+        try check(Recipe(name: "red-eye", detail: SIMD2(0.86, 0.78)) {
+            $0.redEyes = [RedEyeSpot(id: Self.uuid(7), centre: [0.86, 0.78], radius: 0.05),
+                          RedEyeSpot(id: Self.uuid(8), centre: [0.1, 0.35], radius: 0.08, strength: 0.6)]
+        })
+    }
+
     func testLocalAdjustments() throws {
         try check(Recipe(name: "local-adjustments") {
             $0.locals = [

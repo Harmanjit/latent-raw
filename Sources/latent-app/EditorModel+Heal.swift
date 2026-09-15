@@ -47,7 +47,8 @@ extension EditorModel {
         selectedHealIndex = nil
     }
 
-    /// Which patch and which of its circles is under `p` (normalized sensor).
+    /// Which patch and which of its circles (or strokes) is under `p`
+    /// (normalized sensor).
     private func hitHeal(_ p: SIMD2<Float>) -> (index: Int, isSource: Bool, offset: SIMD2<Float>)? {
         let size = SIMD2(Float(sensorSize.width), Float(sensorSize.height))
         let short = min(size.x, size.y)
@@ -57,6 +58,13 @@ extension EditorModel {
         for i in order {
             let h = parameters.heals[i]
             let rPx = h.radius * short
+            if h.isStroke {
+                // A thin stroke is hard to grab by its width alone.
+                let reach = max(rPx, HealStrokeHandle.minimumGrabPixels / Float(max(viewport.zoom, 1e-6)))
+                if h.distancePixels(from: p, atSource: true, sensorSize: sensorSize) <= reach { return (i, true, p - h.source) }
+                if h.distancePixels(from: p, sensorSize: sensorSize) <= reach { return (i, false, p - h.target) }
+                continue
+            }
             if simd_length((p - h.source) * size) <= rPx { return (i, true, p - h.source) }
             if simd_length((p - h.target) * size) <= rPx { return (i, false, p - h.target) }
         }
@@ -73,6 +81,13 @@ extension EditorModel {
         }
         guard parameters.heals.count < HealPatch.maximumCount else {
             status = "At most \(HealPatch.maximumCount) spot patches per image"
+            return
+        }
+        if healShape == .brush {
+            // Painted strokes become a patch when the drag ends.
+            selectedHealIndex = nil
+            paintingHealStroke = [p]
+            healDrag = .painting
             return
         }
         // Default source: 2.5 radii to the right, or to the left near the edge.
@@ -97,36 +112,49 @@ extension EditorModel {
             parameters.heals[i].target = simd_clamp(p - off, SIMD2(0, 0), SIMD2(1, 1))
         case .movingSource(let i, let off) where i < parameters.heals.count:
             parameters.heals[i].source = simd_clamp(p - off, SIMD2(0, 0), SIMD2(1, 1))
+        case .painting:
+            addPaintedPoint(p)
         default:
             break
         }
     }
 
-    func healToolEnded() { healDrag = nil }
+    func healToolEnded() {
+        if case .painting = healDrag { finishPaintedStroke() }
+        healDrag = nil
+    }
 
     /// Turns off every on-image tool. Called when the viewport is about
     /// to be used for viewing only (Loupe, Compare) and by Escape.
     func disarmTools() {
         healToolActive = false
+        redEyeToolActive = false
         cropToolActive = false
         maskTool = .none
         healDrag = nil
+        redEyeDrag = nil
+        paintingHealStroke = []
     }
 
     // MARK: - Image tools (dispatch)
 
     /// Whether drags on the image belong to a tool rather than panning.
-    var imageToolActive: Bool { maskToolActive || healToolActive }
+    var imageToolActive: Bool { maskToolActive || healToolActive || redEyeToolActive }
 
     func imageToolBegan(at screen: CGPoint, exclude: Bool) {
         if healToolActive { healToolBegan(at: screen); return }
+        if redEyeToolActive { redEyeToolBegan(at: screen); return }
         promptModifierExclude = exclude
         maskToolBegan(at: screen)
     }
     func imageToolMoved(to screen: CGPoint) {
-        if healToolActive { healToolMoved(to: screen) } else { maskToolMoved(to: screen) }
+        if healToolActive { healToolMoved(to: screen) }
+        else if redEyeToolActive { redEyeToolMoved(to: screen) }
+        else { maskToolMoved(to: screen) }
     }
     func imageToolEnded() {
-        if healToolActive { healToolEnded() } else { maskToolEnded() }
+        if healToolActive { healToolEnded() }
+        else if redEyeToolActive { redEyeToolEnded() }
+        else { maskToolEnded() }
     }
 }

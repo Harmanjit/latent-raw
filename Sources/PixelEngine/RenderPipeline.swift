@@ -124,6 +124,8 @@ public struct EditParameters: Sendable, Equatable {
     public var crop: CropParameters
     /// Spot removal patches, applied in order in camera space.
     public var heals: [HealPatch]
+    /// Red-eye corrections, applied in camera space after the patches.
+    public var redEyes: [RedEyeSpot] = []
     /// Presence: local contrast at two scales and haze removal, −1…1.
     public var texture: Float
     public var clarity: Float
@@ -223,6 +225,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.manualDistortion == b.manualDistortion && a.manualVignetting == b.manualVignetting
             && a.toneCurve == b.toneCurve && a.hsl == b.hsl && a.splitToning == b.splitToning
             && a.locals == b.locals && a.crop == b.crop && a.heals == b.heals
+            && a.redEyes == b.redEyes
             && a.texture == b.texture && a.clarity == b.clarity && a.dehaze == b.dehaze
             && a.vibrance == b.vibrance
             && a.defringePurple == b.defringePurple && a.defringeGreen == b.defringeGreen
@@ -484,9 +487,14 @@ public final class RenderPipeline {
         let activeHeals = parameters.heals.filter {
             $0.targetBounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(renderInfo.sensorRect)
         }
-        if !activeHeals.isEmpty {
+        // Red eyes, on the same working texture.
+        let activeRedEyes = parameters.redEyes.filter {
+            !$0.isIdentity && $0.bounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(renderInfo.sensorRect)
+        }
+        if !activeHeals.isEmpty || !activeRedEyes.isEmpty {
             colourInput = try applyHeal(session: session, cmdBuffer: cmdBuffer, input: colourInput,
-                                        patches: activeHeals, renderInfo: renderInfo, binSpan: binSpan)
+                                        patches: activeHeals, redEyes: activeRedEyes, cameraToWorking: cameraToWorking,
+                                        renderInfo: renderInfo, binSpan: binSpan)
         }
 
         // Stage 7: lens corrections, still in camera space.
@@ -740,11 +748,13 @@ public final class RenderPipeline {
     /// Patches in order, each over its own bounding box (HealStage).
     private func applyHeal(session: ImageSession, cmdBuffer: MTLCommandBuffer,
                            input: MTLTexture, patches: [HealPatch],
+                           redEyes: [RedEyeSpot], cameraToWorking: simd_float3x3,
                            renderInfo: RenderInfo, binSpan: Float) throws -> MTLTexture {
         let output = try session.texture(width: input.width, height: input.height,
                                          pixelFormat: .rgba16Float, role: .healed)
         let summary = session.file.summary
-        try HealStage.encode(patches: patches, input: input, output: output,
+        try HealStage.encode(patches: patches, redEyes: redEyes, cameraToWorking: cameraToWorking,
+                             input: input, output: output,
                              sensorSize: SIMD2(Float(summary.rawWidth), Float(summary.rawHeight)),
                              tileOrigin: SIMD2(Float(renderInfo.sensorRect.origin.x),
                                                Float(renderInfo.sensorRect.origin.y)),

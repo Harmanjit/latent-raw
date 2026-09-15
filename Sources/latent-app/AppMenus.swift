@@ -30,6 +30,8 @@ struct CommandState: Equatable {
     var cropToolActive = false
     var healToolActive = false
     var hasSelectedHeal = false
+    var redEyeToolActive = false
+    var hasSelectedRedEye = false
     /// The mask brush or the spot tool is armed, so [ and ] have a size to change.
     var toolSizeAdjustable = false
     var canAddMask = false
@@ -49,8 +51,8 @@ struct CommandState: Equatable {
         case .toggleZoom, .zoomToFit, .zoomToActualSize: mode.showsImage && hasImage
         case .revealInFinder: hasSelection || hasVisibleImages
         case .beforeAfter: mode.showsImage && hasImage
-        case .crop, .heal, .autoAdjust: mode == .develop && hasImage
-        case .deleteHeal: mode == .develop && healToolActive && hasSelectedHeal
+        case .crop, .heal, .redEye, .autoAdjust: mode == .develop && hasImage
+        case .deleteHeal: mode == .develop && ((healToolActive && hasSelectedHeal) || (redEyeToolActive && hasSelectedRedEye))
         case .toolSize: mode == .develop && toolSizeAdjustable
         case .addMask: mode == .develop && canAddMask
         case .toggleMaskOverlay: mode == .develop && hasSelectedMask
@@ -222,6 +224,7 @@ struct LatentCommands: Commands {
             Divider()
             toolToggle("Crop & Straighten", .crop, isOn: state.cropToolActive)
             toolToggle("Spot Removal", .heal, isOn: state.healToolActive)
+            toolToggle("Red-Eye Removal", .redEye, isOn: state.redEyeToolActive)
             Menu("Masks") {
                 item("New Linear Gradient", .addMask(.linear))
                 item("New Radial Gradient", .addMask(.radial))

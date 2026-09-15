@@ -55,6 +55,9 @@ struct ImageViewport: View {
                 if allowsTools && model.healToolActive {
                     HealOverlay(model: model)
                 }
+                if allowsTools && model.redEyeToolActive {
+                    RedEyeOverlay(model: model)
+                }
             } else {
                 VStack(spacing: 12) {
                     Text(model.isReady ? "No image open" : model.setupError == nil ? "Starting…" : "Metal unavailable")

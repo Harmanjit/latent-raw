@@ -40,8 +40,9 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | ⌘U | Auto adjust |
 | R | Crop and straighten tool |
 | H | Spot removal tool |
-| [, ] | Smaller, larger brush or spot (while the mask brush or spot removal is on) |
-| ⌫ | Delete the selected spot patch |
+| Y | Red-eye tool |
+| [, ] | Smaller, larger brush or spot (while the mask brush, spot removal or red-eye is on) |
+| ⌫ | Delete the selected spot patch or red-eye spot |
 | Esc | Leave any on-image tool |
 | ⇧⌘C, ⇧⌘V | Copy / paste settings (to the whole selection in the Library) |
 | Double-click a slider | Reset it |
