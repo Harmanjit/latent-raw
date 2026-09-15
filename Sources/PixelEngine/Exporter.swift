@@ -78,16 +78,27 @@ public struct ExportSettings: Sendable {
         }
 
         public var supportsQuality: Bool { self == .jpeg || self == .heic }
+
+        /// Formats ImageIO writes an ISO 21496-1 gain map into on macOS 15.
+        /// PNG and TIFF have no place for one.
+        public var supportsGainMap: Bool { self == .jpeg || self == .heic }
     }
 
     public var format: Format
     /// JPEG/HEIC quality, 0...1. Ignored for the lossless formats.
     public var quality: Float
+    /// Also write an HDR gain map (JPEG and HEIC only; see GainMap.swift).
+    /// The main image stays the ordinary SDR export either way.
+    public var hdrGainMap: Bool
 
-    public init(format: Format = .jpeg, quality: Float = 0.92) {
+    public init(format: Format = .jpeg, quality: Float = 0.92, hdrGainMap: Bool = false) {
         self.format = format
         self.quality = quality
+        self.hdrGainMap = hdrGainMap
     }
+
+    /// Whether this export gets a gain map: asked for, and possible.
+    public var writesGainMap: Bool { hdrGainMap && format.supportsGainMap }
 }
 
 /// What gets written into the file besides pixels. A file with no
@@ -209,7 +220,7 @@ public struct ExportMetadata: Sendable, Equatable {
 /// everywhere else. The pipeline knows which space it produced, so that
 /// knowledge is carried into the file's ICC profile.
 public final class Exporter {
-    private let gpu: GPUContext
+    let gpu: GPUContext
 
     public init(gpu: GPUContext) {
         self.gpu = gpu
@@ -219,6 +230,9 @@ public final class Exporter {
     /// to `maxLongEdge` happen on the GPU together with the conversion to
     /// the file's bit depth; the CPU never loops over pixels. Returns the
     /// written pixel size.
+    ///
+    /// `hdrRender` renders the same edit for another output; it is needed
+    /// only when `settings.writesGainMap`, for the HDR half of the map.
     @discardableResult
     public func write(_ texture: MTLTexture,
                        to url: URL,
@@ -227,7 +241,13 @@ public final class Exporter {
                        rotation: ImageRotation = .none,
                        crop: CropParameters = .none,
                        metadata: ExportMetadata? = nil,
-                       maxLongEdge: Int? = nil) throws -> (width: Int, height: Int) {
+                       maxLongEdge: Int? = nil,
+                       hdrRender: ((RenderOutput) throws -> MTLTexture)? = nil) throws -> (width: Int, height: Int) {
+        if settings.writesGainMap, let hdrRender {
+            return try writeWithGainMap(texture, to: url, settings: settings, colorSpace: colorSpace,
+                                        rotation: rotation, crop: crop, metadata: metadata,
+                                        maxLongEdge: maxLongEdge, hdrRender: hdrRender)
+        }
         let cgImage = try cgImage(from: texture, colorSpace: colorSpace, rotation: rotation, crop: crop,
                                   bitsPerComponent: settings.format.bitsPerComponent,
                                   maxLongEdge: maxLongEdge)
@@ -238,7 +258,7 @@ public final class Exporter {
     /// Writes an already-built CGImage. The image's own colour space tag
     /// is embedded as the file's ICC profile.
     public static func write(cgImage: CGImage, to url: URL, settings: ExportSettings,
-                             metadata: ExportMetadata? = nil) throws {
+                             metadata: ExportMetadata? = nil, gainMap: GainMap? = nil) throws {
         // Encoded under a temporary name and moved into place only once
         // finalised, so a failed or interrupted encode never leaves a
         // truncated file, or costs the old one, under the real name.
@@ -261,27 +281,14 @@ public final class Exporter {
         } else {
             CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
         }
+        if let gainMap {
+            CGImageDestinationAddAuxiliaryDataInfo(destination, kCGImageAuxiliaryDataTypeISOGainMap,
+                                                   gainMap.auxiliaryDataInfo)
+        }
         guard CGImageDestinationFinalize(destination) else {
             throw ExportError.writeFailed(url)
         }
         try pending.commit()
-    }
-
-    /// Resamples so the long edge is `maxLongEdge` pixels (never upscales).
-    /// High-quality interpolation; the input is normally already close
-    /// to the target size because the render was binned to suit.
-    public static func resized(_ image: CGImage, maxLongEdge: Int) -> CGImage {
-        let longEdge = max(image.width, image.height)
-        guard longEdge > maxLongEdge, maxLongEdge > 0 else { return image }
-        let scale = Double(maxLongEdge) / Double(longEdge)
-        let w = max(1, Int((Double(image.width) * scale).rounded()))
-        let h = max(1, Int((Double(image.height) * scale).rounded()))
-        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: image.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
-                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return image }
-        ctx.interpolationQuality = .high
-        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-        return ctx.makeImage() ?? image
     }
 
     /// Output size after crop, rotation and resize.
@@ -296,8 +303,9 @@ public final class Exporter {
         return (w, h)
     }
 
-    /// One GPU pass: sample the rendered texture (rotated, resized) into
-    /// a shared-storage 8- or 16-bit texture the CPU can read directly.
+    /// Sample the rendered texture (rotated, cropped) into a shared-storage
+    /// 8- or 16-bit texture the CPU can read directly: one GPU pass at full
+    /// size, three when resizing.
     func packedTexture(from texture: MTLTexture, rotation: ImageRotation, crop: CropParameters,
                        bitsPerComponent: Int, maxLongEdge: Int?) throws -> MTLTexture {
         // The rendered texture stands in for the sensor: the crop is
@@ -310,6 +318,12 @@ public final class Exporter {
             width: w, height: h, mipmapped: false)
         descriptor.storageMode = .shared     // read by the CPU straight after
         descriptor.usage = [.shaderWrite]
+        if (w, h) != Self.outputSize(frame: frame, maxLongEdge: nil) {
+            // A resize: filtered properly, in linear light (ExportResampler.swift).
+            guard let dest = gpu.device.makeTexture(descriptor: descriptor) else { throw ExportError.readbackFailed }
+            try resample(texture, frame: frame, into: dest, sourceIsEncoded: true, encode: true)
+            return dest
+        }
         guard let dest = gpu.device.makeTexture(descriptor: descriptor),
               let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
               let encoder = cmdBuffer.makeComputeCommandEncoder() else {

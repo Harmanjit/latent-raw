@@ -96,8 +96,8 @@ public enum ExportWorker {
             lap("denoise")
         }
 
-        let texture = try pipeline.render(session,
-                                          scale: ExportPlan.scale(for: file.summary, maxLongEdge: request.maxLongEdge),
+        let scale = ExportPlan.scale(for: file.summary, maxLongEdge: request.maxLongEdge)
+        let texture = try pipeline.render(session, scale: scale,
                                           parameters: parameters, output: .file(request.colorSpace))
         let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
         lap("render")
@@ -126,14 +126,18 @@ public enum ExportWorker {
         }
 
         // Rotation, the final resize and the quantisation to 8 or 16 bits
-        // all happen in one GPU pass inside the exporter; the CPU only
-        // hands the bytes to the encoder.
+        // all happen on the GPU inside the exporter; the CPU only hands the
+        // bytes to the encoder. A gain map needs the edit rendered a second
+        // time with HDR headroom, which the exporter asks for when it's ready.
         let exporter = Exporter(gpu: gpu)
         let written = try exporter.write(texture, to: request.destinationURL, settings: request.settings,
                                          colorSpace: request.colorSpace, rotation: rotation,
                                          crop: parameters.crop,
                                          metadata: request.includeMetadata ? metadata : nil,
-                                         maxLongEdge: request.maxLongEdge)
+                                         maxLongEdge: request.maxLongEdge,
+                                         hdrRender: { output in
+                                             try pipeline.render(session, scale: scale, parameters: parameters, output: output)
+                                         })
         lap("write")
         return Outcome(pixelWidth: written.width, pixelHeight: written.height,
                        seconds: Date().timeIntervalSince(start), masksGenerated: masksGenerated,
