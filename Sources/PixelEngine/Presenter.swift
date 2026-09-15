@@ -2,6 +2,7 @@ import Foundation
 import Metal
 import QuartzCore
 import simd
+import Synchronization
 
 /// One texture and where it belongs in sensor space.
 public struct PresentLayer {
@@ -11,11 +12,81 @@ public struct PresentLayer {
     /// Pixels to trim from every edge before drawing. Full-resolution
     /// tiles set this to hide the demosaic's degraded border.
     public let inset: CGFloat
+    /// The ceiling the pipeline rendered this texture to
+    /// (`RenderOutput.headroom`). The presenter fits values up to it into
+    /// whatever the screen can show at the moment of drawing.
+    public let headroom: Float
+    /// Different for every layer made. Renders reuse pooled textures, so a
+    /// new image often arrives in the very texture object the last one
+    /// used; the texture's identity can't tell a view there is something
+    /// new to draw, but this can.
+    public let generation: UInt64
 
-    public init(texture: MTLTexture, coverage: CGRect, inset: CGFloat = 0) {
+    private static let generations = Atomic<UInt64>(0)
+
+    public init(texture: MTLTexture, coverage: CGRect, inset: CGFloat = 0, headroom: Float = 1) {
         self.texture = texture
         self.coverage = coverage
         self.inset = inset
+        self.headroom = max(1, headroom)
+        self.generation = Self.generations.add(1, ordering: .relaxed).newValue
+    }
+}
+
+/// The viewport's EDR decisions, as plain arithmetic so they can be tested
+/// without a screen.
+///
+/// Two headrooms are in play. A screen's *potential* headroom is how far
+/// above SDR white it could reach once some content asks for EDR; it
+/// belongs to the display, not to its brightness setting. Its *current*
+/// headroom is what it shows right now, which follows the brightness
+/// slider and ramps up over a second or so after EDR content appears. The
+/// pipeline renders to the potential one, so an edit looks the same at any
+/// brightness and a brightness change never costs a render; the presenter
+/// rolls the highlights off to the current one on every draw.
+public enum DisplayHeadroom {
+    /// The most the tone curve is ever given. A display that reports 16x
+    /// headroom would otherwise render every clipped cloud as a
+    /// searchlight; 4x is already very bright.
+    public static let renderCeiling: Float = 4
+
+    /// The headroom the pipeline renders the viewport to. Soft proofing
+    /// overrides it with 1, since an EDR highlight can't be in the file
+    /// being proofed.
+    public static func rendered(potential: CGFloat, hdrDisplayEnabled: Bool) -> Float {
+        guard hdrDisplayEnabled else { return 1 }
+        return min(max(1, Float(potential)), renderCeiling)
+    }
+
+    /// Whether the layer should ask for EDR. EDR makes the display raise
+    /// its backlight and dim everything else to match, which costs power,
+    /// so it is on only while the image on screen was rendered with room
+    /// above white and the screen can show some of it.
+    public static func wantsExtendedDynamicRange(contentHeadroom: Float, potential: CGFloat) -> Bool {
+        contentHeadroom > 1 && potential > 1
+    }
+
+    /// The headroom to draw for. Without EDR on the layer it is 1 whatever
+    /// the screen says: the compositor would clip anything brighter.
+    public static func presented(current: CGFloat, extendedDynamicRange: Bool) -> Float {
+        extendedDynamicRange ? max(1, Float(current)) : 1
+    }
+}
+
+/// The present kernel's highlight roll-off (`toneMapToHeadroom` in
+/// Present.metal), copied line for line so its properties can be tested
+/// without a GPU. Change both together.
+public enum HeadroomToneMap {
+    /// The value a pixel whose largest channel is `peak` is scaled to.
+    public static func map(peak: Float, displayHeadroom: Float, contentHeadroom: Float) -> Float {
+        if contentHeadroom <= displayHeadroom || peak <= 0 { return peak }
+        let knee = displayHeadroom * 0.75
+        if peak <= knee { return peak }
+        let range = displayHeadroom - knee
+        let x = (peak - knee) / range
+        let xMax = (contentHeadroom - knee) / range
+        let y = x * (1 + x / (xMax * xMax)) / (1 + x)
+        return knee + range * min(y, 1)
     }
 }
 
@@ -33,10 +104,9 @@ public struct PresentLayer {
 /// gesture the tile may not cover the window, and the base shows through
 /// softly until the pipeline catches up.
 ///
-/// Known gap (DESIGN.md §8.3): this presents bounded, already-encoded sRGB.
-/// Real EDR display means keeping the pipeline output extended-linear and
-/// doing the display transform here instead, so highlights above diffuse
-/// white survive to the screen. That's a deliberate later change.
+/// The textures arrive as extended linear Display P3 rendered to some
+/// headroom. The one display transform done here is fitting that headroom
+/// into what the screen can show at this moment (see `DisplayHeadroom`).
 public final class Presenter {
     private let gpu: GPUContext
 
@@ -84,13 +154,32 @@ public final class Presenter {
     }
 
     /// The general form: `frame` carries rotation, crop and straighten.
+    /// `displayHeadroom` is what the screen shows above SDR white right now
+    /// (1 without EDR); brighter content is rolled off to fit it.
     public func present(base: PresentLayer,
                          tile: PresentLayer?,
                          transform: ViewportTransform,
                          frame: CropFrame,
                          to drawable: CAMetalDrawable,
-                         backgroundLevel: Float = 0.12) {
-        let drawableSize = CGSize(width: drawable.texture.width, height: drawable.texture.height)
+                         backgroundLevel: Float = 0.12,
+                         displayHeadroom: Float = 1) {
+        guard let cmdBuffer = encode(base: base, tile: tile, transform: transform, frame: frame,
+                                     into: drawable.texture, backgroundLevel: backgroundLevel,
+                                     displayHeadroom: displayHeadroom) else { return }
+        cmdBuffer.present(drawable)
+        cmdBuffer.commit()
+    }
+
+    /// Encodes the present pass into `target` and returns the command
+    /// buffer uncommitted. Split from `present` so tests can draw offscreen.
+    func encode(base: PresentLayer,
+                tile: PresentLayer?,
+                transform: ViewportTransform,
+                frame: CropFrame,
+                into target: MTLTexture,
+                backgroundLevel: Float,
+                displayHeadroom: Float) -> MTLCommandBuffer? {
+        let drawableSize = CGSize(width: target.width, height: target.height)
         let baseMap = transform.screenToTextureMap(coverage: base.coverage, frame: frame,
                                                    drawableSize: drawableSize)
 
@@ -105,23 +194,26 @@ public final class Presenter {
             tileSource = SIMD4<Float>(i / w, i / h, (w - 2 * i) / w, (h - 2 * i) / h)
         }
 
-        draw(base: base.texture, baseMap: baseMap,
-             tile: tile?.texture, tileMap: tileMap, tileSource: tileSource,
-             into: drawable, backgroundLevel: backgroundLevel)
+        // The screen's headroom, then the ceiling each layer was rendered to.
+        let headrooms = SIMD4<Float>(max(1, displayHeadroom), base.headroom, tile?.headroom ?? 1, 0)
+        return draw(base: base.texture, baseMap: baseMap,
+                    tile: tile?.texture, tileMap: tileMap, tileSource: tileSource,
+                    into: target, backgroundLevel: backgroundLevel, headrooms: headrooms)
     }
 
     private func draw(base: MTLTexture, baseMap: simd_float3x2,
                       tile: MTLTexture?, tileMap: simd_float3x2, tileSource: SIMD4<Float>,
-                      into drawable: CAMetalDrawable, backgroundLevel: Float) {
+                      into target: MTLTexture, backgroundLevel: Float,
+                      headrooms: SIMD4<Float>) -> MTLCommandBuffer? {
         guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
-              let encoder = cmdBuffer.makeComputeCommandEncoder() else { return }
+              let encoder = cmdBuffer.makeComputeCommandEncoder() else { return nil }
 
         encoder.setComputePipelineState(gpu.presentPSO)
         encoder.setTexture(base, index: 0)
         // Metal requires every declared texture slot to be bound, even if
         // the kernel won't read it this time.
         encoder.setTexture(tile ?? base, index: 1)
-        encoder.setTexture(drawable.texture, index: 2)
+        encoder.setTexture(target, index: 2)
 
         var baseMapV = baseMap
         var tileMapV = tileMap
@@ -133,18 +225,18 @@ public final class Presenter {
         encoder.setBytes(&tileSourceV, length: 16, index: 2)
         encoder.setBytes(&hasTile, length: 4, index: 3)
         encoder.setBytes(&background, length: 4, index: 4)
+        var headroomsV = headrooms
+        encoder.setBytes(&headroomsV, length: MemoryLayout<SIMD4<Float>>.size, index: 5)
 
         let pso = gpu.presentPSO
         let tw = pso.threadExecutionWidth
         let th = max(1, pso.maxTotalThreadsPerThreadgroup / tw)
-        let groups = MTLSize(width: (drawable.texture.width + tw - 1) / tw,
-                              height: (drawable.texture.height + th - 1) / th,
+        let groups = MTLSize(width: (target.width + tw - 1) / tw,
+                              height: (target.height + th - 1) / th,
                               depth: 1)
         encoder.dispatchThreadgroups(groups,
                                       threadsPerThreadgroup: MTLSize(width: tw, height: th, depth: 1))
         encoder.endEncoding()
-
-        cmdBuffer.present(drawable)
-        cmdBuffer.commit()
+        return cmdBuffer
     }
 }

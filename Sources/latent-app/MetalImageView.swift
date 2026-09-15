@@ -9,7 +9,8 @@ import PixelEngine
 /// AppKit rather than SwiftUI because SwiftUI has no way to hand you a
 /// CAMetalLayer and control exactly when it draws. That control is the
 /// whole point here — the layer redraws only when there's a new texture,
-/// a new transform, or the window resizes, never on a timer (DESIGN.md
+/// a new transform, the window resizes or the screen's headroom moves, at
+/// most once per screen refresh, and never on a timer (DESIGN.md
 /// efficiency rule 4: zero cost when idle).
 ///
 /// The view deliberately knows nothing about images. It turns raw AppKit
@@ -29,9 +30,11 @@ struct MetalImageView: NSViewRepresentable {
 
     /// Drawable size in device pixels changed.
     let onResize: (CGSize) -> Void
-    /// The screen's EDR headroom changed (view moved to another display,
-    /// or the display's brightness changed what it can show). 1.0 means
-    /// an ordinary SDR screen.
+    /// The screen's potential EDR headroom changed, which in practice means
+    /// the view moved to another display. 1.0 means an ordinary SDR screen.
+    /// The current headroom, which follows the brightness slider, never
+    /// comes through here: the view reads it for every frame and fits the
+    /// image to it, so brightness costs a present, not a render.
     let onHeadroomChange: (CGFloat) -> Void
     /// Grey level for the surround, in the drawable's own encoding.
     let backgroundLevel: Float
@@ -69,6 +72,20 @@ struct MetalImageView: NSViewRepresentable {
     }
 }
 
+/// Everything a presented frame depends on. A frame that would come out
+/// identical to the one on screen is skipped, which is most of them:
+/// SwiftUI calls `updateNSView` for every published change of the model,
+/// status text and histogram included.
+private struct PresentedFrame: Equatable {
+    var preview: UInt64
+    var tile: UInt64?
+    var transform: ViewportTransform
+    var frame: CropFrame
+    var backgroundLevel: Float
+    var drawableSize: CGSize
+    var displayHeadroom: Float
+}
+
 final class MetalLayerView: NSView {
     private var metalLayer: CAMetalLayer!
     private var presenter: Presenter?
@@ -79,7 +96,17 @@ final class MetalLayerView: NSView {
     private var currentFrame = CropFrame(sensorSize: .zero)
     private var lastReportedSize: CGSize = .zero
     private var lastReportedHeadroom: CGFloat = 0
-    var backgroundLevel: Float = 0.12
+    var backgroundLevel: Float = 0.12 {
+        didSet { if backgroundLevel != oldValue { setNeedsRedraw() } }
+    }
+
+    /// Fires with the screen's refresh while there is a frame to draw, and
+    /// is paused the rest of the time, so several changes in one refresh
+    /// cost one present and an idle viewport costs nothing.
+    private var displayLink: CADisplayLink?
+    private var needsRedraw = false
+    /// What the frame on screen was drawn from.
+    private var presented: PresentedFrame?
 
     var onResize: ((CGSize) -> Void)?
     var onHeadroomChange: ((CGFloat) -> Void)?
@@ -106,10 +133,11 @@ final class MetalLayerView: NSView {
         // linear Display P3. "Extended" means components may exceed 1.0;
         // on an HDR-capable screen the compositor shows those as brighter
         // than paper white instead of clipping. On an SDR screen it just
-        // clips, and nothing else changes.
+        // clips, and nothing else changes. EDR itself starts off and is
+        // turned on only while it's needed (updateDynamicRange).
         layer.pixelFormat = .rgba16Float
         layer.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)
-        layer.wantsExtendedDynamicRangeContent = true
+        layer.wantsExtendedDynamicRangeContent = false
         // The present kernel writes to the drawable from a compute shader,
         // which framebufferOnly would forbid.
         layer.framebufferOnly = false
@@ -117,12 +145,20 @@ final class MetalLayerView: NSView {
         layer.needsDisplayOnBoundsChange = true
         self.layer = layer
         self.metalLayer = layer
+
+        // Posted for new screens and resolutions, and for every step of an
+        // EDR headroom change: the brightness slider, and the ramp after
+        // EDR content first appears. Another app's EDR video posts it too,
+        // which the frame comparison turns into no work at all.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(screenParametersChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
     }
 
     override var wantsUpdateLayer: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
-    // MARK: - Size
+    // MARK: - Screen and size
 
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
@@ -130,20 +166,74 @@ final class MetalLayerView: NSView {
         reportHeadroom()
     }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        reportHeadroom()
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if let window {
+            NotificationCenter.default.removeObserver(
+                self, name: NSWindow.didChangeScreenNotification, object: window)
+        }
     }
 
-    /// What the current screen can show above paper white right now.
-    /// This moves with brightness on XDR displays, so it's re-read
-    /// whenever the view's backing properties change.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // The display link retains its target, so it must not outlive the
+        // window: that would keep the view alive forever.
+        displayLink?.invalidate()
+        displayLink = nil
+        guard let window else { return }
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(screenParametersChanged),
+            name: NSWindow.didChangeScreenNotification, object: window)
+        // An NSView display link follows the view to whichever screen it's
+        // on, so it ticks at that screen's refresh rate.
+        let link = displayLink(target: self, selector: #selector(displayLinkFired(_:)))
+        link.isPaused = true
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+        reportHeadroom()
+        setNeedsRedraw()
+    }
+
+    @objc private func screenParametersChanged() {
+        reportHeadroom()
+        setNeedsRedraw()
+    }
+
+    /// Tells the model how far the screen could reach above paper white,
+    /// which is what the pipeline renders to. Unlike the current headroom
+    /// it doesn't wait for EDR to be switched on, and doesn't move with
+    /// brightness, so this only fires when the view changes screens.
     private func reportHeadroom() {
         guard let screen = window?.screen else { return }
-        let headroom = screen.maximumExtendedDynamicRangeColorComponentValue
+        let headroom = screen.maximumPotentialExtendedDynamicRangeColorComponentValue
         guard headroom != lastReportedHeadroom else { return }
         lastReportedHeadroom = headroom
         DispatchQueue.main.async { [weak self] in self?.onHeadroomChange?(headroom) }
+    }
+
+    /// EDR on while the image on screen was rendered with room above white
+    /// and the screen can show some of it; off otherwise, since EDR raises
+    /// the backlight and costs power. HDR display switched off, soft
+    /// proofing and SDR screens all render to headroom 1, so they all end
+    /// up here with EDR off.
+    private func updateDynamicRange() {
+        guard let metalLayer else { return }
+        let content = max(currentPreview?.headroom ?? 1, currentTile?.headroom ?? 1)
+        let potential = window?.screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1
+        let wanted = DisplayHeadroom.wantsExtendedDynamicRange(contentHeadroom: content, potential: potential)
+        if metalLayer.wantsExtendedDynamicRangeContent != wanted {
+            metalLayer.wantsExtendedDynamicRangeContent = wanted
+        }
+    }
+
+    /// What the screen shows above paper white at this moment. Read for
+    /// every frame because it follows brightness and the EDR ramp; each
+    /// change posts a screen-parameters notification that asks for a frame,
+    /// so nothing polls.
+    private var presentHeadroom: Float {
+        DisplayHeadroom.presented(
+            current: window?.screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1,
+            extendedDynamicRange: metalLayer?.wantsExtendedDynamicRangeContent ?? false)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -170,7 +260,9 @@ final class MetalLayerView: NSView {
             let size = pixelSize
             DispatchQueue.main.async { [weak self] in self?.onResize?(size) }
         }
-        redraw()
+        // Drawn at once rather than on the next refresh: the layer is
+        // already showing the old frame stretched to the new size.
+        drawIfChanged()
     }
 
     // MARK: - Drawing
@@ -181,16 +273,40 @@ final class MetalLayerView: NSView {
         currentTile = tile
         currentTransform = transform
         currentFrame = frame
-        redraw()
+        setNeedsRedraw()
     }
 
-    private func redraw() {
-        guard let metalLayer, let presenter, let preview = currentPreview,
-              metalLayer.drawableSize.width > 0,
-              let drawable = metalLayer.nextDrawable() else { return }
+    /// Asks for a frame on the next screen refresh.
+    private func setNeedsRedraw() {
+        needsRedraw = true
+        displayLink?.isPaused = false
+    }
+
+    @objc private func displayLinkFired(_ link: CADisplayLink) {
+        // Pause first: anything that changes during the draw unpauses it.
+        link.isPaused = true
+        guard needsRedraw else { return }
+        needsRedraw = false
+        drawIfChanged()
+    }
+
+    /// Presents a frame unless it would match the one already on screen.
+    private func drawIfChanged() {
+        guard let metalLayer, let presenter, let preview = currentPreview, window != nil,
+              metalLayer.drawableSize.width > 0 else { return }
+        updateDynamicRange()
+        let headroom = presentHeadroom
+        let wanted = PresentedFrame(preview: preview.generation, tile: currentTile?.generation,
+                                    transform: currentTransform, frame: currentFrame,
+                                    backgroundLevel: backgroundLevel,
+                                    drawableSize: metalLayer.drawableSize,
+                                    displayHeadroom: headroom)
+        guard wanted != presented, let drawable = metalLayer.nextDrawable() else { return }
+        presented = wanted
         presenter.present(base: preview, tile: currentTile,
                           transform: currentTransform, frame: currentFrame,
-                          to: drawable, backgroundLevel: backgroundLevel)
+                          to: drawable, backgroundLevel: backgroundLevel,
+                          displayHeadroom: headroom)
         #if DEBUG
         SnapshotHarness.noteDrawable(drawable.texture, presentedBy: self)
         #endif
