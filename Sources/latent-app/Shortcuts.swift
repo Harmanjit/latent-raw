@@ -126,6 +126,7 @@ enum Shortcuts {
         Shortcut(.pasteSettings, "v", [.shift, .command]),
         // Export
         Shortcut(.export, "e", [.shift, .command]),
+        Shortcut(.revealInFinder, "r", [.option, .command]),
     ]
 
     /// The menu bar's standard items that keep their keys.
@@ -141,6 +142,7 @@ enum Shortcuts {
         SystemShortcut(title: "Paste", key: .character("v"), modifiers: .command),
         SystemShortcut(title: "Select All", key: .character("a"), modifiers: .command),
         SystemShortcut(title: "Enter Full Screen", key: .character("f"), modifiers: [.control, .command]),
+        SystemShortcut(title: "Latent Help", key: .character("?"), modifiers: .command),
     ]
 
     static func shortcut(for command: KeyCommand) -> Shortcut? {
@@ -229,7 +231,7 @@ extension Shortcuts {
             ShortcutPageRow([.step(-1), .step(1)], "Previous / next image (loads it in Loupe, Compare and Develop)"),
             ShortcutPageRow([.openSelection], "Open the selection in Develop"),
             ShortcutPageRow([.toggleZoom], "Toggle fit / 100%"),
-            ShortcutPageRow([.zoomToFit, .zoomToActualSize, .zoomIn, .zoomOut], "Fit, 100%, zoom in, zoom out"),
+            ShortcutPageRow([.zoomToFit, .zoomToActualSize, .zoomIn, .zoomOut], "Fit, 100%, zoom in, zoom out (in the grid, ⌘= and ⌘- size the thumbnails)"),
             ShortcutPageRow([.makeSelect], "Compare: make the candidate the Select"),
             ShortcutPageRow([.openFolder], "Open folder"),
             ShortcutPageRow(keys: .system("Settings"), "Settings"),
@@ -254,6 +256,7 @@ extension Shortcuts {
         ]),
         ("Export", [
             ShortcutPageRow([.export], "Export the selection"),
+            ShortcutPageRow([.revealInFinder], "Reveal the selection in Finder"),
         ]),
     ]
 

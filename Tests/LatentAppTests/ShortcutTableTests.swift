@@ -92,7 +92,8 @@ final class ShortcutTableTests: XCTestCase {
                 if spelled.contains("control") { modifiers.insert(.control) }
                 if match.range(at: 2).location == NSNotFound { modifiers = .command }
                 let known = Shortcuts.all.contains { $0.key == .character(key) && $0.modifiers == modifiers }
-                XCTAssertTrue(known, "\(file.lastPathComponent): \(Shortcuts.glyphs(.character(key), modifiers)) is not in Shortcuts.all")
+                    || Shortcuts.system.contains { $0.key == .character(key) && $0.modifiers == modifiers }
+                XCTAssertTrue(known, "\(file.lastPathComponent): \(Shortcuts.glyphs(.character(key), modifiers)) is not in Shortcuts.all or Shortcuts.system")
             }
         }
     }

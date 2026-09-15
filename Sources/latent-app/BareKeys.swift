@@ -59,7 +59,7 @@ enum KeyCommand: Equatable {
     case openFolder, openFile, export, exportOpenImage
     case undo, redo, copySettings, pasteSettings
     case rotate(Int), zoomIn, zoomOut, zoomToFit, zoomToActualSize
-    case autoAdjust, clearFilter, swapCompare
+    case autoAdjust, clearFilter, swapCompare, revealInFinder
     case addMask(NewMask), toggleMaskOverlay
     /// [ and ]: the armed brush or spot patch, a step smaller or larger.
     case toolSize(Int)

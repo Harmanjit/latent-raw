@@ -29,7 +29,10 @@ struct LatentApp: App {
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1400, height: 900)
-        .commands { LatentCommands() }
+        .commands {
+            LatentCommands()
+            HelpCommands()
+        }
 
         Settings {
             PreferencesView()

@@ -14,7 +14,7 @@ Single keys do nothing while you type in a text field. The menu bar lists these 
 | ←, → | Previous / next image (loads it in Loupe, Compare and Develop) |
 | Return | Open the selection in Develop |
 | Z | Toggle fit / 100% |
-| ⌘0, ⌘1, ⌘=, ⌘- | Fit, 100%, zoom in, zoom out |
+| ⌘0, ⌘1, ⌘=, ⌘- | Fit, 100%, zoom in, zoom out (in the grid, ⌘= and ⌘- size the thumbnails) |
 | ⇧X | Compare: make the candidate the Select |
 | ⇧⌘O | Open folder |
 | ⌘, | Settings |
@@ -48,3 +48,4 @@ Single keys do nothing while you type in a text field. The menu bar lists these 
 | Keys | Action |
 |---|---|
 | ⇧⌘E | Export the selection |
+| ⌥⌘R | Reveal the selection in Finder |

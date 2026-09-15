@@ -38,7 +38,9 @@ final class CommandStateTests: XCTestCase {
         XCTAssertFalse(loupe.isEnabled(.heal))
         XCTAssertFalse(loupe.isEnabled(.addMask(.brush)))
         XCTAssertTrue(loupe.isEnabled(.zoomIn))
-        XCTAssertFalse(develop { $0.mode = .library }.isEnabled(.zoomIn))
+        // In the grid ⌘= and ⌘- size the thumbnails instead.
+        XCTAssertTrue(develop { $0.mode = .library }.isEnabled(.zoomIn))
+        XCTAssertFalse(develop { $0.mode = .library }.isEnabled(.zoomToActualSize))
         XCTAssertFalse(develop { $0.mode = .library }.isEnabled(.beforeAfter))
     }
 

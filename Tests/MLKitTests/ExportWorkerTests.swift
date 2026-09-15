@@ -185,7 +185,8 @@ final class ExportWorkerTests: XCTestCase {
         let source = try XCTUnwrap(CGImageSourceCreateWithURL(worker as CFURL, nil))
         let props = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
         let tiff = try XCTUnwrap(props[kCGImagePropertyTIFFDictionary] as? [CFString: Any])
-        XCTAssertEqual(tiff[kCGImagePropertyTIFFModel] as? String, "D750")
+        // The camera's own EXIF strings are carried over (see ExportMetadata).
+        XCTAssertEqual(tiff[kCGImagePropertyTIFFModel] as? String, "NIKON D750")
         let iptc = try XCTUnwrap(props[kCGImagePropertyIPTCDictionary] as? [CFString: Any])
         XCTAssertEqual(iptc[kCGImagePropertyIPTCKeywords] as? [String], ["ball"])
         XCTAssertEqual(iptc[kCGImagePropertyIPTCStarRating] as? Int, 3)

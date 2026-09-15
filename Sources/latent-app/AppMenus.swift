@@ -45,7 +45,9 @@ struct CommandState: Equatable {
         case .library, .openFolder, .disarmTools: true
         case .develop: hasImage || hasSelection
         case .toggleLoupe: (mode == .library && hasSelection) || mode == .loupe
-        case .toggleZoom, .zoomIn, .zoomOut, .zoomToFit, .zoomToActualSize: mode.showsImage && hasImage
+        case .zoomIn, .zoomOut: mode == .library || (mode.showsImage && hasImage)
+        case .toggleZoom, .zoomToFit, .zoomToActualSize: mode.showsImage && hasImage
+        case .revealInFinder: hasSelection || hasVisibleImages
         case .beforeAfter: mode.showsImage && hasImage
         case .crop, .heal, .autoAdjust: mode == .develop && hasImage
         case .deleteHeal: mode == .develop && healToolActive && hasSelectedHeal
@@ -93,6 +95,10 @@ struct CommandState: Equatable {
     }
 
     var beforeAfterTitle: String { showingBefore ? "Show After" : "Show Before" }
+
+    /// ⌘= and ⌘- size the thumbnails in the grid and zoom elsewhere.
+    var zoomInTitle: String { mode == .library ? "Larger Thumbnails" : "Zoom In" }
+    var zoomOutTitle: String { mode == .library ? "Smaller Thumbnails" : "Zoom Out" }
 
     /// Pick, or Unpick when the image is already picked (the U key).
     var pickItem: (title: String, command: KeyCommand) {
@@ -150,6 +156,7 @@ struct LatentCommands: Commands {
             Divider()
             item(state.exportTitle, .export)
             item("Export Open Image…", .exportOpenImage)
+            item("Reveal in Finder", .revealInFinder)
         }
 
         CommandGroup(replacing: .undoRedo) {
@@ -174,8 +181,8 @@ struct LatentCommands: Commands {
             item("Next Image", .step(1))
             item("Open in Develop", .openSelection)
             Divider()
-            item("Zoom In", .zoomIn)
-            item("Zoom Out", .zoomOut)
+            item(state.zoomInTitle, .zoomIn)
+            item(state.zoomOutTitle, .zoomOut)
             item("Zoom to Fit", .zoomToFit)
             item("Actual Size", .zoomToActualSize)
             item("Fit ↔ 100%", .toggleZoom)
@@ -188,8 +195,6 @@ struct LatentCommands: Commands {
             item("Swap Select and Candidate", .swapCompare)
             Divider()
             item("Clear Filters", .clearFilter)
-            // TODO(grid): Larger and Smaller Thumbnails go here once the
-            // grid has thumbnail size commands.
             Divider()
         }
 

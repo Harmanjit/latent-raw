@@ -2,10 +2,8 @@ import SwiftUI
 import Catalog
 
 /// The grid's thumbnail size: a slider between a small and a large photo
-/// button, which step the size with ⌘- and ⌘=. Remembered in preferences.
-///
-/// The keys live here, in the Library's own bar, so they exist only while
-/// the grid shows; in Loupe, Compare and Develop the same keys zoom.
+/// button. Remembered in preferences. ⌘- and ⌘= step it too, through the
+/// View menu's zoom items, which size thumbnails while the grid shows.
 struct ThumbnailSizeControl: View {
     @ObservedObject private var prefs = AppPreferences.shared
 
@@ -17,7 +15,6 @@ struct ThumbnailSizeControl: View {
                 Image(systemName: "photo").imageScale(.small)
             }
             .buttonStyle(.borderless)
-            .keyboardShortcut("-", modifiers: .command)
             .disabled(prefs.thumbnailSize <= ThumbnailGridLayout.sizeRange.lowerBound)
             .help("Smaller thumbnails (⌘-)")
             .accessibilityLabel("Smaller thumbnails")
@@ -35,7 +32,6 @@ struct ThumbnailSizeControl: View {
                 Image(systemName: "photo").imageScale(.large)
             }
             .buttonStyle(.borderless)
-            .keyboardShortcut("=", modifiers: .command)
             .disabled(prefs.thumbnailSize >= ThumbnailGridLayout.sizeRange.upperBound)
             .help("Larger thumbnails (⌘=)")
             .accessibilityLabel("Larger thumbnails")

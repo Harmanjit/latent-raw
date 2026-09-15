@@ -1154,34 +1154,6 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    /// Closes the image, saving a pending edit first. Used when another
-    /// folder opens: the catalog id belongs to the catalog being left, and
-    /// the same id in the next one is a different photo, so once the save
-    /// is on its way nothing may be saved under that id again.
-    func closeImage() {
-        flushPendingSave()
-        catalogImageID = nil
-        disarmTools()
-        aiDenoiseTask?.cancel()
-        aiDenoiseRunning = false
-        aiDenoiseStatus = ""
-        sam2Encoding?.cancel()
-        sam2Encoding = nil
-        sam2Session = nil
-        sam2Status = ""
-        session = nil
-        sourceURL = nil
-        preview = nil
-        tile = nil
-        histogram = nil
-        waveform = nil
-        vectorscope = nil
-        imageTitle = nil
-        history = EditHistory(initial: EditStack(parameters: parameters))
-        snapshots = []
-        status = "Open a raw file to begin"
-    }
-
     // MARK: - Viewport
 
     /// The Metal view moved to a screen with a different potential
@@ -1400,11 +1372,16 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    /// Lets go of the open image and everything built from it, for a pane
-    /// nobody is looking at. Opening an image starts afresh.
+    /// Lets go of the open image and everything built from it, saving a
+    /// pending edit first. Used for a pane nobody is looking at, and when
+    /// another folder opens: the catalog id belongs to the catalog being
+    /// left, and the same id in the next one is a different photo, so once
+    /// the save is on its way nothing may be saved under that id again.
+    /// Opening an image starts afresh.
     func closeImage() {
         guard hasImage else { return }
         flushPendingSave()
+        disarmTools()
         pendingRender?.cancel()
         aiDenoiseTask?.cancel()
         aiDenoiseRunning = false
@@ -1426,6 +1403,8 @@ final class EditorModel: ObservableObject {
         waveform = nil
         vectorscope = nil
         imageTitle = nil
+        history = EditHistory(initial: EditStack(parameters: parameters))
+        snapshots = []
         status = "Open a raw file to begin"
     }
 

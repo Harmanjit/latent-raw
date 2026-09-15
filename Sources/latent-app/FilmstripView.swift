@@ -196,7 +196,7 @@ private final class FilmstripItem: NSCollectionViewItem {
     private let ringLayer = CALayer()
     private(set) var record: ImageRecord?
     private weak var library: Library?
-    private var load: Task<Void, Never>?
+    private var load: ThumbnailRequest?
 
     var isCurrent = false {
         didSet {
@@ -253,20 +253,19 @@ private final class FilmstripItem: NSCollectionViewItem {
     }
 
     /// A cached thumbnail is drawn at once, so scrolling back never shows a
-    /// blank frame; otherwise it loads, unless the cell scrolls away first.
+    /// blank frame; otherwise it loads through the grid's loader, which
+    /// never decodes a request cancelled before its turn comes up.
     func reloadThumbnail() {
         guard let record, let library else { return }
-        if let cached = library.cachedThumbnail(for: record) {
+        let pixelSize = Int((max(Self.size.width, Self.size.height) * (view.window?.backingScaleFactor ?? 2)).rounded(.up))
+        if let cached = library.displayThumbnail(for: record, pixelSize: pixelSize) {
             cancelThumbnail()
             setImage(cached)
             return
         }
         guard load == nil else { return }
-        load = Task { [weak self] in
-            // Cells flicked past are cancelled before their turn comes up.
-            guard !Task.isCancelled else { return }
-            let image = await library.loadThumbnail(for: record)
-            guard let self, !Task.isCancelled, self.record?.id == record.id else { return }
+        load = library.requestDisplayThumbnail(for: record, pixelSize: pixelSize) { [weak self] image in
+            guard let self, self.record?.id == record.id else { return }
             self.load = nil
             if let image { self.setImage(image) }
         }
@@ -277,11 +276,11 @@ private final class FilmstripItem: NSCollectionViewItem {
         load = nil
     }
 
-    /// The user's quarter turns are applied here, as the grid does.
+    /// Thumbnails come already turned by the user's rotation.
     private func setImage(_ image: CGImage?) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        imageLayer.contents = image.map { Thumbnailer.rotated($0, quarterTurns: record?.userRotation ?? 0) }
+        imageLayer.contents = image
         CATransaction.commit()
     }
 

@@ -343,7 +343,7 @@ struct ExportSheet: View {
                     }
                 }
             }
-            Toggle("Include camera metadata, keywords and rating", isOn: $preset.includeMetadata)
+            Toggle("Include camera metadata, location, keywords and rating", isOn: $preset.includeMetadata)
 
             groupLabel("Naming")
             HStack {

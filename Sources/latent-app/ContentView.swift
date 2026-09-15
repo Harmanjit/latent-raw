@@ -607,10 +607,14 @@ struct ContentView: View {
             pasteSettings()
         case .rotate(let quarterTurns):
             rotate(by: quarterTurns)
+        case .zoomIn where mode == .library, .zoomOut where mode == .library:
+            prefs.thumbnailSize = ThumbnailGridLayout.stepped(prefs.thumbnailSize, larger: command == .zoomIn)
         case .zoomIn:
             model.zoomIn(); mirrorModel?.zoomIn()
         case .zoomOut:
             model.zoomOut(); mirrorModel?.zoomOut()
+        case .revealInFinder:
+            GridContextMenu.revealInFinder(library)
         case .zoomToFit:
             model.zoomToFit(); mirrorModel?.zoomToFit()
         case .zoomToActualSize:
@@ -1036,7 +1040,6 @@ struct ContentView: View {
                     HStack {
                         Button("Auto") { model.autoAdjust() }
                             .controlSize(.small)
-                            .keyboardShortcut("u", modifiers: .command)
                             .disabled(!model.hasImage)
                             .help("Estimate exposure, contrast and white balance from the image (⌘U)")
                         Spacer()
@@ -1061,7 +1064,7 @@ struct ContentView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("HDR display")
                                     .font(.subheadline)
-                                Text(String(format: "this screen: %.1f× above white",
+                                Text(String(format: "this screen: up to %.1f× above white",
                                             model.displayHeadroom))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
