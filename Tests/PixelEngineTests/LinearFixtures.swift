@@ -15,7 +15,8 @@ enum LinearFixtures {
     /// Same lens EXIF, which must be ignored.
     static let mergePanorama = "merge-panorama-64x48.dng"
     /// 64 x 48, strips, no XMP, BaselineExposure -0.5, with values the
-    /// plane has to clean in the first two pixels (`plainSpecials`).
+    /// plane has to clean in the first two pixels (`plainSpecialsStored`,
+    /// cleaned to `plainSpecialsCleaned`).
     static let plain = "plain-64x48.dng"
     /// 64 x 48, strips, Orientation 6, no lens EXIF.
     static let orientation6 = "orientation6-64x48.dng"

@@ -2,10 +2,9 @@ import XCTest
 import RawCore
 @testable import MergeKit
 
-/// The vendored LibRaw reading a merge's DNG back through RawCore, in
-/// process. What today's RawCore can open: metadata only, since decoding
-/// three-sample float data arrives with the linear-source work (see
-/// LibRawPixelRoundTripTests for the pixel half).
+/// The vendored LibRaw reading a merge's DNG metadata back through RawCore,
+/// in process and from an open descriptor, as the raw decoder service opens
+/// every file. LibRawPixelRoundTripTests checks the pixels.
 final class LibRawReadBackTests: XCTestCase {
     nonisolated(unsafe) private var folder: URL!
 

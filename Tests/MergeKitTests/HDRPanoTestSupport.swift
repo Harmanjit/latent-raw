@@ -12,17 +12,7 @@ import simd
 ///
 /// The scene, the camera's levels and the projection maths are
 /// `PanoMergeTestSupport`'s; only the frame's size and its own DNG writer
-/// are here, because an HDR panorama writes and reads back an intermediate
-/// DNG per position and those must be a size LibRaw reads correctly.
-///
-/// **Why 1100 x 500 and not the panorama tests' 900 x 600.** A LinearRaw
-/// DNG of ours whose tile grid is exactly 2 x 2 (512 px tiles: 513...1024
-/// on both sides) reads back as the bit patterns of its half floats rather
-/// than their values, and 1024 x 1024 doesn't open at all; every other
-/// tiling is right. That is a bug in the writer or the vendored LibRaw, not
-/// in the merge, and it is reported separately — real photos are far larger
-/// and tile 12 x 8. These frames are 3 x 1 tiles so the intermediates come
-/// back as what was written.
+/// are here.
 enum HDRPanoTestSupport {
     /// The photos' size and lens: 1100 x 500 px at 700 px focal length is
     /// 76° x 39°, so 0.4 rad steps overlap by about half.

@@ -2,7 +2,8 @@
 
 Small floating-point LinearRaw DNGs, the kind of file Photo Merge writes,
 for the tests that open linear sources (`LinearDNGFileTests`,
-`LinearSourceRenderTests`, and MLKit's `AIDenoiseLinearSourceTests`).
+`LinearSourceRenderTests`, `LensRegionTests`, and MLKit's
+`AIDenoiseLinearSourceTests`).
 `LinearFixtures.swift` describes each file and holds the pixel values it was
 written with, so the tests check what comes back against what went in.
 
@@ -21,17 +22,21 @@ matrix and as-shot white balance), except the integer one.
 
 ## How they were made
 
-With the Photo Merge DNG spike's writer (`~/latent-wt/spikes/dng`,
+With the writer from Photo Merge's Phase 0 DNG spike (its
 `Sources/DNGKit`), which the spike showed LibRaw reads back bit for bit.
-The writer is not copied into this repository. A throwaway package compiles
-the generator below together with the spike's three writer files, linked
-in, so the fixtures are exactly what that writer produces plus the few tags
-it doesn't write itself (lens EXIF, per-channel black):
+The spike is not part of this repository. Its production port is
+`Sources/MergeKit/DNG` (`LinearRawDNGWriter`), which has a different API,
+so the generator below does not build against this repository as it
+stands; it is kept as the record of what each file holds. It was compiled
+in a throwaway package together with the spike's three writer files,
+linked in, so the fixtures are exactly what that writer produces plus the
+few tags it doesn't write itself (lens EXIF, per-channel black):
 
 ```sh
+# SPIKE is a checkout of the DNG spike.
 mkdir -p /tmp/fixturegen/Sources/fixturegen && cd /tmp/fixturegen
 for f in LinearRawDNG TIFFWriter FloatDeflate; do
-  ln -sf ~/latent-wt/spikes/dng/Sources/DNGKit/$f.swift Sources/fixturegen/$f.swift
+  ln -sf "$SPIKE/Sources/DNGKit/$f.swift" Sources/fixturegen/$f.swift
 done
 cat > Package.swift <<'SWIFT'
 // swift-tools-version: 6.0
@@ -44,8 +49,9 @@ SWIFT
 swift run fixturegen <this folder>
 ```
 
-Regenerating changes the files only if the generator or the spike's writer
-changed; if it did, `LinearFixtures.swift` has to agree.
+Regenerating changes the files only if the generator or the writer changed,
+and porting the generator to `LinearRawDNGWriter` is such a change; if
+either did, `LinearFixtures.swift` has to agree.
 
 ## A LibRaw quirk the layout works around
 
@@ -65,9 +71,9 @@ with strips (or smaller tiles).
 //
 // Writes the linear DNG fixtures for Latent's Tests/PixelEngineTests/
 // Fixtures/LinearDNG. Compiled together with the Photo Merge DNG spike's
-// writer (~/latent-wt/spikes/dng/Sources/DNGKit/*.swift, symlinked in, not
-// copied), so the files are exactly what that writer produces, plus the
-// few tags the spike doesn't write (lens EXIF, per-channel black).
+// writer (its Sources/DNGKit/*.swift, symlinked in, not copied), so the
+// files are exactly what that writer produces, plus the few tags the spike
+// doesn't write (lens EXIF, per-channel black).
 
 import CoreGraphics
 import Foundation
@@ -76,8 +82,7 @@ import ImageIO
 let outDir = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
 
-// Nikon D750, as LibRaw reports TestAssets/golden_nikon_d750_cc0.nef
-// (spikes/dng/out/camera_d750.json).
+// Nikon D750, as LibRaw reports TestAssets/golden_nikon_d750_cc0.nef.
 let camXYZ: [Double] = [0.9020, -0.2890, -0.0715, -0.4535, 1.2436, 0.2348, -0.0934, 0.1919, 0.7086]
 let camMul: [Double] = [2.078125, 1, 1.207031]
 
@@ -201,8 +206,9 @@ func write(_ dng: LinearRawDNG, _ name: String, lens: Bool = true,
     guard case .ifdOffsets(let subIFDs)? = ifd0.entries[Tag.subIFDs],
           case .ifdOffsets(let exifIFDs)? = ifd0.entries[Tag.exifIFD] else { fatalError("no sub IFDs") }
     if lens {
-        // A Nikon 35 mm f/1.8, the lens of the golden NEF, so Lensfun has a
-        // profile to match when the merge hasn't applied one already.
+        // A Nikon AF-S 35mm f/1.8G ED at the golden NEF's focal length and
+        // aperture (its own lens is a Tamron SP 35mm f/1.8), so Lensfun has
+        // a profile to match when the merge hasn't applied one already.
         let exif = exifIFDs[0]
         exif.set(ExtraTag.focalLength, .rationals([TIFFRational(35, 1)]))
         exif.set(ExtraTag.focalLengthIn35mmFilm, short: 35)
