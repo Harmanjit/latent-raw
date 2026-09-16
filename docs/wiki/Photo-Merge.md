@@ -103,7 +103,7 @@ The colours are orange, sky blue, bluish green, yellow, blue, vermillion and red
 
 **Size.** The file is uncompressed half floats, about 6 bytes per pixel: a merge of 24 MP photos is roughly 145 MB, of 45 MP photos about 270 MB. Latent checks the disk has room before writing.
 
-**What made it.** The photo's sidecar and the DNG itself record which photos were merged (by path and fingerprint), when they were taken, and how: the Deghost level, whether Auto Align was on, how far it moved each shot and which shots it left out. That is a record only: Latent can't yet re-run a merge from it.
+**What made it.** The photo's sidecar and the DNG itself record which photos were merged (by path and fingerprint), when they were taken, and how: the Deghost level, whether Auto Align was on, how far it moved each shot and which shots it left out. Select the merged photo and the info panel shows a **Merged** section with the same facts: what kind of merge it was, the options, the photos it came from and any that were left out. That is a record only: Latent can't yet re-run a merge from it.
 
 ## Panorama
 
@@ -182,7 +182,7 @@ Agreeing is asked for every time, and again whenever the size changes (after swi
 
 **Its first edit.** With **Auto Crop** on, the crop is stored as the panorama's first edit; with **Auto Settings** on, Develop's **Auto Adjust** (⌘U) is stored too. Both are one edit, so a single **Undo** in Develop takes you back to the stitch exactly as it came out.
 
-**What made it.** The panorama's sidecar and the DNG record which photos were stitched (by path and fingerprint) and how. That is a record only: Latent can't yet re-run a merge from it.
+**What made it.** The panorama's sidecar and the DNG record which photos were stitched (by path and fingerprint) and how. Select the merged photo and the info panel shows a **Merged** section with the same facts: what kind of merge it was, the options, the photos it came from and any that were left out. That is a record only: Latent can't yet re-run a merge from it.
 
 ## HDR Panorama (experimental)
 
