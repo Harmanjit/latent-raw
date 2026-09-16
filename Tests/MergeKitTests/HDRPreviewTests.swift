@@ -311,20 +311,36 @@ final class HDRPreviewTests: XCTestCase {
         XCTAssertTrue(Homography.isIdentity(reduced.homographies[1]))
 
         XCTAssertEqual(HDRClipFeather.standard.reduced(by: 1), .standard)
-        XCTAssertEqual(HDRClipFeather.standard.reduced(by: 3), HDRClipFeather(erodeRadius: 1, sigma: 0.5))
-        // At half size, the calibrated counts: 65% of the share, rounded up.
-        let medium = DeghostAmount.medium.settings!
-        let medium2 = medium.reduced(by: 2)
-        XCTAssertEqual([medium2.patchRadius, medium2.patchCount, medium2.dilateRadius], [2, 3, 2])
-        XCTAssertEqual(medium2.featherSigma, 1)
-        XCTAssertEqual(medium2.gapStops, medium.gapStops)
-        let low2 = DeghostAmount.low.settings!.reduced(by: 2)
-        XCTAssertEqual([low2.patchRadius, low2.patchCount, low2.dilateRadius], [2, 5, 1])
-        let high2 = DeghostAmount.high.settings!.reduced(by: 2)
-        XCTAssertEqual([high2.patchRadius, high2.patchCount, high2.dilateRadius], [2, 2, 2])
-        let medium4 = medium.reduced(by: 4)
-        XCTAssertEqual([medium4.patchRadius, medium4.patchCount], [1, 1])
-        XCTAssertEqual(medium.reduced(by: 1), medium)
+        XCTAssertEqual(HDRClipFeather.standard.reduced(by: 3),
+                       HDRClipFeather(erodeRadius: Int((Double(HDRClipFeather.standard.erodeRadius) / 3).rounded()),
+                                      sigma: HDRClipFeather.standard.sigma / 3))
+
+        // The reduced settings are checked against the full ones, not against
+        // fixed numbers, so tuning a Deghost level can't break this test.
+        for amount in [DeghostAmount.low, .medium, .high] {
+            let full = amount.settings!
+            XCTAssertEqual(full.reduced(by: 1), full, "\(amount) unchanged at full size")
+            for factor in [2, 4] {
+                let small = full.reduced(by: factor)
+                let f = Double(factor)
+                XCTAssertEqual(small.patchRadius, max(1, Int((Double(full.patchRadius) / f).rounded())),
+                               "\(amount) patch radius at 1/\(factor)")
+                XCTAssertEqual(small.dilateRadius, Int((Double(full.dilateRadius) / f).rounded()),
+                               "\(amount) widening at 1/\(factor)")
+                XCTAssertEqual(small.featherSigma, full.featherSigma / Float(factor), accuracy: 1e-6,
+                               "\(amount) feathering at 1/\(factor)")
+                XCTAssertEqual(small.gapStops, full.gapStops, "\(amount) thresholds don't scale")
+                // The patch asks for 65% of the full share of disagreeing
+                // blocks, to within the one block rounding can add.
+                let fullShare = Double(full.patchCount) / pow(Double(2 * full.patchRadius + 1), 2)
+                let blocks = pow(Double(2 * small.patchRadius + 1), 2)
+                let wanted = max(1, Int((HDRDeghostSettings.reducedShare * fullShare * blocks).rounded(.up)))
+                XCTAssertEqual(small.patchCount, wanted, "\(amount) patch count at 1/\(factor)")
+                // Rounding up to whole blocks can only push it one block past.
+                XCTAssertLessThanOrEqual(Double(small.patchCount) / blocks, fullShare + 1 / blocks,
+                                         "\(amount) at 1/\(factor) asks for far more than the full share")
+            }
+        }
     }
 
     // MARK: - Warnings for a picked reference

@@ -247,8 +247,8 @@ if args.count >= 2, args[1] == "merge-hdr" {
             if !report.ghostMaskedFractions.isEmpty {
                 let shares = zip(report.ghostFlaggedFractions, report.ghostMaskedFractions).enumerated()
                     .map { i, share in
-                        i == reference ? "\(i): reference"
-                            : String(format: "%d: %.2f%% moving, %.2f%% left out", i, share.0 * 100, share.1 * 100)
+                        String(format: "%d%@: %.2f%% moving, %.2f%% left out", i, i == reference ? "*" : "",
+                               share.0 * 100, share.1 * 100)
                     }
                 print("Deghosting (\(deghost.rawValue)) at preview size: " + shares.joined(separator: "; "))
             }
@@ -276,8 +276,8 @@ if args.count >= 2, args[1] == "merge-hdr" {
         if !mergeReport.ghostMaskedFractions.isEmpty {
             let shares = zip(mergeReport.ghostFlaggedFractions, mergeReport.ghostMaskedFractions).enumerated()
                 .map { i, share in
-                    i == reference ? "\(i): reference"
-                        : String(format: "%d: %.2f%% moving, %.2f%% left out", i, share.0 * 100, share.1 * 100)
+                    String(format: "%d%@: %.2f%% moving, %.2f%% left out", i, i == reference ? "*" : "",
+                           share.0 * 100, share.1 * 100)
                 }
             print("Deghosting (\(deghost.rawValue)): " + shares.joined(separator: "; "))
         }

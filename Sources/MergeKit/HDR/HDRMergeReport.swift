@@ -25,8 +25,9 @@ public struct HDRMergeReport: Sendable, Equatable {
     public internal(set) var ghostFlaggedFractions: [Double] = []
     /// With deghosting on, the share of each frame its ghost mask left out
     /// by at least half: every frame's movement, widened, except where the
-    /// frame is the local reference. 0 for the reference frame, which is
-    /// never masked. Empty without deghosting.
+    /// frame is the one chosen to show that moving area. The reference frame
+    /// is masked too, wherever another frame shows the movement. Empty
+    /// without deghosting.
     public internal(set) var ghostMaskedFractions: [Double] = []
 
     public init() {}

@@ -74,7 +74,7 @@ The cost is noise and range in those parts: they come from one shot instead of s
 
 What to expect:
 
-- **Deghost compares brightness, not colour.** Something that moved in front of a background just as bright (a blond head in front of a sunlit wall) can go unnoticed and still look doubled or transparent. Try a higher level; if that doesn't help, a merge without it may look softer but more natural.
+- **Deghost compares brightness and colour,** and takes each moving thing whole from one photo, so a person walking through the scene appears once. What it still can't fix is *parallax*: when the camera itself moved, near objects shift against the background and no single photo matches, so edges there can stay doubled. A tripod avoids this.
 - **Deghost takes a little longer**: each shot is read once more to look for movement.
 - **Use Auto Align with it.** Without alignment, a shot that moved differs from the reference everywhere, and Deghost would take almost the whole picture from one shot.
 
