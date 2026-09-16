@@ -79,7 +79,7 @@ public struct PanoramaMergeFrame: Sendable, Equatable {
 }
 
 /// Something the dialog should say before merging. None of these stop a
-/// merge; `PanoramaMergeError` does.
+/// merge; `PanoramaError` does.
 public enum PanoramaMergeWarning: Sendable, Equatable {
     /// Photos that couldn't be joined to the rest, by index into `frames`.
     case framesLeftOut(indices: [Int])

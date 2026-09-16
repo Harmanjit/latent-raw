@@ -1,7 +1,7 @@
 import Foundation
 import simd
 
-/// Colour grading parameters (DESIGN.md §8.1 stage 11).
+/// Colour grading parameters (DESIGN.md §8.1 stage 13).
 
 /// A point tone curve on [0,1] → [0,1]. Points are kept sorted by x with
 /// the endpoints pinned to x = 0 and x = 1.

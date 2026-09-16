@@ -365,9 +365,10 @@ public final class Library: ObservableObject {
         }
     }
 
-    /// Re-reconciles the open folder (the Refresh action, DESIGN.md §5.3
-    /// "no live watching"). Its result is dropped if another folder opened,
-    /// or another refresh started, while it ran.
+    /// Re-reconciles the open folder after Latent changes it: a move, copy,
+    /// rename or merge, or a subfolder decision (DESIGN.md §5.3, "No live
+    /// watching"; the app has no Refresh command). Its result is dropped if
+    /// another folder opened, or another refresh started, while it ran.
     public func refresh() async throws {
         guard let catalog else { return }
         refreshGeneration += 1

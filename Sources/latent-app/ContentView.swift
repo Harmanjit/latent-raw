@@ -37,13 +37,9 @@ enum AppMode: String, CaseIterable, Identifiable {
 /// follows Lightroom — white balance first, then tone — because that's the
 /// order the adjustments actually want to be made in.
 ///
-/// Sections that aren't reached for often are collapsed by default. As more
-/// panels arrive (lens corrections, detail, grading) the same pattern keeps
-/// the panel from becoming a wall of sliders.
-///
-/// Left-hand panel (navigator, presets, collections) is deliberately absent
-/// until there's something to put in it — that's Phase 2, when catalogs
-/// arrive.
+/// Sections that aren't reached for often are collapsed by default, which
+/// keeps the panel from becoming a wall of sliders. The folder sidebar
+/// (`FolderSidebar`) is on the left.
 struct ContentView: View {
     // Not the window's own: reopening the window must not build a second set.
     @ObservedObject private var model = MainWindowModels.shared.model

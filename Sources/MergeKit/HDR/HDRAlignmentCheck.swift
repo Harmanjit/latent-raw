@@ -1,12 +1,13 @@
-// Checking whether a bracket's frames line up, so v1 (which doesn't align
-// them) can say when the result may show double edges.
+// Checking whether a bracket's frames line up, so a merge made without
+// Auto Align can warn that the result may show double edges, and a link
+// the aligner rejects gets a second opinion.
 
 import Accelerate
 import Foundation
 
 /// Finds the shift between two neighbouring frames by phase correlation,
-/// ported from the Phase 0 alignment spike (~/latent-wt/spikes/vision,
-/// TwoStage.swift), which found it reliable on real brackets 8 stops apart.
+/// ported from the Phase 0 alignment spike (docs/PhotoMerge.md §0), which
+/// found it reliable on real brackets 8 stops apart.
 ///
 /// **Phase correlation.** Shifting an image doesn't change the strength of
 /// its frequencies (the magnitudes of its Fourier transform), only their

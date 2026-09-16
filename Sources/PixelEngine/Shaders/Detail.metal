@@ -2,7 +2,7 @@
 using namespace metal;
 
 // Detail stages: noise reduction and sharpening (DESIGN.md §8.1 stages
-// 8 and 12).
+// 4 and 17).
 
 // ---------------------------------------------------------------------
 // Denoise: a bilateral filter in linear camera space, run before the

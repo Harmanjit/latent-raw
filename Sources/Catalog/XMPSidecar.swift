@@ -4,9 +4,8 @@ import Foundation
 ///
 /// Writes are atomic: to a temporary file, then renamed over the old
 /// sidecar, so a crash mid-write can never leave a half-written file
-/// (DESIGN.md §5.3). Reads use Foundation's XMLDocument. Exiv2 (per
-/// DESIGN.md §3) may replace the read side later for MakerNotes and
-/// arbitrary foreign XMP; for Latent's own sidecars this is enough.
+/// (DESIGN.md §5.3). Reads use Foundation's XMLDocument, which is all
+/// Latent's own sidecars need (Exiv2 was not adopted, DESIGN.md §3).
 public enum XMPSidecar {
     /// The namespace URI is fixed now that the repository is public
     /// (DESIGN.md §5.5); changing it would orphan existing sidecars.

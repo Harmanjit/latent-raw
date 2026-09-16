@@ -64,7 +64,7 @@ struct FinderTagList: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Finder tags")
         .accessibilityValue(tags.map(\.name).joined(separator: ", "))
-        .help("Tags set in Finder. Latent reads them when the folder is opened or refreshed.")
+        .help("Tags set in Finder. Latent reads them when the folder is opened.")
     }
 }
 
