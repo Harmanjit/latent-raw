@@ -122,7 +122,11 @@ enum PhaseCorrelation {
             let fy = refine(value(p.x, p.y - 1), p.v, value(p.x, p.y + 1))
             for dy in [p.y, p.y - n] where abs(dy) < min(a.height, b.height) {
                 for dx in [p.x, p.x - n] where abs(dx) < min(a.width, b.width) {
-                    out.append(Candidate(dx: Double(dx) + fx, dy: Double(dy) + fy, peak: Double(p.v)))
+                    // vDSP's transforms aren't normalised: forward then
+                    // inverse scales by n on each axis, so a perfect
+                    // match's peak comes out n² times too big.
+                    out.append(Candidate(dx: Double(dx) + fx, dy: Double(dy) + fy,
+                                         peak: Double(p.v) / Double(n * n)))
                 }
             }
         }
@@ -153,9 +157,10 @@ enum PhaseCorrelation {
         return out
     }
 
-    /// The 2-D transform, in place. vDSP scales the inverse by 1 / n², so
-    /// forward then inverse gives back the input, and a perfect match's
-    /// correlation peak is 1.
+    /// The 2-D transform, in place. vDSP's complex transforms aren't
+    /// normalised: forward then inverse gives back the input scaled by n on
+    /// each axis, so whatever comes out of the inverse is n² times the value
+    /// the maths asks for. `candidates` divides its peaks by n² for that.
     private static func transform(_ real: inout [Float], _ imaginary: inout [Float], n: Int, log2n: Int,
                                   setup: FFTSetup, direction: FFTDirection) {
         real.withUnsafeMutableBufferPointer { re in

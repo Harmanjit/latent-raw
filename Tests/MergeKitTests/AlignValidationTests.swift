@@ -148,4 +148,45 @@ final class AlignValidationTests: XCTestCase {
             XCTAssertLessThan(error, 0.3, "frame \(index)")
         }
     }
+
+    /// `PhaseCorrelation.Candidate.peak` is the normalised correlation its
+    /// doc comment promises: about 1 where a plane matches itself, near 0
+    /// where two planes share nothing. vDSP's transforms aren't normalised,
+    /// so the peak has to be divided by n² on the way out; it used to be
+    /// published raw, about a million times too big for the 1024-point
+    /// transform the aligner uses, and any test of the documented contract
+    /// would have passed on noise.
+    func testPeakIsTheNormalisedCorrelation() throws {
+        let (w, h) = (300, 200)
+        var random = SplitMix64(seed: 42)
+        let noise = (0..<(w * h)).map { _ in Float(random.uniform()) }
+        let plane = AlignmentPlane(width: w, height: h, values: noise)
+        let itself = try XCTUnwrap(PhaseCorrelation.candidates(reference: plane, moving: plane).first)
+        XCTAssertEqual(itself.dx, 0, accuracy: 1e-6)
+        XCTAssertEqual(itself.dy, 0, accuracy: 1e-6)
+        XCTAssertEqual(itself.peak, 1, accuracy: 0.02, "a plane matches itself perfectly")
+
+        var other = SplitMix64(seed: 7)
+        let unrelated = AlignmentPlane(width: w, height: h, values: (0..<(w * h)).map { _ in Float(other.uniform()) })
+        let none = try XCTUnwrap(PhaseCorrelation.candidates(reference: plane, moving: unrelated).first)
+        print("align-validation | peak: self \(itself.peak), unrelated \(none.peak)")
+        XCTAssertLessThan(none.peak, 0.1, "unrelated planes have no clear peak")
+
+        // A known shift, seen as two windows on the same larger texture:
+        // the peak is lower than a perfect match but still a correlation,
+        // never above 1.
+        var wide = SplitMix64(seed: 11)
+        let texture = (0..<((w + 20) * (h + 20))).map { _ in Float(wide.uniform()) }
+        func window(dx: Int, dy: Int) -> AlignmentPlane {
+            AlignmentPlane(width: w, height: h,
+                           values: (0..<(w * h)).map { i in texture[(i / w + 10 - dy) * (w + 20) + i % w + 10 - dx] })
+        }
+        let moved = try XCTUnwrap(PhaseCorrelation.candidates(reference: window(dx: 0, dy: 0),
+                                                              moving: window(dx: 5, dy: 3)).first)
+        print("align-validation | shifted peak \(moved.peak) at \(moved.dx), \(moved.dy)")
+        XCTAssertEqual(moved.dx, 5, accuracy: 0.2)
+        XCTAssertEqual(moved.dy, 3, accuracy: 0.2)
+        XCTAssertGreaterThan(moved.peak, 0.1)
+        XCTAssertLessThanOrEqual(moved.peak, 1.05, "a correlation peak can't be much above 1")
+    }
 }
