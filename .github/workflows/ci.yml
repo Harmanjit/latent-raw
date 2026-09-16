@@ -18,7 +18,7 @@ jobs:
       LIBRAW_TAG: "0.22.2"
       LIBRAW_COMMIT: "b93f6e45c194f5df9b02a43b1af9a54b4f41f33f"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install autotools
         run: brew install autoconf automake libtool pkg-config
