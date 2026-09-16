@@ -20,6 +20,11 @@ public enum PanoramaError: Error, Equatable, LocalizedError {
     case gpuUnavailable(reason: String)
     /// The photos don't form a panorama: why, in the dialog's words.
     case notAPanorama(reason: String)
+    /// The volume holding the result hasn't room for it (the merge is
+    /// refused before anything is written).
+    case notEnoughDiskSpace(neededBytes: Int64, availableBytes: Int64)
+    /// The result couldn't be written; nothing is left behind.
+    case cantWrite(fileName: String, reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -30,6 +35,11 @@ public enum PanoramaError: Error, Equatable, LocalizedError {
             "\(name) was taken with a different camera or focal length from the first photo."
         case .gpuUnavailable(let reason): "The GPU couldn't prepare the photos (\(reason))."
         case .notAPanorama(let reason): "These photos don't form a panorama: \(reason)"
+        case .notEnoughDiskSpace(let needed, let available):
+            "Not enough disk space: the panorama needs "
+                + "\(ByteCountFormatter().string(fromByteCount: needed)) and only "
+                + "\(ByteCountFormatter().string(fromByteCount: available)) is free."
+        case .cantWrite(let name, let reason): "\(name) couldn't be written (\(reason))."
         }
     }
 }
@@ -126,16 +136,38 @@ public final class PanoramaFramePrep {
         return rgb
     }
 
+    /// A photo reduced for the geometry, with where it clips.
+    public struct Measured: Sendable {
+        public let input: PanoramaFrameInput
+        /// The value at and above which the photo's pixels are clipped, in
+        /// prepared units (about 0.98 for a Bayer raw, whose white is 1).
+        public let clipLevel: Float
+    }
+
     /// The photo decoded and reduced for the geometry (`thumbnailSpan`).
     public func input(for photo: Photo) throws -> PanoramaFrameInput {
+        try measure(photo).input
+    }
+
+    /// `input(for:)` with the photo's clip level, which the merge needs for
+    /// the blend and for the result's recipe.
+    public func measure(_ photo: Photo) throws -> Measured {
         try autoreleasepool {
             let file = try open(photo)
             let source = try Self.gpuStep { try self.source(for: file, multipliers: SIMD3(repeating: 1)) }
             let reduced = try Self.gpuStep { try kernels.thumbnail(source, span: Self.thumbnailSpan, lens: photo.lens) }
             let thumbnail = PanoramaThumbnail(width: reduced.width, height: reduced.height, span: reduced.span,
                                               rgba: reduced.rgba, clippedShare: reduced.clippedShare)
-            return PanoramaFrameInput(metadata: photo.metadata, thumbnail: thumbnail)
+            return Measured(input: PanoramaFrameInput(metadata: photo.metadata, thumbnail: thumbnail),
+                            clipLevel: Self.clipLevel(of: source))
         }
+    }
+
+    /// One photo ready for the stitcher.
+    public struct Prepared {
+        public let texture: MTLTexture
+        /// See `Measured.clipLevel`.
+        public let clipLevel: Float
     }
 
     /// The photo prepared at `span` for the stitcher: an `rgba16Float`
@@ -144,10 +176,29 @@ public final class PanoramaFramePrep {
     /// `floor(width / span) x floor(height / span)`. Waits for the GPU.
     public func prepare(_ photo: Photo, span: Int, multipliers: SIMD3<Float>,
                         storage: MTLStorageMode = .private) throws -> MTLTexture {
+        try prepared(photo, span: span, multipliers: multipliers, storage: storage).texture
+    }
+
+    /// `prepare`, with the photo's clip level (`Measured.clipLevel`).
+    public func prepared(_ photo: Photo, span: Int, multipliers: SIMD3<Float>,
+                         storage: MTLStorageMode = .private) throws -> Prepared {
         try autoreleasepool {
             let file = try open(photo)
             let source = try Self.gpuStep { try self.source(for: file, multipliers: multipliers) }
-            return try Self.gpuStep { try kernels.prepare(source, span: span, lens: photo.lens, storage: storage) }
+            let texture = try Self.gpuStep {
+                try kernels.prepare(source, span: span, lens: photo.lens, storage: storage)
+            }
+            return Prepared(texture: texture, clipLevel: Self.clipLevel(of: source))
+        }
+    }
+
+    /// Where a source's prepared pixels clip: for a Bayer raw the lowest of
+    /// the three colours' clipping points (the first colour to saturate),
+    /// for a linear DNG the clip level its own merge recorded.
+    static func clipLevel(of source: MergePanoPrepKernels.Source) -> Float {
+        switch source {
+        case .bayer(_, let levels, _): return levels.channelClip.min()
+        case .linear(_, let clipLevel): return clipLevel
         }
     }
 

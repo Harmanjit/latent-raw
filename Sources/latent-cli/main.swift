@@ -468,6 +468,162 @@ if args.count >= 2, args[1] == "pano-layout" {
     exit(0)
 }
 
+// `merge-pano` subcommand: the whole panorama (docs/PhotoMerge.md section 4)
+// — analyse, optionally write the dialog's preview, then stitch and write
+// the DNG — with what the dialog would say and what each stage cost.
+if args.count >= 2, args[1] == "merge-pano" {
+    var positional: [String] = []
+    var projection = PanoramaProjection.automatic
+    var autoCrop = true
+    var previewPath: String?
+    var previewLongEdge = 1600
+    var index = 2
+    while index < args.count {
+        if args[index] == "--projection", index + 1 < args.count {
+            guard let chosen = PanoramaProjection(rawValue: args[index + 1]) else {
+                print("--projection takes automatic, perspective, cylindrical or spherical")
+                exit(1)
+            }
+            projection = chosen
+            index += 2
+        } else if args[index] == "--no-auto-crop" {
+            autoCrop = false
+            index += 1
+        } else if args[index] == "--preview", index + 1 < args.count {
+            previewPath = args[index + 1]
+            index += 2
+        } else if args[index] == "--long-edge", index + 1 < args.count, let n = Int(args[index + 1]), n > 0 {
+            previewLongEdge = n
+            index += 2
+        } else {
+            positional.append(args[index])
+            index += 1
+        }
+    }
+    guard positional.count >= 3 else {
+        print("Usage: latent-cli merge-pano <out.dng> <raw> <raw> [...] "
+              + "[--projection automatic|perspective|cylindrical|spherical] [--no-auto-crop] "
+              + "[--preview out.jpg] [--long-edge N]")
+        exit(1)
+    }
+    let output = URL(fileURLWithPath: positional[0])
+    let inputs = positional.dropFirst().map { URL(fileURLWithPath: $0) }
+
+    func column(_ text: String, _ width: Int) -> String {
+        text.count >= width ? String(text.prefix(width)) : text.padding(toLength: width, withPad: " ", startingAt: 0)
+    }
+    func shutterText(_ seconds: Double) -> String {
+        guard seconds > 0 else { return "?" }
+        return seconds >= 1 ? String(format: "%gs", seconds) : "1/\(Int((1 / seconds).rounded()))"
+    }
+    func printReport(_ report: PanoramaMergeReport, title: String) {
+        print("  \(title):")
+        for stage in report.stages {
+            print("    " + column(stage.name, 40) + String(format: "%8.3f s", stage.seconds))
+        }
+        print("    " + column("total", 40) + String(format: "%8.3f s", report.totalSeconds))
+    }
+    /// `url` relative to `folder`, as a merge recipe records its sources.
+    func relativePath(of url: URL, from folder: URL) -> String {
+        let target = url.standardizedFileURL.pathComponents, base = folder.standardizedFileURL.pathComponents
+        var shared = 0
+        while shared < min(target.count, base.count), target[shared] == base[shared] { shared += 1 }
+        return (Array(repeating: "..", count: base.count - shared) + target[shared...]).joined(separator: "/")
+    }
+
+    do {
+        let gpu = try GPUContext()
+        let merger = PanoramaMerger(gpu: gpu)
+        let options = PanoramaMergeOptions(projection: projection, autoCrop: autoCrop)
+        let (analysis, analysisReport) = try await merger.analyseWithReport(inputs, options: options)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        print(String(format: "Analysed %d photos in %.2f s", analysis.frames.count, analysisReport.totalSeconds))
+        print("   #  " + column("File", 18) + "Time      Shutter   ISO     f   Gain EV     Yaw    Pitch   Roll")
+        for (i, frame) in analysis.frames.enumerated() {
+            let angles = frame.yawPitchRoll.map { String(format: "%+7.2f %+7.2f %+6.2f", $0.x, $0.y, $0.z) }
+                ?? "left out"
+            print(String(format: "  %2d  ", i) + column(frame.url.lastPathComponent, 18)
+                  + formatter.string(from: frame.captureTime) + "  " + column(shutterText(frame.exposureSeconds), 8)
+                  + String(format: "%5.0f %5.1f  %+8.3f  ", frame.iso, frame.aperture, frame.gainStops) + angles)
+        }
+        let layout = analysis.layout, size = analysis.outputSize
+        print(String(format: "Extent: %.1f° x %.1f°; projection %@; canvas %d x %d px (%.1f MP)",
+                     analysis.widthDegrees, analysis.heightDegrees, layout.canvas.projection.rawValue,
+                     layout.canvas.width, layout.canvas.height,
+                     Double(layout.canvas.width) * Double(layout.canvas.height) / 1e6))
+        print(String(format: "Output: %@, scale %.3f, limit %@, decode span %d, DNG about %.0f MB",
+                     size.sizeMessage, size.scale, size.limit.rawValue, size.decodeSpan,
+                     Double(analysis.estimatedOutputBytes) / 1e6))
+        let crop = layout.autoCropRect
+        print(String(format: "Auto crop (%@): x %.0f, y %.0f, %.0f x %.0f canvas px (%.0f%% of the canvas)",
+                     autoCrop ? "on" : "off", crop.minX, crop.minY, crop.width, crop.height,
+                     crop.width * crop.height / (Double(layout.canvas.width) * Double(layout.canvas.height)) * 100))
+        if analysis.warnings.isEmpty { print("Warnings: none") }
+        for warning in analysis.warnings { print("Warning: " + warning.message(frames: analysis.frames)) }
+
+        var previewReport: PanoramaMergeReport?
+        if let previewPath {
+            let (image, report) = try await merger.previewWithReport(analysis, options: options,
+                                                                     longEdge: previewLongEdge)
+            try PanoramaPreview.writeJPEG(image, to: URL(fileURLWithPath: previewPath))
+            previewReport = report
+            print("Wrote the dialog preview \(previewPath) (\(image.width) x \(image.height))")
+        }
+
+        var sources: [MergeRecipe.Source] = []
+        for frame in analysis.frames {
+            sources.append(MergeRecipe.Source(
+                path: relativePath(of: frame.url, from: output.deletingLastPathComponent()),
+                hash: FileHash.hexString(try FileHash.xxh64(ofFileAt: frame.url)),
+                captureTime: Int64(frame.captureTime.timeIntervalSince1970)))
+        }
+        // Printed from the progress callback, which the merge may call from
+        // any thread: one line per stage, so a long merge shows what it is doing.
+        final class StageLine: @unchecked Sendable {
+            private let lock = NSLock()
+            private var last = ""
+            func show(_ progress: PanoramaMergeProgress) {
+                let stage = String(progress.stage.prefix(while: { !$0.isNumber }))
+                let changed: Bool = lock.withLock {
+                    guard stage != last else { return false }
+                    last = stage
+                    return true
+                }
+                if changed { print(String(format: "  %3.0f%%  %@", progress.fraction * 100, progress.stage)) }
+            }
+        }
+        let stageLine = StageLine()
+        let (result, mergeReport) = try await merger.mergeWithReport(
+            analysis, options: options, sources: sources, to: output, prepareSidecar: { _ in },
+            progress: { stageLine.show($0) })
+        print("Timings:")
+        printReport(analysisReport, title: "analysis")
+        if let previewReport { printReport(previewReport, title: "dialog preview") }
+        printReport(mergeReport, title: "merge")
+        let blend = mergeReport.blend
+        print(String(format: "Blend: %d tiles in %.2f s, seams %.2f s, %d frame uploads, "
+                     + "peak frame cache %.0f MB, peak stitch textures %.0f MB",
+                     blend.tilesCompleted, blend.tileSeconds, blend.prepareSeconds, blend.frameUploads,
+                     Double(blend.peakFrameCacheBytes) / 1e6, Double(blend.peakTextureBytes) / 1e6))
+        print(String(format: "Peak GPU memory: %.2f GB; scratch files %.0f MB",
+                     Double(mergeReport.peakGPUBytes) / 1_073_741_824, Double(mergeReport.scratchBytes) / 1e6))
+        print(String(format: "Brightest value: bound %.4f (%d stops), actually written %.4f; clip level %.4f",
+                     mergeReport.maximumBound, result.normalisation.shift, mergeReport.maximumSeen,
+                     mergeReport.clipLevel))
+        print(String(format: "Wrote %@ (%d x %d, %.1f MB, BaselineExposure %+.2f, clip level %g)",
+                     result.url.path as NSString, size.width, size.height, Double(result.byteCount) / 1_000_000,
+                     result.baselineExposure, result.recipe.clipLevel))
+    } catch let error as PanoramaError {
+        print("Failed: \(error.errorDescription ?? String(describing: error))")
+        exit(1)
+    } catch {
+        print("Failed: \(error)")
+        exit(1)
+    }
+    exit(0)
+}
+
 guard args.count >= 3, args[1] == "render" else {
     print("""
     Usage:
@@ -481,6 +637,9 @@ guard args.count >= 3, args[1] == "render" else {
                            [--deghost none|low|medium|high]
       latent-cli pano-layout <raw> <raw> [...] [--projection automatic|perspective|cylindrical|spherical]
                              [--preview out.jpg]
+      latent-cli merge-pano <out.dng> <raw> <raw> [...] [--no-auto-crop]
+                            [--projection automatic|perspective|cylindrical|spherical]
+                            [--preview out.jpg] [--long-edge N]
 
     Options:
       --out <path.png>       write the result as a PNG

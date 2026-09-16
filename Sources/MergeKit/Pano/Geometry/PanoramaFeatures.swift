@@ -139,8 +139,10 @@ enum PanoramaFeatures {
         for cy in 0..<gridCells {
             for cx in 0..<gridCells {
                 var candidates: [(Float, Int, Int)] = []
-                for y in (cy * cellH)..<min(h, (cy + 1) * cellH) {
-                    for x in (cx * cellW)..<min(w, (cx + 1) * cellW) {
+                // A cell can start past the edge when the grid is finer than
+                // the image (a small photo's 1/8 copy), so both ends are clamped.
+                for y in min(cy * cellH, h)..<min(h, (cy + 1) * cellH) {
+                    for x in min(cx * cellW, w)..<min(w, (cx + 1) * cellW) {
                         let i = y * w + x
                         let v = response[i]
                         guard v > threshold, clear[i], x > 1, y > 1, x < w - 2, y < h - 2 else { continue }
