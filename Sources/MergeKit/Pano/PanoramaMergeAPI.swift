@@ -15,10 +15,42 @@ public struct PanoramaMergeOptions: Sendable, Equatable, Codable {
     public var autoCrop: Bool
     /// Apply Latent's Auto adjust to the result, as the HDR merge's option does.
     public var autoSettings: Bool
+    /// What the result records about itself, when that isn't what the
+    /// stitch alone would say. Nil for an ordinary panorama; set by the HDR
+    /// Panorama merge (Phase 9), which hands the stitcher intermediate HDRs
+    /// it made itself and must record the photographer's own photos.
+    /// It belongs to one merge, not to the user's settings, so it is not
+    /// encoded with them.
+    public var recipeOverride: RecipeOverride?
 
-    public init(projection: PanoramaProjection = .automatic, autoCrop: Bool = true, autoSettings: Bool = false) {
-        self.projection = projection; self.autoCrop = autoCrop; self.autoSettings = autoSettings
+    /// The recipe an HDR panorama writes in place of the stitch's own.
+    public struct RecipeOverride: Sendable, Equatable {
+        /// `.hdrPanorama`, in practice.
+        public var kind: MergeRecipe.Kind
+        /// Replaces the sources the merge was given (the intermediate
+        /// HDRs): every photo the user selected, in the HDR panorama
+        /// analysis's order.
+        public var sources: [MergeRecipe.Source]
+        /// Index into `sources` of the photo the result follows.
+        public var reference: Int
+        /// Added to the options the stitch records: the HDR stage's
+        /// settings and how the positions were found.
+        public var options: [String: JSONValue]
+
+        public init(kind: MergeRecipe.Kind, sources: [MergeRecipe.Source], reference: Int,
+                    options: [String: JSONValue] = [:]) {
+            self.kind = kind; self.sources = sources; self.reference = reference; self.options = options
+        }
     }
+
+    public init(projection: PanoramaProjection = .automatic, autoCrop: Bool = true, autoSettings: Bool = false,
+                recipeOverride: RecipeOverride? = nil) {
+        self.projection = projection; self.autoCrop = autoCrop; self.autoSettings = autoSettings
+        self.recipeOverride = recipeOverride
+    }
+
+    /// `recipeOverride` is left out on purpose: see its note.
+    private enum CodingKeys: String, CodingKey { case projection, autoCrop, autoSettings }
 }
 
 /// One photo, as the analysis understood it.

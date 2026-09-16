@@ -82,3 +82,57 @@ struct PanoramaMergePreferences {
         PanoramaMergeOptions(projection: projection, autoCrop: autoCrop, autoSettings: autoSettings)
     }
 }
+
+/// The HDR Panorama dialog's options, remembered between merges
+/// (experimental, Phase 9). It has both parents' settings, kept under keys
+/// of its own: someone who merges HDRs one way and panoramas another
+/// shouldn't have an HDR panorama change either.
+///
+/// Agreeing to a smaller panorama is never remembered, for the reason
+/// `PanoramaMergePreferences` gives.
+struct HDRPanoramaMergePreferences {
+    let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    static let autoAlignKey = "PhotoMerge.HDRPanorama.autoAlign"
+    static let deghostKey = "PhotoMerge.HDRPanorama.deghost"
+    static let projectionKey = "PhotoMerge.HDRPanorama.projection"
+    static let autoCropKey = "PhotoMerge.HDRPanorama.autoCrop"
+    static let autoSettingsKey = "PhotoMerge.HDRPanorama.autoSettings"
+
+    /// On unless it was turned off: the brackets of a sweep are handheld
+    /// more often than not.
+    var autoAlign: Bool {
+        get { defaults.object(forKey: Self.autoAlignKey) as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: Self.autoAlignKey) }
+    }
+
+    var deghost: DeghostAmount {
+        get { defaults.string(forKey: Self.deghostKey).flatMap(DeghostAmount.init(rawValue:)) ?? DeghostAmount.none }
+        nonmutating set { defaults.set(newValue.rawValue, forKey: Self.deghostKey) }
+    }
+
+    var projection: PanoramaProjection {
+        get { defaults.string(forKey: Self.projectionKey).flatMap(PanoramaProjection.init(rawValue:)) ?? .automatic }
+        nonmutating set { defaults.set(newValue.rawValue, forKey: Self.projectionKey) }
+    }
+
+    var autoCrop: Bool {
+        get { defaults.object(forKey: Self.autoCropKey) as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: Self.autoCropKey) }
+    }
+
+    var autoSettings: Bool {
+        get { defaults.object(forKey: Self.autoSettingsKey) as? Bool ?? false }
+        nonmutating set { defaults.set(newValue, forKey: Self.autoSettingsKey) }
+    }
+
+    var options: HDRPanoramaOptions {
+        HDRPanoramaOptions(hdr: HDRMergeOptions(deghost: deghost, autoAlign: autoAlign),
+                           panorama: PanoramaMergeOptions(projection: projection, autoCrop: autoCrop,
+                                                          autoSettings: autoSettings))
+    }
+}

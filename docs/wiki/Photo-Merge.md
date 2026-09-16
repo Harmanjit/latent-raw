@@ -1,11 +1,10 @@
 # Photo Merge
 
-**Photo › Photo Merge** combines two or more photos into one new photo file. It does two kinds of merge:
+**Photo › Photo Merge** combines two or more photos into one new photo file. It does three kinds of merge:
 
 - **HDR** (**⌃H**): several shots of the same scene at different exposures become one photo with the shadows of the bright shots and the highlights of the dark ones.
 - **Panorama** (**⌃M**): overlapping shots taken while turning the camera become one wide photo.
-
-HDR Panorama — brackets stitched into a panorama — is coming.
+- **HDR Panorama** (**⌃⇧M**, **experimental**): a bracket at each position of a sweep — every bracket merged to HDR, then the results stitched.
 
 ## What HDR merge does
 
@@ -182,13 +181,62 @@ Agreeing is asked for every time, and again whenever the size changes (after swi
 
 **What made it.** The panorama's sidecar and the DNG record which photos were stitched (by path and fingerprint) and how. That is a record only: Latent can't yet re-run a merge from it.
 
+## HDR Panorama (experimental)
+
+**Photo › Photo Merge › HDR Panorama… (Experimental)**, **⌃⇧M**.
+
+Shoot a bracket at each position of a sweep — say −2, 0 and +2 EV, then turn the camera and do it again — select the lot, and Latent merges each position to HDR and stitches those results into one panorama.
+
+> **Experimental, and this is what that means.** Nobody has shot a real HDR panorama for Latent to be tested against, and no freely licensed set exists, so every test is either synthetic or built by cutting overlapping windows out of a real bracket. The pieces it is made of — the HDR merge and the panorama stitch — are each well tested on real photos, and the two stages together are tested end to end on those stand-ins. What has **not** been checked is a real bracketed sweep: light that changes while you turn, parallax between near and far things across several positions, and brackets whose frames drift from position to position. Look at the result before you trust it, and tell Harman how it went.
+
+### How the positions are worked out
+
+Latent has to decide which photos belong together before it can merge anything. It uses three kinds of evidence, in this order:
+
+1. **The repeating exposures.** A bracketed sweep is the same bracket over and over: −2, 0, +2, −2, 0, +2… The shortest run of different exposures that repeats through the whole selection is the bracket. This is the strongest evidence there is.
+2. **The gaps between shots.** A bracket is shot in a burst; turning to the next position takes seconds. When the gaps fall into two clear groups, the long ones are the moves. (Cameras stamp whole seconds, so a burst's gaps are often all zero — that is still a clear split.)
+3. **How much consecutive photos overlap.** Asked for only when the first two say nothing, because it means reading every photo: a bracket's frames show nearly the same view, a new position is a big jump.
+
+If the exposures and the timing disagree, the exposures win, and the dialog says so.
+
+**What it copes with:**
+
+- Any number of exposures at any number of positions, as long as each position has the same ones.
+- **Uneven brackets:** a position with more or fewer exposures than the rest, when the timing makes the positions clear. The dialog warns; that position simply has less range.
+- **A stray single photo** with no bracket around it: it becomes a position of its own and goes into the panorama as it is, since there is nothing to merge it with.
+- **Photos you merged earlier.** An HDR you made before (a `-HDR.dng`) counts as a finished position, and can sit beside brackets that are merged now, as in Lightroom. Auto Align and Deghost don't apply to it: it was merged with whatever settings it was merged with.
+
+If none of the evidence can tell, Latent refuses rather than guessing: *"These don't look like brackets: each position needs the same exposures."* Shoot the same bracket at every position, or merge each bracket with **HDR…** first and then stitch the results with **Panorama…**.
+
+### The dialog
+
+It lists the positions it found, the photos at each one and the exposures they were shot at, and where each position points. Above the list it says what it decided — "3 exposures at each of 5 positions, from the repeating exposures and the gaps between shots" — so you can see at a glance whether it read your sweep correctly.
+
+The options are both parents' put together:
+
+- **Auto Align** and **Deghost** apply to every position's own merge (see [Auto Align](#auto-align) and [Deghost](#deghost) above).
+- **Projection**, **Auto Crop** and **Auto Settings** apply to the stitch (see [Panorama](#panorama)).
+- If the result would be bigger than this Mac can edit, the same agreement appears as for a panorama: Latent says what it will make instead and waits for you to agree. It never refuses a panorama for its size.
+
+There is **no preview**. The HDR dialog previews reduced frames and the Panorama dialog previews the real stitch of reduced frames; an HDR panorama's preview would have to merge every position first, which is most of the work. Rather than show a picture that isn't what you will get, the dialog shows what it found and what it will do.
+
+### While it runs
+
+The merge happens in the background, like the other two, and the library panel shows both stages: "Merging bracket 2 of 5", then the stitch. It takes one GPU job slot, so exports and other merges wait.
+
+**It needs room on disk.** Each position is merged to a temporary DNG first, and those are handed to the stitcher — the same path an HDR you merged earlier takes, so nothing new happens to your pixels. Five positions of 24 MP photos need about 725 MB of temporary space, which the dialog tells you about beforehand and which is given back when the merge ends, however it ends.
+
+### The result
+
+**`<first photo>-HDRPano.dng`**, beside the first photo, and it is a panorama in every other way: lens corrections baked in, Auto Crop as an undoable first edit, the full merged range of light in the pixels. Its recipe records **every photo you selected** — not the temporary merges — which positions they fell into, and both stages' settings.
+
 ## Current limits
 
 - **Auto Align moves whole shots.** Near and far things that shifted against each other in a handheld bracket (parallax) still show slightly doubled edges, and a shot it can't align is merged as it is or left out.
 - **Deghost compares brightness only,** so movement against an equally bright background can slip through, and deghosted parts come from one shot, with that shot's noise.
 - **Panoramas are one row.** A single sweep left to right (or right to left). Several rows stacked into a grid, and full 360° panoramas that join back to their start, aren't there yet.
 - **Parallax.** Neither merge can fix near things shifting against far things when the camera itself moved. Turn the camera on the spot.
-- **HDR Panorama is coming,** and will be marked experimental when it arrives.
+- **HDR Panorama is experimental** and has never been checked on a real bracketed sweep (see above). It also inherits every limit of both its parents, and adds one: the positions must be told apart from the exposures, the timing or the overlap, so a sweep shot with a different bracket at each position can't be read.
 - **Raw files only,** from Bayer sensors. X-Trans, monochrome and already-merged files can't be merged, and all photos must come from the same camera at the same size and orientation.
 - **The preview is small,** about 1,000 pixels across; to judge fine detail, merge and look at the result.
 - **On Macs with 8 GB of memory,** a merge takes at most 5 photos.

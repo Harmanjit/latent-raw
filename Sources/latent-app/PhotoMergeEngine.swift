@@ -19,6 +19,8 @@ enum PhotoMergeEngine {
     static var debugHDR: (any HDRMerging)?
     /// The same for the Panorama dialog's step.
     static var debugPanorama: (any PanoramaMerging)?
+    /// The same for the HDR Panorama dialog's step.
+    static var debugHDRPanorama: (any HDRPanoramaMerging)?
     #endif
 
     /// The HDR engine, using `gpu` for the merge.
@@ -39,5 +41,14 @@ enum PhotoMergeEngine {
         if let debugPanorama { return debugPanorama }
         #endif
         return PanoramaMerger(gpu: gpu)
+    }
+
+    /// The HDR panorama engine (experimental): the HDR engine for each
+    /// position and the panorama engine for the stitch, both on `gpu`.
+    static func hdrPanorama(gpu: GPUContext) -> any HDRPanoramaMerging {
+        #if DEBUG
+        if let debugHDRPanorama { return debugHDRPanorama }
+        #endif
+        return HDRPanoramaMerger(gpu: gpu)
     }
 }

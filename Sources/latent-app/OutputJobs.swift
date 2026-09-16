@@ -28,6 +28,8 @@ final class OutputJobs {
         /// Photo › Photo Merge › Panorama (PhotoMergeQueue). Its own kind
         /// only so the quit alert can name it; one merge runs at a time.
         case panoramaMerge
+        /// An HDR panorama: brackets merged, then stitched (experimental).
+        case hdrPanoramaMerge
     }
 
     struct Job: Identifiable {
@@ -54,6 +56,7 @@ final class OutputJobs {
         case .contactSheet: "Making the contact sheet \(name)"
         case .photoMerge: "Merging photos with \(name)"
         case .panoramaMerge: "Stitching a panorama from \(name)"
+        case .hdrPanoramaMerge: "Merging an HDR panorama from \(name)"
         }
         let job = Job(kind: kind, name: name, cancel: cancel, activity: ExportActivity(reason: reason))
         running.append(job)
@@ -85,10 +88,12 @@ final class OutputJobs {
     static func quitAlert(for jobs: [Job]) -> (message: String, information: String, button: String) {
         let prints = jobs.filter { $0.kind == .print }
         let sheets = jobs.filter { $0.kind == .contactSheet }
-        let merges = jobs.filter { $0.kind == .photoMerge || $0.kind == .panoramaMerge }
+        let merges = jobs.filter { $0.kind == .photoMerge || $0.kind == .panoramaMerge
+            || $0.kind == .hdrPanoramaMerge }
         // One merge runs at a time, so "merge" below is one kind's word
         // unless a future queue runs two.
-        let mergeWord = merges.allSatisfy { $0.kind == .panoramaMerge } ? "panorama merge" : "HDR merge"
+        let mergeWord = merges.allSatisfy { $0.kind == .panoramaMerge } ? "panorama merge"
+            : merges.allSatisfy { $0.kind == .hdrPanoramaMerge } ? "HDR panorama merge" : "HDR merge"
         // What is under way, in the order the message names it.
         var underWay: [String] = []
         if !prints.isEmpty {

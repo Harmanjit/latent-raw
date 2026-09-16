@@ -64,6 +64,9 @@ struct ContentView: View {
     @State private var hdrMergeSheet: HDRMergeSheetModel?
     /// The Panorama dialog's state, while it is up (Photo › Photo Merge › Panorama…).
     @State private var panoramaMergeSheet: PanoramaMergeSheetModel?
+    /// The HDR Panorama dialog's state, while it is up (Photo › Photo Merge ›
+    /// HDR Panorama…, experimental).
+    @State private var hdrPanoramaMergeSheet: HDRPanoramaMergeSheetModel?
     /// Compare's left pane ("Select"): its own render, created the first
     /// time Compare opens. The right pane ("Candidate") is the main model,
     /// which follows the selection as arrow keys move it.
@@ -218,6 +221,12 @@ struct ContentView: View {
             PanoramaMergeSheet(model: sheet, thumbnail: { await library.loadThumbnail(for: $0) },
                                onMerge: { startPanoramaMerge($0, options: $1, from: sheet) },
                                canMerge: !exportQueue.isGPUBusy)
+                .motionFollowsAccessibility()
+        }
+        .sheet(item: $hdrPanoramaMergeSheet) { sheet in
+            HDRPanoramaMergeSheet(model: sheet, thumbnail: { await library.loadThumbnail(for: $0) },
+                                  onMerge: { startHDRPanoramaMerge($0, options: $1, from: sheet) },
+                                  canMerge: !exportQueue.isGPUBusy)
                 .motionFollowsAccessibility()
         }
         .sheet(item: $renaming) { record in
@@ -860,6 +869,43 @@ struct ContentView: View {
         }
     }
 
+    /// Opens the HDR Panorama dialog (experimental) on the whole selection,
+    /// which the engine starts sorting into positions at once.
+    private func beginHDRPanoramaMerge() {
+        guard let gpu = model.gpu else { return }
+        let records = library.selectedImages
+        let urls = records.compactMap { library.fileURL(for: $0) }
+        guard records.count >= 2, urls.count == records.count else { return }
+        let catalog = library.catalog
+        let sheet = HDRPanoramaMergeSheetModel(records: records, urls: urls,
+                                               engine: PhotoMergeEngine.hdrPanorama(gpu: gpu)) { reference in
+            // The name as it would be now; the job plans it again on Merge.
+            guard let catalog,
+                  let relPath = try? await catalog.planMergeResult(forReference: reference.relPath,
+                                                                   suffix: PhotoMergeKind.hdrPanorama.suffix)
+            else { return nil }
+            return (relPath as NSString).lastPathComponent
+        }
+        hdrPanoramaMergeSheet = sheet
+        sheet.start()
+    }
+
+    /// Merge in the HDR Panorama dialog: the job merges each bracket and
+    /// stitches the results in the background from here.
+    private func startHDRPanoramaMerge(_ analysis: HDRPanoramaAnalysis, options: HDRPanoramaOptions,
+                                       from sheet: HDRPanoramaMergeSheetModel) {
+        let records = sheet.recordsInPhotoOrder.compactMap { $0 }
+        guard records.count == analysis.photos.count,
+              photoMerge.startHDRPanorama(analysis, options: options, records: records, library: library,
+                                          engine: sheet.engine,
+                                          firstEdit: panoramaFirstEdit(analysis.panorama,
+                                                                       options: options.panorama)) else {
+            library.lastError = "The HDR panorama couldn’t start: an export or another merge is using the graphics "
+                + "processor, or the photos are no longer in the open folder."
+            return
+        }
+    }
+
     /// The panorama's first edit: Auto Crop's rectangle and Auto Settings'
     /// adjustments together, worked out away from the main thread.
     private func panoramaFirstEdit(_ analysis: PanoramaMergeAnalysis,
@@ -1019,6 +1065,8 @@ struct ContentView: View {
             mergeHDRWithoutDialog()
         case .photoMergePanorama:
             beginPanoramaMerge()
+        case .photoMergeHDRPanorama:
+            beginHDRPanoramaMerge()
         case .slideshow:
             SlideshowController.start(model: model, library: library)
         case .editExternally:

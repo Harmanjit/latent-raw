@@ -9,13 +9,29 @@ import PixelEngine
 enum PhotoMergeKind: String, Equatable, Sendable {
     case hdr
     case panorama
+    /// Phase 9, experimental: a bracket at each position, merged and then
+    /// stitched.
+    case hdrPanorama
 
-    /// What the result is called: "DSC_0107-HDR.dng", "DSC_0107-Pano.dng".
-    var suffix: String { self == .hdr ? "HDR" : "Pano" }
+    /// What the result is called: "DSC_0107-HDR.dng", "DSC_0107-Pano.dng",
+    /// "DSC_0107-HDRPano.dng".
+    var suffix: String {
+        switch self {
+        case .hdr: "HDR"
+        case .panorama: "Pano"
+        case .hdrPanorama: "HDRPano"
+        }
+    }
 
     /// The panel's label and the first words of the status bar's messages:
     /// "HDR merge failed: …", "Panorama merge cancelled".
-    var title: String { self == .hdr ? "HDR merge" : "Panorama merge" }
+    var title: String {
+        switch self {
+        case .hdr: "HDR merge"
+        case .panorama: "Panorama merge"
+        case .hdrPanorama: "HDR panorama merge"
+        }
+    }
 
     /// What the status bar calls the result's first edit when it fails.
     var firstEditName: String { self == .hdr ? "Auto Settings" : "Auto Crop and Auto Settings" }
@@ -40,6 +56,10 @@ struct MergeProgress: Equatable, Sendable {
     }
 
     init(_ report: PanoramaMergeProgress) {
+        self.init(fraction: report.fraction, stage: report.stage)
+    }
+
+    init(_ report: HDRPanoramaProgress) {
         self.init(fraction: report.fraction, stage: report.stage)
     }
 }
@@ -206,6 +226,41 @@ final class PhotoMergeQueue: ObservableObject {
         return true
     }
 
+    // MARK: - HDR Panorama (experimental)
+
+    /// Starts merging `analysis`'s brackets and stitching them, into the
+    /// open folder of `library`. `records` are the files of
+    /// `analysis.photos`, one each, in that order. Returns false, doing
+    /// nothing, when a merge or an export already holds the GPU, the folder
+    /// has gone, or no position was joined to the rest.
+    ///
+    /// - Parameter firstEdit: Auto Crop's crop rectangle and Auto Settings'
+    ///   adjustments as one edit, as a panorama's; nil to leave the result
+    ///   unedited.
+    @discardableResult
+    func startHDRPanorama(_ analysis: HDRPanoramaAnalysis, options: HDRPanoramaOptions,
+                          records: [ImageRecord], library: Library, engine: any HDRPanoramaMerging,
+                          firstEdit: FirstEdit? = nil) -> Bool {
+        guard !isRunning, let catalog = library.catalog, records.count == analysis.photos.count,
+              let referenceIndex = analysis.referencePhotoIndex, records.indices.contains(referenceIndex),
+              gpuSlot.claimSlot() else { return false }
+        let reference = records[referenceIndex]
+        name = Self.firstCandidateName(forReference: reference, kind: .hdrPanorama)
+        begin(.hdrPanorama, jobName: reference.fileName, library: library, catalog: catalog) { [weak self] generation in
+            guard let self else { return .cancelled }
+            let job = MergeJob(
+                kind: .hdrPanorama, reference: reference, records: records, library: library, catalog: catalog,
+                generation: generation, firstEdit: firstEdit, firstEditStage: "Finishing the panorama",
+                merge: { destination, sources, prepareSidecar, progress in
+                    _ = try await engine.merge(analysis, options: options, sources: sources, to: destination,
+                                               prepareSidecar: prepareSidecar,
+                                               progress: { progress(MergeProgress($0)) })
+                })
+            return await self.commit(job)
+        }
+        return true
+    }
+
     /// The photo a panorama is named after: the first one, in capture
     /// order, that the analysis joined to the rest. Nil when none was.
     static func panoramaReferenceIndex(_ analysis: PanoramaMergeAnalysis) -> Int? {
@@ -231,7 +286,12 @@ final class PhotoMergeQueue: ObservableObject {
         isRunning = true
         progress = nil
         summary = ""
-        let job = jobs.begin(kind == .hdr ? .photoMerge : .panoramaMerge, name: jobName,
+        let outputKind: OutputJobs.Kind = switch kind {
+        case .hdr: .photoMerge
+        case .panorama: .panoramaMerge
+        case .hdrPanorama: .hdrPanoramaMerge
+        }
+        let job = jobs.begin(outputKind, name: jobName,
                              cancel: { [weak self] in self?.cancel() })
         task = Task {
             // Renders let go with an export sheet may still be stopping.

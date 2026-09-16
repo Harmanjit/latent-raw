@@ -624,6 +624,134 @@ if args.count >= 2, args[1] == "merge-pano" {
     exit(0)
 }
 
+// `merge-hdrpano` subcommand (experimental, docs/PhotoMerge.md phase 9):
+// sort the photos into positions, merge each position's bracket to HDR and
+// stitch the results, printing what the dialog would show.
+if args.count >= 2, args[1] == "merge-hdrpano" {
+    var positional: [String] = []
+    var projection = PanoramaProjection.automatic
+    var autoCrop = true
+    var autoAlign = true
+    var deghost = DeghostAmount.none
+    var index = 2
+    while index < args.count {
+        if args[index] == "--projection", index + 1 < args.count {
+            guard let chosen = PanoramaProjection(rawValue: args[index + 1]) else {
+                print("--projection takes automatic, perspective, cylindrical or spherical")
+                exit(1)
+            }
+            projection = chosen
+            index += 2
+        } else if args[index] == "--no-auto-crop" {
+            autoCrop = false
+            index += 1
+        } else if args[index] == "--no-align" {
+            autoAlign = false
+            index += 1
+        } else if args[index] == "--deghost", index + 1 < args.count {
+            guard let amount = DeghostAmount(rawValue: args[index + 1]) else {
+                print("--deghost takes none, low, medium or high")
+                exit(1)
+            }
+            deghost = amount
+            index += 2
+        } else {
+            positional.append(args[index])
+            index += 1
+        }
+    }
+    guard positional.count >= 5 else {
+        print("Usage: latent-cli merge-hdrpano <out.dng> <raw> <raw> <raw> <raw> [...] "
+              + "[--projection automatic|perspective|cylindrical|spherical] [--no-auto-crop] "
+              + "[--no-align] [--deghost none|low|medium|high]")
+        exit(1)
+    }
+    let output = URL(fileURLWithPath: positional[0])
+    let inputs = positional.dropFirst().map { URL(fileURLWithPath: $0) }
+
+    /// `url` relative to `folder`, as a merge recipe records its sources.
+    func relativePath(of url: URL, from folder: URL) -> String {
+        let target = url.standardizedFileURL.pathComponents, base = folder.standardizedFileURL.pathComponents
+        var shared = 0
+        while shared < min(target.count, base.count), target[shared] == base[shared] { shared += 1 }
+        return (Array(repeating: "..", count: base.count - shared) + target[shared...]).joined(separator: "/")
+    }
+
+    print("HDR Panorama is experimental: it has never been checked on a real HDR panorama.")
+    do {
+        let gpu = try GPUContext()
+        let merger = HDRPanoramaMerger(gpu: gpu)
+        let options = HDRPanoramaOptions(hdr: HDRMergeOptions(deghost: deghost, autoAlign: autoAlign),
+                                         panorama: PanoramaMergeOptions(projection: projection, autoCrop: autoCrop))
+        let started = Date()
+        let analysis = try await merger.analyse(inputs, options: options)
+        print(String(format: "Grouped %d photos in %.2f s: %@ (%@)", analysis.photos.count,
+                     Date().timeIntervalSince(started), analysis.grouping.summaryText,
+                     analysis.grouping.evidence.text))
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        for (number, position) in analysis.grouping.positions.enumerated() {
+            let frames = position.frames.map { analysis.photos[$0] }
+            let reference = analysis.photos[position.reference].url.lastPathComponent
+            let angle = analysis.panorama.frames
+                .first { $0.url.lastPathComponent == reference }?.yawPitchRoll
+                .map { String(format: "yaw %+.2f deg", $0.x) } ?? "left out"
+            print(String(format: "  %2d  %-28@ %@  %@", number + 1,
+                         frames.map { $0.url.lastPathComponent }.joined(separator: " ") as NSString,
+                         formatter.string(from: frames[0].captureTime), angle))
+            print("      " + frames.map(\.exposureText).joined(separator: " | ")
+                  + (position.needsMerging ? "" : "  (not merged: one photo)"))
+        }
+        let size = analysis.panorama.outputSize
+        print(String(format: "Output: %@, scale %.3f, decode span %d, DNG about %.0f MB, "
+                     + "merged brackets about %.0f MB of scratch",
+                     size.sizeMessage, size.scale, size.decodeSpan,
+                     Double(analysis.estimatedOutputBytes) / 1e6, Double(analysis.estimatedScratchBytes) / 1e6))
+        if analysis.warnings.isEmpty { print("Warnings: none") }
+        for warning in analysis.warnings { print("Warning: " + warning.message(analysis)) }
+
+        var sources: [MergeRecipe.Source] = []
+        for photo in analysis.photos {
+            sources.append(MergeRecipe.Source(
+                path: relativePath(of: photo.url, from: output.deletingLastPathComponent()),
+                hash: FileHash.hexString(try FileHash.xxh64(ofFileAt: photo.url)),
+                captureTime: Int64(photo.captureTime.timeIntervalSince1970)))
+        }
+        // One line per stage, as merge-pano prints it.
+        final class HDRPanoStageLine: @unchecked Sendable {
+            private let lock = NSLock()
+            private var last = ""
+            func show(_ progress: HDRPanoramaProgress) {
+                let stage = String(progress.stage.prefix(while: { !$0.isNumber }))
+                let changed: Bool = lock.withLock {
+                    guard stage != last else { return false }
+                    last = stage
+                    return true
+                }
+                if changed { print(String(format: "  %3.0f%%  %@", progress.fraction * 100, progress.stage)) }
+            }
+        }
+        let stageLine = HDRPanoStageLine()
+        let mergeStarted = Date()
+        let result = try await merger.merge(analysis, options: options, sources: sources, to: output,
+                                            prepareSidecar: { _ in }, progress: { stageLine.show($0) })
+        print(String(format: "Merged in %.2f s", Date().timeIntervalSince(mergeStarted)))
+        print(String(format: "Wrote %@ (%.1f MB, BaselineExposure %+.2f, clip level %g, %d sources)",
+                     result.url.path as NSString, Double(result.byteCount) / 1_000_000,
+                     result.baselineExposure, result.recipe.clipLevel, result.recipe.sources.count))
+    } catch let error as HDRPanoramaError {
+        print("Failed: \(error.errorDescription ?? String(describing: error))")
+        exit(1)
+    } catch let error as PanoramaError {
+        print("Failed: \(error.errorDescription ?? String(describing: error))")
+        exit(1)
+    } catch {
+        print("Failed: \(error)")
+        exit(1)
+    }
+    exit(0)
+}
+
 guard args.count >= 3, args[1] == "render" else {
     print("""
     Usage:
@@ -640,6 +768,10 @@ guard args.count >= 3, args[1] == "render" else {
       latent-cli merge-pano <out.dng> <raw> <raw> [...] [--no-auto-crop]
                             [--projection automatic|perspective|cylindrical|spherical]
                             [--preview out.jpg] [--long-edge N]
+      latent-cli merge-hdrpano <out.dng> <raw> <raw> <raw> <raw> [...]
+                            [--projection automatic|perspective|cylindrical|spherical]
+                            [--no-auto-crop] [--no-align]
+                            [--deghost none|low|medium|high]   (experimental)
 
     Options:
       --out <path.png>       write the result as a PNG

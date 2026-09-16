@@ -75,6 +75,9 @@ enum KeyCommand: Equatable {
     /// Photo › Photo Merge › Panorama…: the selected sweep stitched into
     /// one DNG beside the first photo.
     case photoMergePanorama
+    /// Photo › Photo Merge › HDR Panorama… (experimental): a bracket at
+    /// each position, merged and then stitched.
+    case photoMergeHDRPanorama
     case slideshow, editExternally
     case undo, redo, copySettings, pasteSettings
     case rotate(Int), zoomIn, zoomOut, zoomToFit, zoomToActualSize
