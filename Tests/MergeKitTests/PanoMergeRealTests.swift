@@ -12,13 +12,56 @@ import XCTest
 final class PanoMergeRealTests: XCTestCase {
     private func photos() throws -> [URL] {
         try XCTSkipIf(ProcessInfo.processInfo.environment["LATENT_CI_ASSETS_ONLY"] == "1", "CI assets only")
-        let directory = AlignTestSupport.assets.appendingPathComponent("pano")
+        let directory = TestAssets.url("pano")
         guard FileManager.default.fileExists(atPath: directory.path) else {
             throw XCTSkip("TestAssets/pano is missing")
         }
         return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension.lowercased() == "nef" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// Changing the projection in the dialog must not read the 17 raws and
+    /// solve the geometry all over again: the projection decides the canvas
+    /// and the crop, and nothing before them. The decoded photos and the
+    /// solved cameras are kept, so the second analysis is a canvas and a
+    /// coverage pass.
+    func testAnotherProjectionReusesTheDecodedPhotosAndTheSolvedCameras() async throws {
+        let urls = try photos()
+        let merger = PanoramaMerger(gpu: try HDRTestSupport.gpu())
+        let (first, firstReport) = try await merger.analyseWithReport(
+            urls, options: PanoramaMergeOptions(projection: .automatic))
+        let (second, secondReport) = try await merger.analyseWithReport(
+            urls, options: PanoramaMergeOptions(projection: .spherical))
+
+        // The photos are opened and decoded once, and the cameras solved once.
+        let slow = ["Open photos", "Decode and reduce", "Solve cameras"]
+        XCTAssertTrue(slow.allSatisfy { name in firstReport.stages.contains { $0.name == name } },
+                      "\(firstReport.stages.map(\.name))")
+        XCTAssertFalse(secondReport.stages.contains { slow.contains($0.name) },
+                       "the second analysis must reuse them: \(secondReport.stages.map(\.name))")
+        for (which, stages) in [("first", firstReport.stages), ("again", secondReport.stages)] {
+            for stage in stages {
+                print(String(format: "pano-projection | %@ %@ %.3f s", which, stage.name, stage.seconds))
+            }
+        }
+        print(String(format: "pano-projection | first analysis %.2f s, another projection %.2f s (%.0fx faster)",
+                     firstReport.totalSeconds, secondReport.totalSeconds,
+                     firstReport.totalSeconds / max(secondReport.totalSeconds, 1e-9)))
+        XCTAssertLessThan(secondReport.totalSeconds, firstReport.totalSeconds / 4)
+
+        // And it really is the other projection, over the same cameras.
+        XCTAssertEqual(first.layout.canvas.projection, .cylindrical)
+        XCTAssertEqual(second.layout.canvas.projection, .spherical)
+        XCTAssertEqual(second.layout.cameras, first.layout.cameras)
+        XCTAssertEqual(second.frames.map(\.url), first.frames.map(\.url))
+        XCTAssertNotEqual(second.layout.canvas.height, first.layout.canvas.height)
+
+        // Closing the dialog gives the memory back; then it measures again.
+        await merger.releasePreviews()
+        let (_, afterRelease) = try await merger.analyseWithReport(
+            urls, options: PanoramaMergeOptions(projection: .spherical))
+        XCTAssertTrue(afterRelease.stages.contains { $0.name == "Decode and reduce" })
     }
 
     /// About 12 seconds on an M1 Pro: analysis 6 s, merge 6 s, 275 MB written.

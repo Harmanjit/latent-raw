@@ -9,9 +9,10 @@ import MergeKit
 ///
 /// **Options.** Projection, Auto Crop and Auto Settings start as they were
 /// last left (`PanoramaMergePreferences`). Projection decides the shape of
-/// the whole canvas, so changing it measures the photos again; Auto Crop
-/// only changes the crop the result opens with, and Auto Settings only its
-/// first edit.
+/// the whole canvas, so changing it works the layout out again — the engine
+/// keeps the photos it decoded and the cameras it solved, so that costs a
+/// canvas and a crop, not another read of every raw. Auto Crop only changes
+/// the crop the result opens with, and Auto Settings only its first edit.
 ///
 /// **Agreeing to a smaller panorama.** A sweep can easily want more pixels
 /// than this Mac can edit. Latent never refuses it (Harman's rule): the
@@ -147,10 +148,16 @@ final class PanoramaMergeSheetModel: ObservableObject, Identifiable {
 
     /// Starts measuring the photos; `phase` follows. Once only (changing
     /// the projection starts again by itself).
-    func start() {
+    ///
+    /// - Parameter after: an analysis being thrown away, waited for before
+    ///   this one starts. Two analyses would share one GPU and one set of
+    ///   measurements in the engine, and only compete.
+    func start(after previous: Task<Void, Never>? = nil) {
         guard analysis == nil else { return }
         let engine = engine, urls = urls, options = options
         analysis = Task { [weak self] in
+            await previous?.value
+            guard !Task.isCancelled else { return }
             do {
                 let result = try await engine.analyse(urls, options: options)
                 guard let self, !Task.isCancelled else { return }
@@ -193,7 +200,10 @@ final class PanoramaMergeSheetModel: ObservableObject, Identifiable {
         previewTask?.cancel()
         analysis = nil
         phase = .analysing
-        start()
+        // The one being thrown away is waited for first, as `schedulePreview`
+        // waits for the preview it replaces: the engine stops it at its next
+        // pair or tile, and two would only fight over the same GPU.
+        start(after: running)
     }
 
     var analysisResult: PanoramaMergeAnalysis? {
@@ -294,12 +304,49 @@ final class PanoramaMergeSheetModel: ObservableObject, Identifiable {
     /// The analysing line: "Measuring 17 photos…".
     var analysingText: String { "Measuring \(records.count) photos…" }
 
-    /// "12,482 × 3,276 (41 MP)": the size the merge will really be.
+    /// "12,224 × 2,096 (26 MP)": the size of the picture that opens, which
+    /// is the stitched canvas with Auto Crop off and the cropped rectangle
+    /// with it on (it is on by default). The preview above the row shows
+    /// the same picture.
     var sizeText: String? {
-        analysisResult.map { Self.pixelSize($0.outputSize.width, $0.outputSize.height) }
+        openedSize.map { Self.pixelSize($0.width, $0.height) }
     }
 
-    /// "About 245.3 MB".
+    /// The size the result opens at, in pixels.
+    var openedSize: (width: Int, height: Int)? {
+        guard let result = analysisResult else { return nil }
+        guard autoCrop, let cropped = Self.croppedSize(result) else {
+            return (result.outputSize.width, result.outputSize.height)
+        }
+        return cropped
+    }
+
+    /// Auto Crop's rectangle in the output's own pixels; nil when it would
+    /// crop nothing (the solver found no rectangle, or it is the whole
+    /// canvas). Worked out as the merge works it out: the layout's
+    /// rectangle is in canvas pixels at scale 1, so it scales with the
+    /// output.
+    static func croppedSize(_ result: PanoramaMergeAnalysis) -> (width: Int, height: Int)? {
+        let rect = result.layout.autoCropRect, size = result.outputSize
+        guard rect.width >= 1, rect.height >= 1, size.width > 0, size.height > 0 else { return nil }
+        let width = max(1, min(size.width, Int((rect.width * size.scale).rounded(.down))))
+        let height = max(1, min(size.height, Int((rect.height * size.scale).rounded(.down))))
+        guard width < size.width || height < size.height else { return nil }
+        return (width, height)
+    }
+
+    /// Said under Size when Auto Crop is on and really crops: the file
+    /// still holds the whole stitch, because Auto Crop is an undoable crop
+    /// edit and nothing is thrown away. Without it Size and File size, which
+    /// is the file's, would look like they disagreed.
+    var wholeCanvasNote: String? {
+        guard autoCrop, let result = analysisResult, Self.croppedSize(result) != nil else { return nil }
+        return "Auto Crop hides the blank edges. The whole "
+            + "\(Self.pixelCount(result.outputSize.width, result.outputSize.height)) stitch stays in the file."
+    }
+
+    /// "About 245.3 MB": the file, which holds the whole stitch whether or
+    /// not Auto Crop is on.
     var estimatedSizeText: String? {
         analysisResult.map { "About " + MetadataFormat.fileSize($0.estimatedOutputBytes) }
     }
@@ -509,8 +556,9 @@ final class PanoramaMergeSheetModel: ObservableObject, Identifiable {
         return items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
     }
 
-    /// The picker's names.
-    static func name(for projection: PanoramaProjection) -> String {
+    /// The picker's names. Nonisolated so the library panel can name a
+    /// stored panorama's projection with the same words the dialog used.
+    nonisolated static func name(for projection: PanoramaProjection) -> String {
         switch projection {
         case .automatic: "Automatic"
         case .perspective: "Perspective"
@@ -735,6 +783,17 @@ struct PanoramaMergeSheet: View {
     private var details: some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
             if let size = model.sizeText { detail("Size", size) }
+            if let note = model.wholeCanvasNote {
+                GridRow {
+                    Color.clear.frame(width: Self.labelWidth, height: 1)
+                        .accessibilityHidden(true)
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Size: \(note)")
+                }
+            }
             if let coverage = model.coverageText { detail("Sweep", coverage) }
             if let estimate = model.estimatedSizeText { detail("File size", estimate) }
             detail("Saved as", model.destinationName ?? "—")
@@ -778,9 +837,9 @@ struct PanoramaMergeSheet: View {
                 .accessibilityLabel("Projection")
                 .accessibilityValue(PanoramaMergeSheetModel.name(for: model.projection))
                 .accessibilityHint("How the photos are flattened onto the panorama. "
-                                   + "Changing it measures the photos again.")
+                                   + "Changing it works out the shape again.")
                 .help("How the directions the camera pointed are flattened into one picture. "
-                      + "Changing it measures the photos again.")
+                      + "Changing it works out the panorama's shape again.")
             }
             GridRow {
                 Color.clear.frame(width: Self.labelWidth, height: 1)

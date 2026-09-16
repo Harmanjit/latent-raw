@@ -200,6 +200,43 @@ final class PanoBlendLifecycleTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: live.directory.path))
     }
 
+    /// macOS hands process ids out again within a day or two, so a crashed
+    /// panorama's 3 GB folder must not be kept for ever just because some
+    /// other process now holds the id it was named after. A folder nothing
+    /// has touched for a day goes whatever its id says — except this
+    /// process's own, which are named after it and are live by definition.
+    func testAScratchFolderWhosePIDWasHandedOnGoesByItsAge() throws {
+        let parent = Support.scratchParent().appendingPathComponent("recycled-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: parent) }
+        // Named after pid 1 (launchd): always running, never this process,
+        // and `kill(1, 0)` answers EPERM, so the folder looks live.
+        let recycled = parent.appendingPathComponent("1-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: recycled, withIntermediateDirectories: true)
+        let old = Date().addingTimeInterval(-PanoramaFrameStore.abandonedAfter - 60)
+        try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: recycled.path)
+
+        // A live store of this process is never touched, however it looks.
+        let live = try PanoramaFrameStore(parent: parent)
+        try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: live.directory.path)
+
+        XCTAssertEqual(PanoramaFrameStore.removeAbandonedScratch(parent: parent), 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recycled.path), "a day old and not ours: abandoned")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: live.directory.path), "ours, so never by age")
+        live.removeScratch()
+    }
+
+    /// A folder whose id is in use and which was written a moment ago is a
+    /// stitch that is still running: left alone.
+    func testARecentScratchFolderOfALiveProcessIsKept() throws {
+        let parent = Support.scratchParent().appendingPathComponent("recent-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let fresh = parent.appendingPathComponent("1-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: fresh, withIntermediateDirectories: true)
+        XCTAssertEqual(PanoramaFrameStore.removeAbandonedScratch(parent: parent,
+                                                                 now: Date().addingTimeInterval(60)), 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path))
+    }
+
     func testMissingFrameIsReported() throws {
         let gpu = try HDRTestSupport.gpu()
         let row = Support.row()

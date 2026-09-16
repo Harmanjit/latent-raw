@@ -27,6 +27,9 @@ struct LibraryPanel: View {
     var exportsOpenImage = true
 
     @State private var keywordText = ""
+    /// The selected photo's merge recipe, when it is one Photo Merge made;
+    /// read from the catalog when the selection settles.
+    @State private var mergeSummary: MergeRecipeSummary?
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -92,6 +95,12 @@ struct LibraryPanel: View {
                 sectionLabel("History & Snapshots")
             }
 
+            // Above the section, not inside it: a job the user started must
+            // always show how far it has got and offer its Cancel, and what
+            // it had to say at the end, whether or not Export is folded away.
+            runningJob
+            mergeNotes
+
             DisclosureGroup(isExpanded: $exportExpanded) {
                 exportSection.padding(.top, 6)
             } label: {
@@ -153,22 +162,14 @@ struct LibraryPanel: View {
             Button("Export open image…") { Self.exportOpenImage(model: model, library: library) }
                 .controlSize(.small)
                 .disabled(!model.hasImage || model.isExporting || !exportsOpenImage)
-            photoMergeProgress
-            if exportQueue.isRunning {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        Text("\(exportQueue.done) of \(exportQueue.total)").font(.caption2)
-                        Spacer()
-                        Button("Cancel") { exportQueue.cancel() }.controlSize(.mini)
-                    }
-                    ProgressView(value: Double(exportQueue.done), total: Double(max(exportQueue.total, 1)))
-                        .controlSize(.small)
-                        .accessibilityLabel("Export progress")
-                        .accessibilityValue("\(exportQueue.done) of \(exportQueue.total)")
-                    Text(exportQueue.currentName).font(.caption2).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle)
-                }
-            } else if !exportQueue.summary.isEmpty {
+            // How long the last job took. What a running one is doing, and
+            // anything the last one had to say, are above the section
+            // (`runningJob`, `mergeNotes`).
+            if !photoMerge.isRunning, !photoMerge.summary.isEmpty {
+                Text(photoMerge.summary).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !exportQueue.isRunning, !exportQueue.summary.isEmpty {
                 Text(exportQueue.summary).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 ForEach(exportQueue.failures) { f in
@@ -180,9 +181,36 @@ struct LibraryPanel: View {
         }
     }
 
-    /// A Photo Merge under way, where export progress shows (they take
-    /// turns, so only one of the two is ever running), or how the last ended.
-    @ViewBuilder private var photoMergeProgress: some View {
+    /// What the last Photo Merge had to say for itself: a photo Auto Align
+    /// left out, exposures that disagree with their EXIF, a first edit that
+    /// couldn't be worked out. The merge worked, so these are notes —
+    /// orange, wrapped and whole — not the red one-line status bar, which
+    /// VoiceOver announces as an error.
+    ///
+    /// Beside the progress and outside the Export group for the same
+    /// reason: HDR Merge Without Dialog has no other channel for them, and
+    /// a folded-away section would swallow them.
+    @ViewBuilder private var mergeNotes: some View {
+        if !photoMerge.isRunning, !photoMerge.notes.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(photoMerge.notes.enumerated()), id: \.offset) { _, note in
+                    Label(note, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Note: \(note)")
+                }
+            }
+        }
+    }
+
+    /// The export or Photo Merge under way, with its Cancel. They take
+    /// turns over one GPU slot, so only one of the two is ever running.
+    ///
+    /// Outside the Export disclosure group on purpose: the panel is the
+    /// only place either job's progress and its only Cancel appear, and a
+    /// folded-away section would hide them (and leave Export and Photo
+    /// Merge greyed out with nothing on screen to say why).
+    @ViewBuilder private var runningJob: some View {
         if photoMerge.isRunning {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
@@ -202,9 +230,20 @@ struct LibraryPanel: View {
                 Text(photoMerge.name).font(.caption2).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
             }
-        } else if !photoMerge.summary.isEmpty {
-            Text(photoMerge.summary).font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        } else if exportQueue.isRunning {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text("\(exportQueue.done) of \(exportQueue.total)").font(.caption2)
+                    Spacer()
+                    Button("Cancel") { exportQueue.cancel() }.controlSize(.mini)
+                }
+                ProgressView(value: Double(exportQueue.done), total: Double(max(exportQueue.total, 1)))
+                    .controlSize(.small)
+                    .accessibilityLabel("Export progress")
+                    .accessibilityValue("\(exportQueue.done) of \(exportQueue.total)")
+                Text(exportQueue.currentName).font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
         }
     }
 
@@ -343,6 +382,41 @@ struct LibraryPanel: View {
                 }
             }
             .font(.caption2)
+            mergeSection
+        }
+        // A merge result's recipe, from the catalog's own row: no file is
+        // touched when the selection changes, as for the rows above.
+        .task(id: image.id) {
+            mergeSummary = nil
+            guard let json = try? await library.mergeRecipe(for: image) else { return }
+            mergeSummary = MergeRecipeSummary(json: json)
+        }
+    }
+
+    /// What Photo Merge made this photo from, for a photo it made. Read
+    /// only: the recipe records how the file came about, so there is
+    /// nothing here to change.
+    @ViewBuilder private var mergeSection: some View {
+        if let summary = mergeSummary {
+            Divider()
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 4) {
+                ForEach(summary.rows, id: \.label) { row in
+                    GridRow {
+                        Text(row.label)
+                            .foregroundStyle(.secondary)
+                            .gridColumnAlignment(.trailing)
+                        Text(row.value)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .font(.caption2)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Photo Merge")
+            .accessibilityValue(summary.spoken)
+            .help("What Photo Merge made this photo from. Photos listed as left out couldn’t be used: "
+                  + "they wouldn’t line up, or wouldn’t join the panorama.")
         }
     }
 

@@ -219,15 +219,35 @@ public final class PanoramaFrameStore: PanoramaBlendFrameSource, @unchecked Send
         return removeFolders(in: parent) { $0.hasPrefix(mine) }
     }
 
+    /// How long a folder whose process id is in use again has to sit
+    /// untouched before it counts as abandoned anyway.
+    ///
+    /// macOS hands process ids out again within a day or two. A folder left
+    /// by a crash at pid 4821 that some launchd job now holds would
+    /// otherwise be skipped at every launch for ever, and a crashed
+    /// 17-photo panorama's folder is over 3 GB of the boot volume with
+    /// nothing in the app to explain it. Nothing live can look this old:
+    /// this process's own folders are excluded by their name, and any other
+    /// Latent's would still be writing frames into theirs.
+    public static let abandonedAfter: TimeInterval = 24 * 60 * 60
+
     /// Deletes store folders left by processes that are no longer running
-    /// (a crash, or a quit that couldn't clean up). Call at launch.
+    /// (a crash, or a quit that couldn't clean up), and folders old enough
+    /// that their process id has plainly been handed on since. Call at
+    /// launch.
     @discardableResult
-    public static func removeAbandonedScratch(parent: URL = scratchParent) -> Int {
-        removeFolders(in: parent) { name in
+    public static func removeAbandonedScratch(parent: URL = scratchParent, now: Date = Date()) -> Int {
+        let mine = "\(ProcessInfo.processInfo.processIdentifier)-"
+        return removeFolders(in: parent) { name in
+            guard !name.hasPrefix(mine) else { return false }
             guard let dash = name.firstIndex(of: "-"), let pid = Int32(name[..<dash]) else { return false }
             // kill with signal 0 only asks whether the process exists; EPERM
             // means it does but belongs to someone else.
-            return kill(pid, 0) != 0 && errno == ESRCH
+            if kill(pid, 0) != 0 && errno == ESRCH { return true }
+            let attributes = try? FileManager.default
+                .attributesOfItem(atPath: parent.appendingPathComponent(name).path)
+            guard let modified = attributes?[.modificationDate] as? Date else { return false }
+            return now.timeIntervalSince(modified) > abandonedAfter
         }
     }
 

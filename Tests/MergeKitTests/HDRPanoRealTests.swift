@@ -151,8 +151,7 @@ final class HDRPanoRealTests: XCTestCase {
 
     /// The Ihrke bracket's frames, in the order the folder holds them.
     private func ihrkeFrames() throws -> [URL] {
-        let directory = AlignTestSupport.assets.appendingPathComponent("merge")
-            .appendingPathComponent("ihrke-tripod-bracket")
+        let directory = TestAssets.url("merge").appendingPathComponent("ihrke-tripod-bracket")
         guard FileManager.default.fileExists(atPath: directory.path) else {
             throw XCTSkip("TestAssets/merge/ihrke-tripod-bracket is missing")
         }

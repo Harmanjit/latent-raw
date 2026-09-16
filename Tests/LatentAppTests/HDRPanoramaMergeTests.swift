@@ -32,6 +32,9 @@ final class FakeHDRPanoramaEngine: HDRPanoramaMerging, @unchecked Sendable {
     private var _mergeOptions: [HDRPanoramaOptions] = []
     private var _analyseOptions: [HDRPanoramaOptions] = []
     private var _releases = 0
+    /// How many analyses are running at once, and the most there have been.
+    private var _running = 0
+    private var _peakRunning = 0
     let script: Script
     let reports: [HDRPanoramaProgress]
 
@@ -48,6 +51,7 @@ final class FakeHDRPanoramaEngine: HDRPanoramaMerging, @unchecked Sendable {
     var mergeOptions: [HDRPanoramaOptions] { lock.withLock { _mergeOptions } }
     var analyseOptions: [HDRPanoramaOptions] { lock.withLock { _analyseOptions } }
     var releases: Int { lock.withLock { _releases } }
+    var peakConcurrentAnalyses: Int { lock.withLock { _peakRunning } }
 
     func closeGate() { lock.withLock { _gateOpen = false } }
     func openGate() { lock.withLock { _gateOpen = true } }
@@ -58,7 +62,12 @@ final class FakeHDRPanoramaEngine: HDRPanoramaMerging, @unchecked Sendable {
     func analyse(_ urls: [URL], options: HDRPanoramaOptions) async throws -> HDRPanoramaAnalysis {
         note("analyse \(urls.count) \(options.panorama.projection.rawValue) "
              + "\(options.hdr.autoAlign) \(options.hdr.deghost.rawValue)")
-        lock.withLock { _analyseOptions.append(options) }
+        lock.withLock {
+            _analyseOptions.append(options)
+            _running += 1
+            _peakRunning = max(_peakRunning, _running)
+        }
+        defer { lock.withLock { _running -= 1 } }
         while !lock.withLock({ _gateOpen }) {
             try Task.checkCancellation()
             try await Task.sleep(for: .milliseconds(5))
@@ -288,6 +297,24 @@ final class HDRPanoramaMergeSheetModelTests: XCTestCase {
         XCTAssertTrue(preferences.autoSettings)
         XCTAssertEqual(preferences.options.hdr.deghost, .medium)
         XCTAssertEqual(preferences.options.panorama.autoCrop, false)
+    }
+
+    /// As in the Panorama dialog: the analysis being replaced is cancelled
+    /// and waited for, so clicking through the projections never leaves two
+    /// running on one GPU.
+    func testChangingTheProjectionWaitsForTheAnalysisItReplaces() async throws {
+        let engine = FakeHDRPanoramaEngine(analysis: .success(analysis()))
+        engine.closeGate()
+        let model = model(engine)
+        model.start()
+        await waitUntil("the first analysis") { engine.analyseOptions.count == 1 }
+        model.projection = .cylindrical
+        model.projection = .spherical
+        XCTAssertEqual(engine.peakConcurrentAnalyses, 1)
+        engine.openGate()
+        try await waitForReady(model)
+        XCTAssertEqual(engine.peakConcurrentAnalyses, 1, "never two at once")
+        XCTAssertEqual(engine.analyseOptions.last?.panorama.projection, .spherical)
     }
 
     /// An oversized panorama is never refused: it says what it will make
