@@ -62,6 +62,8 @@ struct ContentView: View {
     @State private var showingExportSheet = false
     /// The HDR Merge dialog's state, while it is up (Photo › Photo Merge › HDR…).
     @State private var hdrMergeSheet: HDRMergeSheetModel?
+    /// The Panorama dialog's state, while it is up (Photo › Photo Merge › Panorama…).
+    @State private var panoramaMergeSheet: PanoramaMergeSheetModel?
     /// Compare's left pane ("Select"): its own render, created the first
     /// time Compare opens. The right pane ("Candidate") is the main model,
     /// which follows the selection as arrow keys move it.
@@ -210,6 +212,12 @@ struct ContentView: View {
             HDRMergeSheet(model: sheet, thumbnail: { await library.loadThumbnail(for: $0) },
                           onMerge: { startHDRMerge($0, options: $1, autoSettings: $2, from: sheet) },
                           canMerge: !exportQueue.isGPUBusy)
+                .motionFollowsAccessibility()
+        }
+        .sheet(item: $panoramaMergeSheet) { sheet in
+            PanoramaMergeSheet(model: sheet, thumbnail: { await library.loadThumbnail(for: $0) },
+                               onMerge: { startPanoramaMerge($0, options: $1, from: sheet) },
+                               canMerge: !exportQueue.isGPUBusy)
                 .motionFollowsAccessibility()
         }
         .sheet(item: $renaming) { record in
@@ -816,9 +824,60 @@ struct ContentView: View {
         }
     }
 
+    /// Opens the Panorama dialog on the whole selection, which the engine
+    /// starts measuring at once.
+    private func beginPanoramaMerge() {
+        guard let gpu = model.gpu else { return }
+        let records = library.selectedImages
+        let urls = records.compactMap { library.fileURL(for: $0) }
+        guard records.count >= 2, urls.count == records.count else { return }
+        let catalog = library.catalog
+        let sheet = PanoramaMergeSheetModel(records: records, urls: urls,
+                                            engine: PhotoMergeEngine.panorama(gpu: gpu)) { reference in
+            // The name as it would be now; the job plans it again on Merge.
+            guard let catalog,
+                  let relPath = try? await catalog.planMergeResult(forReference: reference.relPath,
+                                                                   suffix: PhotoMergeKind.panorama.suffix)
+            else { return nil }
+            return (relPath as NSString).lastPathComponent
+        }
+        panoramaMergeSheet = sheet
+        sheet.start()
+    }
+
+    /// Merge in the Panorama dialog: the job stitches in the background
+    /// from here, with the same engine that measured the photos.
+    private func startPanoramaMerge(_ analysis: PanoramaMergeAnalysis, options: PanoramaMergeOptions,
+                                    from sheet: PanoramaMergeSheetModel) {
+        let records = sheet.recordsInFrameOrder.compactMap { $0 }
+        guard records.count == analysis.frames.count,
+              photoMerge.startPanorama(analysis, options: options, records: records, library: library,
+                                       engine: sheet.engine,
+                                       firstEdit: panoramaFirstEdit(analysis, options: options)) else {
+            library.lastError = "The panorama couldn’t start: an export or another merge is using the graphics "
+                + "processor, or the photos are no longer in the open folder."
+            return
+        }
+    }
+
+    /// The panorama's first edit: Auto Crop's rectangle and Auto Settings'
+    /// adjustments together, worked out away from the main thread.
+    private func panoramaFirstEdit(_ analysis: PanoramaMergeAnalysis,
+                                   options: PanoramaMergeOptions) -> PhotoMergeQueue.FirstEdit? {
+        guard let gpu = model.gpu else { return nil }
+        let crop = options.autoCrop ? PanoramaResultEdit.crop(for: analysis) : nil
+        let autoAdjust = options.autoSettings
+        guard crop != nil || autoAdjust else { return nil }
+        return { url in
+            try await Task.detached(priority: .userInitiated) {
+                try PanoramaResultEdit.editStackJSON(forPhotoAt: url, crop: crop, autoAdjust: autoAdjust, gpu: gpu)
+            }.value
+        }
+    }
+
     /// Auto Settings' edit for a merged photo: Develop's Auto Adjust, worked
     /// out away from the main thread.
-    private func hdrAutoSettings() -> PhotoMergeQueue.AutoSettings? {
+    private func hdrAutoSettings() -> PhotoMergeQueue.FirstEdit? {
         guard let gpu = model.gpu else { return nil }
         return { url in
             try await Task.detached(priority: .userInitiated) {
@@ -958,6 +1017,8 @@ struct ContentView: View {
             beginHDRMerge()
         case .photoMergeHDRWithoutDialog:
             mergeHDRWithoutDialog()
+        case .photoMergePanorama:
+            beginPanoramaMerge()
         case .slideshow:
             SlideshowController.start(model: model, library: library)
         case .editExternally:

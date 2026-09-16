@@ -49,7 +49,11 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 ## Photo Merge
 
-- **HDR only.** Panorama and HDR Panorama merges aren't there yet, and neither is focus stacking (Lightroom doesn't have it either).
+- **HDR and Panorama.** HDR Panorama (brackets stitched into a panorama) isn't there yet, and will be marked experimental when it arrives. Focus stacking isn't planned (Lightroom doesn't have it either).
+- **Panoramas are one row.** One sweep, left to right or right to left. Several rows stacked into a grid, and full 360° panoramas that join back to their start, need our own feature matcher and aren't there yet.
+- **Parallax.** When the camera moves sideways instead of turning on the spot, near things shift against far things and no stitch lines both up: edges close to the camera can look doubled. The dialog warns when the photos only match to several pixels.
+- **A panorama too big to edit is made smaller, never refused.** The dialog says what it would have been, what it will be and why (memory, or the largest picture the graphics processor can hold), and waits for you to agree. The limit is this Mac's: the same sweep merges larger on a bigger machine.
+- **A photo that can't be joined is left out** and named in a warning; the panorama is made from the rest. The usual cause is too little overlap — aim for about 30%.
 - **Auto Align moves whole frames.** It lines up handheld brackets, but near and far things that shifted against each other (parallax) still show slightly doubled edges. A frame it can't align is merged unaligned if it looks within a pixel or so, or left out of the merge otherwise; the dialog says which.
 - **Deghost compares brightness, not colour.** Something that moved in front of an equally bright background can go unnoticed and look doubled or semi-transparent, and deghosted areas come from a single frame, with its noise. The dialog's preview and its deghost overlay are small, about 1,000 pixels across, and on cameras over about 36 MP the overlay is a rougher guide to what the merge takes from one frame.
 - **Raw files from Bayer sensors only,** all from one camera at one size and orientation; merged photos can't be merged again. On 8 GB Macs a merge takes at most 5 photos.

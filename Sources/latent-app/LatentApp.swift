@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Catalog
 import PixelEngine
+import MergeKit
 
 /// Latent's application target.
 ///
@@ -111,6 +112,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         AppPreferences.shared.applyAppearance()
+        // A panorama stitch keeps its half-warped frames in memory-mapped
+        // scratch files. A crash leaves a folder of them behind, so every
+        // launch clears out the ones whose process is gone (this one's are
+        // cleared on quit below). Off the main thread: it reads a folder.
+        Task.detached(priority: .utility) {
+            let removed = PanoramaFrameStore.removeAbandonedScratch()
+            if removed > 0 {
+                Log.export.error("Removed \(removed, privacy: .public) abandoned panorama scratch folder(s)")
+            }
+        }
     }
 
     /// Closing the last window quits through `terminate`, so it takes the
@@ -205,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !exporting.isEmpty || !exportingOpenImage.isEmpty || libraries.contains(where: \.hasPendingWork)
                 || outputs.isRunning else {
             SafeFileWriter.abandonPendingWrites()
+            _ = PanoramaFrameStore.removeScratchOfThisProcess()
             return .terminateNow
         }
         Task {
@@ -241,6 +253,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if transfers > 0 {
                 Log.catalog.error("Quit: removed \(transfers, privacy: .public) unfinished copies of images being moved or copied")
             }
+            // The waits above have let a panorama stitch stop and tidy up,
+            // so its scratch files can go now.
+            _ = PanoramaFrameStore.removeScratchOfThisProcess()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
