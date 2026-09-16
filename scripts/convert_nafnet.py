@@ -3,7 +3,7 @@
 Converts NAFNet (SIDD, width 32) from the published PyTorch weights into a
 Core ML package for Latent's AI noise reduction.
 
-    source ~/rawhead-ml/bin/activate     # or wherever the venv lives
+    source ~/latent-ml/bin/activate     # or wherever the venv lives
     python scripts/convert_nafnet.py
 
 NAFNet ("Simple Baselines for Image Restoration", Chen et al. 2022, MIT
