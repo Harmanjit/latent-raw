@@ -1,9 +1,9 @@
 # Phase 0 checklist
 
 Tracks DESIGN.md §13. **Phase 0 is closed** (September 2026): everything
-below that mattered is done, and Phase 1 work (tiled zoom, stage cache)
-has started on top of it. Unchecked items are deferred, not blocking —
-notes say why.
+below that mattered is done, and the later phases (DESIGN.md §14) have
+since been built on top of it. This file is kept as the record of what the
+spike measured. Unchecked items are deferred, not blocking — notes say why.
 
 ## 0. Prerequisites
 - [x] Xcode installed (last version compatible with your current OS is fine —
@@ -28,8 +28,9 @@ notes say why.
 ## 2. First build
 - [x] `swift build` succeeds for all library targets
 - [x] Fix any drift between `clibraw_shim.cpp` and the real LibRaw API —
-      it was written from memory of the 0.20/0.21 API shape, not against
-      real headers (see the note at the top of that file)
+      it was first drafted from memory of the 0.20/0.21 API shape; it now
+      builds against LibRaw 0.22.2's headers, and the note at the top of
+      that file says what to recheck after an upgrade
 
 ## 3. Zero-copy ingest decision (DESIGN.md §13 task 2)
 - [x] Instrument `RawFile.rawSensorPlane()` — LibRaw's allocation is

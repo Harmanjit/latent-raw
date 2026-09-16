@@ -2,13 +2,13 @@
 
 ## 0. Phase 0 findings (2026-09-15) — these override the sections below where they disagree
 
-**DNG spike** (code in `~/latent-wt/spikes/dng`, becomes the Phase 3 writer). The plain-Swift writer produces float16 LinearRaw DNGs, and the vendored LibRaw reads every pixel back bit-for-bit (strips, tiles, odd sizes, deflate with float predictors). ImageIO and CIRAWFilter read and render them correctly.
+**DNG spike** (a throwaway spike outside the repository; it became the Phase 3 writer, `Sources/MergeKit/DNG`). The plain-Swift writer produces float16 LinearRaw DNGs, and the vendored LibRaw reads every pixel back bit-for-bit (strips, tiles, odd sizes, deflate with float predictors). ImageIO and CIRAWFilter read and render them correctly.
 - **Pixel values are normalised so the maximum is ≤ 1.0.** Divide by a power of two and add the same number of stops to `BaselineExposure`. Apple's RAW engine clips float values above 1.0. Float16 keeps about 14 normal stops below 1.0; wider merges may need 24-bit float (untested).
 - **Always write `WhiteLevel = 1`,** and clear `LIBRAW_RAWOPTIONS_CONVERTFLOAT_TO_INT` in `imgdata.rawparams.options`.
 - **Tiles, not strips, whenever compressing.** Apple's RawCamera crashes on deflate combined with strips. v1 writes uncompressed 512 px tiles: 45 MP ≈ 294 MB, written in 0.09 s and read in 0.12 s.
 - **LibRaw quirks:** it rejects `Software` values that start with "Adobe" or "dcraw"; `dcraw_process()` fails on float data (we don't use it); linking needs Little CMS stubs only if `dcraw_process` is referenced.
 
-**Vision spike** (code in `~/latent-wt/spikes/vision`). This **changes the alignment decision in 2c.**
+**Vision spike** (a throwaway spike outside the repository). This **changes the alignment decision in 2c.**
 - **Vision failed:** `VNHomographicImageRegistrationRequest` fails on 21–29% of HDR bracket pairs and on every panorama pair at 15–35% overlap. It only finds shifts up to about 4% of the long edge.
 - **What worked:** **phase correlation** (a coarse shift from the Fourier transform) followed by **ECC refinement** (an iterative, brightness-invariant homography fit) over a 400 → 800 → 1600 → 3200 px pyramid.
   - HDR: p90 corner error 0.07–0.11 px, even 8 EV apart, in about 0.4 s on the CPU.
@@ -26,7 +26,7 @@
 - **CC0 options:**
   - Kolláth CR2 fisheye night panorama, 114 MB.
   - Soltesz 5-frame JPEG bracket and Hurd 4-frame JPEG panorama.
-- **Shot list** for what's missing (handheld bracket, long panorama, HDR panorama) is in the Wave A report.
+- **What was missing** then was a handheld bracket, a long panorama and an HDR panorama. Market Mires turned out to be handheld, and Harman's own 17-frame sweep (`TestAssets/pano`) is the long panorama; a real HDR panorama sweep still doesn't exist.
 
 **Phase 6 (Auto Align and Deghost) is done (2026-09-15).** Where it differs from sections 2c and 3:
 - **Alignment** is phase correlation plus ECC on the CPU (`MergeKit/Align`), as the Vision spike recommended, not Vision. The analysis aligns neighbours on half-size frames (2 x 2 photosite blocks; 4 x 4 above about 60 MP) and keeps only the links (`HDRMergeAlignment`), so the merge can chain them to whichever frame is the reference. Real brackets: Market Mires frames moved up to 28 px at the corners, Ihrke and Crete 0.2–2.3 px; every neighbour pair was accepted (NCC 0.95–0.996).
@@ -35,7 +35,7 @@
 - **Merge:** each frame is warped (Catmull-Rom) after RCD and before the clip feathering, ghost mask and weights; alpha is coverage and multiplies the weight, so the output keeps the reference frame's full size and uncovered edges get weight 0 (the reference keeps a 1e-8 floor when anything warps). The clip mask is warped with the largest of its four nearest pixels, not the full Catmull-Rom footprint: with the accumulator's own one-pixel widening that covers the same pixels, and the full footprint widened twice showed as grey squares in glittering water. Warping adds 9 bytes per pixel.
 - **Deghost with alignment:** each frame's quarter-size measurement (brightness interval and usable map) is warped onto the reference grid before the local references are chosen, blending the interval limits bilinearly. Taking the widest interval of the footprint instead found a fortieth of the movement on Ihrke.
 - **Recipe** options add `autoAlign`, `alignmentShifts` (px per frame, null if not aligned) and `leftOut`.
-- **Not done, for Phase 7:** the deghost overlay (done in Phase 7, below), colour-aware ghost detection (moving people against an equally bright background can still double at Medium and High on Market Mires), parallax (a near pole against the street in a handheld bracket keeps a doubled edge).
+- **Not done in Phase 6:** the deghost overlay (done in Phase 7, below) and colour-aware ghost detection (done afterwards, commit 33adc3b: blocks are also compared by colour, red and blue over green, against `DeghostAmount.colourStops`, so the people on Market Mires, who were as bright as the street behind them, now come out whole). Still not done: parallax (a near pole against the street in a handheld bracket keeps a doubled edge).
 
 **Phase 7 (the HDR dialog's preview and conveniences) is done (2026-09-15).** Where it differs from the table in section 8:
 - **Preview.** `HDRMerging.preview(_:options:longEdge:showDeghostOverlay:)` runs the merge's own steps (`findGhosts`, `accumulate`, the recipe and `renderPreview`) on reduced Bayer frames, not binned RGB: each frame is reduced once, during the analysis, to a mosaic of the same Bayer order and levels (each photosite the mean of the same colour's photosites, or their maximum where any is clipped) and kept in `HDRPreviewCache` (one bracket, long edge at most 3,072, under 160 MB for 9 frames; released when the dialog closes). A task-local frame set makes `HDRMerger.open` and `levels` hand the merge those frames, so the deghosting pass is called unchanged. Pixel sizes are scaled (warps, clip feathering, the deghost patch); the deghost patch count is calibrated (65% of the share, rounded up), since averaging hides scattered movement: at half size, Low/Medium/High leave out within about a fifth of the full merge on all three test brackets, where a quarter size left out 20% instead of 7% on Ihrke. Deghosting runs on the kept frames; the merge and render run on those reduced again to the picture's size, with the masks averaged down. Real timings, release build, 1,024 px: 0.06–0.15 s per option change (6 x 21 MP Ihrke, 5 x 10 MP Mires, 7 x 10 MP Crete), 0.25–0.35 s for the first (the GPU's pipelines being built). On synthetic brackets the preview matches the full merge's DNG rendered at the same size within 1 level mean and 4 levels p99 where the picture is smooth.
@@ -67,7 +67,7 @@
 - **The recipe** is `kind: .hdrPanorama` naming every selected photo (not the intermediates), with both stages' options and the brackets, through a new `PanoramaMergeOptions.recipeOverride` — the one additive change to an existing public API.
 - **No preview in the dialog:** an honest one would have to merge every position first. The dialog shows the positions, their exposures and where they point instead.
 - **Tests:** synthetic bracketed sweeps of the panorama tests' scene (`HDRPanoTestSupport`), and a "fake HDR panorama" cut as overlapping windows out of the real Ihrke bracket — real photons, real exposures, synthetic geometry (the windows claim a long lens, since a crop is a rotation only in that limit).
-- **Found on the way:** a LinearRaw DNG of ours whose tile grid is exactly 2 x 2 (512 px tiles, i.e. 513...1024 on both sides) reads back as the bit patterns of its half floats, and 1024 x 1024 doesn't open at all; every other tiling is correct. Real merges are far larger, but a heavily downsampled panorama could land there. Not fixed here (it is the writer's or the vendored LibRaw's); the HDR panorama tests use frames that tile 3 x 1.
+- **Found on the way, and since fixed (commit 7f92329):** a LinearRaw DNG whose tile grid was exactly four tiles (2 x 2, 4 x 1 or 1 x 4) read back as the bit patterns of its half floats, or didn't open at all, because LibRaw 0.22.2 takes a TileOffsets count of 4 as the mark of a Sinar 4-shot file. Real merges are far larger, but a heavily downsampled panorama could land there. `LinearRawDNGWriter.tileSize` now halves the tile whenever the grid would be four tiles, and `DNGTileGridTests` checks every size from 200 to 2400 px for the grid, with LibRaw round trips across that range.
 - **Still unverified:** a real bracketed sweep. Nobody has shot one for Latent, so changing light, parallax across positions and brackets that drift from position to position have never been tried. The menu item, the dialog, `docs/wiki/Photo-Merge.md` and `Limitations.md` all say so.
 
 ## 1. What Photo Merge will do
@@ -101,7 +101,7 @@
 
 **Rules for every frame:**
 - Demosaic all frames with the **reference frame's as-shot multipliers**. Pass these explicitly, not `multipliers(for:)`, which would pick up that frame's WB edits. Then divide them out.
-- **Crop every frame to the sensor's active area.** Today the shim never reads `left_margin`/`top_margin` (`libraw_types.h:217`), and `plan()` uses the full `rawWidth×rawHeight`. The dark optical-black margin strips would be stitched into panoramas.
+- **Crop every frame to the sensor's active area.** (Done: the shim reads `left_margin`/`top_margin` and `SensorPlane` holds only the active area, so the dark optical-black strips never reach a merge; see §0.)
 
 ### 2b. The output file: one shared "master" contract
 **Choice:** a **16-bit float LinearRaw DNG**, written into the reference photo's folder as `DSC_0107-HDR.dng` or `-Pano.dng`.
@@ -275,7 +275,7 @@ Every decision is made on a **1/8-scale** copy. Only the final warp and blend ru
 - Cap HDR at 9 frames, and at 5 on Macs where `MemoryPolicy.isConstrained` is true (8 GB). (Built: `HDRMerger.frameLimit`; the 9 was not in the first draft of this plan.) Panoramas have no frame cap and are sized by the downsampling rule in §4, never refused.
 - Check free disk space against 2× the output size.
 
-**Performance targets** (not measured; `latent-cli merge --timings` will measure them):
+**Performance targets** (not yet measured. `LATENT_PERF=1 swift test --filter HDRMergePerformanceTests` times a synthetic 3 x 24 MP HDR merge stage by stage, and can keep the bracket in `LATENT_HDR_BRACKET_DIR`; `latent-cli merge-hdr` and `merge-pano` print per-stage timings, so a release build can be timed on the same frames):
 - 3×24 MP tripod HDR under 10 s.
 - 3-frame panorama under 30 s.
 
@@ -352,7 +352,7 @@ Still using my defaults unless Harman says otherwise:
 **Risks:**
 - **Vision** may be inaccurate at 25–30% overlap, and can change between OS releases. Mitigation: validation, the 0b spike, and a phase-10 matcher. **Resolved** — see §0: Vision is not used at all; alignment is phase correlation plus ECC, and the panorama's fallback matcher was built in Phase 8, not Phase 10.
 - **Chained homographies drift** over many frames. Mitigation: cap panorama v1 at 6 frames. **Not taken** — see §0: bundle adjustment plus extra non-neighbour pairs handle the drift, and there is no frame cap.
-- **The margin bug likely affects ordinary renders today** (full `rawWidth` includes optical black). Fixing it globally may change goldens for some cameras; fix it only in the merge path first.
+- **The margin bug likely affects ordinary renders today** (full `rawWidth` includes optical black). Fixing it globally may change goldens for some cameras; fix it only in the merge path first. **Resolved** — see §0: the sensor plane is cut to the active area for every render (DESIGN.md §7.1), not only for merges; the D750 goldens were unchanged because it has no border.
 - **Lightroom and ACR compatibility** of our DNG is unproven until `dng_validate` and a manual open pass.
 - **Editing masters above the pixel budget** needs a tiled editor and export. Until then, panoramas are downsampled to fit (§4).
 - **Timing and memory figures are estimates.** Phase 4's CLI timings are the first real numbers.

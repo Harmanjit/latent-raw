@@ -1,22 +1,24 @@
 # Test assets
 
 Not committed to the repo (large, and mostly not ours to redistribute).
-Drop files here with these exact names so the tests in
-`Tests/PixelEngineTests` pick them up automatically:
+Drop files here with these exact names and the tests under `Tests/` pick
+them up automatically; a test whose file is missing skips itself. Each test
+target that reads samples finds this folder through its own
+`Support/TestAssets.swift`, except `LensKitTests`, which uses
+`LensMatchingTests.assetPath`.
 
 | Filename | Source |
 |---|---|
-| `golden_nikon_d750_cc0.nef` | Downloaded by `scripts/fetch_test_assets.sh` (raw.pixls.us, CC0, checksum-verified). The golden-image tests render it |
-| `nikon_d750_sample.nef` | One of your own D750 files, or raw.pixls.us |
-| `sony_a7iii_compressed.arw` | One of your own A7 III files shot in compressed mode |
-| `sony_a7iii_uncompressed.arw` | Same camera, uncompressed mode |
-| `canon_cr2_sample.cr2` | raw.pixls.us |
-| `canon_cr3_sample.cr3` | raw.pixls.us — only needed once a CR3-shooting body is confirmed |
-| `monochrome_sample.dng` or raw | e.g. a Leica Monochrom sample from raw.pixls.us |
-| `linear_sample.dng` | Any already-demosaiced linear DNG (many phone RAWs qualify) |
+| `golden_nikon_d750_cc0.nef` | Downloaded by `scripts/fetch_test_assets.sh` (raw.pixls.us, CC0, checksum-verified). The golden-image tests render it, and it is the only file CI has |
+| `nikon_d750_sample.nef` | Harman's own D750 raw, with a Tokina AF 100mm f/2.8 Macro. Tests that take any D750 raw use it ahead of the golden raw, and `LensMatchingTests`, `HealTests` and `LocalAdjustmentTests` rely on this particular picture |
+| `HSB_2615.NEF`, `HSB_2639.NEF`, `HSB_6548.NEF` | Harman's own D750 raws, with an AF-S Nikkor 50mm f/1.4G. Read by the lens-matching, lens-correction, active-area, demosaic-border, soft-proof, AI mask, AI denoise and export-worker tests |
+| `HSB_6664.NEF` | Harman's own D750 raw, with a Tokina AF 100mm f/2.8 Macro. Read by `LensMatchingTests` and `ActiveAreaTests` |
+| `sony_a7iii_compressed.arw` | An A7 III (ILCE-7M3) raw shot in compressed mode, your own or from raw.pixls.us, which lists its samples by camera. `RenderPipelineTests` checks that it opens |
 
-raw.pixls.us organizes samples by camera under
-`https://raw.pixls.us/getfile.php/...` — browse by camera model there.
+Harman's own files are not redistributed. Several tests that name them
+assert things about those particular pictures (the lens, where the sky is,
+where a heal lands), so a different photo under the same name can fail
+rather than skip.
 
 ## Photo Merge brackets (`TestAssets/merge/`)
 
