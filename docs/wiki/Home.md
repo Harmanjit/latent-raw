@@ -4,7 +4,7 @@
 
 Latent opens a folder of raw files, keeps a catalog inside that folder, and edits every image on the GPU without touching the original. It is in the same family as Lightroom, darktable and RawTherapee, but it targets one platform only and uses everything that platform has: unified memory, Metal compute, and on-device machine learning.
 
-- **Status:** beta. Everything planned is implemented and tested except **DNG export**, which doesn't exist, and **HDR Panorama**, which works but is marked **experimental** because no real bracketed sweep has ever been merged with it. Panoramas are single-row only. Expect rough edges, and read [Limitations](Limitations) before relying on it.
+- **Status:** version 0.9, a beta for review. Everything planned is implemented and tested except **DNG export**, which doesn't exist, and **HDR Panorama**, which works but is marked **experimental** because no real bracketed sweep has ever been merged with it. Panoramas are single-row only. Expect rough edges, and read [Limitations](Limitations) before relying on it. Please report bugs as [issues on GitHub](https://github.com/Harmanjit/latent-raw/issues).
 - **Licence:** GPLv3.
 - **Platform:** macOS 15 or newer on Apple Silicon. Verified on M1 Pro and M4.
 
@@ -15,7 +15,7 @@ These pages are also in the app: **Help > Latent Help** (⌘?) shows them with s
 | | |
 |---|---|
 | [Motivation](Motivation) | Why another RAW editor, and why only for this hardware |
-| [Installation](Installation) | Building from source, the Gatekeeper dialog |
+| [Installation](Installation) | Downloading, building from source, the Gatekeeper dialog |
 | [Getting Started](Getting-Started) | First folder, the five views, ratings |
 | [Library](Library) | The sidebar, the catalog, the grid, sorting and filtering, Finder tags, Loupe, Compare and Survey, full screen, moving and renaming, undo, the slideshow |
 | [Develop](Develop) | Every editing module, typed values, masks, spot and red-eye removal, presets, history |

@@ -34,7 +34,7 @@ A *bracket* is the answer: the same scene shot several times, each at a differen
 5. Choose the options: **Auto Align** (on unless you turned it off), **Deghost** (None unless you chose a level) with **Show Deghost Overlay**, and **Auto Settings** (off unless you turned it on). The dialog remembers Auto Align, Deghost and Auto Settings for next time. Turning Auto Align on or off reads the photos again.
 6. To use another photo as the reference, **click its row**. The stops, the preview and the file name follow. (With VoiceOver, the row's **Use as reference** action does the same.) The choice is for this merge only.
 7. Read any note or warning. When Auto Align moved the photos by a pixel or more, a note says by how much ("Photo Merge aligned these photos (up to 17 px)"). A warning says when a photo couldn't be aligned. If there are several, they scroll.
-8. Press **Merge** (Return). The dialog closes and the merge runs in the background. Its progress shows in the left panel's **Export** section, with a **Cancel** button. Esc or **Cancel** in the dialog closes it without merging.
+8. Press **Merge** (Return). The dialog closes and the merge runs in the background. Its progress shows in the left panel, above the **Export** section, with a **Cancel** button. Esc or **Cancel** in the dialog closes it without merging.
 
 If the photos can't be merged (they are from different cameras, different sizes, or all the same exposure, say) the dialog says why and offers only **Close**.
 
@@ -50,7 +50,7 @@ Because it is small, fine detail differs a little from the full-size merge. The 
 
 ### HDR Merge Without Dialog
 
-**Photo › Photo Merge › HDR Merge Without Dialog** (**⌃⇧H**) merges the selected photos straight away, with the options the dialog was last left with (Auto Align, Deghost, Auto Settings) and the reference chosen automatically. The photos are read and merged in the background; progress shows in the Export section as usual. If the photos can't be merged, the reason shows in the status bar. When it finishes, any warning the dialog would have shown (a photo that couldn't be aligned or was left out, say) shows in the status bar too.
+**Photo › Photo Merge › HDR Merge Without Dialog** (**⌃⇧H**) merges the selected photos straight away, with the options the dialog was last left with (Auto Align, Deghost, Auto Settings) and the reference chosen automatically. The photos are read and merged in the background; progress shows in the left panel above the Export section, as usual. If the photos can't be merged, the reason shows in the status bar. When it finishes, any warning the dialog would have shown (a photo that couldn't be aligned or was left out, say) shows in the status bar too.
 
 ## Auto Align
 
@@ -103,7 +103,7 @@ The colours are orange, sky blue, bluish green, yellow, blue, vermillion and red
 
 **Size.** The file is uncompressed half floats, about 6 bytes per pixel: a merge of 24 MP photos is roughly 145 MB, of 45 MP photos about 270 MB. Latent checks the disk has room before writing.
 
-**What made it.** The photo's sidecar and the DNG itself record which photos were merged (by path and fingerprint), when they were taken, and how: the Deghost level, whether Auto Align was on, how far it moved each shot and which shots it left out. Select the merged photo and the info panel shows a **Merged** section with the same facts: what kind of merge it was, the options, the photos it came from and any that were left out. That is a record only: Latent can't yet re-run a merge from it.
+**What made it.** The photo's sidecar and the DNG itself record which photos were merged (by path and fingerprint), when they were taken, and how: the Deghost level, whether Auto Align was on, how far it moved each shot and which shots it left out. Select the merged photo and the left panel's **Metadata** section ends with the same facts, starting at a **Merged** row: what kind of merge it was, the options, the photos it came from and any that were left out. That is a record only: Latent can't yet re-run a merge from it.
 
 ## Panorama
 
@@ -129,7 +129,7 @@ Choose **Photo › Photo Merge › Panorama…**, or press **⌃M**, with two or
 2. Press **⌃M**. The **Panorama** dialog reads the photos and works out the layout — on a long sweep this takes a little while.
 3. The dialog shows a **preview** of the stitch at the top, and below it the photos **in the order they were taken**. Each row gives the shutter speed, aperture and ISO, **where that photo points** across the panorama ("36° left", "centre", "12° right") and **how much its brightness is corrected** to match the others ("−0.3 EV"). A photo that couldn't be joined is dimmed and marked **Left out**.
 4. Beside the list: the **Projection**, **Auto Crop** and **Auto Settings**, and then the size the panorama will really be, how wide and tall the sweep is in degrees, roughly how large the file will be, and its name.
-5. Press **Merge** (Return). The dialog closes and the stitch runs in the background, with its progress and a **Cancel** button in the left panel's **Export** section.
+5. Press **Merge** (Return). The dialog closes and the stitch runs in the background, with its progress and a **Cancel** button in the left panel, above the **Export** section.
 
 The merge starts from the files themselves — the raws, or the HDR merges you chose; edits you made to them in Develop aren't used.
 
@@ -182,7 +182,7 @@ Agreeing is asked for every time, and again whenever the size changes (after swi
 
 **Its first edit.** With **Auto Crop** on, the crop is stored as the panorama's first edit; with **Auto Settings** on, Develop's **Auto Adjust** (⌘U) is stored too. Both are one edit, so a single **Undo** in Develop takes you back to the stitch exactly as it came out.
 
-**What made it.** The panorama's sidecar and the DNG record which photos were stitched (by path and fingerprint) and how. Select the merged photo and the info panel shows a **Merged** section with the same facts: what kind of merge it was, the options, the photos it came from and any that were left out. That is a record only: Latent can't yet re-run a merge from it.
+**What made it.** The panorama's sidecar and the DNG record which photos were stitched (by path and fingerprint) and how. Select the merged photo and the left panel's **Metadata** section ends with the same facts, starting at a **Merged** row: what kind of merge it was, the options, the photos it came from and any that were left out. That is a record only: Latent can't yet re-run a merge from it.
 
 ## HDR Panorama (experimental)
 
@@ -190,7 +190,7 @@ Agreeing is asked for every time, and again whenever the size changes (after swi
 
 Shoot a bracket at each position of a sweep — say −2, 0 and +2 EV, then turn the camera and do it again — select the lot, and Latent merges each position to HDR and stitches those results into one panorama.
 
-> **Experimental, and this is what that means.** Nobody has shot a real HDR panorama for Latent to be tested against, and no freely licensed set exists, so every test is either synthetic or built by cutting overlapping windows out of a real bracket. The pieces it is made of — the HDR merge and the panorama stitch — are each well tested on real photos, and the two stages together are tested end to end on those stand-ins. What has **not** been checked is a real bracketed sweep: light that changes while you turn, parallax between near and far things across several positions, and brackets whose frames drift from position to position. Look at the result before you trust it, and tell Harman how it went.
+> **Experimental, and this is what that means.** Nobody has shot a real HDR panorama for Latent to be tested against, and no freely licensed set exists, so every test is either synthetic or built by cutting overlapping windows out of a real bracket. The pieces it is made of — the HDR merge and the panorama stitch — are each well tested on real photos, and the two stages together are tested end to end on those stand-ins. What has **not** been checked is a real bracketed sweep: light that changes while you turn, parallax between near and far things across several positions, and brackets whose frames drift from position to position. Look at the result before you trust it, and please [open an issue](https://github.com/Harmanjit/latent-raw/issues) to say how it went.
 
 ### How the positions are worked out
 

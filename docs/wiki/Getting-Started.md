@@ -10,6 +10,8 @@ Subfolders are asked about the first time: include them in this catalog, or keep
 
 There is no import step. Copy files into a folder however you like, then open the folder. Opening it again later re-scans by name, size and modification time and decodes nothing unless something changed.
 
+To look at one raw file without opening its folder, choose File > Open File… or click **Open File…** in the status bar; the file opens in Develop. It isn't in a catalog, so edits to it are not saved. Export what you want to keep with File > Export Open Image… before you open another image or quit.
+
 ## The five views
 
 Switch with the segmented control in the status bar, the View menu, or the keys.
@@ -30,7 +32,7 @@ Loupe and Develop show a filmstrip of the grid's images along the bottom; the fi
 
 ## Edit
 
-Open an image in Develop. Drag sliders; the image updates as you drag at full quality. Double-click any slider to reset it, or click its value to type one. Edits are saved a second after you stop, or at once when you quit, to the sidecar and the catalog, and the thumbnail regenerates in the background. Press `\` to see the unedited image while held.
+Open an image in Develop. Drag sliders; the image updates as you drag at full quality. Double-click any slider to reset it, or click its value to type one. Edits are saved a second after you stop, or at once when you quit, to the sidecar and the catalog, and the thumbnail regenerates in the background. Press `\` to see the unedited image, and press it again to go back to your edit.
 
 ## Export
 

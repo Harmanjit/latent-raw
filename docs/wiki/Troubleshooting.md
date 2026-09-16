@@ -31,7 +31,7 @@ A file crashed the isolated decoder. The app is unaffected; the file is likely c
 Thumbnails come from the cameras' embedded previews; a few cameras write none, and those images get a rendered thumbnail instead, which takes longer. The status bar reports thumbnails failed if a file could not be read.
 
 **Rename, Move to Folder or Copy to Folder is greyed out.**
-They work in the Library grid, not in Loupe, Compare, Survey or Develop, and not while an export or another move is running. Rename needs exactly one selected image.
+They work in the Library grid, not in Loupe, Compare, Survey or Develop, and not while an export, a print, a contact sheet, a Photo Merge or another move or copy is running. Rename needs exactly one selected image.
 
 **A moved or copied image came out as "DSC_0107 2.NEF".**
 The destination already had a file of that name, or a sidecar a file had left behind, and Latent never writes over one. The name the image had is kept in its sidecar.
@@ -44,9 +44,6 @@ The copy had changed or been replaced since Latent made it, so Latent didn't put
 
 **A Finder tag I just set doesn't show.**
 Tags are read when a folder opens. Open the folder again from the sidebar.
-
-**An image dropped to the end of my Custom sort.**
-Renaming with Latent's Rename doesn't carry the image's place in the arrangement yet; drag it back. A file renamed in Finder keeps its place.
 
 **A trackpad swipe doesn't go to the next image.**
 Swipes step only at fit, in Loupe and Develop, with no crop, spot or mask tool on. Zoomed in, a swipe pans instead; a mouse wheel never steps. The arrow keys always do, unless Settings › Library › Arrow keys pan a zoomed-in image is on and the image is zoomed in.
@@ -67,7 +64,7 @@ The application was moved or deleted after you chose it. The TIFF was still writ
 Models compile on first use, once, into the app container. Subsequent runs are fast. If macOS ran short of memory, a model is loaded again from that compiled copy, which takes well under a second, and AI noise reduction may run again.
 
 **Quitting takes a few seconds.**
-Latent saves the last edit and waits for catalog writes to reach the sidecars, and for the image a move or copy is working on, before it quits, at most 10 seconds. During an export (a batch or Export open image…) it first asks whether to finish the image being written; that can take up to a minute for a large image with AI noise reduction.
+Latent saves the last edit and waits for catalog writes to reach the sidecars before it quits, for at most 10 seconds, or up to a minute while a move or copy finishes the image under way. During an export (a batch or Export open image…) it first asks whether to finish the image being written; that can take up to a minute for a large image with AI noise reduction.
 
 **The Help window is empty or out of date.**
 Help shows the pages copied into the app by `scripts/make_app.sh`; rebuild the app after changing `docs/wiki`. A `swift run` build reads `docs/wiki` directly.
