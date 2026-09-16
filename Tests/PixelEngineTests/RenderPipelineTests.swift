@@ -197,9 +197,11 @@ final class RenderPipelineTests: XCTestCase {
     }
 
     func testSonyCompressedARWRenders() throws {
-        let path = TestAssets.path("sony_a7iii_compressed.arw")
+        let name = "sony_a7iii_compressed.arw"
+        let path = TestAssets.path(name)
+        // The message names the real folder: with LATENT_CI_ASSETS_ONLY=1, `path` is in one that doesn't exist.
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path),
-                           "Drop an A7 III compressed ARW at \(path)")
+                           "Drop an A7 III compressed ARW at \(TestAssets.folder.appendingPathComponent(name).path)")
 
         let file = try RawFile(path: path)
         XCTAssertEqual(file.summary.cameraModel.contains("ILCE-7M3") ||

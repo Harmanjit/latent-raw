@@ -169,7 +169,7 @@ final class LensMatchingTests: XCTestCase {
         ]
         var ran = 0
         for (name, expected) in cases {
-            let path = Self.assetPath(name)
+            let path = TestAssets.path(name)
             guard FileManager.default.fileExists(atPath: path) else { continue }
             let s = try RawFile(path: path).summary
             let match = LensMatcher.match(cameraMake: s.cameraMake, cameraModel: s.cameraModel, lensName: s.lensModel,
@@ -179,11 +179,5 @@ final class LensMatchingTests: XCTestCase {
             ran += 1
         }
         try XCTSkipIf(ran == 0, "none of the real test files are in TestAssets")
-    }
-
-    static func assetPath(_ name: String) -> String {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("TestAssets").appendingPathComponent(name).path
     }
 }
