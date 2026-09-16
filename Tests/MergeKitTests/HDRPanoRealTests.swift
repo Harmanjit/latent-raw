@@ -28,8 +28,7 @@ import XCTest
 /// Skipped when TestAssets/merge is missing (as it is on CI).
 final class HDRPanoRealTests: XCTestCase {
     /// The window cut from each frame, and how far apart the windows are.
-    /// 1600 x 1000 tiles as 4 x 2, which LibRaw reads back correctly (see
-    /// `HDRPanoTestSupport`), and 900 px apart leaves 44% overlap.
+    /// 1600 x 1000 px windows 900 px apart overlap by 44%.
     static let windowWidth = 1600
     static let windowHeight = 1000
     static let windowStep = 900

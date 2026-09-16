@@ -5,7 +5,6 @@ import RawCore
 /// The pixel half of the LibRaw round trip: a merge's DNG, opened through
 /// `RawFile` like any photo, must give back every half float the writer
 /// stored, plus the colour, exposure and XMP metadata.
-///
 final class LibRawPixelRoundTripTests: XCTestCase {
     func testRawFileReadsEveryStoredHalfFloat() throws {
         let folder = try Fixtures.temporaryFolder()
