@@ -10,8 +10,9 @@ jobs:
     # GitHub's macOS runners are Apple Silicon and have Metal, so the GPU
     # tests run. The golden-image tests render a public-domain raw that
     # scripts/fetch_test_assets.sh downloads and checks; tests that need
-    # the author's own sample files (not in the repo) skip themselves. The LibRaw XCFramework is built from a pinned tag by
-    # scripts/build_libraw.sh and cached by that tag.
+    # the author's own sample files (not in the repo) skip themselves.
+    # The LibRaw XCFramework is built by scripts/build_libraw.sh from a
+    # pinned tag and commit, and cached by that commit.
     runs-on: macos-15
     timeout-minutes: 45
     env:
@@ -85,7 +86,7 @@ jobs:
       # difference image; keep them so the failure can be seen.
       - name: Upload golden-image failures
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: golden-failures
           path: .build/golden-failures
