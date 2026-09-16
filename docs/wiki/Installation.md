@@ -4,6 +4,19 @@
 
 - macOS 15 (Sequoia) or 26 (Tahoe).
 - Apple Silicon. Verified on an M4 MacBook Air and an M1 Pro MacBook Pro; any M-series chip should work. The M1 Pro, with its larger GPU, is if anything faster in the editor.
+
+## Download
+
+Version 0.9.0 is a beta, published for review. The [Releases page](https://github.com/Harmanjit/latent-raw/releases) offers it as `Latent-0.9.0.zip`, for macOS 15 or newer on Apple Silicon.
+
+1. Download `Latent-0.9.0.zip` and unzip it.
+2. Drag `Latent.app` to Applications.
+3. Open it. The first time, Gatekeeper stops it, because the app is not notarised; follow [The Gatekeeper dialog](#the-gatekeeper-dialog).
+
+## Build from source
+
+Building needs, as well as the requirements above:
+
 - **Xcode 16 or newer**, the full application from the App Store, not just the Command Line Tools. The build needs `xcodebuild`, and Xcode must be the active developer directory:
 
 ```bash
@@ -16,16 +29,14 @@ Without that step the build fails with errors about missing tools even though Xc
 
 - About 1 GB of disk for the build.
 
-There is no prebuilt download yet. Building takes about ten minutes the first time.
-
-## Build from source
+Building takes about ten minutes the first time.
 
 ```bash
 git clone https://github.com/Harmanjit/latent-raw.git
 cd latent-raw
 brew install autoconf automake libtool pkg-config
 scripts/build_libraw.sh          # builds the LibRaw framework from a pinned commit, once
-scripts/make_app.sh 0.7.0        # release build, assembles build/Latent.app, signs it
+scripts/make_app.sh 0.9.0        # release build, assembles build/Latent.app, signs it
 open build/Latent.app
 ```
 
@@ -56,6 +67,7 @@ This is a one-time step per Mac. The app is sandboxed and hardened regardless of
 swift run latent-app                       # unsigned, unsandboxed, debug
 swift run latent-app /path/to/folder       # open a folder straight away
 scripts/fetch_test_assets.sh               # downloads the public-domain raw the golden tests render
+scripts/fetch_test_assets.sh --merge       # also the Photo Merge brackets (about 390 MB)
 swift test                                 # tests needing the author's own samples skip
 ```
 

@@ -18,7 +18,7 @@ An M1 Pro MacBook Pro, with its larger GPU, keeps slider re-renders under 3 ms a
 
 ## Design principles
 
-- **Non-destructive, always.** Originals are never modified. Edits are a small JSON document stored beside the image.
+- **Non-destructive, always.** Originals are never modified. Edits are a small JSON document, kept in each image's sidecar in the folder's `_latent/` directory.
 - **No master catalog.** Each folder is its own catalog, kept inside the folder in a `_latent/` directory. Move the folder and the catalog moves with it. Delete the directory and the photos are untouched.
 - **Sidecars are the truth.** An XMP sidecar per image holds ratings, keywords, the edit, history and snapshots. The database is a cache that can be rebuilt from them.
 - **Minimum compute.** Nothing runs on a timer. When you are not interacting, the app draws nothing. Only the visible scope is computed. Thumbnails come from the camera's embedded preview unless the image was edited.
@@ -26,4 +26,4 @@ An M1 Pro MacBook Pro, with its larger GPU, keeps slider re-renders under 3 ms a
 
 ## What it is not
 
-Latent is not trying to replace the cross-platform editors for people who need Windows or Linux, tethering, printing, or a plugin ecosystem. It is a focused tool for one kind of machine, built to be the fastest thing you can run on it.
+Latent is not trying to replace the cross-platform editors for people who need Windows or Linux, tethering, or a plugin ecosystem. It is a focused tool for one kind of machine, built to be the fastest thing you can run on it.

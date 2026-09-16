@@ -5,7 +5,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 ## Cameras and files
 
 - **Bayer sensors only.** Fujifilm X-Trans, Sigma Foveon, monochrome and four-colour sensors are read for metadata but do not render.
-- **Tested on one camera.** The only raw file in the test suite is a Nikon D750 NEF. LibRaw supports hundreds of cameras and the pipeline is generic, but colour and exposure on other cameras have not been checked against a reference.
+- **Colour checked on one camera.** The golden-image tests, which compare renders with reference images, use a Nikon D750 NEF. The Photo Merge tests also read raws from a Canon EOS 5D Mark II and a Nikon D200, but don't check their colour. LibRaw supports hundreds of cameras and the pipeline is generic, but colour and exposure on other cameras have not been checked against a reference.
 - **Camera matrix colour only.** Colour comes from the camera's characterisation matrix. There are no camera-matching profiles, so the default rendering will not match the in-camera JPEG look.
 - **Lens profiles** cover the bundled Lensfun subset; a lens the matcher cannot identify gets manual sliders only.
 - **No DNG export.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is fixed at two stops. PNG and TIFF are SDR only.
@@ -27,11 +27,11 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **The sandbox limits the sidebar** to folders inside a favourite. Anything else needs Open Folder, or adding a folder that contains it.
 - **Subfolder include/independent choices are not stored in sidecars.** They live only in the catalog database, so rebuilding the catalog, including the automatic rebuild of a damaged database, resets them and asks again. Changing the choice moves no existing sidecars or thumbnails.
 - **No video, no plugins.**
-- **Metadata editing** is limited to rating, label, flag and keywords. Title, caption and copyright are not editable. Keywords apply to one image at a time, not to a multiple selection.
+- **Metadata editing** is limited to rating, flag and keywords. Colour labels, title, caption and copyright can't be set. Keywords apply to one image at a time, not to a multiple selection.
 - **Finder tags are read, never written,** and a tag changed in Finder while the folder is open shows only when the folder is opened again.
-- **Undo in the Library has edges.** It covers ratings, flags, rotation, keywords, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export is running.
+- **Undo in the Library has edges.** It covers ratings, flags, rotation, keywords, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export, print, contact sheet or Photo Merge is running.
 - **Rename is one image at a time.** There is no batch rename.
-- **Rename, Move and Copy work only in the Library grid,** and not while an export is running.
+- **Rename, Move and Copy work only in the Library grid,** and not while an export, print, contact sheet or Photo Merge is running.
 - **A move takes only the raw file.** A JPEG shot alongside it (RAW+JPEG) and an `.xmp` sidecar another application put beside the raw stay where they were.
 - **A move to another disk copies, then deletes the original.** If Latent crashes or is force-quit during a long copy, a hidden `.latent-transfer-…` file can be left in the destination. The original is still in place, and the hidden file can be deleted.
 - **Arranging the Custom order needs dragging.** There are no keys for it.
@@ -50,7 +50,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 ## Photo Merge
 
 - **HDR, Panorama and HDR Panorama.** HDR Panorama (⌃⇧M) is **experimental**: it works and is tested end to end, but only against synthetic sweeps and against overlapping windows cut out of a real bracket, because no real HDR panorama exists to check it with. A real bracketed sweep — changing light, parallax across positions, brackets that drift — has never been tried. Focus stacking isn't planned (Lightroom doesn't have it either).
-- **Panoramas are one row.** One sweep, left to right or right to left. Several rows stacked into a grid, and full 360° panoramas that join back to their start, aren't built. (The corner matcher the plan said they would need does exist now — it is the panorama's registration fallback — but the rest of the work hasn't been done.)
+- **Panoramas are one row.** One sweep, left to right or right to left. Several rows stacked into a grid, and full 360° panoramas that join back to their start, aren't built.
 - **Parallax.** When the camera moves sideways instead of turning on the spot, near things shift against far things and no stitch lines both up: edges close to the camera can look doubled. The dialog warns when the photos only match to several pixels.
 - **A panorama too big to edit is made smaller, never refused.** The dialog says what it would have been, what it will be and why (memory, or the largest picture the graphics processor can hold), and waits for you to agree. The limit is this Mac's: the same sweep merges larger on a bigger machine.
 - **A photo that can't be joined is left out** and named in a warning; the panorama is made from the rest. The usual cause is too little overlap — aim for about 30%.
@@ -86,5 +86,5 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 - **Golden-image tests don't cover AI noise reduction** or gain maps. Every other stage of the render is pinned against reference images; Core ML output varies between compute units, so neural denoise has only unit tests. What the magnifier and the slideshow draw on screen, and printed pages, aren't pictured by any test either.
 - **Red-eye's thresholds are written twice,** in `RedEye.metal` and in `RedEyeTuning` (`RedEye.swift`), which Auto uses to decide an eye is red. They are kept in step by hand; no test ties them.
-- Tests that render a raw need a sample that is not in the repository. `scripts/fetch_test_assets.sh` downloads the public-domain one the golden-image tests use; a few tests use the author's own samples and skip everywhere else, CI included.
+- Tests that render a raw need a sample that is not in the repository. `scripts/fetch_test_assets.sh` downloads the public-domain one the golden-image tests use, and with `--merge` the freely licensed brackets the Photo Merge tests use (about 390 MB), which skip without them; a few tests use the author's own samples and skip everywhere else, CI included.
 - **`LATENT_RAW_INPROCESS=1` only works in debug builds.** `scripts/make_app.sh` always builds release, so no bundle it makes can decode in process.

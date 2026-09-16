@@ -105,11 +105,11 @@ With several images selected, ⇧⌘V pastes copied settings onto all of them, a
 
 Ratings, flags, keywords, edits, snapshots, history and the thumbnail go with each image. If the destination already has a file of that name, or a sidecar left behind by one, the image gets a number ("DSC_0107 2.NEF") and its old name is kept in the sidecar as its original file name. A folder without a catalog gets a `_latent` folder only when an image brings a sidecar. A subfolder inside the open catalog that is still to be asked about (one just made with New Folder in the panel, say) is asked about first: include it in this catalog, or keep it separate as a catalog of its own. One you chose to keep separate is a catalog of its own.
 
-Progress shows in the status bar with a stop button. Stopping, or quitting, finishes the image under way, so no image is left half-moved; quitting waits up to a minute for it, and an image still being copied then stays where it was. While an export is running, images can't be moved, copied, renamed or dropped on a folder, and those can't be undone. ⌘Z moves images back; undoing a copy puts the copy and its sidecar in the Trash. Nothing is ever overwritten or permanently deleted, apart from thumbnails, which are made again, a moved image's old sidecar, whose contents are already in the new one, and, for a move to another disk, the original once its copy is complete.
+Progress shows in the status bar with a stop button. Stopping, or quitting, finishes the image under way, so no image is left half-moved; quitting waits up to a minute for it, and an image still being copied then stays where it was. While an export, print, contact sheet or Photo Merge is running, images can't be moved, copied, renamed or dropped on a folder, and those can't be undone. ⌘Z moves images back; undoing a copy puts the copy and its sidecar in the Trash. Nothing is ever overwritten or permanently deleted, apart from thumbnails, which are made again, a moved image's old sidecar, whose contents are already in the new one, and, for a move to another disk, the original once its copy is complete.
 
 **Rename…** (F2, the File menu or the right-click menu) renames one image, keeping its extension; its sidecar and thumbnail follow. A name that differs only in letter case works.
 
-These commands work in the Library grid, and not while an export is running.
+These commands work in the Library grid, and not while an export, print, contact sheet or Photo Merge is running.
 
 ## Slideshow
 

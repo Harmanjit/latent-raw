@@ -6,7 +6,7 @@ Latent makes no network requests. There is no telemetry, analytics, crash report
 
 ## Sandbox and hardened runtime
 
-The app runs in the App Sandbox with the hardened runtime, signed ad hoc. It can reach only folders you choose in an open panel, folders you add to the sidebar's favourites (by Add Folder… or by dragging them in) and everything inside those, plus its own container under `~/Library/Containers/com.latent.app`. Each is remembered between launches by a security-scoped bookmark; removing a favourite forgets its bookmark. The same kind of bookmark remembers the last five folders you moved or copied images to, the folder and applications chosen for Edit in External Editor, and the songs added to the slideshow. No Apple developer account is involved; the sandbox is enforced from the signature regardless.
+The app runs in the App Sandbox with the hardened runtime, signed ad hoc. It can reach only folders and files you choose in an open panel, folders you add to the sidebar's favourites (by Add Folder… or by dragging them in) and everything inside those, plus its own container under `~/Library/Containers/com.latent.app`. Each is remembered between launches by a security-scoped bookmark; removing a favourite forgets its bookmark. The same kind of bookmark remembers the last five folders you moved or copied images to, the folder and applications chosen for Edit in External Editor, and the songs added to the slideshow. No Apple developer account is involved; the sandbox is enforced from the signature regardless.
 
 Besides files and bookmarks, the app has one entitlement: `com.apple.security.print`, without which the sandbox refuses to let File > Print… reach the printing system. It grants nothing else, no network and no files.
 
@@ -36,7 +36,7 @@ Environment variables that change how the app works on the inside, such as `LATE
 
 ## Supply chain
 
-LibRaw is pinned by commit hash and refused if the tag moves. The one Swift dependency is pinned to an exact version. Model weights are pinned by repository revision and SHA-256 in the conversion scripts. Dependabot watches the Actions and Python dependencies.
+LibRaw is pinned by commit hash and refused if the tag moves. The one Swift dependency is pinned to an exact version. The conversion scripts pin NAFNet's weights by repository revision and SHA-256, and SegFormer's by repository revision only. The Segment Anything packages are Apple's own Core ML conversion, committed to the repository with no script to fetch or check them. Dependabot watches the Actions and Python dependencies.
 
 ## What is written, and where
 

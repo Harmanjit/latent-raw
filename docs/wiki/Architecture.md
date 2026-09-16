@@ -39,7 +39,7 @@ A file's Finder tags are cached in the catalog (`images.finder_tags`) and read a
 
 ## Machine learning
 
-Models are bundled as Core ML packages and compiled on first use into the app container. They run on the GPU by default; the Neural Engine is opt-in because its compiler hangs on some macOS 15 builds. Conversion scripts in `scripts/` pin the source revisions and verify checksums. When macOS runs low on memory, loaded models, cached render textures and, if critical, the AI denoise result are released and rebuilt when next needed.
+Models are bundled as Core ML packages and compiled on first use into the app container. They run on the GPU by default; the Neural Engine is opt-in because its compiler hangs on some macOS 15 builds. The conversion scripts in `scripts/` pin their source revisions, and NAFNet's also checks the weights' SHA-256; the Segment Anything packages are Apple's own conversion, with no script. When macOS runs low on memory, loaded models, cached render textures and, if critical, the AI denoise result are released and rebuilt when next needed.
 
 ## Tests and CI
 
