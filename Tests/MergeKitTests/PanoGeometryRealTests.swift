@@ -13,7 +13,7 @@ import RawCore
 final class PanoGeometryRealTests: XCTestCase {
     private func photos(_ folder: String) throws -> [URL] {
         try XCTSkipIf(ProcessInfo.processInfo.environment["LATENT_CI_ASSETS_ONLY"] == "1", "CI assets only")
-        let directory = AlignTestSupport.assets.appendingPathComponent(folder)
+        let directory = TestAssets.url(folder)
         guard FileManager.default.fileExists(atPath: directory.path) else {
             throw XCTSkip("TestAssets/\(folder) is missing")
         }

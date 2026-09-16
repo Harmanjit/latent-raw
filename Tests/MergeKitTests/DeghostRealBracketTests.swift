@@ -13,9 +13,10 @@ import RawCore
 /// blend of several), it leaves out a sane share of each frame, and it
 /// doesn't raise the merge's GPU memory.
 final class DeghostRealBracketTests: XCTestCase {
-    static let assets = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("TestAssets/merge")
+    /// Through `TestAssets`, so LATENT_CI_ASSETS_ONLY=1 hides the brackets
+    /// here as it hides them everywhere else and these tests skip, the way
+    /// they do on CI.
+    static let assets = TestAssets.url("merge")
 
     /// The raws of a bracket folder, or a skip.
     static func bracket(_ name: String, extension ext: String) throws -> [URL] {

@@ -126,10 +126,16 @@ final class HDRPanoramaMergeSheetModel: ObservableObject, Identifiable {
 
     /// Starts measuring the photos; `phase` follows. Once only (changing
     /// the projection starts again by itself).
-    func start() {
+    ///
+    /// - Parameter after: an analysis being thrown away, waited for before
+    ///   this one starts, as in the Panorama dialog: two would share one
+    ///   GPU and only compete.
+    func start(after previous: Task<Void, Never>? = nil) {
         guard analysis == nil else { return }
         let engine = engine, urls = urls, options = options
         analysis = Task { [weak self] in
+            await previous?.value
+            guard !Task.isCancelled else { return }
             do {
                 let result = try await engine.analyse(urls, options: options)
                 guard let self, !Task.isCancelled else { return }
@@ -161,7 +167,7 @@ final class HDRPanoramaMergeSheetModel: ObservableObject, Identifiable {
         running.cancel()
         analysis = nil
         phase = .analysing
-        start()
+        start(after: running)
     }
 
     var analysisResult: HDRPanoramaAnalysis? {

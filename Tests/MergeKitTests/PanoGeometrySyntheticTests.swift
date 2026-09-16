@@ -250,6 +250,85 @@ final class PanoGeometrySyntheticTests: XCTestCase {
         _ = inputs
     }
 
+    // MARK: - The two halves
+
+    /// `solve` is `solveCameras` then `project`, and the two together give
+    /// exactly what the one gave: the split is a seam, not a change.
+    func testSolvingInTwoStepsGivesTheSameLayout() throws {
+        let (inputs, whole) = try Self.solvedSweep()
+        let solver = PanoramaLayoutSolver()
+        let split = try solver.project(solver.solveCameras(inputs))
+        XCTAssertEqual(split.layout, whole.layout)
+        XCTAssertEqual(split.report.leftOut, whole.report.leftOut)
+        XCTAssertEqual(split.report.focalLengthPixels, whole.report.focalLengthPixels)
+        XCTAssertEqual(split.report.rmsErrorPixels, whole.report.rmsErrorPixels)
+        XCTAssertEqual(split.report.frames, whole.report.frames)
+        XCTAssertEqual(split.report.widthDegrees, whole.report.widthDegrees)
+    }
+
+    /// The point of the split: the projection reaches the canvas and the
+    /// crop and nothing before them, so the dialog's picker can project the
+    /// cameras it already has instead of registering the photos again.
+    ///
+    /// Each projection is also what running the whole thing that way would
+    /// have given, so nothing is lost by reusing the cameras.
+    func testProjectingAgainCostsAFractionAndMatchesAFullSolve() throws {
+        let (inputs, _) = try Self.solvedSweep()
+        let clock = ContinuousClock()
+        let cameraStart = clock.now
+        let solved = try PanoramaLayoutSolver().solveCameras(inputs)
+        let cameraSeconds = Self.seconds(clock.now - cameraStart)
+
+        var projectSeconds = 0.0
+        for projection in [PanoramaProjection.cylindrical, .spherical, .perspective] {
+            let solver = PanoramaLayoutSolver(options: PanoramaLayoutOptions(projection: projection))
+            let start = clock.now
+            let again = try solver.project(solved)
+            projectSeconds += Self.seconds(clock.now - start)
+            XCTAssertEqual(again.layout.canvas.projection, projection)
+            // The same as measuring the photos all over again with it.
+            let fromScratch = try solver.solve(inputs)
+            XCTAssertEqual(again.layout, fromScratch.layout, "\(projection)")
+        }
+        let each = projectSeconds / 3
+        print(String(format: "pano-synthetic | cameras %.3f s, projection %.4f s each (%.1fx cheaper)",
+                     cameraSeconds, each, cameraSeconds / max(each, 1e-9)))
+        XCTAssertLessThan(each, cameraSeconds / 4,
+                          "a new projection must be far cheaper than solving the cameras again")
+    }
+
+    static func seconds(_ duration: Duration) -> Double {
+        Double(duration.components.seconds) + Double(duration.components.attoseconds) * 1e-18
+    }
+
+    /// Cancelling the task stops the solve where it is. Without a check
+    /// anywhere inside it, a dialog closed with Cancel — or a projection
+    /// changed — left the whole registration and camera solve running to
+    /// the end, on the same GPU as the analysis that replaced it.
+    func testACancelledSolveStopsInsteadOfRunningToTheEnd() async throws {
+        let inputs = Self.sweep.enumerated().map { index, camera in
+            Self.frame(camera, index: index, exifExposure: camera.exposure, exifFocal: Self.focal)
+        }
+        let clock = ContinuousClock()
+        let wholeStart = clock.now
+        _ = try PanoramaLayoutSolver().solve(inputs)
+        let wholeSeconds = Self.seconds(clock.now - wholeStart)
+
+        let task = Task.detached(priority: .userInitiated) { try PanoramaLayoutSolver().solve(inputs) }
+        task.cancel()
+        let cancelledStart = clock.now
+        do {
+            _ = try await task.value
+            XCTFail("a cancelled solve must give up, not finish")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("\(error)")
+        }
+        let cancelledSeconds = Self.seconds(clock.now - cancelledStart)
+        print(String(format: "pano-synthetic | solve %.3f s, cancelled after %.4f s", wholeSeconds, cancelledSeconds))
+        XCTAssertLessThan(cancelledSeconds, wholeSeconds / 2, "it gave up at the first check, not at the end")
+    }
+
     func testNarrowSweepIsPerspectiveAndABracketIsRefused() throws {
         // Three frames 15° apart: about 56° across, so Perspective.
         let narrow = [-15.0, 0, 15].enumerated().map { k, yaw in

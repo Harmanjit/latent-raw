@@ -8,11 +8,11 @@ import RawCore
 
 /// What the alignment tests share: a real scene to cut synthetic frames
 /// from, a CPU reference for the GPU warp, and the real brackets.
+///
+/// Sample files are looked up through `TestAssets.url(_:)`, never built
+/// from `#filePath` here, so LATENT_CI_ASSETS_ONLY=1 hides everything CI
+/// hasn't got and a parity run really does skip what CI skips.
 enum AlignTestSupport {
-    static let repository = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    static let assets = repository.appendingPathComponent("TestAssets")
-
     /// A planar Float32 image.
     struct Plane {
         let width: Int
@@ -31,9 +31,9 @@ enum AlignTestSupport {
     static func scene() throws -> Plane {
         lock.lock(); defer { lock.unlock() }
         if let scene = cachedScene { return scene }
-        let url = assets.appendingPathComponent("golden_nikon_d750_cc0.nef")
+        let url = TestAssets.url(TestAssets.goldenName)
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw XCTSkip("TestAssets/golden_nikon_d750_cc0.nef is missing")
+            throw XCTSkip("TestAssets/\(TestAssets.goldenName) is missing")
         }
         let gpu = try HDRTestSupport.gpu()
         let file = try RawFile(path: url.path)
@@ -221,7 +221,7 @@ enum AlignTestSupport {
     /// frame 2 x 2 binned by the HDR analysis kernel, with its exposure
     /// measured against its neighbour as the HDR merge measures it.
     static func realBracket(_ folder: String) throws -> (images: [AlignmentImage], names: [String]) {
-        let directory = assets.appendingPathComponent("merge").appendingPathComponent(folder)
+        let directory = TestAssets.url("merge").appendingPathComponent(folder)
         guard FileManager.default.fileExists(atPath: directory.path) else {
             throw XCTSkip("TestAssets/merge/\(folder) is missing")
         }

@@ -38,6 +38,10 @@ final class FakePanoramaEngine: PanoramaMerging, @unchecked Sendable {
     private var _previews: [(options: PanoramaMergeOptions, longEdge: Int)] = []
     private var _releases = 0
     private var _previewError: Error?
+    /// How many analyses are running at once, and the most there have ever
+    /// been: a re-analysis must wait for the one it replaces.
+    private var _running = 0
+    private var _peakRunning = 0
     private var merges = 0
     let script: Script
     let reports: [PanoramaMergeProgress]
@@ -57,6 +61,7 @@ final class FakePanoramaEngine: PanoramaMerging, @unchecked Sendable {
     var analyseOptions: [PanoramaMergeOptions] { lock.withLock { _analyseOptions } }
     var previews: [(options: PanoramaMergeOptions, longEdge: Int)] { lock.withLock { _previews } }
     var releases: Int { lock.withLock { _releases } }
+    var peakConcurrentAnalyses: Int { lock.withLock { _peakRunning } }
 
     func failPreviews(with error: Error?) { lock.withLock { _previewError = error } }
     func closeGate() { lock.withLock { _gateOpen = false } }
@@ -67,7 +72,12 @@ final class FakePanoramaEngine: PanoramaMerging, @unchecked Sendable {
 
     func analyse(_ urls: [URL], options: PanoramaMergeOptions) async throws -> PanoramaMergeAnalysis {
         note("analyse \(urls.count) \(options.projection.rawValue)")
-        lock.withLock { _analyseOptions.append(options) }
+        lock.withLock {
+            _analyseOptions.append(options)
+            _running += 1
+            _peakRunning = max(_peakRunning, _running)
+        }
+        defer { lock.withLock { _running -= 1 } }
         while !lock.withLock({ _gateOpen }) {
             try Task.checkCancellation()
             try await Task.sleep(for: .milliseconds(5))
@@ -141,8 +151,15 @@ enum PanoramaFixtures {
     static func analysis(urls: [URL], leftOut: Set<Int> = [], outputSize: PanoramaOutputSize = fits,
                          projection: PanoramaProjection = .cylindrical,
                          warnings: [PanoramaMergeWarning] = [],
-                         autoCropRect: CGRect = CGRect(x: 960, y: 320, width: 7_680, height: 2_240))
+                         autoCropRect: CGRect? = nil)
         -> PanoramaMergeAnalysis {
+        // A plausible Auto Crop rectangle for whatever canvas is asked for:
+        // the middle 80% across and 70% down, so the cropped size the dialog
+        // shows is the same shape of number whatever the panorama's size.
+        let crop = autoCropRect ?? CGRect(x: Double(outputSize.fullWidth) * 0.1,
+                                          y: Double(outputSize.fullHeight) * 0.1,
+                                          width: Double(outputSize.fullWidth) * 0.8,
+                                          height: Double(outputSize.fullHeight) * 0.7)
         let frames = urls.enumerated().map { index, url in
             PanoramaMergeFrame(url: url, captureTime: Date(timeIntervalSince1970: 1_789_498_800 + Double(index)),
                                exposureSeconds: 1.0 / 250, iso: 200, aperture: 5.6,
@@ -157,7 +174,7 @@ enum PanoramaFixtures {
         }
         let canvas = PanoramaCanvas(projection: projection, pixelsPerRadian: 5_000, origin: SIMD2(-4_800, -1_600),
                                     width: outputSize.fullWidth, height: outputSize.fullHeight)
-        let layout = PanoramaLayout(cameras: cameras, canvas: canvas, autoCropRect: autoCropRect)
+        let layout = PanoramaLayout(cameras: cameras, canvas: canvas, autoCropRect: crop)
         var all = warnings
         if !leftOut.isEmpty, !warnings.contains(where: { if case .framesLeftOut = $0 { return true } else { return false } }) {
             all.insert(.framesLeftOut(indices: leftOut.sorted()), at: 0)
@@ -302,7 +319,16 @@ final class PanoramaMergeSheetModelTests: XCTestCase {
         XCTAssertEqual(rows[1].spoken,
                        "DSC_0107.NEF, 1/250 s, ƒ/5.6, ISO 200, points at the centre of the panorama, "
                            + "no brightness correction")
-        XCTAssertEqual(model.sizeText, "9,600 × 3,200 (31 MP)")
+        // Auto Crop is on by default, so Size is the picture that opens —
+        // the same one the preview beside it shows — and the note says the
+        // whole stitch is still in the file.
+        XCTAssertEqual(model.sizeText, "7,680 × 2,240 (17 MP)")
+        XCTAssertEqual(model.wholeCanvasNote,
+                       "Auto Crop hides the blank edges. The whole 9,600 × 3,200 stitch stays in the file.")
+        model.autoCrop = false
+        XCTAssertEqual(model.sizeText, "9,600 × 3,200 (31 MP)", "with Auto Crop off, the whole canvas opens")
+        XCTAssertNil(model.wholeCanvasNote, "nothing to explain when nothing is cropped")
+        model.autoCrop = true
         XCTAssertEqual(model.coverageText, "186° across, 44° tall")
         XCTAssertEqual(model.estimatedSizeText, "About 245 MB")
         XCTAssertEqual(model.destinationName, "DSC_0106-Pano.dng")
@@ -374,7 +400,12 @@ final class PanoramaMergeSheetModelTests: XCTestCase {
         XCTAssertEqual(model.downsampleText,
                        "This panorama would be 29,195 × 7,664 pixels (224 MP). The largest this Mac can edit is "
                            + "12,482 × 3,276 (41 MP), limited by memory, so the photos will be merged at 43%.")
-        XCTAssertEqual(model.sizeText, "12,482 × 3,276 (41 MP)", "the size it will really be")
+        // 80% x 70% of a 29,195 x 7,664 canvas, merged at 43%: what Auto
+        // Crop opens, not the whole 12,482 x 3,276 canvas behind it.
+        XCTAssertEqual(model.sizeText, "9,984 × 2,293 (23 MP)", "the picture the merge will really open")
+        XCTAssertEqual(model.wholeCanvasNote,
+                       "Auto Crop hides the blank edges. The whole 12,482 × 3,276 stitch stays in the file.")
+        XCTAssertEqual(model.estimatedSizeText, "About 245 MB", "the file holds the whole stitch")
         XCTAssertTrue(model.needsDownsamplingConsent)
         XCTAssertEqual(model.consentLabel, "Merge at 43%")
         XCTAssertEqual(model.mergeButtonTitle, "Merge at 43%", "the button says what it will do")
@@ -465,6 +496,30 @@ final class PanoramaMergeSheetModelTests: XCTestCase {
         XCTAssertEqual(model.projectionHint, "Straight lines stay straight; only for a narrow sweep.")
         XCTAssertEqual(model.options,
                        PanoramaMergeOptions(projection: .perspective, autoCrop: false, autoSettings: true))
+    }
+
+    /// The analysis being replaced is waited for before the new one starts.
+    /// Two would share one GPU and one set of measurements in the engine,
+    /// and clicking through the four projections would stack up four.
+    func testChangingTheProjectionWaitsForTheAnalysisItReplaces() async {
+        let engine = FakePanoramaEngine(analysis: .success(analysis()))
+        engine.closeGate()
+        let (model, _) = model(engine)
+        model.start()
+        await waitUntil("the first analysis") { engine.analyseOptions.count == 1 }
+
+        // Three clicks through the picker while the first is still stuck.
+        model.projection = .cylindrical
+        model.projection = .spherical
+        model.projection = .perspective
+        XCTAssertEqual(model.phase, .analysing)
+        XCTAssertEqual(engine.peakConcurrentAnalyses, 1, "the replaced one is cancelled and waited for")
+
+        engine.openGate()
+        engine.setAnalysis(analysis(projection: .perspective))
+        await waitUntil("the last list") { model.analysisResult != nil }
+        XCTAssertEqual(engine.peakConcurrentAnalyses, 1, "never two at once")
+        XCTAssertEqual(engine.analyseOptions.last?.projection, .perspective, "the last one asked for wins")
     }
 
     /// Automatic first, Auto Crop on, Auto Settings off; after that, as
@@ -781,9 +836,63 @@ final class PanoramaMergeJobTests: XCTestCase {
         let result = try XCTUnwrap(sweep.library.images.first { $0.fileName == "DSC_0106-Pano.dng" })
         let storedJSON = try await sweep.library.editStack(for: result)
         XCTAssertNil(storedJSON)
-        XCTAssertEqual(sweep.library.lastError,
-                       "Panorama merge DSC_0106-Pano.dng finished, but: Auto Crop and Auto Settings couldn’t be "
-                           + "worked out: no colour profile")
+        // Auto Settings was off, so only Auto Crop is named; and the
+        // panorama is there, so this is a note in the panel, not a red
+        // error in the status bar.
+        XCTAssertNil(sweep.library.lastError)
+        XCTAssertEqual(queue.notes, ["Auto Crop couldn’t be worked out: no colour profile"])
+        XCTAssertTrue(queue.summary.hasPrefix("Merged DSC_0106-Pano.dng"))
+    }
+
+    /// Both options on, so both are named.
+    func testBothPanoramaOptionsAreNamedWhenBothAreOn() async throws {
+        let sweep = try await sweep()
+        struct Broken: Error, LocalizedError { var errorDescription: String? { "no colour profile" } }
+        let engine = FakePanoramaEngine(analysis: .success(analysis(sweep)))
+        let queue = queue()
+        queue.startPanorama(analysis(sweep),
+                            options: PanoramaMergeOptions(projection: .automatic, autoCrop: true, autoSettings: true),
+                            records: sweep.records, library: sweep.library, engine: engine,
+                            firstEdit: { _ in throw Broken() })
+        await queue.waitUntilDone()
+        XCTAssertEqual(queue.notes, ["Auto Crop and Auto Settings couldn’t be worked out: no colour profile"])
+    }
+
+    /// Auto Crop off, Auto Settings on: the other single name.
+    func testOnlyAutoSettingsIsNamedWhenAutoCropIsOff() async throws {
+        let sweep = try await sweep()
+        struct Broken: Error, LocalizedError { var errorDescription: String? { "no colour profile" } }
+        let engine = FakePanoramaEngine(analysis: .success(analysis(sweep)))
+        let queue = queue()
+        queue.startPanorama(analysis(sweep),
+                            options: PanoramaMergeOptions(projection: .automatic, autoCrop: false, autoSettings: true),
+                            records: sweep.records, library: sweep.library, engine: engine,
+                            firstEdit: { _ in throw Broken() })
+        await queue.waitUntilDone()
+        XCTAssertEqual(queue.notes, ["Auto Settings couldn’t be worked out: no colour profile"])
+    }
+
+    /// "Why was this photo left out" is answerable a day later: the recipe
+    /// the merge wrote reaches the catalog, and the library panel's Merged
+    /// rows are made from it.
+    func testTheResultsRecipeReadsBackForTheLibraryPanel() async throws {
+        let sweep = try await sweep()
+        let engine = FakePanoramaEngine(analysis: .success(analysis(sweep)))
+        let queue = queue()
+        queue.startPanorama(analysis(sweep), options: PanoramaMergeOptions(), records: sweep.records,
+                            library: sweep.library, engine: engine)
+        await queue.waitUntilDone()
+        let result = try XCTUnwrap(sweep.library.images.first { $0.fileName == "DSC_0106-Pano.dng" })
+        let stored = try await sweep.library.mergeRecipe(for: result)
+        let json = try XCTUnwrap(stored)
+        let summary = try XCTUnwrap(MergeRecipeSummary(json: json))
+        XCTAssertEqual(summary.rows.first, MergeRecipeSummary.Row(label: "Merged", value: "Panorama"))
+        let from = try XCTUnwrap(summary.rows.first { $0.label.hasPrefix("From") })
+        XCTAssertEqual(from.value, BracketFolder.names.joined(separator: ", "))
+        // A source photo has no recipe of its own, so no Merged rows.
+        let source = try XCTUnwrap(sweep.library.images.first { $0.fileName == BracketFolder.names[0] })
+        let sourceRecipe = try await sweep.library.mergeRecipe(for: source)
+        XCTAssertNil(sourceRecipe)
     }
 
     /// Quitting asks, as for exports and contact sheets, then stops the

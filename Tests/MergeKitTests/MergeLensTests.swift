@@ -192,8 +192,7 @@ final class MergeLensTests: XCTestCase {
     /// with a real reference frame's metadata matches the same lens profile
     /// as that raw. Pixels don't take part in matching, so they are small.
     func testMergedDNGMatchesTheSourceRawsLensProfile() throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("TestAssets/merge")
+        let root = TestAssets.url("merge")
         let raws = ["ihrke-tripod-bracket/IMG_7224.CR2", "empa-crete-seashore-1/DSC_0044.NEF"]
             .map { root.appendingPathComponent($0) }
         guard raws.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {

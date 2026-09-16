@@ -75,3 +75,57 @@ final class PanoramaPreviewCache: @unchecked Sendable {
 
     func release() { lock.withLock { frames = nil } }
 }
+
+/// The last analysis's decoded photos and its solved cameras, kept so that
+/// changing the projection needn't read the raw files or register the pairs
+/// again.
+///
+/// Changing the projection in the Panorama dialog re-analyses, because the
+/// canvas, the size and the warnings all depend on it — but nothing before
+/// the canvas does. Without this, one click on the picker opened and
+/// decoded every raw through the XPC decoder and ran the whole geometry
+/// solve again (tens of seconds for 17 photos) to change how already-solved
+/// cameras are flattened.
+///
+/// The thumbnails inside `solved` share their storage with `inputs`, so
+/// holding both costs one copy of the reduced photos.
+final class PanoramaAnalysisCache: @unchecked Sendable {
+    /// One analysis's measurements.
+    struct Entry: Sendable {
+        /// The photos as they were asked for, which is how the cache is
+        /// looked up.
+        let askedURLs: [URL]
+        /// The same photos in capture order, which is the order everything
+        /// else here is in.
+        let frameURLs: [URL]
+        let inputs: [PanoramaFrameInput]
+        let clipLevels: [Float]
+        let solved: PanoramaCameraLayout
+
+        /// The reduced photos' memory, which is nearly all of it.
+        var byteCount: Int {
+            inputs.reduce(0) { $0 + ($1.thumbnail.rgba.count + $1.thumbnail.clippedShare.count) * 4 }
+        }
+    }
+
+    private let lock = NSLock()
+    private var entry: Entry?
+
+    /// Most memory the decoded photos may take, as for the preview frames:
+    /// 17 photos of 24 MP at 1/8 come to about 130 MB, so only an unusually
+    /// long sweep of unusually large photos goes over. Past it nothing is
+    /// kept and changing the projection measures again, as it used to.
+    static let budgetBytes = 512 << 20
+
+    func store(_ made: Entry) {
+        lock.withLock { entry = made.byteCount <= Self.budgetBytes ? made : nil }
+    }
+
+    /// The measurements for photos `urls`, or nil when they were never
+    /// kept, were released, or belong to another set of photos.
+    func entry(for urls: [URL]) -> Entry? {
+        lock.withLock { entry?.askedURLs == urls ? entry : nil }
+    }
+
+    func release() { lock.withLock { entry = nil } }
+}

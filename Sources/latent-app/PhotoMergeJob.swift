@@ -33,8 +33,6 @@ enum PhotoMergeKind: String, Equatable, Sendable {
         }
     }
 
-    /// What the status bar calls the result's first edit when it fails.
-    var firstEditName: String { self == .hdr ? "Auto Settings" : "Auto Crop and Auto Settings" }
 }
 
 /// How far a merge has got, whichever engine is making it: the HDR and the
@@ -111,6 +109,14 @@ final class PhotoMergeQueue: ObservableObject {
     /// How the last merge ended, for the panel: "Merged DSC_0107-HDR.dng
     /// in 8.2 s". Failures go to the status bar instead.
     @Published private(set) var summary = ""
+    /// What is worth saying about a merge that worked: the warnings the
+    /// dialog would have shown (HDR Merge Without Dialog has no other
+    /// channel for them), or a first edit that couldn't be worked out.
+    ///
+    /// Notes, not failures — the photo is there — so they go to the panel
+    /// beside the summary, where they can be read whole, rather than to the
+    /// status bar, which is red, one line and announced as an error.
+    @Published private(set) var notes: [String] = []
 
     /// The GPU slot shared with exports.
     let gpuSlot: ExportQueue
@@ -215,7 +221,8 @@ final class PhotoMergeQueue: ObservableObject {
             guard let self else { return .cancelled }
             let job = MergeJob(
                 kind: .panorama, reference: reference, records: records, library: library, catalog: catalog,
-                generation: generation, firstEdit: firstEdit, firstEditStage: "Finishing the panorama",
+                generation: generation, firstEdit: firstEdit,
+                firstEditName: Self.panoramaFirstEditName(options), firstEditStage: "Finishing the panorama",
                 merge: { destination, sources, prepareSidecar, progress in
                     _ = try await engine.merge(analysis, options: options, sources: sources, to: destination,
                                                prepareSidecar: prepareSidecar,
@@ -250,7 +257,9 @@ final class PhotoMergeQueue: ObservableObject {
             guard let self else { return .cancelled }
             let job = MergeJob(
                 kind: .hdrPanorama, reference: reference, records: records, library: library, catalog: catalog,
-                generation: generation, firstEdit: firstEdit, firstEditStage: "Finishing the panorama",
+                generation: generation, firstEdit: firstEdit,
+                firstEditName: Self.panoramaFirstEditName(options.panorama),
+                firstEditStage: "Finishing the panorama",
                 merge: { destination, sources, prepareSidecar, progress in
                     _ = try await engine.merge(analysis, options: options, sources: sources, to: destination,
                                                prepareSidecar: prepareSidecar,
@@ -286,6 +295,7 @@ final class PhotoMergeQueue: ObservableObject {
         isRunning = true
         progress = nil
         summary = ""
+        notes = []
         let outputKind: OutputJobs.Kind = switch kind {
         case .hdr: .photoMerge
         case .panorama: .panoramaMerge
@@ -348,6 +358,10 @@ final class PhotoMergeQueue: ObservableObject {
         let generation: Int
         /// The result's first edit; nil for none.
         let firstEdit: FirstEdit?
+        /// What to call that edit when it fails: only the options that are
+        /// actually on ("Auto Crop", not "Auto Crop and Auto Settings" when
+        /// Auto Settings was switched off).
+        let firstEditName: String
         /// The progress line while that edit is worked out.
         let firstEditStage: String
         /// Merges into `destination`, writing the result's sidecar through
@@ -360,9 +374,10 @@ final class PhotoMergeQueue: ObservableObject {
     private enum Outcome {
         /// `firstEdit`: the result's first edit, or why it couldn't be
         /// worked out; nil when not asked for or there's nothing to store.
+        /// `firstEditName`: what to call it if it failed.
         /// `problems`: anything else to say once the result is in, such as
         /// the warnings a merge without the dialog didn't show.
-        case merged(relPath: String, firstEdit: Result<String, Error>?, problems: [String])
+        case merged(relPath: String, firstEdit: Result<String, Error>?, firstEditName: String, problems: [String])
         case cancelled
         case failed(Error)
     }
@@ -411,7 +426,7 @@ final class PhotoMergeQueue: ObservableObject {
         let job = MergeJob(
             kind: .hdr, reference: records[referenceIndex], records: records, library: request.library,
             catalog: request.catalog, generation: request.generation, firstEdit: request.firstEdit,
-            firstEditStage: "Applying Auto Settings",
+            firstEditName: "Auto Settings", firstEditStage: "Applying Auto Settings",
             merge: { destination, sources, prepareSidecar, progress in
                 _ = try await engine.merge(analysis, options: options, sources: sources, to: destination,
                                            prepareSidecar: prepareSidecar,
@@ -419,10 +434,23 @@ final class PhotoMergeQueue: ObservableObject {
             })
         let outcome = await commit(job)
         // Without the dialog, its warnings are said once the merge is done.
-        guard request.withoutDialog, case .merged(let relPath, let edit, _) = outcome else { return outcome }
+        guard request.withoutDialog, case .merged(let relPath, let edit, let editName, _) = outcome
+        else { return outcome }
         let problems = analysis.warnings(reference: referenceIndex)
             .map { HDRMergeSheetModel.text(for: $0, frames: analysis.frames) }
-        return .merged(relPath: relPath, firstEdit: edit, problems: problems)
+        return .merged(relPath: relPath, firstEdit: edit, firstEditName: editName, problems: problems)
+    }
+
+    /// What a panorama's first edit is called, from the options that made
+    /// it: only the ones that are on, so a message never names a setting the
+    /// user had switched off. Never asked for with both off — there is no
+    /// first edit then.
+    static func panoramaFirstEditName(_ options: PanoramaMergeOptions) -> String {
+        switch (options.autoCrop, options.autoSettings) {
+        case (true, true): "Auto Crop and Auto Settings"
+        case (true, false): "Auto Crop"
+        default: "Auto Settings"
+        }
     }
 
     /// Plans a free name, has the engine merge into it with the sidecar
@@ -471,7 +499,7 @@ final class PhotoMergeQueue: ObservableObject {
                         edit = .failure(error)
                     }
                 }
-                return .merged(relPath: relPath, firstEdit: edit, problems: [])
+                return .merged(relPath: relPath, firstEdit: edit, firstEditName: job.firstEditName, problems: [])
             } catch {
                 // Something took the name after it was planned: the DNG's
                 // (the engine's write found a file there) or the sidecar's.
@@ -508,7 +536,7 @@ final class PhotoMergeQueue: ObservableObject {
     private func finish(_ kind: PhotoMergeKind, outcome: Outcome, elapsed: TimeInterval,
                         library: Library, catalog: Catalog) async {
         switch outcome {
-        case .merged(let relPath, let firstEdit, let extraProblems):
+        case .merged(let relPath, let firstEdit, let firstEditName, let extraProblems):
             let fileName = (relPath as NSString).lastPathComponent
             summary = String(format: "Merged %@ in %.1f s", fileName, elapsed)
             var problems: [String] = []
@@ -525,22 +553,26 @@ final class PhotoMergeQueue: ObservableObject {
                                                             processVersion: EditStack.processVersion,
                                                             forImageID: id, in: catalog)
                         } catch {
-                            problems.append("\(kind.firstEditName) couldn’t be saved: \(Self.describe(error))")
+                            problems.append("\(firstEditName) couldn’t be saved: \(Self.describe(error))")
                         }
                     }
                     reveal(relPath, in: library)
                 } catch {
-                    problems.append("Reading the folder after the \(kind.title.lowercased()) failed: \(error)")
+                    problems.append("Reading the folder after the \(kind.title.lowercased()) failed: "
+                                    + Self.describe(error))
                 }
             }
             if case .failure(let error)? = firstEdit {
-                problems.append("\(kind.firstEditName) couldn’t be worked out: \(Self.describe(error))")
+                problems.append("\(firstEditName) couldn’t be worked out: \(Self.describe(error))")
             }
             problems += extraProblems
-            if !problems.isEmpty {
-                library.lastError = "\(kind.title) \(fileName) finished, but: " + problems.joined(separator: " ")
-            }
-            Announcement.post("\(kind.title) finished: \(fileName)")
+            // The photo is there, so these are notes for the panel, not an
+            // error for the status bar.
+            notes = problems
+            Announcement.post("\(kind.title) finished: \(fileName)"
+                              + (problems.isEmpty ? ""
+                                 : ", with \(problems.count) note\(problems.count == 1 ? "" : "s") "
+                                   + "in the library panel"))
         case .cancelled:
             summary = "\(kind.title) cancelled"
         case .failed(let error):
@@ -566,9 +598,30 @@ final class PhotoMergeQueue: ObservableObject {
         return progress.stage.isEmpty ? percent : "\(progress.stage), \(percent)"
     }
 
-    /// An error as the status bar says it.
+    /// An error as the status bar says it: a sentence, never a domain and a
+    /// code.
+    ///
+    /// Our own errors say what happened in `errorDescription` or, failing
+    /// that, in `description`. The file system's don't: `POSIXError` and
+    /// `CocoaError` (a full disk, a read-only folder, a volume that went
+    /// away) are bridged `NSError`s, so describing one prints
+    /// `Error Domain=NSPOSIXErrorDomain Code=28 …` while its
+    /// `localizedDescription` is the sentence we want. Foundation makes up
+    /// a `localizedDescription` for errors of our own, so those two are
+    /// told apart by the placeholder it uses.
     static func describe(_ error: Error) -> String {
-        (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+        if let localized = (error as? LocalizedError)?.errorDescription { return localized }
+        let nsError = error as NSError
+        if !Self.saysNothing(nsError) { return nsError.localizedDescription }
+        return String(describing: error)
+    }
+
+    /// True when Foundation had no sentence for this error and made one up
+    /// naming the type instead: "The operation couldn’t be completed.
+    /// (MergeKit.MergeDNGError error 3.)". The parenthesis is built from the
+    /// domain and the code, so it can be recognised without reading English.
+    static func saysNothing(_ error: NSError) -> Bool {
+        error.localizedDescription.contains("(\(error.domain) error \(error.code).)")
     }
 
     /// The recipe's record of a source photo: where it is from the result's

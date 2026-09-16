@@ -15,8 +15,9 @@ import simd
 /// each (`PanoramaFramePrep`), solves where the cameras pointed
 /// (`PanoramaLayoutSolver`), sizes the result for this Mac
 /// (`PanoramaOutputSizer`) and reports what the dialog must say. It keeps
-/// the small copies so the preview needn't read the photos again
-/// (`releasePreviews()` drops them).
+/// the small copies so the preview needn't read the photos again, and the
+/// solved cameras so that changing the projection needn't measure again
+/// (`releasePreviews()` drops both when the dialog closes).
 ///
 /// **Preview** (`preview`) stitches those small copies through the real
 /// `PanoramaStitcher` — the same seams and the same multi-band blend as the
@@ -53,6 +54,9 @@ public final class PanoramaMerger: PanoramaMerging {
     /// small budget to exercise the downsampling path.
     let sizeLimits: SizeLimits?
     let previewCache = PanoramaPreviewCache()
+    /// The last analysis's decoded photos and solved cameras, so a new
+    /// projection needn't read the raws or register the pairs again.
+    let analysisCache = PanoramaAnalysisCache()
 
     /// The limits the output size is worked out from
     /// (`PanoramaOutputSizer`).
@@ -103,33 +107,51 @@ public final class PanoramaMerger: PanoramaMerging {
     }
 
     /// `analyse`, with how long each stage took and what the geometry found.
+    ///
+    /// **Measuring again for a new projection.** The projection decides the
+    /// canvas and the crop and nothing before them, so the decoded photos
+    /// and the solved cameras of the last analysis are kept
+    /// (`analysisCache`) and only the projection stage is run again. The
+    /// dialog's picker therefore costs a canvas and a coverage pass rather
+    /// than a full decode of every raw and a whole geometry solve.
     public func analyseWithReport(_ urls: [URL], options: PanoramaMergeOptions = PanoramaMergeOptions())
     async throws -> (analysis: PanoramaMergeAnalysis, report: PanoramaMergeReport) {
         var report = PanoramaMergeReport()
-        let prep = PanoramaFramePrep(gpu: gpu)
-        let photos = try report.time("Open photos") { try prep.photos(urls) }
-        var inputs: [PanoramaFrameInput] = []
-        var clipLevels: [Float] = []
-        try report.time("Decode and reduce") {
-            for photo in photos {
-                try Task.checkCancellation()
-                let measured = try prep.measure(photo)
-                inputs.append(measured.input)
-                clipLevels.append(measured.clipLevel)
+        let solver = PanoramaLayoutSolver(options: PanoramaLayoutOptions(projection: options.projection))
+        let measured: PanoramaAnalysisCache.Entry
+        if let kept = analysisCache.entry(for: urls) {
+            measured = kept
+        } else {
+            let prep = PanoramaFramePrep(gpu: gpu)
+            let photos = try report.time("Open photos") { try prep.photos(urls) }
+            var inputs: [PanoramaFrameInput] = []
+            var clipLevels: [Float] = []
+            try report.time("Decode and reduce") {
+                for photo in photos {
+                    try Task.checkCancellation()
+                    let reduced = try prep.measure(photo)
+                    inputs.append(reduced.input)
+                    clipLevels.append(reduced.clipLevel)
+                }
             }
+            report.sampleMemory(gpu.device)
+            try Task.checkCancellation()
+            let cameras = try report.time("Solve cameras") { try solver.solveCameras(inputs) }
+            measured = PanoramaAnalysisCache.Entry(askedURLs: urls, frameURLs: photos.map(\.url), inputs: inputs,
+                                                   clipLevels: clipLevels, solved: cameras)
+            analysisCache.store(measured)
+            previewCache.store(PanoramaPreviewFrames(inputs: inputs, urls: measured.frameURLs,
+                                                     clipLevels: clipLevels))
         }
-        report.sampleMemory(gpu.device)
         try Task.checkCancellation()
-        let solved = try report.time("Layout") {
-            try PanoramaLayoutSolver(options: PanoramaLayoutOptions(projection: options.projection)).solve(inputs)
-        }
+        let solved = try report.time("Layout") { try solver.project(measured.solved) }
         let layout = solved.layout, layoutReport = solved.report
         report.layout = layoutReport
         let size = outputSize(for: layout.canvas)
 
         let leftOut = Set(layoutReport.leftOut)
         let frames = layoutReport.frames.enumerated().map { index, frame in
-            PanoramaMergeFrame(url: photos[index].url, captureTime: frame.captureTime,
+            PanoramaMergeFrame(url: measured.frameURLs[index], captureTime: frame.captureTime,
                                exposureSeconds: frame.exposureTime, iso: frame.iso, aperture: frame.aperture,
                                gainStops: frame.gain.map { log2($0) } ?? 0, yawPitchRoll: frame.yawPitchRoll,
                                leftOut: leftOut.contains(index))
@@ -149,7 +171,6 @@ public final class PanoramaMerger: PanoramaMerging {
             frames: frames, layout: layout, outputSize: size, widthDegrees: layoutReport.widthDegrees,
             heightDegrees: layoutReport.heightDegrees, warnings: warnings,
             estimatedOutputBytes: Self.estimatedOutputBytes(width: size.width, height: size.height))
-        previewCache.store(PanoramaPreviewFrames(inputs: inputs, urls: photos.map(\.url), clipLevels: clipLevels))
         return (analysis, report)
     }
 
@@ -174,6 +195,7 @@ public final class PanoramaMerger: PanoramaMerging {
 
     public func releasePreviews() async {
         previewCache.release()
+        analysisCache.release()
     }
 
     // MARK: - Preview

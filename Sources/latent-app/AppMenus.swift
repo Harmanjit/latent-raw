@@ -92,9 +92,13 @@ struct CommandState: Equatable {
         case .export: selectionCount > 0 && !exportQueueRunning && !photoMergeRunning
         // The whole selection, as Export takes it: from the grid, or kept
         // from the grid in the other views. One GPU job at a time, and not
-        // while typing, where ⌃H is the text system's delete-backward.
+        // while typing, where ⌃H is the text system's delete-backward. Not
+        // while a move, copy or rename is under way either: a merge reads
+        // the files at the paths it took when it started, so the two must
+        // not overlap in either order (see Undo below).
         case .photoMergeHDR, .photoMergeHDRWithoutDialog, .photoMergePanorama, .photoMergeHDRPanorama:
             editorReady && selectionCount >= 2 && !exportQueueRunning && !photoMergeRunning && !isEditingText
+            && !fileOperationRunning
         // Survey's panes aren't the editor's image, which may be one from before.
         case .exportOpenImage: hasImage && !exportingOpenImage && mode != .survey
         // Library prints the selection, and so does Survey, whose selection
@@ -104,9 +108,14 @@ struct CommandState: Equatable {
         // Edits are undone in Develop, library actions in the other modes
         // (the labels are those of the mode). Typing is undone by the Edit
         // menu itself (see LatentCommands). Undoing a move, copy or rename
-        // is refused while an export reads the files, as Move is.
-        case .undo: (mode != .develop || hasImage) && undoLabel != nil && !(undoChangesFiles && exportQueueRunning)
-        case .redo: (mode != .develop || hasImage) && redoLabel != nil && !(redoChangesFiles && exportQueueRunning)
+        // is refused while a job reads the files, as Move is: an export, a
+        // print, a contact sheet or a Photo Merge (all of them
+        // `outputJobRunning`) opens them at the paths it started with, and
+        // undoing a move puts them back somewhere else half way through.
+        case .undo: (mode != .develop || hasImage) && undoLabel != nil
+            && !(undoChangesFiles && (exportQueueRunning || outputJobRunning))
+        case .redo: (mode != .develop || hasImage) && redoLabel != nil
+            && !(redoChangesFiles && (exportQueueRunning || outputJobRunning))
         case .copySettings: hasImage || hasSelection
         case .pasteSettings: hasImage || selectionCount > 0
         case .clearFilter: filterActive

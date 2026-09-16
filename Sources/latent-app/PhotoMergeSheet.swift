@@ -44,6 +44,12 @@ final class HDRMergeSheetModel: ObservableObject, Identifiable {
         /// Relative to the reference frame: "+2 EV", "0 EV", "-2 EV".
         let ev: String
         let isReference: Bool
+        /// True when Auto Align couldn't line this photo up at all, so the
+        /// merge leaves it out. The Panorama dialog marks its own left-out
+        /// photos the same way: the list has to say so, because the warning
+        /// that explains it scrolls out of the notes box once there are a
+        /// couple of them.
+        let isLeftOut: Bool
         /// What VoiceOver reads for the whole row.
         let spoken: String
         /// Whether the row shows its colour in the deghost overlay
@@ -308,20 +314,38 @@ final class HDRMergeSheetModel: ObservableObject, Identifiable {
         guard let result = analysisResult, let reference = referenceIndex else { return [] }
         let referenceEV = result.frames[reference].relativeEV
         let overlay = showDeghostOverlay && deghost != .none
+        let leftOut = leftOutIndices
         return result.frames.enumerated().map { index, frame in
             let stops = frame.relativeEV - referenceEV
             let exposure = MetadataFormat.exposureLine(shutter: frame.exposureSeconds, aperture: frame.aperture,
                                                        iso: Int(frame.iso.rounded()), focal: nil)
             let isReference = index == reference
+            let isLeftOut = leftOut.contains(index)
             var spoken = [frame.url.lastPathComponent]
             spoken += exposure.components(separatedBy: " · ").filter { !$0.isEmpty }
-            spoken.append(isReference ? "reference" : Self.spokenEV(stops))
-            if overlay { spoken.append("overlay colour \(HDRDeghostOverlay.colourName(forFrame: index))") }
+            if isLeftOut {
+                spoken.append("left out of the merge")
+            } else {
+                spoken.append(isReference ? "reference" : Self.spokenEV(stops))
+            }
+            if overlay, !isLeftOut { spoken.append("overlay colour \(HDRDeghostOverlay.colourName(forFrame: index))") }
             return Row(id: index, fileName: frame.url.lastPathComponent,
                        record: record(for: result.frames, at: index), exposure: exposure,
-                       ev: Self.evText(stops), isReference: isReference, spoken: spoken.joined(separator: ", "),
-                       showsOverlayColour: overlay)
+                       ev: Self.evText(stops), isReference: isReference, isLeftOut: isLeftOut,
+                       spoken: spoken.joined(separator: ", "),
+                       showsOverlayColour: overlay && !isLeftOut)
         }
+    }
+
+    /// The frames Auto Align gave up on, for the reference in use: the
+    /// merge leaves them out. Taken from the same warnings the notes below
+    /// the list are made from, so the mark and the sentence never disagree.
+    var leftOutIndices: Set<Int> {
+        guard let result = analysisResult, let reference = referenceIndex else { return [] }
+        return Set(result.warnings(reference: reference).compactMap { warning in
+            if case .frameCouldNotBeAligned(let index, let leftOut) = warning, leftOut { return index }
+            return nil
+        })
     }
 
     /// "6016 × 4016 (24.2 MP)".
@@ -771,6 +795,7 @@ private struct HDRMergeFrameRow: View {
                     }
                 }
                 .frame(width: 50, height: 36)
+                .opacity(row.isLeftOut ? 0.4 : 1)
                 if row.showsOverlayColour {
                     let colour = HDRDeghostOverlay.colour(forFrame: row.id)
                     Circle()
@@ -785,13 +810,24 @@ private struct HDRMergeFrameRow: View {
                     Text(row.fileName)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .foregroundStyle(row.isLeftOut ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                     Text(row.exposure)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 6)
-                if row.isReference {
+                if row.isLeftOut {
+                    // Marked as the Panorama dialog marks a photo it
+                    // couldn't join, so the two lists read the same way.
+                    Text("Left out")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.22), in: Capsule())
+                        .fixedSize()
+                } else if row.isReference {
                     Text("Reference")
                         .font(.caption)
                         .fontWeight(.semibold)
@@ -804,6 +840,7 @@ private struct HDRMergeFrameRow: View {
                     .monospacedDigit()
                     .frame(minWidth: 48, alignment: .trailing)
                     .fixedSize()
+                    .foregroundStyle(row.isLeftOut ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
             }
             .contentShape(Rectangle())
         }

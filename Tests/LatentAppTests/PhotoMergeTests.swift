@@ -462,6 +462,34 @@ final class HDRMergeSheetModelTests: XCTestCase {
         }
     }
 
+    /// A photo Auto Align gave up on is marked in the list, as the Panorama
+    /// dialog marks one it couldn't join: the warning that explains it
+    /// scrolls out of the notes box once there are a couple of them, so the
+    /// list itself has to say so.
+    func testAFrameLeftOutIsMarkedInTheList() async {
+        let warnings: [HDRMergeWarning] = [.frameCouldNotBeAligned(frameIndex: 2, leftOut: true)]
+        let engine = FakeHDREngine(analysis: .success(analysis(warnings: warnings)))
+        let (model, _) = model(engine)
+        model.start()
+        await waitUntil("the list") { model.analysisResult != nil }
+        XCTAssertEqual(model.rows.map(\.isLeftOut), [false, false, true])
+        XCTAssertEqual(model.leftOutIndices, [2])
+        XCTAssertTrue(model.rows[2].spoken.hasSuffix("left out of the merge"),
+                      "VoiceOver says so too: \(model.rows[2].spoken)")
+        XCTAssertFalse(model.rows[1].spoken.contains("left out"))
+    }
+
+    /// A photo the aligner only half managed is merged as it is, so it is
+    /// not marked: the mark means "not in the merge".
+    func testAFrameMergedUnalignedIsNotMarked() async {
+        let warnings: [HDRMergeWarning] = [.frameCouldNotBeAligned(frameIndex: 2, leftOut: false)]
+        let engine = FakeHDREngine(analysis: .success(analysis(warnings: warnings)))
+        let (model, _) = model(engine)
+        model.start()
+        await waitUntil("the list") { model.analysisResult != nil }
+        XCTAssertEqual(model.rows.map(\.isLeftOut), [false, false, false])
+    }
+
     /// Closing the dialog while the photos are read stops the analysis and
     /// shows no error.
     func testCancellingWhileAnalysing() async throws {

@@ -149,6 +149,52 @@ final class CommandStateTests: XCTestCase {
         XCTAssertNotEqual(a, CommandContext(state: develop { $0.showingBefore = true }) { _ in })
     }
 
+    /// A merge opens its source photos at the paths it took when it
+    /// started, so undoing a move while it runs pulls them out from under
+    /// it. The guard must hold both ways round, as Move's already does.
+    func testAFileChangingUndoWaitsForAMergeAsItWaitsForAnExport() {
+        let library = { (change: (inout CommandState) -> Void) -> CommandState in
+            var state = CommandState()
+            state.mode = .library
+            state.hasVisibleImages = true
+            state.hasSelection = true
+            state.selectionCount = 2
+            state.editorReady = true
+            state.undoLabel = "Move (5 Images)"
+            state.redoLabel = "Move (5 Images)"
+            state.undoChangesFiles = true
+            state.redoChangesFiles = true
+            change(&state)
+            return state
+        }
+        XCTAssertTrue(library { _ in }.isEnabled(.undo))
+        // An export already blocked it; a Photo Merge, a print and a
+        // contact sheet are all OutputJobs, as Move and Rename read them.
+        XCTAssertFalse(library { $0.exportQueueRunning = true }.isEnabled(.undo))
+        XCTAssertFalse(library { $0.outputJobRunning = true }.isEnabled(.undo))
+        XCTAssertFalse(library { $0.outputJobRunning = true }.isEnabled(.redo))
+        // An undo that only changes the catalog is still allowed.
+        XCTAssertTrue(library { $0.outputJobRunning = true; $0.undoChangesFiles = false }.isEnabled(.undo))
+    }
+
+    /// And the other way: a merge can't be started on files a move is half
+    /// way through, as Rename and Move to Folder already refuse.
+    func testAMergeWaitsForAMoveOrRename() {
+        var state = CommandState()
+        state.mode = .library
+        state.hasVisibleImages = true
+        state.hasSelection = true
+        state.selectionCount = 5
+        state.editorReady = true
+        XCTAssertTrue(state.isEnabled(.photoMergeHDR))
+        state.fileOperationRunning = true
+        for command in [KeyCommand.photoMergeHDR, .photoMergeHDRWithoutDialog, .photoMergePanorama,
+                        .photoMergeHDRPanorama] {
+            XCTAssertFalse(state.isEnabled(command), "\(command)")
+        }
+        XCTAssertFalse(state.isEnabled(.moveToFolder), "which is how Move already behaves")
+    }
+
     /// With no image open, Undo would restore the history left from the
     /// previous photo onto whatever id is set: a failed open, say.
     func testUndoNeedsAnOpenImage() {

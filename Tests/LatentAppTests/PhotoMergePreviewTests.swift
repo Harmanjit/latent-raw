@@ -249,8 +249,10 @@ final class PhotoMergeWithoutDialogTests: XCTestCase {
         let result = try XCTUnwrap(bracket.library.images.first { $0.fileName == "DSC_0107-HDR.dng" })
         let stored = try await bracket.library.editStack(for: result)
         XCTAssertNil(stored)
-        XCTAssertEqual(bracket.library.lastError,
-                       "HDR merge DSC_0107-HDR.dng finished, but: Auto Settings couldn’t be worked out: no colour profile")
+        // The photo is there, so this is a note beside the panel's summary,
+        // not a red error in the status bar.
+        XCTAssertNil(bracket.library.lastError)
+        XCTAssertEqual(queue.notes, ["Auto Settings couldn’t be worked out: no colour profile"])
     }
 
     /// Without the dialog: the photos are measured and merged with the
@@ -300,11 +302,33 @@ final class PhotoMergeWithoutDialogTests: XCTestCase {
         queue.startWithoutDialog(records: bracket.records, urls: bracket.urls, options: HDRMergeOptions(),
                                  library: bracket.library, engine: finishing)
         await queue.waitUntilDone()
-        XCTAssertEqual(bracket.library.lastError,
-                       "HDR merge DSC_0107-HDR.dng finished, but: "
-                       + "Photo Merge couldn’t align DSC_0108.dng, so it’s left out of the merge. "
-                       + "These photos don’t line up exactly (up to 3 px apart), so edges may look doubled. "
-                       + "Turn on Auto Align to line them up.")
+        // Warnings from a merge that worked are notes, one per line, where
+        // they can be read whole: the status bar is red, announced as an
+        // error, and clipped to one line.
+        XCTAssertNil(bracket.library.lastError, "a merge that worked is not an error")
+        XCTAssertEqual(queue.notes,
+                       ["Photo Merge couldn’t align DSC_0108.dng, so it’s left out of the merge.",
+                        "These photos don’t line up exactly (up to 3 px apart), so edges may look doubled. "
+                        + "Turn on Auto Align to line them up."])
+        XCTAssertTrue(queue.summary.hasPrefix("Merged DSC_0107-HDR.dng"))
+    }
+
+    /// Notes belong to the merge that made them: the next one starts clean.
+    func testNotesAreClearedByTheNextMerge() async throws {
+        let bracket = try await bracket()
+        let warnings: [HDRMergeWarning] = [.smallExposureRange(stops: 0.7)]
+        let queue = queue()
+        queue.startWithoutDialog(records: bracket.records, urls: bracket.urls, options: HDRMergeOptions(),
+                                 library: bracket.library,
+                                 engine: FakeHDREngine(analysis: .success(bracket.analysis(warnings: warnings))))
+        await queue.waitUntilDone()
+        XCTAssertEqual(queue.notes.count, 1)
+        queue.startWithoutDialog(records: bracket.records, urls: bracket.urls, options: HDRMergeOptions(),
+                                 library: bracket.library,
+                                 engine: FakeHDREngine(analysis: .success(bracket.analysis())))
+        XCTAssertEqual(queue.notes, [], "cleared as soon as the next merge starts")
+        await queue.waitUntilDone()
+        XCTAssertEqual(queue.notes, [])
     }
 
     /// Photos that can't be merged: the reason in the status bar, nothing written.

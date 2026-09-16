@@ -217,7 +217,7 @@ final class PanoPrepTests: XCTestCase {
     /// The golden D750 NEF (in CI): prepared at full resolution in small and
     /// large bands, and reduced, the frames agree.
     func testGoldenNEFPreparesTheSameInAnyBandsAndMatchesItsReducedCopy() throws {
-        let url = AlignTestSupport.assets.appendingPathComponent("golden_nikon_d750_cc0.nef")
+        let url = TestAssets.url(TestAssets.goldenName)
         try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path), "golden NEF missing")
         let gpu = try HDRTestSupport.gpu()
         let kernels = MergePanoPrepKernels(gpu: gpu)

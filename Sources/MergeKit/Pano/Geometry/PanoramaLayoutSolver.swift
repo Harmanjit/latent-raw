@@ -95,6 +95,31 @@ public struct PanoramaLayoutResult: Sendable {
     public let report: PanoramaLayoutReport
 }
 
+/// Everything the solver works out that the projection does not change:
+/// where every photo points, how bright each one is against the others, and
+/// how far the sweep reaches.
+///
+/// This is the expensive half — every neighbouring pair registered, the
+/// cameras solved two or three times, the extra pairs searched, the horizon
+/// levelled and the exposures evened out — and `PanoramaLayoutOptions
+/// .projection` touches none of it. The Panorama dialog keeps one of these
+/// so that picking a different projection only runs `project`, which is a
+/// canvas and a crop rectangle over measurements already in hand.
+public struct PanoramaCameraLayout: Sendable {
+    /// The photos that made it in, levelled and with their gains.
+    public let cameras: [PanoramaCamera]
+    /// How far the cameras reach, for Automatic and the report.
+    let extent: PanoramaCanvasBuilder.Extent
+    /// The shared focal length the camera solve settled on, in
+    /// full-resolution pixels.
+    let focal: Double
+    /// The reduced photos of the cameras above, for Auto Crop's coverage
+    /// pass. They share their storage with the frames they came from.
+    let thumbnails: [Int: PanoramaThumbnail]
+    /// What the steps so far found; `project` adds its own stages.
+    public let report: PanoramaLayoutReport
+}
+
 /// Works out where every photo of a panorama goes.
 ///
 /// **The steps** (docs/PhotoMerge.md section 4, stages 3-6 and 9):
@@ -115,6 +140,12 @@ public struct PanoramaLayoutResult: Sendable {
 ///
 /// Photos are refused as a panorama when no pair matches, or when they show
 /// almost the same view (an exposure bracket).
+///
+/// **Two halves.** Steps 1-5 and 7 are `solveCameras` and take all the
+/// time; steps 6 and 8 are `project` and are the only ones
+/// `options.projection` reaches. `solve` runs both, as the CLI and the
+/// tests want; the dialog keeps the first half and projects again when the
+/// picker changes, instead of reading and registering the photos afresh.
 public struct PanoramaLayoutSolver: Sendable {
     public var options: PanoramaLayoutOptions
 
@@ -129,7 +160,18 @@ public struct PanoramaLayoutSolver: Sendable {
         self.options = options
     }
 
+    /// The whole thing: steps 1-8. Cancelling the task that runs it stops
+    /// it at the next pair, solve or coverage pass rather than at the end —
+    /// a 17-photo sweep registers well over a hundred pairs, so a dialog
+    /// closed halfway through would otherwise go on burning CPU.
     public func solve(_ input: [PanoramaFrameInput]) throws -> PanoramaLayoutResult {
+        try project(solveCameras(input))
+    }
+
+    /// Steps 1-5 and 7: order the photos, register them, solve the cameras,
+    /// level the horizon and even out the exposures. None of it depends on
+    /// the projection.
+    public func solveCameras(_ input: [PanoramaFrameInput]) throws -> PanoramaCameraLayout {
         guard input.count >= 2 else { throw PanoramaError.tooFewPhotos }
         var report = PanoramaLayoutReport()
         let frames = input.enumerated().sorted {
@@ -156,9 +198,11 @@ public struct PanoramaLayoutSolver: Sendable {
         let registrar = PanoramaRegistrar(frames: frames, gains: alignmentGains, focal: exifFocal)
         let centres = (0..<n).map { registrar.centre($0) }
 
-        // 2. Neighbours.
+        // 2. Neighbours. One registration is the natural place to give up:
+        // it is the slowest single thing here, and there are n - 1 of them.
         var pairs: [PanoramaPairRegistration] = []
         for k in 0..<(n - 1) {
+            try Task.checkCancellation()
             let pair = report.time("Register \(k)-\(k + 1)") { registrar.register(first: k, second: k + 1) }
             pairs.append(pair)
         }
@@ -168,6 +212,7 @@ public struct PanoramaLayoutSolver: Sendable {
         }
 
         // 3. Cameras.
+        try Task.checkCancellation()
         var solution = report.time("Solve cameras") {
             PanoramaCameraSolver.solve(pairs: pairs, frameCount: n, centres: centres, focal: exifFocal,
                                        refineFocal: options.refineFocalLength, span: span)
@@ -178,13 +223,15 @@ public struct PanoramaLayoutSolver: Sendable {
         // cameras are solved again.
         if !solution.droppedPairs.isEmpty {
             let dropped = Set(solution.droppedPairs)
-            report.time("Register dropped pairs again") {
-                pairs = pairs.map { pair in
+            try report.time("Register dropped pairs again") {
+                pairs = try pairs.map { pair in
                     guard dropped.contains(PairKey(first: pair.first, second: pair.second)), pair.method == .ecc
                     else { return pair }
+                    try Task.checkCancellation()
                     return registrar.register(first: pair.first, second: pair.second, cornersFirst: true)
                 }
             }
+            try Task.checkCancellation()
             solution = report.time("Solve cameras again") {
                 PanoramaCameraSolver.solve(pairs: pairs, frameCount: n, centres: centres, focal: exifFocal,
                                            refineFocal: options.refineFocalLength, span: span)
@@ -193,9 +240,10 @@ public struct PanoramaLayoutSolver: Sendable {
 
         // 4. More pairs, guessed from the cameras so far.
         var extra: [PanoramaPairRegistration] = []
-        report.time("Register more pairs") {
+        try report.time("Register more pairs") {
             let tried = Set(pairs.filter(\.accepted).map { PairKey(first: $0.first, second: $0.second) })
             for a in 0..<n {
+                try Task.checkCancellation()
                 for b in (a + 1)..<n where !tried.contains(PairKey(first: a, second: b)) {
                     guard let ra = solution.rotations[a], let rb = solution.rotations[b] else { continue }
                     let k = { (i: Int) in
@@ -222,12 +270,16 @@ public struct PanoramaLayoutSolver: Sendable {
                     let overlap = Double(inside) / 100
                     let isNeighbour = b == a + 1
                     guard overlap >= Self.extraPairOverlap || (isNeighbour && overlap > 0.05) else { continue }
+                    // Each accepted candidate costs another registration,
+                    // and there are n(n-1)/2 candidates.
+                    try Task.checkCancellation()
                     extra.append(registrar.register(first: a, second: b, predicted: predicted))
                 }
             }
         }
         if extra.contains(where: \.accepted) {
             let all = pairs.filter(\.accepted) + extra.filter(\.accepted)
+            try Task.checkCancellation()
             solution = report.time("Solve cameras again") {
                 PanoramaCameraSolver.solve(pairs: all, frameCount: n, centres: centres, focal: exifFocal,
                                            refineFocal: options.refineFocalLength, span: span)
@@ -253,7 +305,9 @@ public struct PanoramaLayoutSolver: Sendable {
                            width: frames[i].metadata.width, height: frames[i].metadata.height, exposureGain: 1)
         }
 
-        // 6. Projection and canvas.
+        // How far the sweep reaches. The canvas is built from this in
+        // `project`; the check below only needs the angles, which the
+        // projection doesn't change.
         let extent = PanoramaCanvasBuilder.extent(cameras)
         report.widthDegrees = extent.widthDegrees
         report.heightDegrees = extent.heightDegrees
@@ -266,11 +320,9 @@ public struct PanoramaLayoutSolver: Sendable {
                 format: "they show almost the same view (each overlaps the next by about %.0f%%), like an "
                     + "exposure bracket. Use Photo Merge > HDR for a bracket.", typical * 100))
         }
-        let projection = options.projection == .automatic
-            ? PanoramaCanvasBuilder.automaticProjection(extent) : options.projection
-        let canvas = PanoramaCanvasBuilder.canvas(cameras, projection: projection, focal: solution.focal)
 
         // 7. Exposure.
+        try Task.checkCancellation()
         var thumbnails: [Int: PanoramaThumbnail] = [:]
         for i in connected { thumbnails[i] = frames[i].thumbnail }
         let gains = report.time("Exposure") {
@@ -289,12 +341,6 @@ public struct PanoramaLayoutSolver: Sendable {
                                                             exifStops: exif, remainingStops: remaining, samples: m.samples)
         }.sorted { ($0.first, $0.second) < ($1.first, $1.second) }
 
-        // 8. Auto Crop.
-        let crop = report.time("Auto crop") { () -> CGRect in
-            let coverage = PanoramaCanvasBuilder.coverage(canvas: canvas, cameras: cameras, thumbnails: thumbnails)
-            return PanoramaCanvasBuilder.largestRectangle(coverage, canvas: canvas)
-        }
-
         let exifGainsAll: [Double] = exposures.map { e in e.map { medianExposure / $0 } ?? 1 }
         report.frames = frames.indices.map { i in
             let camera = cameras.first { $0.frameIndex == i }
@@ -305,6 +351,32 @@ public struct PanoramaLayoutSolver: Sendable {
                 aperture: m.aperture, exifGain: exifGainsAll[i], gain: camera?.exposureGain,
                 yawPitchRoll: angles.map { SIMD3($0.yaw, $0.pitch, $0.roll) })
         }
+        return PanoramaCameraLayout(cameras: cameras, extent: extent, focal: solution.focal,
+                                    thumbnails: thumbnails, report: report)
+    }
+
+    /// Steps 6 and 8: flatten the solved cameras onto a canvas with this
+    /// solver's projection, and find Auto Crop's rectangle inside it.
+    ///
+    /// Cheap next to `solveCameras`: the canvas is measured from cameras
+    /// already solved, and the crop from a coverage grid a thousand cells
+    /// across. This is the only part changing the projection has to redo.
+    public func project(_ solved: PanoramaCameraLayout) throws -> PanoramaLayoutResult {
+        var report = solved.report
+        let cameras = solved.cameras
+        // 6. Projection and canvas.
+        let projection = options.projection == .automatic
+            ? PanoramaCanvasBuilder.automaticProjection(solved.extent) : options.projection
+        let canvas = PanoramaCanvasBuilder.canvas(cameras, projection: projection, focal: solved.focal)
+
+        // 8. Auto Crop.
+        try Task.checkCancellation()
+        let crop = report.time("Auto crop") { () -> CGRect in
+            let coverage = PanoramaCanvasBuilder.coverage(canvas: canvas, cameras: cameras,
+                                                          thumbnails: solved.thumbnails)
+            return PanoramaCanvasBuilder.largestRectangle(coverage, canvas: canvas)
+        }
+
         let layout = PanoramaLayout(cameras: cameras, canvas: canvas, autoCropRect: crop)
         return PanoramaLayoutResult(layout: layout, report: report)
     }
