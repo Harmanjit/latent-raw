@@ -53,6 +53,10 @@ public struct SnapshotPlan: Equatable, Sendable {
         /// selection and the images after it (three in all), measured by a
         /// stand-in engine so no bracket is needed. Not in the default steps.
         case hdrMerge = "hdrmerge"
+        /// The Panorama dialog over the window, ready to stitch the
+        /// selection and the images after it (four in all), measured by a
+        /// stand-in engine so no sweep is needed. Not in the default steps.
+        case panoramaMerge = "panoramamerge"
         /// A slideshow of the visible images, its first slide at rest with
         /// the caption and controls showing. Not in the default steps.
         case slideshow

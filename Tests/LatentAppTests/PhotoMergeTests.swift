@@ -713,7 +713,7 @@ final class PhotoMergeJobTests: XCTestCase {
         let reports = (1...5).map { HDRMergeProgress(fraction: Double($0) / 5, stage: "Merging photo \($0) of 5") }
         let engine = FakeHDREngine(analysis: .success(bracket.analysis()), reports: reports)
         let queue = queue()
-        var seen: [HDRMergeProgress] = []
+        var seen: [MergeProgress] = []
         var offMain = 0
         let watch = queue.$progress.dropFirst().sink { progress in
             if !Thread.isMainThread { offMain += 1 }
@@ -722,9 +722,9 @@ final class PhotoMergeJobTests: XCTestCase {
         defer { watch.cancel() }
         queue.start(bracket.analysis(), records: bracket.records, library: bracket.library, engine: engine)
         await queue.waitUntilDone()
-        XCTAssertEqual(seen, reports)
+        XCTAssertEqual(seen, reports.map(MergeProgress.init), "the engine's reports, in order")
         XCTAssertEqual(offMain, 0)
-        XCTAssertEqual(PhotoMergeQueue.spokenProgress(reports[1]), "Merging photo 2 of 5, 40 percent")
+        XCTAssertEqual(PhotoMergeQueue.spokenProgress(MergeProgress(reports[1])), "Merging photo 2 of 5, 40 percent")
         XCTAssertEqual(PhotoMergeQueue.spokenProgress(nil), "Starting")
     }
 

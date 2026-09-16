@@ -23,15 +23,18 @@ final class OutputJobs {
     enum Kind: Equatable {
         case print
         case contactSheet
-        /// Photo › Photo Merge (PhotoMergeQueue).
+        /// Photo › Photo Merge › HDR (PhotoMergeQueue).
         case photoMerge
+        /// Photo › Photo Merge › Panorama (PhotoMergeQueue). Its own kind
+        /// only so the quit alert can name it; one merge runs at a time.
+        case panoramaMerge
     }
 
     struct Job: Identifiable {
         let id = UUID()
         let kind: Kind
         /// The print's title ("12 Photos"), the contact sheet's file name,
-        /// or the merge's reference photo ("DSC_0107.NEF").
+        /// or the merge's first photo ("DSC_0107.NEF").
         let name: String
         /// Stops the job early; nil when it can only be waited for (a print).
         let cancel: (() -> Void)?
@@ -50,6 +53,7 @@ final class OutputJobs {
         case .print: "Printing \(name)"
         case .contactSheet: "Making the contact sheet \(name)"
         case .photoMerge: "Merging photos with \(name)"
+        case .panoramaMerge: "Stitching a panorama from \(name)"
         }
         let job = Job(kind: kind, name: name, cancel: cancel, activity: ExportActivity(reason: reason))
         running.append(job)
@@ -81,14 +85,20 @@ final class OutputJobs {
     static func quitAlert(for jobs: [Job]) -> (message: String, information: String, button: String) {
         let prints = jobs.filter { $0.kind == .print }
         let sheets = jobs.filter { $0.kind == .contactSheet }
-        let merges = jobs.filter { $0.kind == .photoMerge }
+        let merges = jobs.filter { $0.kind == .photoMerge || $0.kind == .panoramaMerge }
+        // One merge runs at a time, so "merge" below is one kind's word
+        // unless a future queue runs two.
+        let mergeWord = merges.allSatisfy { $0.kind == .panoramaMerge } ? "panorama merge" : "HDR merge"
         // What is under way, in the order the message names it.
         var underWay: [String] = []
         if !prints.isEmpty {
             underWay.append(prints.count == 1 ? "printing “\(prints[0].name)”" : "printing \(prints.count) jobs")
         }
         if !sheets.isEmpty { underWay.append("making a contact sheet") }
-        if !merges.isEmpty { underWay.append(merges.count == 1 ? "making an HDR merge" : "making HDR merges") }
+        if !merges.isEmpty {
+            underWay.append(merges.count == 1 ? "making \(mergeWord.hasPrefix("HDR") ? "an" : "a") \(mergeWord)"
+                                              : "making \(mergeWord)s")
+        }
         // What quitting stops, then what it waits for.
         var stopped: [String] = []
         if !sheets.isEmpty {
@@ -96,8 +106,8 @@ final class OutputJobs {
                            + (sheets.count == 1 ? "isn’t" : "aren’t") + " saved")
         }
         if !merges.isEmpty {
-            stopped.append(merges.count == 1 ? "the HDR merge, which leaves no photo"
-                                             : "the HDR merges, which leave no photos")
+            stopped.append(merges.count == 1 ? "the \(mergeWord), which leaves no photo"
+                                             : "the \(mergeWord)s, which leave no photos")
         }
         var information = stopped.isEmpty ? "" : "Quitting now stops " + stopped.joined(separator: ", and ")
         if !prints.isEmpty {

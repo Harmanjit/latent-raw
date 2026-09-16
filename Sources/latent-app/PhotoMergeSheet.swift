@@ -359,7 +359,8 @@ final class HDRMergeSheetModel: ObservableObject, Identifiable {
     var analysingText: String { "Analysing \(records.count) photos…" }
 
     /// Said whatever the state: the merge reads the raw files themselves.
-    static let editsNotice = "The merge starts from the original raw files. Edits you made to these photos aren’t used."
+    /// The Panorama dialog says the same (`PhotoMergeText`).
+    static let editsNotice = PhotoMergeText.editsNotice
 
     // MARK: - Words
 

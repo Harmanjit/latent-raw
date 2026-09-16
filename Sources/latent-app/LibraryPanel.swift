@@ -186,15 +186,15 @@ struct LibraryPanel: View {
         if photoMerge.isRunning {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text("HDR merge").font(.caption2)
+                    Text(photoMerge.kind.title).font(.caption2)
                     Spacer()
                     Button("Cancel") { photoMerge.cancel() }
                         .controlSize(.mini)
-                        .accessibilityLabel("Cancel HDR merge")
+                        .accessibilityLabel("Cancel \(photoMerge.kind.title.lowercased())")
                 }
                 ProgressView(value: photoMerge.progress?.fraction ?? 0, total: 1)
                     .controlSize(.small)
-                    .accessibilityLabel("HDR merge progress")
+                    .accessibilityLabel("\(photoMerge.kind.title) progress")
                     .accessibilityValue(PhotoMergeQueue.spokenProgress(photoMerge.progress))
                 Text(photoMerge.progress?.stage ?? "Starting…").font(.caption2).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.tail)

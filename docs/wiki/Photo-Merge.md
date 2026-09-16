@@ -1,6 +1,11 @@
 # Photo Merge
 
-**Photo › Photo Merge** combines two or more photos into one new photo file. This version does **HDR**: several shots of the same scene at different exposures become one photo with the shadows of the bright shots and the highlights of the dark ones. Panorama and HDR Panorama are coming.
+**Photo › Photo Merge** combines two or more photos into one new photo file. It does two kinds of merge:
+
+- **HDR** (**⌃H**): several shots of the same scene at different exposures become one photo with the shadows of the bright shots and the highlights of the dark ones.
+- **Panorama** (**⌃M**): overlapping shots taken while turning the camera become one wide photo.
+
+HDR Panorama — brackets stitched into a panorama — is coming.
 
 ## What HDR merge does
 
@@ -100,11 +105,90 @@ The colours are orange, sky blue, bluish green, yellow, blue, vermillion and red
 
 **What made it.** The photo's sidecar and the DNG itself record which photos were merged (by path and fingerprint), when they were taken, and how: the Deghost level, whether Auto Align was on, how far it moved each shot and which shots it left out. That is a record only: Latent can't yet re-run a merge from it.
 
+## Panorama
+
+A **panorama** is made from several photos taken while turning the camera, each overlapping the one before. Latent works out where the camera was pointing for every shot, warps them all onto one curved surface and blends them into a single wide photo.
+
+Choose **Photo › Photo Merge › Panorama…**, or press **⌃M**, with two or more photos selected.
+
+### Shooting a sweep
+
+- **Overlap about 30%.** Each shot should share roughly a third of its frame with the one before. Too little overlap and Latent can't tell how two shots fit together; much more and you are making work for nothing. Overlap is what a panorama is built from — it matters more than anything else here.
+- **Turn the camera, don't walk it sideways.** Turn about the camera itself (ideally about the lens, not your shoulder). When the camera moves sideways instead, near things shift against far things — that is *parallax*, and no stitcher can make near and far line up at once. Edges close to the camera then look doubled. A tripod, turned on the spot, gives the cleanest sweep; handheld, keep your feet still and turn your body.
+- **Set the exposure by hand** (manual, or lock it) and keep the same aperture and ISO for the whole sweep. If the camera meters each shot, the sky changes brightness across the panorama; Latent evens the shots out and still warns you when they were too far apart.
+- **Focus once, then switch autofocus off,** so the focus doesn't hunt between shots.
+- **Keep the camera level** and turn steadily, one direction only. Portrait orientation gives a taller panorama for the same number of shots.
+- **Avoid moving things** in the overlaps where you can — a person walking through the seam is the hardest thing to hide.
+- **Shoot raw.** Photo Merge reads raw files only (Bayer sensors; not Fujifilm X-Trans). All the shots must come from the same camera, at the same focal length.
+
+### Merging a panorama
+
+1. Select the photos of one sweep in the grid. The order doesn't matter: Latent sorts them by the time they were taken.
+2. Press **⌃M**. The **Panorama** dialog reads the photos and works out the layout — on a long sweep this takes a little while.
+3. The dialog shows a **preview** of the stitch at the top, and below it the photos **in the order they were taken**. Each row gives the shutter speed, aperture and ISO, **where that photo points** across the panorama ("36° left", "centre", "12° right") and **how much its brightness is corrected** to match the others ("−0.3 EV"). A photo that couldn't be joined is dimmed and marked **Left out**.
+4. Beside the list: the **Projection**, **Auto Crop** and **Auto Settings**, and then the size the panorama will really be, how wide and tall the sweep is in degrees, roughly how large the file will be, and its name.
+5. Press **Merge** (Return). The dialog closes and the stitch runs in the background, with its progress and a **Cancel** button in the left panel's **Export** section.
+
+The merge starts from the original raw files; edits you made to the photos aren't used.
+
+If the photos don't form a panorama — they don't overlap, or they come from different cameras — the dialog says why and offers only **Close**.
+
+### Projection
+
+A panorama covers directions, not a flat rectangle, so it has to be flattened somehow. That choice is the **projection**, and it changes the shape of the whole picture.
+
+| Projection | What it does | Use it for |
+|---|---|---|
+| **Automatic** | Latent picks: Perspective for a narrow sweep, Cylindrical for a wide one | Leave it here unless you want a particular look. |
+| **Perspective** | Straight lines stay straight | Narrow sweeps, buildings. Stretches badly past about 70° across. |
+| **Cylindrical** | Wraps around like a label on a can; upright things stay upright | Most panoramas: landscapes, streets. |
+| **Spherical** | Bends both ways | Very tall sweeps, or a full circle. Horizons curve. |
+
+Changing the projection measures the photos again, so the preview, the size and the warnings all follow it.
+
+### Auto Crop
+
+A stitched panorama has ragged, empty edges: the shots don't line up into a neat rectangle. **Auto Crop** (on unless you turn it off) finds the largest rectangle with no empty edge in it and opens the panorama cropped to it.
+
+It is an ordinary **crop edit**, not a cut: the whole stitch is in the file. **Undo** in Develop takes the crop off, and the crop tool (**R**) drags it out again — useful when you would rather fill a corner by hand than lose the rest of the sky.
+
+### Photos that were left out
+
+Latent joins the photos pair by pair. When a photo shares too little with its neighbours — a gap in the sweep, a blurred frame, a shot of your feet between two sweeps — it can't be placed, and it is **left out**: marked in the list and named in a warning. The panorama is made from the rest. If a photo you wanted is left out, the usual reason is too little overlap; reshoot that part with more.
+
+The result is named after the **first photo that was joined**: `HSB_6554.NEF` gives `HSB_6554-Pano.dng`, then `-Pano-2` and so on if that name is taken. Nothing is ever overwritten.
+
+### Why a big panorama is made smaller
+
+Seventeen 24 MP photos across 186° can add up to a canvas of 29,195 × 7,664 pixels — 224 megapixels, several times what any Mac can hold in memory while you edit it with a brush and a history.
+
+**Latent never refuses a panorama for its size.** Instead the dialog tells you exactly what will happen, in the panorama's own numbers:
+
+> This panorama would be 29,195 × 7,664 pixels (224 MP). The largest this Mac can edit is 12,482 × 3,276 (41 MP), limited by memory, so the photos will be merged at 43%.
+
+Turn on **Merge at 43%** to agree, and the button becomes **Merge at 43%** too, so it says what it is about to do. The limit is worked out for *this* Mac — its memory, and the largest picture its graphics processor can hold — so the same sweep may merge whole on a bigger machine and smaller on a laptop. Latent never offers a size it couldn't then edit.
+
+What you lose is resolution, not field of view: the whole sweep is there, at 43% of the pixels along each edge, which is still a photo far wider than any single frame. What you gain is a panorama you can actually work on.
+
+Agreeing is asked for every time, and again whenever the size changes (after switching projection, say).
+
+### The stitched photo
+
+**What it is.** A DNG, as an HDR merge is: the merged light itself, not a finished picture, so white balance, exposure and every other adjustment work on it as on a camera raw. It opens in Latent, Lightroom and Apple Photos.
+
+**Lens corrections are baked in.** A panorama has to be lens-corrected before it can be stitched, so distortion, vignetting and chromatic aberration are already taken out and Develop doesn't apply them again.
+
+**Its first edit.** With **Auto Crop** on, the crop is stored as the panorama's first edit; with **Auto Settings** on, Develop's **Auto Adjust** (⌘U) is stored too. Both are one edit, so a single **Undo** in Develop takes you back to the stitch exactly as it came out.
+
+**What made it.** The panorama's sidecar and the DNG record which photos were stitched (by path and fingerprint) and how. That is a record only: Latent can't yet re-run a merge from it.
+
 ## Current limits
 
 - **Auto Align moves whole shots.** Near and far things that shifted against each other in a handheld bracket (parallax) still show slightly doubled edges, and a shot it can't align is merged as it is or left out.
 - **Deghost compares brightness only,** so movement against an equally bright background can slip through, and deghosted parts come from one shot, with that shot's noise.
-- **HDR only.** Panorama and HDR Panorama are coming.
+- **Panoramas are one row.** A single sweep left to right (or right to left). Several rows stacked into a grid, and full 360° panoramas that join back to their start, aren't there yet.
+- **Parallax.** Neither merge can fix near things shifting against far things when the camera itself moved. Turn the camera on the spot.
+- **HDR Panorama is coming,** and will be marked experimental when it arrives.
 - **Raw files only,** from Bayer sensors. X-Trans, monochrome and already-merged files can't be merged, and all photos must come from the same camera at the same size and orientation.
 - **The preview is small,** about 1,000 pixels across; to judge fine detail, merge and look at the result.
 - **On Macs with 8 GB of memory,** a merge takes at most 5 photos.
