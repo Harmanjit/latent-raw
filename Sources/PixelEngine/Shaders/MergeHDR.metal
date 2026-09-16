@@ -179,13 +179,17 @@ constexpr sampler mergeHDRMaskSampler(coord::pixel, filter::linear, address::cla
 //   Both maps are quarter size, read with `mergeHDRMaskSampler` (`maskSpan`
 //   photosites per map pixel). One weight for all three channels, so a
 //   handover between frames can't shift the colour.
-// - `weightFloor` is 0 except for the darkest frame, which keeps at least
+// - `weightFloor` is 0 for most frames. The darkest frame keeps at least
 //   1e-4: where every frame is clipped, the darkest one's value is the
 //   best there is, and the floor makes it the result with no special case.
+//   The reference frame keeps a far smaller floor, 1e-8, whenever any frame
+//   is warped, for the reason in the next point.
 // - With `coverageOn` (a frame warped onto the reference by alignment), the
 //   weight, floor included, is multiplied by the frame's alpha: 1 inside
 //   the moved frame, 0 where it moved out of the picture and has nothing to
-//   give.
+//   give. So along an edge every other frame moved away from, only the
+//   reference frame covers the pixel, and without its 1e-8 floor the sums
+//   there would be zero and `mergeHDRResolve` would write black.
 kernel void mergeHDRAccumulate(
     texture2d<float, access::read> rgb               [[texture(0)]],
     texture2d<float, access::read> clipMask          [[texture(1)]],

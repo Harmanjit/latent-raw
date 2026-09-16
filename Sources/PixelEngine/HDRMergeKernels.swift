@@ -308,8 +308,13 @@ public final class HDRMergeAccumulator {
     ///   - multipliers: the white balance RCD works with (red, green, blue),
     ///     the same for every frame; divided back out before summing.
     ///   - relativeEV: stops of light relative to the brightest frame (0 or less).
-    ///   - weightFloor: the least weight any pixel of this frame gets: 1e-4
-    ///     for the darkest frame, 0 for the others.
+    ///   - weightFloor: the least weight any pixel of this frame gets, in
+    ///     three cases: 1e-4 for the darkest frame, so pixels clipped in
+    ///     every frame fall back to it; 1e-8 for the reference frame
+    ///     whenever any frame is warped, because a warped frame's weight is
+    ///     multiplied by its coverage, so an edge every other frame moved
+    ///     away from would otherwise end with no weight at all and resolve
+    ///     to black; 0 for every other frame.
     ///   - feather: how the frame fades out near its clipping; nil for none
     ///     (the darkest frame, which nothing darker could replace).
     ///   - ghostMask: where the frame shows something that moved, from
