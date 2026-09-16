@@ -7,7 +7,8 @@ DerivedData/
 TestAssets/*
 !TestAssets/README.md
 vendor/*-src/
-vendor/*.xcframework/
+# No trailing slash: worktrees link the framework in as a symlink.
+vendor/*.xcframework
 
 # Editor / tool state
 .claude/

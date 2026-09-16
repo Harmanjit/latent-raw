@@ -35,7 +35,7 @@ from huggingface_hub import hf_hub_download
 import argparse
 import hashlib
 _args = argparse.ArgumentParser()
-_args.add_argument("--width", type=int, default=32, help="32 (bundled) or 64 (optional download)")
+_args.add_argument("--width", type=int, default=32, help="32 (bundled) or 64 (not bundled or published; convert it yourself)")
 _args.add_argument("--out", default=None, help="output directory (default: the bundled Models folder)")
 ARGS = _args.parse_args()
 

@@ -8,9 +8,11 @@ import PixelEngine
 /// are the people", "where is water" and so on at once.
 ///
 /// The model is SegFormer-B2 (27 M parameters, ~55 MB in fp16), converted
-/// by `scripts/convert_segformer.py` with the normalisation, upsampling
-/// and softmax folded into the graph, so this class only resizes the
-/// image in and reads probabilities out.
+/// by `scripts/convert_segformer.py` with the normalisation and softmax
+/// folded into the graph, so this class only resizes the image in and
+/// reads probabilities out. They come out at a quarter of the input size
+/// (128 x 128 for a 512 x 512 input); upsampling 150 class maps inside the
+/// graph would cost far more than resizing the one mask that is wanted.
 public final class SegmentationModel: @unchecked Sendable {
     public static let packageName = "SegFormer_segformer_b2_finetuned_ade_512_512"
     public static let modelVersion = "segformer-b2-ade20k-512.1"
