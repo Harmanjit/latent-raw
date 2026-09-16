@@ -153,6 +153,8 @@ enum Shortcuts {
         // system key (insert a new line), which the command leaves to a
         // field being typed in (CommandState).
         Shortcut(.photoMergePanorama, "m", .control),
+        // Lightroom's ⌃⇧M for HDR Panorama, beside ⌃M as ⌃⇧H sits beside ⌃H.
+        Shortcut(.photoMergeHDRPanorama, "m", [.shift, .control]),
     ]
 
     /// The menu bar's standard items that keep their keys.
@@ -310,6 +312,7 @@ extension Shortcuts {
             ShortcutPageRow([.photoMergeHDR], "HDR merge of the selected photos into one DNG beside them (see [Photo Merge](Photo-Merge)); not while typing in a text field, where ⌃H deletes backward"),
             ShortcutPageRow([.photoMergeHDRWithoutDialog], "HDR merge without the dialog, with the options it was last left with; problems show in the status bar"),
             ShortcutPageRow([.photoMergePanorama], "Stitch the selected photos into one panorama DNG beside them (see [Photo Merge](Photo-Merge)); not while typing in a text field"),
+            ShortcutPageRow([.photoMergeHDRPanorama], "Merge a bracket at each position and stitch the results into one DNG (experimental; see [Photo Merge](Photo-Merge)); not while typing in a text field"),
         ]),
     ]
 

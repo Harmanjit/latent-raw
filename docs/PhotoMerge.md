@@ -48,6 +48,17 @@
 
 **Active-area fix** is merged: the sensor plane is cut to LibRaw's visible area, and old edits with geometry are migrated on load. The "Crop every frame to the active area" rule in 2a is therefore already true everywhere.
 
+**Phase 9 (HDR Panorama, experimental) is done (2026-09-15).** How it turned out:
+- **It composes what exists** rather than adding pixel code: `MergeKit/HDRPano` groups the selection into positions, has `HDRMerger` merge each position, and hands the results to `PanoramaMerger`, which already reads linear DNGs (`PanoramaFramePrep` accepts `.linearRGB`).
+- **Grouping** (`HDRPanoramaGrouper`), strongest evidence first: the shortest repeating period of the exposures whose own exposures are all different; then the gaps between shots, split at the *lowest* clear jump (at least 2.5x the gaps below it, or ≥ 1 s when those are 0, as EXIF's whole seconds make them); then, only when neither says anything, the overlap of consecutive photos, measured the same way. Pattern and timing disagreeing means the pattern wins, and the dialog is told (`.mixed`). Already-merged photos (linear DNGs) are positions of one and cut the sequence. A run that won't split is one position when it could be one bracket (all exposures different, at most `HDRMerger.frameLimit` of them); otherwise it is `.cantTellPositions`, whose message is the one the plan asked for.
+- **Intermediate HDRs are temporary DNGs**, one per position, in a scratch folder removed however the merge ends. Chosen over keeping linear frames in the panorama's prep: no new code in either engine, peak memory is exactly one HDR merge, and it reuses the tested path. Cost is disk (`width x height x 6` bytes a position; 5 x 24 MP ≈ 725 MB), checked before anything is merged and reported to the dialog.
+- **The layout is solved twice.** The analysis solves it on one photo per position so the dialog can show the sweep and the downsample agreement without merging anything; the merge solves it again on the real intermediates, which is what is stitched. A position's HDR has the same size, lens, orientation and capture time as that frame, so the two agree.
+- **The recipe** is `kind: .hdrPanorama` naming every selected photo (not the intermediates), with both stages' options and the brackets, through a new `PanoramaMergeOptions.recipeOverride` — the one additive change to an existing public API.
+- **No preview in the dialog:** an honest one would have to merge every position first. The dialog shows the positions, their exposures and where they point instead.
+- **Tests:** synthetic bracketed sweeps of the panorama tests' scene (`HDRPanoTestSupport`), and a "fake HDR panorama" cut as overlapping windows out of the real Ihrke bracket — real photons, real exposures, synthetic geometry (the windows claim a long lens, since a crop is a rotation only in that limit).
+- **Found on the way:** a LinearRaw DNG of ours whose tile grid is exactly 2 x 2 (512 px tiles, i.e. 513...1024 on both sides) reads back as the bit patterns of its half floats, and 1024 x 1024 doesn't open at all; every other tiling is correct. Real merges are far larger, but a heavily downsampled panorama could land there. Not fixed here (it is the writer's or the vendored LibRaw's); the HDR panorama tests use frames that tile 3 x 1.
+- **Still unverified:** a real bracketed sweep. Nobody has shot one for Latent, so changing light, parallax across positions and brackets that drift from position to position have never been tried. The menu item, the dialog, `docs/wiki/Photo-Merge.md` and `Limitations.md` all say so.
+
 ## 1. What Photo Merge will do
 
 **Photo Merge** takes 2 or more photos you select in the grid and writes **one new photo file** next to them. Latent then catalogs it and edits it like any RAW.
@@ -302,7 +313,7 @@ Every decision is made on a **1/8-scale** copy. Only the final warp and blend ru
 | 8a | **Panorama geometry:** camera solve, projections, CPU twin, gains, crop | 2 wk | `MergeKit/Pano/Geometry/*` | ⇉ with 8b (agree the `PanoCameras` struct first) |
 | 8b | **Panorama GPU:** `mergeLensPrep`, warp, Voronoi, tiled blend, scratch files | 2–3 wk | `MergeKit/Pano/Blend/*`, `Shaders/MergePano.metal` | ⇉ with 8a |
 | 8c | Panorama CLI + app (⌃M), `PanoramaOutputSizer` + downsample warning | 1 wk | CLI, app | after 8a+8b |
-| 9 | HDR Panorama (**experimental**): bracket grouping, per-position HDR → panorama. No real HDR panorama test set exists (none are freely licensed and Harman hasn't shot one), so tests build synthetic ones: overlapping windows cut from the real Ihrke and Empa brackets, warped by known camera rotations. The menu item and docs say "Experimental" until a real set has been checked. | 1–2 wk | `MergeKit/HDRPano/*`, app | — |
+| 9 | HDR Panorama (**experimental**) (**done**; see §0) | 1–2 wk | `MergeKit/HDRPano/*`, app | — |
 | 10 | Later: own FAST/BRIEF matcher + bundle adjustment (multi-row/360), spherical projection, graph-cut seams, tiled editor/export, deflate, Find Bracket Sets, stacks | large | — | — |
 
 **Timeline:** first user-visible release (tripod HDR) at the end of phase 5b, about 8–11 weeks. That is realistic for step-by-step work; the earlier "preliminary step" framing undersold phases 1–2.

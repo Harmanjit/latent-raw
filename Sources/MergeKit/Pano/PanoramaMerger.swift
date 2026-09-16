@@ -363,9 +363,15 @@ public final class PanoramaMerger: PanoramaMerging {
         metadata.lensModel = nil
         metadata.lensSpecification = nil
         metadata.lens = nil
-        let recipe = MergeRecipe(kind: .panorama, clipLevel: clipLevel, lensApplied: true,
-                                 reference: cameras[0].frameIndex,
-                                 options: Self.recipeOptions(analysis, options: options), sources: sources)
+        // An HDR panorama hands us intermediate HDRs it made itself, so it
+        // says what the result must record instead (`recipeOverride`): its
+        // own kind, the photographer's photos and the HDR stage's settings.
+        let override = options.recipeOverride
+        var recordedOptions = Self.recipeOptions(analysis, options: options)
+        for (key, value) in override?.options ?? [:] { recordedOptions[key] = value }
+        let recipe = MergeRecipe(kind: override?.kind ?? .panorama, clipLevel: clipLevel, lensApplied: true,
+                                 reference: override?.reference ?? cameras[0].frameIndex,
+                                 options: recordedOptions, sources: override?.sources ?? sources)
         let stored = recipe.normalised(by: normalisation)
 
         // The stitch, streamed into the writer a tile at a time.
