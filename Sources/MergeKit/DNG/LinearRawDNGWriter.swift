@@ -254,14 +254,40 @@ public struct LinearRawDNGWriter: Sendable {
         return ifd
     }
 
-    /// The tile size actually written for an image. LibRaw 0.22.2 misreads
-    /// a tiled float DNG whose width or height is smaller than one tile, so
-    /// for small images the tile shrinks to the largest multiple of 16 that
-    /// fits inside both sides (16 at the very least). Real merges are far
-    /// bigger than 512 px and always get the requested size.
+    /// The tile size actually written for an image, small enough that
+    /// LibRaw reads the tiles back as tiles.
+    ///
+    /// Two shapes of grid have to be avoided, both because of how LibRaw
+    /// 0.22.2 reads the directory rather than anything the DNG spec says.
+    ///
+    /// 1. A tile bigger than the image on either side: LibRaw misreads it,
+    ///    so the tile shrinks to the largest multiple of 16 that fits
+    ///    inside both sides (16 at the very least).
+    /// 2. A grid of exactly four tiles, whatever its shape (2 x 2, but 4 x 1
+    ///    and 1 x 4 as well). LibRaw takes a TileOffsets count of 4 as the
+    ///    mark of a Sinar 4-shot camera file and swaps the decoder for the
+    ///    whole file (src/metadata/tiff.cpp, tag 0x0144: `if (len == 4) {
+    ///    load_raw = &LibRaw::sinar_4shot_load_raw; is_raw = 5; }`). That
+    ///    decoder reads plain 16-bit integers, so our half floats came back
+    ///    as their bit patterns, or it read past the end of the file and
+    ///    the DNG wouldn't open at all. Halving the tile escapes: a side
+    ///    that needed two tiles needs at least three of half the size, so
+    ///    the count lands at 9 or more (7 or more from a 4 x 1).
+    ///
+    /// Real merges are far bigger than 512 px and get the requested size;
+    /// a heavily downsampled panorama is what can land on four tiles.
+    /// Images under about 33 px square would need a tile below the 16 px
+    /// minimum to escape, so they keep their four tiles.
     static func tileSize(_ requested: Int, width: Int, height: Int) -> Int {
         let fits = (min(width, height) / 16) * 16
-        return max(16, min(requested, fits))
+        let tile = max(16, min(requested, fits))
+        guard tile > 16, tileCount(tile, width: width, height: height) == 4 else { return tile }
+        return max(16, tile / 2 / 16 * 16)
+    }
+
+    /// How many tiles of `tile` px it takes to cover the image.
+    static func tileCount(_ tile: Int, width: Int, height: Int) -> Int {
+        ((width + tile - 1) / tile) * ((height + tile - 1) / tile)
     }
 
     /// SubIFD 1: the JPEG preview.

@@ -97,9 +97,10 @@ public struct HDRGhostMeasurement: Sendable {
 /// 1. `measure` every frame, in any order, once each: its brightness and
 ///    colour, and whether it sees each block better than the frames before
 ///    it (which builds the map of local references).
-/// 2. `finishMeasuring()`, then `findMovement` for every frame but the
-///    reference: where it disagrees with the local references, added to one
-///    map of movement.
+/// 2. `finishMeasuring()`, then `findMovement` for every frame, the
+///    reference included: where it disagrees with the local references,
+///    added to one map of movement. No frame is compared with itself: a
+///    block whose local reference is the frame itself is skipped.
 /// 3. `mask` for every frame, the reference included: every moving area,
 ///    except those (or the parts of them) the frame is the source of. The
 ///    first call finds the areas and their sources (`findAreas`).
@@ -560,8 +561,10 @@ public final class HDRGhostDetector {
 
     /// Where frame `index` disagrees with the local references, from its
     /// measurement, added to the map of movement. Call `finishMeasuring()`
-    /// first, and this for every frame but the reference before any `mask`.
-    /// Returns the share of the frame found moving, 0...1. Waits for the GPU.
+    /// first, and this for every frame before any `mask`, the reference
+    /// frame too: it disagrees only where some other frame sees the block
+    /// better. Returns the share of the frame found moving, 0...1. Waits
+    /// for the GPU.
     public func findMovement(_ measurement: HDRGhostMeasurement, index: Int,
                              settings: HDRDeghostSettings) throws -> Double {
         guard measuringDone, framesMeasured > 0, areas == nil else {

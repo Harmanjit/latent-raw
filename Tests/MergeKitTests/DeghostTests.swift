@@ -202,4 +202,104 @@ final class DeghostTests: XCTestCase {
         XCTAssertEqual(HDRMerger.recipeOptions(HDRMergeOptions(deghost: .low)),
                        ["deghost": .string("low"), "clipFeather": .number(1), "autoAlign": .bool(false)])
     }
+
+    // MARK: - Movement only the reference frame can see
+
+    /// Where the bright-only-in-the-reference rectangle sits, inside a
+    /// uniform background painted over the scene's shadow band.
+    static let onlyReferenceBackground = SyntheticBracket.Patch(
+        x: 100, y: 600, width: 600, height: 190, radiance: SIMD3<Float>(repeating: 0.25))
+    static let onlyReferenceRect = SyntheticBracket.Patch(
+        x: 250, y: 650, width: 120, height: 110, radiance: SIMD3<Float>(repeating: 0.94))
+    /// Exposures 4, 1 and 1/2. The 0.94 rectangle puts the reference frame
+    /// at 88% of its clip level: past the point where it stops being the
+    /// local reference (the choice fades the reference frame's bonus over
+    /// the first half of how usable it is), but still well inside the
+    /// weight the merge gives it, which only reaches zero at 95%.
+    static let onlyReferenceExposures = [4.0, 1, 0.5]
+
+    /// A bracket whose middle (reference) frame alone shows a bright
+    /// rectangle, in an area where that frame is close to clipping.
+    ///
+    /// Over the 0.25 background the brightest frame is already clipped, so
+    /// all it can say is "at least as bright as my own clip level", which
+    /// the background itself satisfies: it can never disagree with anything
+    /// here. The darkest frame sees the background comfortably, so it is
+    /// the local reference and is exempt from being compared with itself.
+    /// That leaves the reference frame as the only frame able to report the
+    /// rectangle at all.
+    static func onlyTheReferenceSeesItBracket() throws -> [URL] {
+        var frames = SyntheticBracket.frames(onlyReferenceExposures)
+        for i in frames.indices {
+            frames[i].patches = [onlyReferenceBackground] + (i == 1 ? [onlyReferenceRect] : [])
+        }
+        return try HDRTestSupport.bracket("onlyReferenceSees3", frames, noise: true)
+    }
+
+    /// The mean merged value well inside the rectangle.
+    static func rectangleMean(_ merged: HDRTestSupport.Merged) -> SIMD3<Double> {
+        let r = onlyReferenceRect
+        var sum = SIMD3<Double>(), count = 0.0
+        for y in (r.y + 16)..<(r.y + r.height - 16) {
+            for x in (r.x + 16)..<(r.x + r.width - 16) {
+                sum += SIMD3<Double>(merged.pixel(x, y))
+                count += 1
+            }
+        }
+        return sum / count
+    }
+
+    /// Something that moved through an area the reference frame is close to
+    /// clipping in is masked, even though no other frame can report it.
+    ///
+    /// Deghosting used to skip the reference frame when looking for
+    /// movement, which cost nothing where the reference frame sees the
+    /// scene best (it is compared with itself there and never disagrees),
+    /// but everything in blocks it lost to another frame: near clipping, or
+    /// crushed. The merge still gave it real weight there, so the rectangle
+    /// came out as a half-transparent ghost, a blend of its own brightness
+    /// and the background another frame saw in its place, in exactly the
+    /// highlights deghosting is turned on for.
+    func testMovementOnlyTheReferenceFrameCanSeeIsMasked() async throws {
+        let urls = try Self.onlyTheReferenceSeesItBracket()
+        let rectangle = SyntheticBracket.mergeUnits(Self.onlyReferenceRect.radiance, brightest: 4)
+        let background = SyntheticBracket.mergeUnits(Self.onlyReferenceBackground.radiance, brightest: 4)
+
+        let (_, noneResult, _, noneFolder) = try await HDRTestSupport.merge(
+            urls, options: HDRMergeOptions(referenceIndex: 1))
+        defer { try? FileManager.default.removeItem(at: noneFolder) }
+        let blended = Self.rectangleMean(try HDRTestSupport.readBack(noneResult.url))
+
+        let (_, result, report, folder) = try await HDRTestSupport.merge(
+            urls, options: HDRMergeOptions(referenceIndex: 1, deghost: .medium))
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let deghosted = Self.rectangleMean(try HDRTestSupport.readBack(result.url))
+
+        func distance(_ value: SIMD3<Double>) -> Double {
+            min(HDRMergeTests.relativeError(value, rectangle), HDRMergeTests.relativeError(value, background))
+        }
+        print("Only the reference sees it: rectangle \(rectangle), background \(background); "
+              + "without deghosting \(blended) (distance \(distance(blended))), "
+              + "at medium \(deghosted) (distance \(distance(deghosted))); "
+              + "flagged \(report.ghostFlaggedFractions), masked \(report.ghostMaskedFractions)")
+
+        // Nothing but the reference frame can flag anything in this scene,
+        // so before it was compared the movement map stayed empty and every
+        // mask with it.
+        XCTAssertGreaterThan(report.ghostFlaggedFractions[1], 0.005,
+                             "the reference frame is compared, so its own movement is found")
+        XCTAssertEqual(report.ghostFlaggedFractions[0], 0, accuracy: 1e-9)
+        XCTAssertEqual(report.ghostFlaggedFractions[2], 0, accuracy: 1e-9)
+        XCTAssertGreaterThan(report.ghostMaskedFractions[0], 0.005,
+                             "the rectangle becomes a moving area the other frames are left out of")
+        // The ghost is faint here (7% over the background) because the
+        // merge already gives a frame this close to clipping little weight
+        // next to a darker one. It is the whole of what the reference frame
+        // contributes on its own, and it is a blend of two frames; masked,
+        // the rectangle reads as one frame's view of the scene.
+        XCTAssertGreaterThan(distance(blended), 0.04,
+                             "without deghosting the rectangle is a blend of two frames: \(blended)")
+        XCTAssertLessThan(distance(deghosted), 0.02,
+                          "deghosted, the rectangle comes from one frame: \(deghosted)")
+    }
 }

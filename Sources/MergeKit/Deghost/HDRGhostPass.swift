@@ -79,7 +79,18 @@ extension HDRMerger {
         var flagged: [Double] = []
         for (index, frame) in frames.enumerated() {
             try Task.checkCancellation()
-            guard index != reference, let measurement = measurements[index] else {
+            // The reference frame is compared too. It is never compared
+            // with itself: `mergeDeghostCompare` writes 0 for every block
+            // the frame is already the local reference of. What is left are
+            // the blocks the reference frame lost (near clipping, or
+            // crushed), and there it is the only frame that can show what
+            // moved: a brighter frame is clipped there and can't disagree
+            // with anything, and the local reference is exempt by that same
+            // test. Skipping it left a moving subject in the reference's
+            // near-clipped highlights unmasked, half blended with another
+            // frame's pose of it, which is the very thing deghosting is on
+            // for.
+            guard let measurement = measurements[index] else {
                 flagged.append(0)
                 continue
             }
