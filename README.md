@@ -13,10 +13,15 @@ Repository: `Harmanjit/latent-raw`.
   `xcodebuild -downloadComponent MetalToolchain`) the shaders compile at first
   launch.
 - **License:** GPLv3. See `LICENSE`.
-- **Status:** beta (Phase 9). Editing (with red-eye and brush healing), a catalog with a folder sidebar, Custom sort, Finder tags, moving and renaming images with their edits, undo in the Library, AI masks, Loupe, Compare and Survey, full-screen and second-display viewing, export (with optional HDR gain maps and a watermark), soft-proofing, printing, contact sheets, a slideshow, hand-off to an external editor and Photo Merge — HDR of handheld or tripod brackets (Photo › Photo Merge › HDR…, ⌃H), single-row Panoramas (Panorama…, ⌃M) and, marked experimental, HDR Panorama (⌃⇧M), all writing a DNG — work; DNG export does not exist. HDR Panorama has never been checked on a real bracketed sweep, because nobody has shot one for Latent yet. Expect rough edges.
+- **Status:** version 0.9, a beta review build. Editing (with red-eye and brush healing), a catalog with a folder sidebar, Custom sort, Finder tags, moving and renaming images with their edits, undo in the Library, AI masks, Loupe, Compare and Survey, full-screen and second-display viewing, export (with optional HDR gain maps and a watermark), soft-proofing, printing, contact sheets, a slideshow, hand-off to an external editor and Photo Merge — HDR of handheld or tripod brackets (Photo › Photo Merge › HDR…, ⌃H), single-row Panoramas (Panorama…, ⌃M) and, marked experimental, HDR Panorama (⌃⇧M), all writing a DNG — work; DNG export does not exist. HDR Panorama has never been checked on a real bracketed sweep, because nobody has shot one for Latent yet. Expect rough edges.
 - **Name:** the project was called *rawhead* until September 2026. Folders
   catalogued by those builds have a `_rawhead/` container; opening them in
   Latent renames it to `_latent/` in place, keeping every edit and sidecar.
+- **Download:** a prebuilt app, ad hoc signed and not notarised, is on the
+  [Releases page](https://github.com/Harmanjit/latent-raw/releases). The
+  first time it opens, Gatekeeper stops it until you click **Open Anyway**
+  in System Settings > Privacy & Security; see the wiki's
+  [Installation](docs/wiki/Installation.md) page.
 
 See `DESIGN.md` for the full architecture: storage layout, pipeline design,
 efficiency rules and the roadmap. `PHASE0.md` records what the Phase 0 spike
@@ -41,7 +46,7 @@ Sources/
 Tests/                Unit, golden-image, help-page and app-logic tests
 docs/                 PhotoMerge.md, the Photo Merge plan and algorithm
 docs/wiki/            The user guide (GitHub wiki and in-app Help)
-vendor/               Vendored C/C++ dependencies (LibRaw) built as XCFrameworks
+vendor/               LibRaw, the one C/C++ dependency, built here as an XCFramework (not committed)
 Assets/               The app icon: Latent.pdf, the vector original, and the AppIcon.icns and AppIcon.png made from it
 TestAssets/           Sample RAW files (not committed; see below)
 ```
@@ -99,11 +104,17 @@ What it writes, and where:
   thumbnails and, once you arrange a Custom sort, `custom-order.json`.
   Nothing else is written in your photo folders unless you ask: Move
   and Copy to Folder and Rename change files (never overwriting one, and
-  undoing a copy puts it in the Trash), and Edit in External Editor
-  writes a TIFF to the folder set for it. Finder tags are read, never
-  written.
-- `~/Library/Application Support/latent/`: compiled Core ML models and
-  your saved presets.
+  undoing a copy puts it in the Trash), Edit in External Editor
+  writes a TIFF to the folder set for it, and Photo Merge writes its
+  result beside the reference photo (`<name>-HDR.dng`, `-Pano.dng` or
+  `-HDRPano.dng`, numbered when the name is taken), with its sidecar in
+  `_latent/`. Finder tags are read, never written.
+- `~/Library/Containers/com.latent.app/Data/Library/Application Support/latent/`
+  (`~/Library/Application Support/latent/` for `swift run` and
+  `make_app.sh --dev` builds, which aren't sandboxed): compiled Core ML
+  models and your saved presets.
+- The temporary folder: a panorama's prepared frames and HDR Panorama's
+  intermediate DNGs while a merge runs, removed when it ends.
 - Settings in the app's UserDefaults, including bookmarks for the last
   folder, the export folder, the sidebar's favourite folders, the last
   five Move/Copy destinations, the external editor's folder and
@@ -132,19 +143,25 @@ print layout lives in the print panel (⌘P).
 
 ## Building (on macOS, Apple Silicon, Xcode 16+)
 
+`RawCore` depends on LibRaw, built from source as an arm64 XCFramework by
+`scripts/build_libraw.sh`. The framework is not committed, so a fresh clone
+runs that script once, with Homebrew's autotools installed, before
+`swift build`. See `vendor/README.md` for why and how.
+
 ```
+brew install autoconf automake libtool pkg-config   # once
+scripts/build_libraw.sh                       # once per clone: builds vendor/LibRaw.xcframework from a pinned commit
 swift build                                   # everything, debug
 scripts/fetch_test_assets.sh                  # public-domain raw for the golden-image tests
 swift test                                    # unit + golden tests (tests on private samples skip)
-scripts/build_libraw.sh                      # once per clone: builds vendor/LibRaw.xcframework from a pinned tag
-swift run latent-app TestAssets/photo.nef    # the editor, opening a file straight away (defaults such as -AppleLanguages (en) may come first)
-swift run latent-cli render photo.nef --out /tmp/out.png   # headless render + timings
+swift run latent-app TestAssets/golden_nikon_d750_cc0.nef   # the editor, opening a file straight away (defaults such as -AppleLanguages (en) may come first)
+swift run latent-cli render TestAssets/golden_nikon_d750_cc0.nef --out /tmp/out.png   # headless render + timings
 ```
 
 For a proper `.app` (Dock icon, window memory, signed for this Mac):
 
 ```
-scripts/make_app.sh 0.1.0        # builds release and assembles build/Latent.app
+scripts/make_app.sh 0.9.0        # builds release and assembles build/Latent.app
 open build/Latent.app
 ```
 
@@ -171,10 +188,6 @@ the menu bar and the single-key handler also use, so it can't drift. The
 menu bar shows every command with its key. After changing the table, run
 `LATENT_WRITE_SHORTCUTS_PAGE=1 swift test --filter ShortcutsPageTests`.
 
-`RawCore` depends on LibRaw as a vendored C library. See `vendor/README.md`
-for how it's fetched and built as an XCFramework — this step needs to run
-on macOS since it compiles native code for arm64.
-
 ## Test assets
 
 Sample RAW files are intentionally not committed (they're large and mostly
@@ -187,4 +200,5 @@ file, so a local run skips what CI skips.
 
 ## Contributing
 
-Not yet open for contributions.
+Not yet open for contributions. Bug reports are welcome at
+https://github.com/Harmanjit/latent-raw/issues.

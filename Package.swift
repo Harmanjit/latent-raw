@@ -23,8 +23,9 @@ let package = Package(
         // Exact, not "from": a fresh resolve must never pull in a version
         // nobody tested. Bump deliberately.
         .package(url: "https://github.com/groue/GRDB.swift.git", exact: "6.29.3"),
-        // LibRaw and Lensfun are vendored as XCFrameworks under vendor/ rather than
-        // pulled as SwiftPM dependencies — see vendor/README.md for why and how.
+        // LibRaw is built as an XCFramework under vendor/ by scripts/build_libraw.sh
+        // rather than pulled as a SwiftPM dependency — see vendor/README.md for why
+        // and how. Lensfun contributes only its XML database, bundled in LensKit.
     ],
     targets: [
         // C shim exposing a small, deliberately narrow slice of LibRaw's C++ API
