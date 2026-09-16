@@ -32,10 +32,12 @@ Sources/
   LensKit/            Lensfun database and lens matching
   Catalog/            Per-folder catalogs: GRDB schema, XMP read/write, reconciliation, thumbnails, sorting and Finder tags, moving and renaming images, undo, export naming
   MLKit/              Core ML and Vision: masks, AI denoise, red-eye detection, the export worker
+  MergeKit/           Photo Merge: alignment, deghosting, the HDR merge, the panorama geometry and stitcher, the HDR panorama, the LinearRaw DNG writer and the latent:Merge recipe
   HelpKit/            The Help window's content: the wiki's Markdown, links and search
-  latent-cli/         Headless renderer for benchmarks
+  latent-cli/         Headless renderer for benchmarks, and the merge commands (merge-hdr, pano-layout, merge-pano, merge-hdrpano)
   latent-app/         The SwiftUI/AppKit app (viewport, grid, sidebar, adjustments, export, print, slideshow, menus)
 Tests/                Unit, golden-image, help-page and app-logic tests
+docs/                 PhotoMerge.md, the Photo Merge plan and algorithm
 docs/wiki/            The user guide (GitHub wiki and in-app Help)
 vendor/               Vendored C/C++ dependencies (LibRaw) built as XCFrameworks
 TestAssets/           Sample RAW files (not committed; see below)

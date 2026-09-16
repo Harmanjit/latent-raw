@@ -220,9 +220,13 @@ extension HDRDeghostSettings {
     /// for it: on the Ihrke, Market Mires and Crete brackets, judged at half
     /// size, Low, Medium and High then leave out within about a fifth of
     /// what the full merge leaves out (Medium on Crete: 19.4% either way;
-    /// High on Ihrke: 21.5% against 22.8%). Frames reduced 3 or 4 times
-    /// (sensors over about 36 MP) have patches of 3 x 3 blocks, where the
-    /// rounding is coarser, so their previews are a rougher guide.
+    /// High on Ihrke: 21.5% against 22.8%). Frames reduced 3 or 4 times have
+    /// patches of 3 x 3 blocks, where the rounding is coarser, so their
+    /// previews are a rougher guide. That starts as soon as a frame's long
+    /// edge passes `previewCacheLongEdge` x 2 = 6,144 pixels, where
+    /// `previewFactor` reaches 3 and `patchRadius` rounds 4 / 3 to 1:
+    /// about 25 MP at 3:2, about 28 MP at 4:3. (The wiki said "about 36 MP"
+    /// until 2026-09-15; the long edge, not the megapixels, is what sets it.)
     func reduced(by factor: Int) -> HDRDeghostSettings {
         guard factor > 1 else { return self }
         var reduced = self

@@ -48,6 +48,17 @@
 
 **Active-area fix** is merged: the sensor plane is cut to LibRaw's visible area, and old edits with geometry are migrated on load. The "Crop every frame to the active area" rule in 2a is therefore already true everywhere.
 
+**Phase 8 (Panorama: 8a geometry, 8b GPU, 8c CLI and app) is done (2026-09-15).** Where it differs from section 4 and the risks in section 9 — read this instead of them:
+- **No Vision anywhere.** Stage 3's "pairwise Vision homographies… validated by NCC (≥ 0.6)" is wrong twice over. Pairs are registered by `PanoramaRegistrar`: first `FrameAligner` in panorama mode (phase correlation, then ECC) on exposure-normalised log-luminance thumbnails, accepted only when the answer is also what a camera turning about its lens could produce, with the spike's thresholds — **NCC ≥ 0.9** and overlap ≥ 5%, the `FrameAligner` defaults, not 0.6. When that fails, **corners** (`PanoramaFeatures`: Harris corners, 8 x 8 patch descriptors matched by NCC, a rotation fitted with RANSAC), then ECC again to refine it. The report names the method used: `ECC`, `features+ECC` or `features`. So the "plan a feature-matching fallback" note in §0's Vision spike was taken, in Phase 8 rather than Phase 10.
+- **Neighbours are not the only pairs.** After the first camera solve, any two photos whose solved cameras predict at least 20% overlap are registered too — a sweep shot in more than one pass, or in small steps — along with neighbours that failed but now have a starting guess; then everything is solved again (`PanoramaLayoutSolver`, steps 2 and 4).
+- **There is bundle adjustment,** contrary to stage 4's "no bundle adjustment in v1". `PanoramaCameraSolver.bundleAdjust` fits every rotation and the shared focal length together against all the correspondences, with a prior on the focal length, and the solve is repeated up to four times, dropping the one pair whose error is far worse than the median each round. `PanoramaLayoutOptions.refineFocalLength` defaults to **true**: EXIF focal lengths are nominal, and focusing changes them.
+- **No frame cap, and §9's "cap panorama v1 at 6 frames" mitigation was not taken.** Chained-homography drift is handled by the bundle adjustment and the extra pairs instead. `PanoramaFramePrep.photos()` asks only for two or more; the real test sweep is 17 D750 frames across 186°.
+- **Automatic projection** is Perspective within about 70° both ways, **Spherical** past 65° above or below the horizon, Cylindrical otherwise. Stage 5 mentioned only the first two.
+- **`bytesPerEditPixel` is 112, not the guessed "about 7 x 8 bytes",** measured on a 24 MP linear source with denoise, heal, lens correction, presence, a local adjustment and sharpening all on. So the editing budget is about **41 MP** on a 16 GB M1 Pro, not the 75 MP stage 4's note estimated; the rule itself (`s = min(1, L / max(W, H), sqrt(P / (W x H)))`) is unchanged, and lives in `PanoramaOutputSizer`, pure and testable without a GPU. The sentence the dialog shows is `PanoramaOutputSize.downsampleMessage`, and it names whichever limit bit: "The most this Mac can edit is 41 MP" or "The largest this Mac can edit is 16,384 px on a side".
+- **Panoramas accept linear DNGs,** not only Bayer raws (`PanoramaFramePrep.photos()` takes `.bayer` and `.linearRGB`), which is what let Phase 9 compose HDR and panorama with no new pixel code. The wiki now says so; before, it told users a merged file could never be merged again.
+- **Two shader files, not one:** `Shaders/MergePanoPrep.metal` (lens correction, unit white balance, exposure normalisation) and `Shaders/MergePanoBlend.metal` (warp, seams, pyramids), rather than the single `MergePano.metal` phase 8b originally named.
+- **Known gap, not fixed here:** a lens the bundled Lensfun subset can't identify gets **no** correction during prep (`MergePanoPrepKernels.Lens.profile(for:)` returns nil), yet the result is still written with `lensApplied: true` and its lens tags stripped, so Develop won't correct it either. `PanoramaMergeWarning` has no case for it. `photos()` already knows `lens == nil`, so surfacing it as a warning is a small engine change; until then `docs/wiki/Photo-Merge.md` and `Limitations.md` warn about it in words.
+
 **Phase 9 (HDR Panorama, experimental) is done (2026-09-15).** How it turned out:
 - **It composes what exists** rather than adding pixel code: `MergeKit/HDRPano` groups the selection into positions, has `HDRMerger` merge each position, and hands the results to `PanoramaMerger`, which already reads linear DNGs (`PanoramaFramePrep` accepts `.linearRGB`).
 - **Grouping** (`HDRPanoramaGrouper`), strongest evidence first: the shortest repeating period of the exposures whose own exposures are all different; then the gaps between shots, split at the *lowest* clear jump (at least 2.5x the gaps below it, or ≥ 1 s when those are 0, as EXIF's whole seconds make them); then, only when neither says anything, the overlap of consecutive photos, measured the same way. Pattern and timing disagreeing means the pattern wins, and the dialog is told (`.mixed`). Already-merged photos (linear DNGs) are positions of one and cut the sequence. A run that won't split is one position when it could be one bracket (all exposures different, at most `HDRMerger.frameLimit` of them); otherwise it is `.cantTellPositions`, whose message is the one the plan asked for.
@@ -70,7 +81,7 @@
 **Out of scope, and why:**
 - **Boundary Warp** (stretching panorama edges into a rectangle) and **Fill Edges** (inventing missing corners). Each is a research project.
 - **Focus stacking.** Lightroom doesn't have it either. List it in `docs/wiki/Limitations.md`.
-- **Multi-row and 360° panoramas.** They need our own feature matcher. That is a late phase.
+- **Multi-row and 360° panoramas.** They need our own feature matcher. That is a late phase. (The matcher arrived early: Phase 8 built `PanoramaFeatures` as the registration fallback — see §0. Multi-row and 360° themselves are still not built.)
 - **Re-merge from a recipe** and **Stacks.** Latent has no grouping schema yet.
 
 ## 2. The key decisions
@@ -261,7 +272,7 @@ Every decision is made on a **1/8-scale** copy. Only the final warp and blend ru
 **Rules:**
 - Release the viewport and Survey pools before a merge.
 - `.critical` memory pressure cancels the merge with a clear message.
-- On Macs where `MemoryPolicy.isConstrained` is true (8 GB), cap HDR at 5 frames. Panoramas are sized by the downsampling rule in §4, never refused.
+- Cap HDR at 9 frames, and at 5 on Macs where `MemoryPolicy.isConstrained` is true (8 GB). (Built: `HDRMerger.frameLimit`; the 9 was not in the first draft of this plan.) Panoramas have no frame cap and are sized by the downsampling rule in §4, never refused.
 - Check free disk space against 2× the output size.
 
 **Performance targets** (not measured; `latent-cli merge --timings` will measure them):
@@ -310,11 +321,11 @@ Every decision is made on a **1/8-scale** copy. Only the final warp and blend ru
 | 6a | **Auto Align:** Vision chain, validation, `mergeWarp` (**done**; ECC instead of Vision, see §0) | 1.5 wk | `MergeKit/Align/*`, `Shaders/MergeWarp.metal` | ⇉ with 6b |
 | 6b | **Deghost** None/Low/Med/High + overlay (not red-only) (**done** without the overlay, which moves to 7) | 1.5 wk | `MergeKit/Deghost/*`, `Shaders/MergeDeghost.metal` | ⇉ with 6a |
 | 7 | Preview sheet on cached reduced frames, deghost overlay, reference picking, Auto Settings, headless ⌃⇧H (**done**; no Undo to Trash, see §0) | 2 wk | app + `MergeKit/HDR` | — |
-| 8a | **Panorama geometry:** camera solve, projections, CPU twin, gains, crop | 2 wk | `MergeKit/Pano/Geometry/*` | ⇉ with 8b (agree the `PanoCameras` struct first) |
-| 8b | **Panorama GPU:** `mergeLensPrep`, warp, Voronoi, tiled blend, scratch files | 2–3 wk | `MergeKit/Pano/Blend/*`, `Shaders/MergePano.metal` | ⇉ with 8a |
-| 8c | Panorama CLI + app (⌃M), `PanoramaOutputSizer` + downsample warning | 1 wk | CLI, app | after 8a+8b |
+| 8a | **Panorama geometry:** camera solve, projections, CPU twin, gains, crop (**done**; with bundle adjustment and a corner matcher, see §0) | 2 wk | `MergeKit/Pano/Geometry/*` | ⇉ with 8b (agree the `PanoCameras` struct first) |
+| 8b | **Panorama GPU:** `mergeLensPrep`, warp, Voronoi, tiled blend, scratch files (**done**; two shader files, see §0) | 2–3 wk | `MergeKit/Pano/Blend/*`, `Shaders/MergePanoPrep.metal`, `Shaders/MergePanoBlend.metal` | ⇉ with 8a |
+| 8c | Panorama CLI + app (⌃M), `PanoramaOutputSizer` + downsample warning (**done**) | 1 wk | CLI, app | after 8a+8b |
 | 9 | HDR Panorama (**experimental**) (**done**; see §0) | 1–2 wk | `MergeKit/HDRPano/*`, app | — |
-| 10 | Later: own FAST/BRIEF matcher + bundle adjustment (multi-row/360), spherical projection, graph-cut seams, tiled editor/export, deflate, Find Bracket Sets, stacks | large | — | — |
+| 10 | Later: multi-row and 360° panoramas, graph-cut seams, tiled editor/export, deflate, Find Bracket Sets, stacks | large | — | — |
 
 **Timeline:** first user-visible release (tripod HDR) at the end of phase 5b, about 8–11 weeks. That is realistic for step-by-step work; the earlier "preliminary step" framing undersold phases 1–2.
 
@@ -336,11 +347,11 @@ Still using my defaults unless Harman says otherwise:
 - Block frames whose camera orientation differs, and copy the reference frame's `user_rotation`.
 - Merge exactly the selected photos.
 - Keep the full reference frame for HDR, with no auto-crop.
-- Cap HDR at 5 frames on 8 GB Macs.
+- Cap HDR at 5 frames on 8 GB Macs. (Built with a 9-frame cap elsewhere too; see §6.)
 
 **Risks:**
-- **Vision** may be inaccurate at 25–30% overlap, and can change between OS releases. Mitigation: validation, the 0b spike, and a phase-10 matcher.
-- **Chained homographies drift** over many frames. Mitigation: cap panorama v1 at 6 frames.
+- **Vision** may be inaccurate at 25–30% overlap, and can change between OS releases. Mitigation: validation, the 0b spike, and a phase-10 matcher. **Resolved** — see §0: Vision is not used at all; alignment is phase correlation plus ECC, and the panorama's fallback matcher was built in Phase 8, not Phase 10.
+- **Chained homographies drift** over many frames. Mitigation: cap panorama v1 at 6 frames. **Not taken** — see §0: bundle adjustment plus extra non-neighbour pairs handle the drift, and there is no frame cap.
 - **The margin bug likely affects ordinary renders today** (full `rawWidth` includes optical black). Fixing it globally may change goldens for some cameras; fix it only in the merge path first.
 - **Lightroom and ACR compatibility** of our DNG is unproven until `dng_validate` and a manual open pass.
 - **Editing masters above the pixel budget** needs a tiled editor and export. Until then, panoramas are downsampled to fit (§4).

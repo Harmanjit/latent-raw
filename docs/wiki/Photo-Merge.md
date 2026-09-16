@@ -22,7 +22,8 @@ A *bracket* is the answer: the same scene shot several times, each at a differen
 - **Turn on your camera's auto exposure bracketing (AEB)** if it has one, and set it to **2 EV steps** with **3 or 5 frames**: for example −2, 0 and +2 EV. Five frames at 2 EV cover very bright scenes; three are enough for most.
 - **Use the self-timer or a remote,** so pressing the button doesn't shake the camera.
 - **Avoid moving things** where you can: people, cars, leaves in wind, waves and clouds move between shots. **Deghost** (see below) can keep each one to a single shot, but it works best when little moves.
-- **Shoot raw.** Photo Merge reads raw files only (Bayer sensors; not Fujifilm X-Trans).
+- **Shoot raw.** An HDR merge reads raw files only (Bayer sensors; not Fujifilm X-Trans), and it can't merge a photo that is itself a merge.
+- **Two to nine shots.** An HDR merge takes at most **9** photos, or **5** on a Mac with 8 GB of memory, where a long merge would be competing with everything else for it. Past that the dialog says so and merges nothing; three or five frames is the usual bracket anyway.
 
 ## Merging
 
@@ -45,7 +46,7 @@ A merge takes turns with exports: Export waits while a merge runs, and a merge c
 
 The preview is the merge itself, made small: the same exposures, alignment, deghosting and weighting, opened as the merged photo will open, with default settings. It is made from reduced copies of the photos that Latent keeps in memory while the dialog is open (about 80 MB for six 21 MP photos, freed when the dialog closes), so changing Deghost, the reference or the overlay updates it in about a tenth of a second, a moment after you stop clicking. Changing Auto Align reads the photos again first; the old preview stays, dimmed, until the new one is ready.
 
-Because it is small, fine detail differs a little from the full-size merge, and on cameras over about 36 MP deghosting in the preview is a rougher guide to what the merge will take from one shot.
+Because it is small, fine detail differs a little from the full-size merge. The bigger the photos, the smaller the copies have to be: once a photo's **long edge passes about 6,100 pixels** the copies are reduced a third time, and the deghost overlay in the preview becomes a rougher guide to what the merge will really take from one shot. That is about 25 MP on a 3:2 sensor and about 28 MP on a 4:3 one — so a 24 MP camera is just inside it and a 30 MP one is past it. When the difference matters, judge deghosting on the finished merge.
 
 ### HDR Merge Without Dialog
 
@@ -118,7 +119,9 @@ Choose **Photo › Photo Merge › Panorama…**, or press **⌃M**, with two or
 - **Focus once, then switch autofocus off,** so the focus doesn't hunt between shots.
 - **Keep the camera level** and turn steadily, one direction only. Portrait orientation gives a taller panorama for the same number of shots.
 - **Avoid moving things** in the overlaps where you can — a person walking through the seam is the hardest thing to hide.
-- **Shoot raw.** Photo Merge reads raw files only (Bayer sensors; not Fujifilm X-Trans). All the shots must come from the same camera, at the same focal length.
+- **Shoot raw,** from a Bayer sensor (not Fujifilm X-Trans). All the shots must come from the same camera, at the same size and focal length.
+- **As many shots as the sweep needs.** Unlike an HDR merge, a panorama has no limit on the number of photos — the 17-frame sweep Latent is tested against is fine. Size is handled instead by making a panorama too big to edit smaller (see below), never by refusing it.
+- **HDR merges can be stitched too.** A panorama accepts `-HDR.dng` files you merged earlier as well as camera raws, so a bracketed sweep can be done in two steps: merge each position with **HDR…**, then select the results and press **⌃M**. (**HDR Panorama** does both steps at once, and is experimental; see below.)
 
 ### Merging a panorama
 
@@ -128,7 +131,7 @@ Choose **Photo › Photo Merge › Panorama…**, or press **⌃M**, with two or
 4. Beside the list: the **Projection**, **Auto Crop** and **Auto Settings**, and then the size the panorama will really be, how wide and tall the sweep is in degrees, roughly how large the file will be, and its name.
 5. Press **Merge** (Return). The dialog closes and the stitch runs in the background, with its progress and a **Cancel** button in the left panel's **Export** section.
 
-The merge starts from the original raw files; edits you made to the photos aren't used.
+The merge starts from the files themselves — the raws, or the HDR merges you chose; edits you made to them in Develop aren't used.
 
 If the photos don't form a panorama — they don't overlap, or they come from different cameras — the dialog says why and offers only **Close**.
 
@@ -138,7 +141,7 @@ A panorama covers directions, not a flat rectangle, so it has to be flattened so
 
 | Projection | What it does | Use it for |
 |---|---|---|
-| **Automatic** | Latent picks: Perspective for a narrow sweep, Cylindrical for a wide one | Leave it here unless you want a particular look. |
+| **Automatic** | Latent picks: Perspective when the sweep is within about 70° both ways, Spherical when it reaches more than 65° above or below the horizon, Cylindrical otherwise | Leave it here unless you want a particular look. |
 | **Perspective** | Straight lines stay straight | Narrow sweeps, buildings. Stretches badly past about 70° across. |
 | **Cylindrical** | Wraps around like a label on a can; upright things stay upright | Most panoramas: landscapes, streets. |
 | **Spherical** | Bends both ways | Very tall sweeps, or a full circle. Horizons curve. |
@@ -163,9 +166,9 @@ Seventeen 24 MP photos across 186° can add up to a canvas of 29,195 × 7,664 pi
 
 **Latent never refuses a panorama for its size.** Instead the dialog tells you exactly what will happen, in the panorama's own numbers:
 
-> This panorama would be 29,195 × 7,664 pixels (224 MP). The largest this Mac can edit is 12,482 × 3,276 (41 MP), limited by memory, so the photos will be merged at 43%.
+> This panorama would be 29,195 × 7,664 px (224 MP). The most this Mac can edit is 41 MP, so the photos will be reduced to 43% (12,482 × 3,276 px, 41 MP).
 
-Turn on **Merge at 43%** to agree, and the button becomes **Merge at 43%** too, so it says what it is about to do. The limit is worked out for *this* Mac — its memory, and the largest picture its graphics processor can hold — so the same sweep may merge whole on a bigger machine and smaller on a laptop. Latent never offers a size it couldn't then edit.
+Turn on **Merge at 43%** to agree, and the button becomes **Merge at 43%** too, so it says what it is about to do. The sentence names whichever limit applies: **memory** ("The most this Mac can edit is 41 MP"), or the **largest picture the graphics processor can hold** ("The largest this Mac can edit is 16,384 px on a side"), whichever bites first. Both are worked out for *this* Mac, so the same sweep may merge whole on a bigger machine and smaller on a laptop. Latent never offers a size it couldn't then edit.
 
 What you lose is resolution, not field of view: the whole sweep is there, at 43% of the pixels along each edge, which is still a photo far wider than any single frame. What you gain is a panorama you can actually work on.
 
@@ -175,7 +178,7 @@ Agreeing is asked for every time, and again whenever the size changes (after swi
 
 **What it is.** A DNG, as an HDR merge is: the merged light itself, not a finished picture, so white balance, exposure and every other adjustment work on it as on a camera raw. It opens in Latent, Lightroom and Apple Photos.
 
-**Lens corrections are baked in.** A panorama has to be lens-corrected before it can be stitched, so distortion, vignetting and chromatic aberration are already taken out and Develop doesn't apply them again.
+**Lens corrections are baked in — when Latent knows the lens.** A panorama has to be lens-corrected before it can be stitched, so where Latent can identify the lens in its bundled profile database, distortion, vignetting and chromatic aberration are already taken out and Develop doesn't apply them again. **If it can't identify the lens** (an adapted or third-party lens the database doesn't cover, the same case as in [Limitations](Limitations)), the photos are stitched **uncorrected** — and because the stitched DNG records that corrections were applied and drops the lens's name, Develop then has nothing to offer either. Nothing warns you about this yet. The sign to look for is even, repeating dark banding down the seams, which is each frame's vignette; the fix is to correct the frames some other way, or to use a lens Latent has a profile for.
 
 **Its first edit.** With **Auto Crop** on, the crop is stored as the panorama's first edit; with **Auto Settings** on, Develop's **Auto Adjust** (⌘U) is stored too. Both are one edit, so a single **Undo** in Develop takes you back to the stitch exactly as it came out.
 
@@ -230,15 +233,44 @@ The merge happens in the background, like the other two, and the library panel s
 
 **`<first photo>-HDRPano.dng`**, beside the first photo, and it is a panorama in every other way: lens corrections baked in, Auto Crop as an undoable first edit, the full merged range of light in the pixels. Its recipe records **every photo you selected** — not the temporary merges — which positions they fell into, and both stages' settings.
 
+## When something goes wrong
+
+Anything that stops a merge is said in the dialog, with only **Close** beside it; anything worth knowing that doesn't stop it is a note or a warning above the **Merge** button. A merge that is refused, cancelled or fails part-way leaves nothing behind — no half-made photo and no sidecar — and never touches the photos it read.
+
+| What you see | What it means | What to do |
+|---|---|---|
+| "The photos all have the same exposure." | HDR needs a *bracket*, and these shots were taken at (nearly) one exposure. | Shoot with exposure bracketing on, or use **Panorama…** if what you have is a sweep. |
+| "HDR merges take at most 9 photos on this Mac." (or 5) | More photos were selected than an HDR merge takes. | Select one bracket. If you meant a sweep, use **⌃M**. |
+| "The photos aren't all the same size." / "…different cameras." / "…the same orientation." | Photo Merge needs one camera, one size and one orientation — it lines photos up pixel for pixel. | Split the selection by camera, and don't mix portrait and landscape shots in one merge. |
+| "*name* can't be merged: only Bayer raw files can." | An HDR merge was given a JPEG, an X-Trans or monochrome raw, or a DNG that is itself a merge. | Merge the original raws. To join finished HDRs, use **Panorama…**, which accepts them. |
+| "These photos don't form a panorama: no two neighbouring photos could be matched." | Latent could not find the same scene in any two shots — usually too little overlap, or a blurred or very dark frame. | Reshoot with about 30% overlap. Check the shots are in one sweep and not two. |
+| "…they show almost the same view…, like an exposure bracket." | The shots barely move between frames, so there is no panorama to make. | Use **HDR…** (⌃H) instead. |
+| "*name* doesn't overlap the others enough to be joined, so it is left out." | A warning, not an error: the panorama is made from the rest. | Look at which photo it is. If you wanted it, reshoot that part with more overlap. |
+| "The camera moved as well as turned (the photos line up only to about *n* px)…" | Parallax: the camera travelled sideways instead of turning on the spot. | Expect doubled edges close to the camera. Reshoot turning about the lens, ideally on a tripod. |
+| "The photos still differ in brightness by *n* stops after evening them out…" | The camera metered each shot. Latent corrected what it could; seams may still show. | Reshoot in manual, or with the exposure locked. |
+| "This panorama would be … so the photos will be reduced to *n*%." | Not a refusal — the size agreement. | Turn on **Merge at *n*%** and merge, or cancel and stitch fewer photos. |
+| "Photo Merge aligned these photos (up to 17 px)" | A note: Auto Align moved the shots and merged them lined up. | Nothing. It is working. |
+| "Photo Merge couldn't align *name*, so it's left out of the merge." | That shot shares too little visible detail with its neighbour — usually a nearly black or nearly white frame — and sat more than a pixel or so out, so merging it would have doubled every edge. | Nothing, or reshoot with a smaller EV step so neighbouring shots have more in common. |
+| "Not enough disk space: the merge needs …" | A merged DNG is large (about 6 bytes per pixel), and Latent checks before writing. | Free some space and merge again. |
+
+Things that come out wrong rather than failing:
+
+- **Doubled edges in an HDR merge.** Turn **Auto Align** on. If it is on, what is left is parallax or something that moved: try **Deghost** at Medium.
+- **A moving thing that still shows twice.** Move Deghost up a level. It costs noise in those areas, because they come from one shot.
+- **Noisy or clipped patches after deghosting.** Move Deghost down a level, or to None, and accept the doubling instead.
+- **Ragged empty corners on a panorama.** That is the stitch; **Auto Crop** hides them, and it is an ordinary crop you can drag back out in Develop (**R**).
+- **Even, repeating dark bands down a panorama's seams.** Each frame's vignette, left in because Latent couldn't identify the lens (see [The stitched photo](#the-stitched-photo)).
+
 ## Current limits
 
 - **Auto Align moves whole shots.** Near and far things that shifted against each other in a handheld bracket (parallax) still show slightly doubled edges, and a shot it can't align is merged as it is or left out.
-- **Deghost compares brightness only,** so movement against an equally bright background can slip through, and deghosted parts come from one shot, with that shot's noise.
+- **Deghost compares brightness and colour** and takes each moving area whole from one shot, so a person crossing an equally bright wall is caught. What is left is *parallax* — near things shifting against far ones when the camera moved — and the noise of the single shot each deghosted area comes from.
 - **Panoramas are one row.** A single sweep left to right (or right to left). Several rows stacked into a grid, and full 360° panoramas that join back to their start, aren't there yet.
 - **Parallax.** Neither merge can fix near things shifting against far things when the camera itself moved. Turn the camera on the spot.
 - **HDR Panorama is experimental** and has never been checked on a real bracketed sweep (see above). It also inherits every limit of both its parents, and adds one: the positions must be told apart from the exposures, the timing or the overlap, so a sweep shot with a different bracket at each position can't be read.
-- **Raw files only,** from Bayer sensors. X-Trans, monochrome and already-merged files can't be merged, and all photos must come from the same camera at the same size and orientation.
+- **Raw files only,** from Bayer sensors, all from the same camera at the same size and orientation. X-Trans and monochrome files can't be merged. An **already-merged** photo can't be merged to HDR again — but a **panorama** will stitch `-HDR.dng` files, and HDR Panorama relies on that.
 - **The preview is small,** about 1,000 pixels across; to judge fine detail, merge and look at the result.
-- **On Macs with 8 GB of memory,** a merge takes at most 5 photos.
+- **An HDR merge takes at most 9 photos,** or 5 on a Mac with 8 GB of memory. A **panorama** has no limit on the number of photos: when the result would be too big to edit it is made smaller, never refused.
+- **A panorama from a lens Latent can't identify is stitched uncorrected,** and nothing says so (see [The stitched photo](#the-stitched-photo)).
 
 See also [Limitations](Limitations) and [Keyboard Shortcuts](Keyboard-Shortcuts).
