@@ -2,8 +2,9 @@
 #include "Common.h"
 using namespace metal;
 
-// Stage 1+3 of the pipeline (DESIGN.md §8.1), fused into one kernel per the
-// efficiency rule of minimizing memory round-trips (§3, Dynamic Caching note).
+// Stage 1 of the pipeline (DESIGN.md §8.1), in one kernel to save a pass
+// over the frame in memory (the pipeline is bandwidth-bound; see
+// ColorPipeline.metal).
 // Reads the raw uint16 sensor plane, applies black/white level normalization
 // and the as-shot (or user) white balance multipliers, writes linear-ish
 // float CFA data ready for demosaicing.

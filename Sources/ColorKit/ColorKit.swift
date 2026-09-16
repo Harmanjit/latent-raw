@@ -1,17 +1,17 @@
 import Foundation
 import simd
 
-/// Colour management for Latent (DESIGN.md §8.1, stages 3, 5 and 13).
+/// Colour management for Latent (DESIGN.md §8.1, stages 1, 9 and 15).
 ///
 /// Everything here runs on the CPU, once per image or per parameter change,
 /// and produces small matrices and vectors the GPU kernels apply per pixel.
 /// Doing this algebra per pixel would be pure waste — it's identical for
 /// every pixel in the frame.
 ///
-/// Not yet backed by LittleCMS. ICC profile handling, soft-proofing and
-/// display-profile lookup via ColorSync arrive when export lands (Phase 6);
-/// for now the working and output spaces are built from their published
+/// The working and output spaces are built from their published
 /// primaries, which is exact and dependency-free.
+/// ICC profiles (soft proofing, `PixelEngine/SoftProof.swift`) go through
+/// ColorSync; LittleCMS was not adopted (DESIGN.md §3).
 public enum ColorKit {
 
     // MARK: - Colour space primaries
@@ -400,10 +400,5 @@ public enum ColorKit {
             SIMD3<Float>(rows[0][1], rows[1][1], rows[2][1]),
             SIMD3<Float>(rows[0][2], rows[1][2], rows[2][2])
         ))
-    }
-
-    /// Retained for compatibility with earlier call sites.
-    public static func cameraToWorking(cameraToXYZRowMajor m: [Float]) -> simd_float3x3? {
-        CameraColorProfile(cameraToXYZRowMajor: m)?.cameraToWorking
     }
 }

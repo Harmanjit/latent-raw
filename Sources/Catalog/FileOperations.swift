@@ -128,8 +128,9 @@ public enum FileOperations {
 
     // MARK: - Moves that never overwrite
 
-    /// A rename that refuses to overwrite. Throws a Cocoa error; across
-    /// volumes that is `crossDevice`, for the caller to copy instead.
+    /// A rename that refuses to overwrite. Throws a Cocoa error, except
+    /// across volumes, where it throws `CrossDeviceError` for the caller to
+    /// copy instead.
     static func renameExclusively(_ source: URL, to destination: URL) throws {
         guard renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) != 0 else { return }
         throw cocoaError(errno: errno, source: source, destination: destination)

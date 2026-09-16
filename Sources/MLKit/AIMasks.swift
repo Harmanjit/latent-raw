@@ -57,20 +57,17 @@ public enum AIMaskError: Error, CustomStringConvertible {
 
 /// Generates masks from an image.
 ///
-/// **Subject and people** use the Vision framework's own models. Apple
-/// ships them with the OS, so there's nothing to bundle or download, they
-/// are shared by every app on the machine, and Vision schedules them on
-/// the Neural Engine when it can. Their sizes and architectures aren't
-/// published; what's measurable is the cost, which is printed with each
-/// result: on an M-series Mac a subject lift is a few hundred
-/// milliseconds and a person mask well under one hundred.
+/// **Subject** uses the Vision framework's own model. Apple ships it with
+/// the OS, so there's nothing to bundle or download, it is shared by every
+/// app on the machine, and Vision schedules it on the Neural Engine when it
+/// can. Its size and architecture aren't published; what's measurable is
+/// the cost, which is reported with each result: on an M-series Mac a
+/// subject lift is a few hundred milliseconds.
 ///
-/// **Sky** has no system model on macOS, and a proper one (a small
-/// semantic-segmentation network such as SegFormer-B0 trained on ADE20K,
-/// ~8 MB in fp16) needs a Core ML conversion step that this machine lacks
-/// tooling for. Until that lands, sky is estimated by a classic heuristic
-/// — see `SkyEstimator` — which works for open skies and is honest about
-/// being a heuristic in its model version string.
+/// **Sky, people** and the other semantic classes use the bundled
+/// SegFormer-B2 model (ADE20K). If it is missing, sky falls back to
+/// `SkyEstimator`, a classic heuristic that says so in its model version
+/// string, and people fall back to Vision's person segmentation.
 ///
 /// Input is a small image (~1024 px on the long edge is plenty; the models
 /// resize internally to ~512 anyway). Output is at the model's resolution
@@ -104,9 +101,6 @@ public enum AIMaskGenerator {
         }
         return Result(mask: mask, seconds: Date().timeIntervalSince(start))
     }
-
-    /// Whether `generate` for this kind uses a bundled neural model.
-    public static var segmentationAvailable: Bool { SegmentationModel.isAvailable }
 
     // MARK: - Vision
 
@@ -170,7 +164,7 @@ public enum AIMaskGenerator {
 ///
 /// Where it fails: skies seen through foliage, reflections, sunsets with
 /// strong orange (the saturation test), and scenes with no top-edge sky.
-/// A real model replaces this; the interface stays the same.
+/// Used only when the SegFormer model isn't bundled.
 public enum SkyEstimator {
     static let workingWidth = 256
 

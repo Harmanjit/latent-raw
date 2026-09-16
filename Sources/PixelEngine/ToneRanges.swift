@@ -1,8 +1,8 @@
 import Foundation
 
 /// Highlights, Shadows, Whites and Blacks: brightness changes aimed at one
-/// band of tones each, −1…1 (DESIGN.md §8.1 stage 9, just ahead of the tone
-/// map).
+/// band of tones each, −1…1 (DESIGN.md §8.1 stage 10, after exposure and
+/// ahead of the local adjustments and the tone map).
 ///
 /// Not to be confused with highlight *recovery* (`EditStack.Highlights`),
 /// which neutralises clipped channels in camera space. These sliders move

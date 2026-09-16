@@ -63,7 +63,6 @@ extension Catalog {
 
         // 1. What's on disk.
         let onDisk = try scanFiles(report: &report)
-        let onDiskByPath = Dictionary(uniqueKeysWithValues: onDisk.map { ($0.relPath, $0) })
 
         // 2. What the database thinks.
         let known = try dbQueue.read { db in try ImageRecord.fetchAll(db) }

@@ -279,8 +279,6 @@ final class SheetPreviewImages: @unchecked Sendable {
         self.onReady = onReady
     }
 
-    static let noThumbnails: SheetThumbnailSource = { _, _ in false }
-
     /// Thumbnails from `library`, for items with a record.
     @MainActor
     static func libraryThumbnails(_ library: Library) -> SheetThumbnailSource {
@@ -296,10 +294,6 @@ final class SheetPreviewImages: @unchecked Sendable {
 
     func image(for item: SheetItem) -> CGImage? {
         lock.withLock { images[item.cacheKey] }
-    }
-
-    func hasFailed(_ item: SheetItem) -> Bool {
-        lock.withLock { failed.contains(item.cacheKey) }
     }
 
     /// Asks for those of `items` not already here or on their way.

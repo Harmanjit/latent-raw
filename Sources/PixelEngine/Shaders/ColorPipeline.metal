@@ -1,9 +1,10 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Pipeline stages 2, 5, 6, 9 and 13 (DESIGN.md §8.1), fused into one pass:
-// highlight reconstruction -> camera matrix -> exposure -> tone mapping ->
-// output transform.
+// Pipeline stages 8 to 15 (DESIGN.md §8.1), fused into one pass:
+// highlight reconstruction -> camera matrix -> exposure and tone ranges ->
+// local adjustments -> tone mapping -> grading -> soft proof -> output
+// transform.
 //
 // Fusing them matters because each is only a handful of arithmetic ops per
 // pixel. Running them as separate kernels would mean several round trips
@@ -85,7 +86,7 @@ inline float3 encodeSRGB(float3 c) {
 }
 
 // ---------------------------------------------------------------------
-// Colour grading (stage 11): tone curve, HSL per hue band, split toning.
+// Colour grading (stage 13): tone curve, HSL per hue band, split toning.
 // All in a perceptual (gamma 2.2) domain so equal slider moves look equal
 // in shadows and highlights, then back to linear for the output matrix.
 // ---------------------------------------------------------------------
@@ -236,7 +237,7 @@ inline float3 applyToneRanges(float3 working, constant float *lut,
 }
 
 // ---------------------------------------------------------------------
-// Local adjustments (stage 10): each has a mask in [0,1] built from its
+// Local adjustments (stage 11): each has a mask in [0,1] built from its
 // geometry, optionally narrowed by a luminance or hue range, and applies
 // exposure / contrast / saturation / warmth in scene-linear light scaled
 // by that mask. Geometry is in normalized sensor coordinates.
@@ -367,27 +368,27 @@ kernel void colorAndTone(
 
     float3 camera = input.read(gid).rgb;
 
-    // Stage 2: highlight reconstruction, before the camera matrix — the
+    // Stage 8: highlight reconstruction, before the camera matrix — the
     // clip levels are only meaningful in camera space.
     if (highlightStrength > 0.0) {
         camera = reconstructHighlights(camera, clipLevel,
                                         highlightThreshold, highlightStrength);
     }
 
-    // Stage 5: camera response -> linear Rec.2020 working space.
+    // Stage 9: camera response -> linear Rec.2020 working space.
     float3 working = cameraToWorking * camera;
 
-    // Stage 6: exposure, in linear light (the only place it's meaningful).
+    // Stage 10: exposure, in linear light (the only place it's meaningful).
     working *= exposureScale;
 
-    // Stage 9a: Highlights, Shadows, Whites, Blacks. Before the local
-    // adjustments, so their range masks see the tones the user sees; and
-    // part of tone mapping, so analysis renders skip it with the curve.
+    // Stage 10, continued: Highlights, Shadows, Whites, Blacks. Before the
+    // local adjustments, so their range masks see the tones the user sees;
+    // and part of tone mapping, so analysis renders skip it with the curve.
     if (toneRangesOn != 0 && applyToneMap != 0) {
         working = applyToneRanges(working, toneRangeLUT, contrast, greyPoint);
     }
 
-    // Stage 10: local adjustments. Range masks look at the pixel *before*
+    // Stage 11: local adjustments. Range masks look at the pixel *before*
     // any local changes it, so brightening the shadows can't push a pixel
     // out of its own mask mid-computation.
     float overlay = 0.0;
@@ -403,13 +404,13 @@ kernel void colorAndTone(
         }
     }
 
-    // Stage 9: scene-referred -> display-referred, up to the headroom.
+    // Stage 12: scene-referred -> display-referred, up to the headroom.
     // Analysis renders skip this to get scene-linear numbers out.
     float3 display = (applyToneMap != 0)
         ? toneMapSigmoid(working, contrast, greyPoint, headroom)
         : working;
 
-    // Stage 11: colour grading, in a perceptual domain, on the display-
+    // Stage 13: colour grading, in a perceptual domain, on the display-
     // referred image scaled to [0,1] by the headroom so nothing clips in
     // HDR mode. Skipped entirely when every module is neutral.
     if (any(gradingFlags != uint3(0)) || vibrance != 0.0) {
@@ -422,9 +423,9 @@ kernel void colorAndTone(
         display = pow(max(p, 0.0), 2.2) * headroom;
     }
 
-    // Soft proof: replace each colour with what the target can show of
-    // it. The table covers [0,1]^3 at 33 samples; the sampler maps the
-    // colour onto texel centres so the corners of the cube land exactly
+    // Stage 14: soft proof. Replace each colour with what the target can
+    // show of it. The table covers [0,1]^3 at 33 samples; the sampler maps
+    // the colour onto texel centres so the corners of the cube land exactly
     // on the first and last samples.
     if (proofMode != 0) {
         constexpr sampler s3(coord::normalized, address::clamp_to_edge, filter::linear);
@@ -437,7 +438,7 @@ kernel void colorAndTone(
         if (proofMode == 2 && proofed.a > 0.5) display = float3(0.5 * headroom);
     }
 
-    // Stage 13: working space -> output space, then encode — or not.
+    // Stage 15: working space -> output space, then encode — or not.
     // Files want the sRGB curve applied and values clamped to [0,1].
     // An EDR screen buffer wants linear light, above 1.0 where the scene
     // was, and the compositor handles the rest.

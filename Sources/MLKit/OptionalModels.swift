@@ -18,8 +18,8 @@ public struct OptionalModel: Sendable, Identifiable {
     public var isInstalled: Bool { FileManager.default.fileExists(atPath: installedURL.path) }
 
     /// NAFNet SIDD width 64: ~0.3 dB better than the bundled width-32
-    /// model on SIDD, at about four times the compute. Published as a
-    /// release asset of the repository.
+    /// model on SIDD, at about four times the compute. Not published, and
+    /// nothing in the app offers the download (DESIGN.md §4a).
     public static let nafnetWidth64 = OptionalModel(
         id: "NAFNet_SIDD_width64",
         title: "NAFNet high-quality denoiser",
@@ -81,7 +81,7 @@ public enum ModelDownloader {
         progress?(received, expected)
 
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        guard model.sha256 == "SHA256_PLACEHOLDER" || digest == model.sha256 else {
+        guard digest == model.sha256 else {
             throw ModelDownloadError.checksumMismatch
         }
         try unzip(temp, into: CoreMLStore.externalModelsDirectory, replacing: model.installedURL)

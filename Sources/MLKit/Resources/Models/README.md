@@ -31,15 +31,15 @@ Core ML cleanly. The width-64 variant (~464 MB of weights) scores about
 0.3 dB higher on SIDD at roughly four times the cost; width 32 is the
 sensible default for a 24 MP frame.
 
-## Optional models (downloaded, not bundled)
+## Optional models (dormant, not offered)
 
 | Package | What | Where | Size |
 |---|---|---|---|
-| `NAFNet_SIDD_width64.mlpackage` | NAFNet width 64: ~0.3 dB better, ~2.5× slower | GitHub release `models-v1` of `Harmanjit/latent-raw`, built by `scripts/convert_nafnet.py --width 64` | 214 MB zip |
+| `NAFNet_SIDD_width64.mlpackage` | NAFNet width 64: ~0.3 dB better, about four times the compute | Not published; built by `scripts/convert_nafnet.py --width 64` | 214 MB zip |
 
-Optional models are fetched from the AI Noise Reduction panel into
-`~/Library/Application Support/latent/models/`, verified against the
-SHA-256 in `OptionalModels.swift`, and found by the same lookup as the
-bundled packages. Publishing a new one: convert, zip with
-`zip -r Name.mlpackage.zip Name.mlpackage`, upload as a release asset,
-and record its checksum and size in the catalog.
+`OptionalModels.swift` can download this package into
+`~/Library/Application Support/latent/models/`, verify it against the
+SHA-256 recorded there, and leave it where the same lookup as the bundled
+packages finds it. Nothing uses that path: no view offers the download,
+the app has no network entitlement (`scripts/Latent.entitlements`), and
+the `models-v1` release its URL points at has not been published.

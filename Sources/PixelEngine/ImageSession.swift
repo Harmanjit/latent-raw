@@ -332,18 +332,6 @@ public final class ImageSession {
         return created
     }
 
-    /// Frees the RCD intermediates while keeping the source buffer and the
-    /// viewport textures. Worth calling after an export, since those
-    /// buffers are the largest thing the session holds and won't be needed
-    /// again until the next full-resolution render.
-    public func releaseRCDIntermediates() {
-        let rcdRoles: Set<TextureRole> = [.rcdVHDir, .rcdLowPass, .rcdDiagonal,
-                                           .rcdPQDir, .rcdScratch]
-        texturePool = texturePool.filter { !rcdRoles.contains($0.key.role) }
-        // The cached camera-RGB textures aren't RCD intermediates, so they
-        // survive this and the cache stays valid.
-    }
-
     /// How much GPU memory this session holds, for diagnostics and for
     /// deciding when to evict sessions.
     public var approximateBytesHeld: Int {

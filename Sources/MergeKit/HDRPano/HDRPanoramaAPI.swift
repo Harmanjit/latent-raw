@@ -72,7 +72,7 @@ public enum HDRPanoramaError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .tooFewPhotos:
-            "An HDR panorama needs at least four photos: a bracket at each of two or more positions."
+            "An HDR panorama needs at least two photos: a bracket or an HDR merge at each of two or more positions."
         case .cantTellPositions:
             "These don’t look like brackets: each position needs the same exposures. "
                 + "Shoot the same bracket at every position, or merge each bracket with Photo Merge › HDR first."

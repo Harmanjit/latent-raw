@@ -15,7 +15,7 @@ public enum RenderError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .unsupportedCFAForV1:
-            return "Only Bayer sensors and linear DNGs are supported in v1 (DESIGN.md §9.1)"
+            return "This camera’s sensor layout can’t be rendered: Latent renders only Bayer raws and linear DNGs"
         case .gpuBufferAllocationFailed:
             return "Failed to allocate a GPU buffer or texture"
         case .commandBufferFailed:
@@ -525,8 +525,8 @@ public final class RenderPipeline {
 
         var colourInput = cameraRGB
 
-        // Neural denoise: blend the session's cached full-frame result in,
-        // re-binned and re-white-balanced to match this render.
+        // Stage 3: neural denoise. Blend the session's cached full-frame
+        // result in, re-binned and re-white-balanced to match this render.
         // Never for a linear source (`ImageSession.supportsAIDenoise`): an
         // edit copied from a raw may carry a strength, but no result exists.
         if parameters.aiDenoise > 0, session.supportsAIDenoise, let denoised = session.aiDenoisedCameraRGB {
@@ -536,7 +536,7 @@ public final class RenderPipeline {
                                              outputRole: displayRole == .display ? .aiDenoised : .aiDenoisedPreview)
         }
 
-        // Stage 8: noise reduction, in camera space, before the matrix.
+        // Stage 4: noise reduction, in camera space, before the matrix.
         if parameters.denoiseLuminance > 0 || parameters.denoiseColor > 0 {
             // colourInput, not cameraRGB: it may already carry the AI denoise blend.
             colourInput = try applyDenoise(session: session, cmdBuffer: cmdBuffer,
@@ -544,11 +544,12 @@ public final class RenderPipeline {
                                            binSpan: binSpan)
         }
 
-        // Spot removal, in camera space, before the lens stage moves pixels.
+        // Stage 5: spot removal, in camera space, before the lens stage
+        // moves pixels.
         let activeHeals = parameters.heals.filter {
             $0.targetBounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(sourceInfo.sensorRect)
         }
-        // Red eyes, on the same working texture.
+        // Stage 6: red eyes, on the same working texture.
         let activeRedEyes = parameters.redEyes.filter {
             !$0.isIdentity && $0.bounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(sourceInfo.sensorRect)
         }
@@ -565,6 +566,7 @@ public final class RenderPipeline {
                                                   source: sourceInfo, output: renderInfo, binSpan: binSpan)
         }
 
+        // Stages 8 to 15, in one kernel (Shaders/ColorPipeline.metal).
         var final = try applyColorAndTone(session: session, cmdBuffer: cmdBuffer,
                                           input: colourInput,
                                           outputRole: displayRole,
@@ -574,8 +576,9 @@ public final class RenderPipeline {
                                           output: output,
                                           renderInfo: renderInfo, binSpan: binSpan)
 
-        // Presence (texture, clarity, dehaze, defringe), display-referred,
-        // before sharpening so the sharpener sees the final tonality.
+        // Stage 16: presence (texture, clarity, dehaze, defringe),
+        // display-referred, before sharpening so the sharpener sees the
+        // final tonality.
         if parameters.wantsLocalContrast {
             final = try applyLocalContrast(session: session, cmdBuffer: cmdBuffer, input: final,
                                            outputRole: displayRole == .display ? .presence : .presencePreview,
@@ -583,7 +586,7 @@ public final class RenderPipeline {
                                            renderInfo: renderInfo, binSpan: binSpan)
         }
 
-        // Stage 12: sharpening, on the display-referred result.
+        // Stage 17: sharpening, on the display-referred result.
         if parameters.sharpenAmount > 0 {
             final = try applySharpen(session: session, cmdBuffer: cmdBuffer, input: final,
                                      outputRole: displayRole == .display ? .sharpened : .sharpenedPreview,
@@ -1190,7 +1193,7 @@ public final class RenderPipeline {
         }
     }
 
-    /// Stages 1 and 3: black/white levels and white balance, producing the
+    /// Stage 1: black/white levels and white balance, producing the
     /// single-channel CFA plane both demosaicers consume.
     ///
     /// 32-bit float rather than 16: RCD compares gradients built from

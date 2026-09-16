@@ -2,10 +2,6 @@ import Foundation
 import GRDB
 import os
 
-public enum CatalogError: Error {
-    case volumeDetectionFailed
-}
-
 /// One catalog = one `_latent/` folder next to a set of photos. An actor
 /// because each catalog owns a single DatabaseQueue and all access to it
 /// should be serialized through here (DESIGN.md §11: "each catalog is an

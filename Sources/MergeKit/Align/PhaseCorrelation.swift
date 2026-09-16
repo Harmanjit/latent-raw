@@ -19,7 +19,8 @@ import Foundation
 /// always the tallest. The strongest few peaks and each of their
 /// wrap-around readings are handed back; `FrameAligner` keeps the one whose
 /// overlap actually matches best. HDRAlignmentCheck (HDR/) does a
-/// single-peak version of this for v1's misalignment warning.
+/// single-peak version of this for HDR merges: the misalignment warning,
+/// and a second opinion on links the aligner rejects.
 enum PhaseCorrelation {
     /// A possible shift, in the level's pixels: a feature at p in the
     /// reference appears at p + (dx, dy) in the moving frame.

@@ -1,16 +1,16 @@
 import Foundation
 
-/// Content hashing for catalog identity (DESIGN.md §5.3, §6).
+/// Content hashing for catalog identity (DESIGN.md §5.3).
 ///
-/// The hash is how Latent recognises a file after it's been renamed, and
-/// how import spots duplicates. Which algorithm doesn't matter much as
-/// long as it's fast and, once released, never changes — every sidecar
-/// records the hash of the file it belongs to.
+/// The hash is how reconciliation recognises a file after it's been
+/// renamed and reattaches its sidecar. Which algorithm doesn't matter
+/// much as long as it's fast and, once released, never changes — every
+/// sidecar records the hash of the file it belongs to.
 ///
 /// This is XXH64 (the original xxHash), implemented here in ~60 lines
 /// rather than vendored: it runs at several GB/s, far faster than any
-/// disk, so the newer XXH3 variant the design doc names would buy
-/// nothing measurable and would cost a dependency or a much larger port.
+/// disk, so the newer XXH3 variant would buy nothing measurable and
+/// would cost a dependency or a much larger port.
 /// Hashes are written as `xxh64:` + 16 hex digits.
 public enum FileHash {
     public static let prefix = "xxh64"

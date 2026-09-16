@@ -78,9 +78,6 @@ public final class HDRPanoramaMerger: HDRPanoramaMerging {
         self.gpu = gpu
     }
 
-    /// Fewest photos an HDR panorama can be made of: a bracket of two at
-    /// each of two positions.
-    public static let minimumPhotos = 4
     /// Free space to leave beyond what the merge needs.
     static let freeSpaceMargin: Int64 = 64_000_000
     /// The share of the progress bar the HDR merges take; the stitch has
