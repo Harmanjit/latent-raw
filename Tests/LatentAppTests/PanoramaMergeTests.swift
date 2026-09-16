@@ -422,19 +422,21 @@ final class PanoramaMergeSheetModelTests: XCTestCase {
             .hasPrefix("These photos couldn’t be read for a panorama."))
     }
 
-    /// Until the engine lands, the dialog says so instead of the app
-    /// pretending it can stitch.
-    func testTheEngineIsNotBuiltInYet() async throws {
+    /// The app builds the real engine, and what it throws reaches the
+    /// dialog as a sentence a person can read.
+    func testTheAppUsesTheRealEngine() async throws {
         let gpu = try await GPUContext.shared()
         let engine = PhotoMergeEngine.panorama(gpu: gpu)
-        XCTAssertTrue(engine is PhotoMergeEngine.UnbuiltPanoramaMerger)
+        XCTAssertTrue(engine is PanoramaMerger, "the app builds the real engine")
         do {
-            _ = try await engine.analyse([root.appendingPathComponent("A.NEF")], options: PanoramaMergeOptions())
-            XCTFail("the placeholder must throw")
+            // Two files that aren't photos: the engine must refuse them.
+            _ = try await engine.analyse([root.appendingPathComponent("A.NEF"),
+                                          root.appendingPathComponent("B.NEF")], options: PanoramaMergeOptions())
+            XCTFail("stitching files that aren't photos must throw")
         } catch {
-            XCTAssertEqual(PanoramaMergeSheetModel.message(for: error),
-                           "The GPU couldn't prepare the photos (The panorama engine isn’t built into this "
-                               + "version yet).")
+            let message = PanoramaMergeSheetModel.message(for: error)
+            XCTAssertFalse(message.isEmpty)
+            XCTAssertTrue(message.hasSuffix("."), message)
         }
     }
 
