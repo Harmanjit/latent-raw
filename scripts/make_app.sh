@@ -1,5 +1,7 @@
 #!/bin/bash
-# Builds latent.app from the SwiftPM release binary.
+# Builds Latent.app from the SwiftPM release binaries.
+#
+#   scripts/make_app.sh [version] [--dev]     # version defaults to 0.9.0
 #
 # SwiftPM produces a bare executable plus resource bundles; macOS wants an
 # .app folder with an Info.plist so it can sit in the Dock, remember its
@@ -12,17 +14,34 @@
 #     Contents/Resources/Help/*.md      <- docs/wiki, shown by Help > Latent Help
 #     Contents/Resources/AppIcon.icns   <- Assets/AppIcon.icns, made from Assets/Latent.pdf
 #                                        by scripts/make_icon.swift
+#     Contents/XPCServices/LatentRawDecoder.xpc  <- the sandboxed raw decoder
+#                                        (scripts/LatentRawDecoder.entitlements)
 #
-# Ad-hoc signed so Gatekeeper on this Mac runs it; a notarized build for
-# other Macs needs a Developer ID (DESIGN.md, non-goals: no App Store).
+# Signed ad hoc and not notarised, as there is no Apple developer account;
+# the signing step at the end says what that means on other Macs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${1:-0.1.0}"
+# The version goes into both Info.plists and the Software tag of merged
+# DNGs, so arguments are told apart by shape, not position (--dev may come
+# first), and anything unrecognised stops the build rather than landing
+# in a plist.
 # --dev: skip the sandbox entitlements so the bundle accepts a folder
 # argument (open build/Latent.app --args <folder>); for testing only.
+VERSION=""
 DEV=0
-for arg in "$@"; do [ "$arg" = "--dev" ] && DEV=1; done
+for arg in "$@"; do
+  case "$arg" in
+    --dev) DEV=1 ;;
+    -*) echo "make_app.sh: unknown option $arg (usage: scripts/make_app.sh [version] [--dev])" >&2; exit 2 ;;
+    *)
+      if [ -n "$VERSION" ]; then
+        echo "make_app.sh: more than one version given ($VERSION, $arg)" >&2; exit 2
+      fi
+      VERSION="$arg" ;;
+  esac
+done
+VERSION="${VERSION:-0.9.0}"
 echo "Building release…"
 swift build -c release --product latent-app 2>&1 | tail -1
 swift build -c release --product latent-rawdecoder 2>&1 | tail -1
@@ -145,7 +164,7 @@ PLIST
 # stops the first launch until the user clicks Open Anyway in System
 # Settings > Privacy & Security (Control-click > Open no longer works
 # since macOS 15), or removes the quarantine attribute. See README.
-SCRIPTS="$(dirname "$0")"
+SCRIPTS="scripts"   # relative to the repository root, the working directory
 # Local symbols serve only the debugger; stripping them roughly halves the
 # binaries, and crash reports still name the global symbols. It has to
 # happen before signing, which seals each binary as it is.

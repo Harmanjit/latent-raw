@@ -47,7 +47,7 @@ id2label = {int(k): v for k, v in model.config.id2label.items()}
 print(f"  {len(id2label)} classes, {sum(p.numel() for p in model.parameters())/1e6:.1f} M parameters")
 
 class Wrapped(torch.nn.Module):
-    """RGB 0-255 in, per-class probabilities at full input resolution out."""
+    """RGB 0-255 in, per-class probabilities at 1/4 of the input resolution out."""
     def __init__(self, net, size):
         super().__init__()
         self.net = net

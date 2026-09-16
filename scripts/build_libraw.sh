@@ -11,7 +11,7 @@
 #
 # Needs: autoconf automake libtool pkg-config (brew), and Xcode's
 # command-line tools. Configured arm64-only, static, without OpenMP
-# (Latent schedules its own parallelism) and without libjpeg/LCMS/JasPer
+# (Latent schedules its own parallelism) and without libjpeg and LCMS,
 # so the static library has no dependencies beyond zlib, which
 # Package.swift links. Only the library target is built.
 set -euo pipefail
