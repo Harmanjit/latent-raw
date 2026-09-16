@@ -92,6 +92,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Set once the window first appears.
     static var showMainWindow: (() -> Void)?
 
+    /// Assets/AppIcon.icns, found from this file's place in the repository
+    /// (Sources/latent-app/LatentApp.swift). Only `swift run` uses it.
+    static let sourceTreeIcon = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Assets/AppIcon.icns")
+
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Window tabs would offer a second window by another route.
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -110,6 +118,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // as a background accessory and the window never comes forward.
         // Promoting it to a regular app fixes that; harmless when bundled.
         NSApp.setActivationPolicy(.regular)
+        // Nor has it the bundle's icon, so the Dock would show a generic
+        // one: use the icon in the source tree. The bundled app's comes
+        // from its Info.plist.
+        if Bundle.main.bundleURL.pathExtension != "app",
+           let icon = NSImage(contentsOf: Self.sourceTreeIcon) {
+            NSApp.applicationIconImage = icon
+        }
         NSApp.activate(ignoringOtherApps: true)
         AppPreferences.shared.applyAppearance()
         // A panorama stitch keeps its half-warped frames in memory-mapped

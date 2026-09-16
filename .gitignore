@@ -21,4 +21,6 @@ vendor/*.xcframework/
 *.png
 # Golden-image references are the one set of PNGs that belongs in the repo.
 !Tests/PixelEngineTests/Golden/*.png
+# And the app icon's picture for the README (scripts/make_icon.swift).
+!Assets/AppIcon.png
 /build/

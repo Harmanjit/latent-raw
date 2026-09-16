@@ -1,3 +1,5 @@
+<p align="center"><img src="Assets/AppIcon.png" width="160" height="160" alt="Latent's app icon: three landscape photos fanned out on a cream tile"></p>
+
 # Latent, a catalog management and RAW editor for macOS
 
 A native, Apple Silicon–first RAW photo manager and non-destructive editor for macOS.
@@ -40,6 +42,7 @@ Tests/                Unit, golden-image, help-page and app-logic tests
 docs/                 PhotoMerge.md, the Photo Merge plan and algorithm
 docs/wiki/            The user guide (GitHub wiki and in-app Help)
 vendor/               Vendored C/C++ dependencies (LibRaw) built as XCFrameworks
+Assets/               The app icon: Latent.pdf, the vector original, and the AppIcon.icns and AppIcon.png made from it
 TestAssets/           Sample RAW files (not committed; see below)
 ```
 
@@ -147,8 +150,12 @@ open build/Latent.app
 
 `make_app.sh` precompiles the shaders into `default.metallib` when the Metal
 toolchain is installed (otherwise the app compiles them at first launch),
-strips local symbols from the binaries before signing, and copies
-`docs/wiki` into `Contents/Resources/Help` for the Help window.
+strips local symbols from the binaries before signing, copies
+`docs/wiki` into `Contents/Resources/Help` for the Help window, and adds the
+app icon, `Assets/AppIcon.icns`. That file is committed; after changing the
+logo, `Assets/Latent.pdf`, remake it (and the README's `AppIcon.png`) with
+`swift scripts/make_icon.swift`, which places the artwork on Apple's icon grid
+with the grid's shadow.
 
 A debug build can picture its own window without screen-recording
 permission: `LATENT_SNAPSHOT_DIR=.build/snapshots swift run latent-app`

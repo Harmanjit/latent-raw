@@ -10,6 +10,8 @@
 #     Contents/MacOS/Latent            <- the release binary
 #     Contents/Resources/*.bundle       <- shaders, Lensfun DB, Core ML models
 #     Contents/Resources/Help/*.md      <- docs/wiki, shown by Help > Latent Help
+#     Contents/Resources/AppIcon.icns   <- Assets/AppIcon.icns, made from Assets/Latent.pdf
+#                                        by scripts/make_icon.swift
 #
 # Ad-hoc signed so Gatekeeper on this Mac runs it; a notarized build for
 # other Macs needs a Developer ID (DESIGN.md, non-goals: no App Store).
@@ -78,6 +80,11 @@ mkdir -p "$APP/Contents/Resources/Help"
 cp docs/wiki/*.md "$APP/Contents/Resources/Help/"
 rm -f "$APP/Contents/Resources/Help/README.md"
 
+# The app icon, used by Finder, the Dock, the About window and alerts.
+# It is committed ready-made, so building needs no drawing step; after
+# changing Assets/Latent.pdf, run `swift scripts/make_icon.swift`.
+cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+
 # The raw decoder XPC service: its own bundle, its own (tighter) sandbox.
 XPC="$APP/Contents/XPCServices/LatentRawDecoder.xpc"
 mkdir -p "$XPC/Contents/MacOS"
@@ -113,6 +120,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key>            <string>${VERSION}</string>
   <key>CFBundleShortVersionString</key> <string>${VERSION}</string>
   <key>CFBundleExecutable</key>         <string>Latent</string>
+  <key>CFBundleIconFile</key>           <string>AppIcon</string>
   <key>CFBundlePackageType</key>        <string>APPL</string>
   <key>LSMinimumSystemVersion</key>     <string>15.0</string>
   <key>NSHighResolutionCapable</key>    <true/>
