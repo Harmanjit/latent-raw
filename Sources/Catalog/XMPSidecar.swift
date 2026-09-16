@@ -61,7 +61,6 @@ public enum XMPSidecar {
     }
 
     public enum ReadError: Error {
-        case notXMP
         case noDescription
     }
 

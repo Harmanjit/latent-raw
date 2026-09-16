@@ -401,9 +401,4 @@ public enum ColorKit {
             SIMD3<Float>(rows[0][2], rows[1][2], rows[2][2])
         ))
     }
-
-    /// Retained for compatibility with earlier call sites.
-    public static func cameraToWorking(cameraToXYZRowMajor m: [Float]) -> simd_float3x3? {
-        CameraColorProfile(cameraToXYZRowMajor: m)?.cameraToWorking
-    }
 }

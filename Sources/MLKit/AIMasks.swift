@@ -102,9 +102,6 @@ public enum AIMaskGenerator {
         return Result(mask: mask, seconds: Date().timeIntervalSince(start))
     }
 
-    /// Whether `generate` for this kind uses a bundled neural model.
-    public static var segmentationAvailable: Bool { SegmentationModel.isAvailable }
-
     // MARK: - Vision
 
     static func subjectMask(_ image: CGImage) throws -> MaskBitmap {

@@ -81,7 +81,7 @@ public enum ModelDownloader {
         progress?(received, expected)
 
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        guard model.sha256 == "SHA256_PLACEHOLDER" || digest == model.sha256 else {
+        guard digest == model.sha256 else {
             throw ModelDownloadError.checksumMismatch
         }
         try unzip(temp, into: CoreMLStore.externalModelsDirectory, replacing: model.installedURL)
