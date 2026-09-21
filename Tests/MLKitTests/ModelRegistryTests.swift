@@ -106,7 +106,9 @@ final class ModelRegistryTests: XCTestCase {
                        "built-in, bundled, installed, catalogue; by id within each group")
         XCTAssertEqual(all.map(\.status), [.builtIn, .bundled, .bundled, .installed, .installed, .notInstalled, .notInstalled])
         XCTAssertEqual(r.entry(id: "b-subject")?.location?.path, bundled.path)
-        XCTAssertEqual(r.entry(id: "z-installed")?.location?.path, external.appendingPathComponent("z-installed").path)
+        // The temporary folder is reached through a symlink (/var → /private/var).
+        XCTAssertEqual(r.entry(id: "z-installed")?.location?.resolvingSymlinksInPath().path,
+                       external.appendingPathComponent("z-installed").resolvingSymlinksInPath().path)
         XCTAssertNil(r.entry(id: "c-row")?.location)
         XCTAssertEqual(r.entry(id: "c-row")?.isInstalled, false)
         XCTAssertEqual(r.entries(kind: .subjectSegmentation).map(\.id),
