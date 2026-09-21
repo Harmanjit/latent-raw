@@ -160,6 +160,14 @@ final class WiringTests: XCTestCase {
         model.releaseMemory(for: .warning)
         XCTAssertNil(model.dustAnalysis)
         XCTAssertTrue(session.hasTouchUpMasks, "a warning keeps the masks")
+        // The tool stays armed with its rings; the two controls that
+        // re-detect from the analysis say what happened and what to do.
+        XCTAssertTrue(model.dustToolActive)
+        XCTAssertEqual(model.status, "Memory is low: click Find Spots again to change Sensitivity or Spot Size")
+        model.dustSensitivity = 90
+        model.redetectDustIfArmed()
+        XCTAssertFalse(model.findingDust)
+        XCTAssertEqual(model.status, "Click Find Spots to use the new Sensitivity or Spot Size")
 
         model.releaseMemory(for: .critical)
         XCTAssertFalse(session.hasTouchUpMasks)
@@ -170,6 +178,25 @@ final class WiringTests: XCTestCase {
         XCTAssertFalse(model.touchUpReleasedUnderPressure)
         await waitUntil("the masks built again", seconds: 20) { session.hasTouchUpMasks }
         XCTAssertEqual(fake.builds, 2)
+    }
+
+    /// A memory warning cancels a click-to-select encoding under way; the
+    /// encode itself cannot be stopped, so what it made must not land
+    /// once it ends: the memory the warning asked for would be back with
+    /// no click.
+    func testAWarningCancelsAnEncodeUnderWay() async throws {
+        try XCTSkipUnless(ModelRegistry.shared.defaultPrompted() != nil, "no click-to-select model")
+        let model = try await openModel()
+        model.addPromptedMask()
+        XCTAssertEqual(model.maskTool, .prompt)
+        let task = try XCTUnwrap(model.promptEncoding.values.first, "the encode started")
+
+        model.releaseMemory(for: .critical)
+        XCTAssertTrue(model.promptEncoding.isEmpty)
+        let landed = await task.value
+        XCTAssertNil(landed, "a cancelled encode reports nothing")
+        XCTAssertTrue(model.promptSessions.isEmpty)
+        XCTAssertTrue(model.promptStatus.isEmpty)
     }
 
     // MARK: - The panel
