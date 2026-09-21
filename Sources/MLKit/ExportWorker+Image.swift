@@ -8,9 +8,13 @@ import ColorKit
 /// SDK doesn't say it is Sendable.
 public struct RenderedImage: @unchecked Sendable {
     public let cgImage: CGImage
+    /// As `ExportWorker.Outcome.maskSubstitutions`: the models that stood
+    /// in for missing ones, for the page's note.
+    public let maskSubstitutions: [String]
 
-    public init(_ cgImage: CGImage) {
+    public init(_ cgImage: CGImage, maskSubstitutions: [String] = []) {
         self.cgImage = cgImage
+        self.maskSubstitutions = maskSubstitutions
     }
 }
 
@@ -60,7 +64,7 @@ extension ExportWorker {
         } catch {
             throw ExportWorkerError.unreadableEdit(error)
         }
-        _ = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
+        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
         if request.runsAIDenoise, parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
             let denoiser = try await AIDenoiser.load()
             try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
@@ -74,6 +78,6 @@ extension ExportWorker {
                                                    rotation: rotation, crop: parameters.crop,
                                                    bitsPerComponent: request.bitsPerComponent == 16 ? 16 : 8,
                                                    maxLongEdge: request.maxLongEdge)
-        return RenderedImage(image)
+        return RenderedImage(image, maskSubstitutions: masks.substituted)
     }
 }

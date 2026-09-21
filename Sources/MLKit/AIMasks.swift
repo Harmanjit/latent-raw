@@ -76,6 +76,27 @@ public enum AIMaskGenerator {
     public struct Result: Sendable {
         public let mask: MaskBitmap
         public let seconds: TimeInterval
+        /// The display name of the model that ran instead of the stored
+        /// one, or nil (docs/Retouch.md §2 A: a mask whose model is not
+        /// installed is made with the kind's default and says so).
+        public let substitutedModel: String?
+
+        public init(mask: MaskBitmap, seconds: TimeInterval, substitutedModel: String? = nil) {
+            self.mask = mask
+            self.seconds = seconds
+            self.substitutedModel = substitutedModel
+        }
+    }
+
+    /// `.subject`: ModelRef(stored:) → registry.installed → SubjectSegmenter
+    /// / built-in Vision / missing → Vision + substitutedModel. Wave 1
+    /// (W1-A) wires the registry in; until then the stored version is
+    /// read but not acted on, and every subject mask is Vision's, as the
+    /// 0.9.0 beta renders it, with nothing reported as substituted.
+    public static func generate(_ kind: AIMaskKind, modelVersion: String, from image: CGImage,
+                                registry: ModelRegistry = .shared) async throws -> Result {
+        _ = ModelRef(stored: modelVersion)
+        return try await generate(kind, from: image)
     }
 
     /// Semantic classes go through SegFormer when it's bundled. Without
