@@ -36,22 +36,56 @@ extension EditorModel {
         maskTool = kind == .none ? .none : (kind == .erase ? .brush : kind)
     }
 
-    /// Adds a model-generated mask and starts generating its pixels. The
-    /// model runs off the main thread on a small sRGB copy of the image
-    /// rendered *unrotated*, so the mask lands in sensor coordinates like
-    /// every other mask.
+    /// Adds a model-generated mask made with the kind's default model
+    /// (Settings › AI › Models for a subject, the installed class model
+    /// for a class) and starts generating its pixels.
     func addAIMask(_ kind: AIMaskKind) {
+        addAIMask(kind, modelVersion: kind.modelVersion)
+    }
+
+    /// A subject mask made with `entry` rather than the default: the Add
+    /// menu's Subject submenu.
+    func addAIMask(model entry: ModelEntry) {
+        addAIMask(.subject, modelVersion: entry.modelVersion)
+    }
+
+    /// The model runs off the main thread on a small sRGB copy of the
+    /// image rendered *unrotated*, so the mask lands in sensor coordinates
+    /// like every other mask; the edit records which model made it.
+    private func addAIMask(_ kind: AIMaskKind, modelVersion: String) {
         guard hasImage, parameters.locals.count < LocalAdjustment.maximumCount else { return }
         let local = LocalAdjustment(name: kind.displayName,
-                                    shape: .ai(kind: kind.rawValue, modelVersion: kind.modelVersion))
+                                    shape: .ai(kind: kind.rawValue, modelVersion: modelVersion))
         parameters.locals.append(local)
         selectedLocalIndex = parameters.locals.count - 1
         showMaskOverlay = true
         generateAIMask(for: local)
     }
 
+    /// Makes the mask at `index` again with another model: an ordinary
+    /// parameter change (undo and history cover it) that rewrites the
+    /// stored `modelVersion`, drops the old pixels and regenerates. A
+    /// click-to-select mask keeps its points and answers them against
+    /// the new model's encoding.
+    func rerunMask(at index: Int, with entry: ModelEntry) {
+        guard index < parameters.locals.count, let session else { return }
+        let local = parameters.locals[index]
+        switch local.shape {
+        case .ai(let kind, _):
+            parameters.locals[index].shape = .ai(kind: kind, modelVersion: entry.modelVersion)
+        case .prompted(let points, _):
+            parameters.locals[index].shape = .prompted(points: points, modelVersion: entry.modelVersion)
+        default:
+            return
+        }
+        session.setAIMask(nil, forLocal: local.id)
+        generateAIMask(for: parameters.locals[index])
+        rerender()
+    }
+
     /// Regenerates masks for AI locals that have no pixels yet — after
-    /// opening an image whose edit contains them.
+    /// opening an image whose edit contains them. One encoding per
+    /// distinct click-to-select model the edit names.
     func regenerateMissingAIMasks() {
         guard let session else { return }
         for local in parameters.locals where local.shape.isModelGenerated {
@@ -83,10 +117,11 @@ extension EditorModel {
     private func generateAIMask(for local: LocalAdjustment) {
         guard let session else { return }
         if case .prompted = local.shape { updatePromptedMask(for: local); return }
-        guard case .ai(let kindName, _) = local.shape,
+        guard case .ai(let kindName, let modelVersion) = local.shape,
               let kind = AIMaskKind(storedName: kindName) else { return }
         generatingMasks.insert(local.id)
-        status = "Generating \(kind.displayName.lowercased()) mask…"
+        let runner = ModelMenus.runningModelName(for: kind, modelVersion: modelVersion)
+        status = "Generating \(kind.maskNoun) mask with \(runner)…"
 
         let image: CGImage
         do {
@@ -98,14 +133,20 @@ extension EditorModel {
         }
         let input = SendableImage(cgImage: image)
         let localID = local.id
+        // The analysis render is unrotated; the subject models turn it
+        // upright themselves and turn the mask back (SubjectSegmenter).
+        let rotation = self.rotation
         // Swift 6 concurrency shape: only Sendable values (the image
-        // wrapper and the kind) cross into the detached task; the result
-        // comes back as a value, and the main-actor task below is the only
-        // place that touches the model or the session.
+        // wrapper, the kind and the stored version) cross into the
+        // detached task; the result comes back as a value, and the
+        // main-actor task below is the only place that touches the model
+        // or the session.
         Task { @MainActor [weak self] in
             let outcome: Result<AIMaskGenerator.Result, Error> = await Task.detached(priority: .userInitiated) {
-                do { return .success(try await AIMaskGenerator.generate(kind, from: input.cgImage)) }
-                catch { return .failure(error) }
+                do {
+                    return .success(try await AIMaskGenerator.generate(kind, modelVersion: modelVersion,
+                                                                       from: input.cgImage, rotation: rotation))
+                } catch { return .failure(error) }
             }.value
             guard let self else { return }
             self.generatingMasks.remove(localID)
@@ -114,57 +155,91 @@ extension EditorModel {
                 // The user may have moved to another image while the model ran.
                 guard self.session === session else { return }
                 session.setAIMask(result.mask, forLocal: localID)
-                self.status = String(format: "%@ mask: %.0f ms on device, %.0f%% of the frame",
-                                     kind.displayName, result.seconds * 1000, result.mask.coverage * 100)
+                let made = result.substitutedModel.map { "\(runner), \($0) is not installed" } ?? runner
+                self.status = String(format: "%@ mask (%@): %.0f ms on device, %.0f%% of the frame",
+                                     kind.maskNoun.capitalized, made, result.seconds * 1000,
+                                     result.mask.coverage * 100)
                 self.rerender()
             case .failure(let error):
-                self.status = "\(kind.displayName) mask failed: \(error)"
+                self.status = "\(kind.maskNoun.capitalized) mask failed: \(error)"
             }
         }
     }
 
     // MARK: Click-to-select (Segment Anything 2)
 
-    var sam2Available: Bool { SAM2Models.isAvailable }
+    /// A click-to-select model is there to run: the preferred one, else
+    /// the bundled SAM 2.1 Small.
+    var promptedModelAvailable: Bool { ModelRegistry.shared.defaultPrompted() != nil }
 
-    /// Adds a click-to-select mask and arms the prompt tool. The image is
-    /// encoded in the background right away so the first click is quick.
+    /// Adds a click-to-select mask made with the default model and arms
+    /// the prompt tool.
     func addPromptedMask() {
+        guard let entry = ModelRegistry.shared.defaultPrompted() else { return }
+        addPromptedMask(model: entry)
+    }
+
+    /// Adds a click-to-select mask made with `entry` and arms the prompt
+    /// tool. The image is encoded for that model in the background right
+    /// away so the first click is quick.
+    func addPromptedMask(model entry: ModelEntry) {
         guard hasImage, parameters.locals.count < LocalAdjustment.maximumCount else { return }
         let local = LocalAdjustment(name: "Selection \(parameters.locals.count + 1)",
-                                    shape: .prompted(points: [], modelVersion: SAM2Models.modelVersion))
+                                    shape: .prompted(points: [], modelVersion: entry.modelVersion))
         parameters.locals.append(local)
         selectedLocalIndex = parameters.locals.count - 1
         maskTool = .prompt
         showMaskOverlay = true
-        ensureSAM2Session()
+        ensurePromptSession(for: entry.id)
     }
 
-    private func ensureSAM2Session() {
-        guard sam2Session == nil, sam2Encoding == nil, let session else { return }
+    /// The id of the model that answers a stored click-to-select version:
+    /// the one named when it is installed, else the default (what export
+    /// does, `ExportWorker.regenerateMasks`); nil with no model at all.
+    func promptModelID(for modelVersion: String) -> String? {
+        ModelMenus.promptedEntry(running: modelVersion, registry: .shared)?.id
+    }
+
+    /// Encodes the open image for one click-to-select model, unless it
+    /// is encoded or being encoded already.
+    private func ensurePromptSession(for id: String) {
+        guard promptSessions[id] == nil, promptEncoding[id] == nil, let session else { return }
         let image: CGImage
         do { image = try modelInputImage() } catch {
-            sam2Status = "Click-to-select unavailable: \(error)"
+            promptStatus[id] = "Click-to-select unavailable: \(error)"
             return
         }
         let input = SendableImage(cgImage: image)
-        sam2Status = "Encoding image for click-to-select…"
-        sam2Encoding = Task { @MainActor [weak self] in
+        promptStatus[id] = "Encoding image for click-to-select…"
+        promptEncoding[id] = Task { @MainActor [weak self] in
             let result = await Task.detached(priority: .userInitiated) { () -> SAM2Session? in
-                guard let models = await SAM2Models.shared.value else { return nil }
+                guard let models = await ModelRegistry.shared.prompted(id: id) else { return nil }
                 return try? SAM2Session(models: models, image: input.cgImage)
             }.value
             guard let self, self.session === session else { return nil }
-            self.sam2Session = result
-            self.sam2Encoding = nil
-            self.sam2Status = result.map { String(format: "Image encoded in %.0f ms — click the subject; option-click to exclude", $0.encodeSeconds * 1000) }
-                ?? "Click-to-select unavailable (SAM 2 models not bundled)"
-            // Any prompted locals that were waiting for the encoding.
+            self.promptSessions[id] = result
+            self.promptEncoding[id] = nil
+            self.promptStatus[id] = result.map { String(format: "Image encoded in %.0f ms — click the subject; option-click to exclude", $0.encodeSeconds * 1000) }
+                ?? "Click-to-select unavailable (the model could not be loaded)"
+            // Any prompted locals of this model that were waiting for the encoding.
             for local in self.parameters.locals {
-                if case .prompted(let pts, _) = local.shape, !pts.isEmpty { self.updatePromptedMask(for: local) }
+                if case .prompted(let pts, let version) = local.shape, !pts.isEmpty,
+                   self.promptModelID(for: version) == id {
+                    self.updatePromptedMask(for: local)
+                }
             }
             return result
         }
+    }
+
+    /// Forgets every encoding: the image is closing, or memory is short.
+    /// `keeping` survives (the model the armed prompt tool is clicking
+    /// against); an encoding under way for it goes on.
+    func resetPromptSessions(keeping kept: String? = nil) {
+        for (id, task) in promptEncoding where id != kept { task.cancel() }
+        promptEncoding = promptEncoding.filter { $0.key == kept }
+        promptSessions = promptSessions.filter { $0.key == kept }
+        promptStatus = promptStatus.filter { $0.key == kept }
     }
 
     /// A click on the image while the prompt tool is armed.
@@ -186,9 +261,9 @@ extension EditorModel {
     }
 
     private func updatePromptedMask(for local: LocalAdjustment) {
-        guard case .prompted(let points, _) = local.shape, let session else { return }
-        guard !points.isEmpty else { return }
-        guard let sam = sam2Session else { ensureSAM2Session(); return }
+        guard case .prompted(let points, let version) = local.shape, let session else { return }
+        guard !points.isEmpty, let id = promptModelID(for: version) else { return }
+        guard let sam = promptSessions[id] else { ensurePromptSession(for: id); return }
         let prompts = points.map { PromptPoint(x: $0.x, y: $0.y, foreground: $0.foreground) }
         let localID = local.id
         generatingMasks.insert(localID)
@@ -300,6 +375,3 @@ extension EditorModel {
         return 0.5
     }
 }
-
-/// CGImage is immutable but not marked Sendable; this vouches for it.
-private struct SendableImage: @unchecked Sendable { let cgImage: CGImage }

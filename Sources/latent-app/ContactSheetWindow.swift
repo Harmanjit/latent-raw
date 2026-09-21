@@ -134,6 +134,9 @@ final class ContactSheetModel: ObservableObject {
 
     /// Names of photos the last save couldn't render (drawn as empty cells).
     @Published private(set) var unrenderedNames: [String] = []
+    /// By photo name, the models the last save's edits name but this Mac
+    /// lacks; those photos were drawn with a stand-in.
+    @Published private(set) var maskSubstitutions: [String: [String]] = [:]
 
     /// Makes the sheet and writes it to `url`, off the main thread; calls
     /// `completion` on the main actor with nil on success, or the error.
@@ -162,10 +165,12 @@ final class ContactSheetModel: ObservableObject {
             }
             let box = failure.map { ErrorBox(error: $0) }
             let unrendered = renderer.failedNames
+            let substituted = renderer.maskSubstitutions
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { [weak self] in
                     jobs.end(job)
                     self?.unrenderedNames = unrendered
+                    self?.maskSubstitutions = substituted
                     self?.isSaving = false
                     self?.cancel = nil
                     completion(box?.error)
@@ -409,9 +414,9 @@ final class ContactSheetPresenter {
                 let model = ContactSheetModel(items: items, title: library.folderURL?.lastPathComponent ?? "",
                                               library: library, gpu: gpu)
                 let presenter = ContactSheetPresenter(model: model, startFolder: nil) { url in
-                    let missing = model.unrenderedNames
-                    let message = "Saved “\(url.lastPathComponent)”" + (missing.isEmpty ? "" :
-                        missing.count == 1 ? "; \(missing[0]) couldn’t be rendered" : "; \(missing.count) photos couldn’t be rendered")
+                    let message = ContactSheetPresenter.savedMessage(fileName: url.lastPathComponent,
+                                                                     unrendered: model.unrenderedNames,
+                                                                     substitutions: model.maskSubstitutions)
                     editor.reportError(message)
                     Announcement.post(message)
                 }
@@ -420,6 +425,19 @@ final class ContactSheetPresenter {
                 editor.reportFailure("Reading the edits for the contact sheet", error)
             }
         }
+    }
+
+    /// "Saved “sheet.pdf”; 2 photos couldn’t be rendered. 2 photos used
+    /// Apple Vision because BiRefNet General is not installed".
+    nonisolated static func savedMessage(fileName: String, unrendered: [String], substitutions: [String: [String]],
+                                         registry: ModelRegistry = .shared) -> String {
+        var message = "Saved “\(fileName)”" + (unrendered.isEmpty ? "" :
+            unrendered.count == 1 ? "; \(unrendered[0]) couldn’t be rendered" : "; \(unrendered.count) photos couldn’t be rendered")
+        let missing = Array(Set(substitutions.values.flatMap { $0 })).sorted()
+        if let sentence = MaskSubstitutions.pageSentence(photos: substitutions.count, missing: missing, registry: registry) {
+            message += ". " + sentence
+        }
+        return message
     }
 
     func begin(on window: NSWindow) {

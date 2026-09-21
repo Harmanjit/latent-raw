@@ -6,6 +6,7 @@ import MLKit
 /// one, its tool, its sliders and its range refinements.
 struct LocalAdjustmentsPanel: View {
     @ObservedObject var model: EditorModel
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -16,14 +17,14 @@ struct LocalAdjustmentsPanel: View {
                     Button("Brush") { model.addLocal(.brush) }
                     Button("Whole Image (range only)") { model.addLocal(.none) }
                     Divider()
-                    Button("Click to Select (Segment Anything)") { model.addPromptedMask() }
-                        .disabled(!model.sam2Available)
+                    modelMenu("Subject", kind: .subjectSegmentation) { model.addAIMask(model: $0) }
+                    modelMenu("Click to Select", kind: .promptedSegmentation) { model.addPromptedMask(model: $0) }
+                        .disabled(!model.promptedModelAvailable)
                     Menu("Select by Class") {
                         ForEach(AIMaskKind.allCases.filter { $0 != .subject }, id: \.self) { kind in
                             Button(kind.displayName) { model.addAIMask(kind) }
                         }
                     }
-                    Button("Subject (auto, Vision)") { model.addAIMask(.subject) }
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -47,6 +48,26 @@ struct LocalAdjustmentsPanel: View {
                 selectedControls(i)
             }
         }
+    }
+
+    /// The installed models of a kind, the default first and ticked, then
+    /// the way to Settings for more.
+    private func modelMenu(_ title: String, kind: ModelManifest.Kind,
+                           add: @escaping (ModelEntry) -> Void) -> some View {
+        let choices = ModelMenus.choices(kind: kind, registry: .shared)
+        return Menu(title) {
+            ForEach(choices) { entry in
+                // A Toggle draws the tick a menu item shows; choosing it
+                // adds the mask rather than changing a setting.
+                Toggle(isOn: Binding(get: { entry.id == choices.first?.id }, set: { _ in add(entry) })) {
+                    Text(entry.manifest.displayName)
+                }
+            }
+            Divider()
+            Button("More models…") { openSettings() }
+                .help("Settings › AI › Models: add a model from disk or choose the default")
+        }
+        .disabled(choices.isEmpty)
     }
 
     private var localList: some View {
@@ -140,16 +161,25 @@ struct LocalAdjustmentsPanel: View {
         case .whole:
             Text("Whole image — use the ranges below to limit it.")
                 .font(.caption2).foregroundStyle(.secondary)
-        case .ai(let kind, let version):
-            HStack(spacing: 6) {
-                if model.generatingMasks.contains(model.parameters.locals[i].id) {
-                    ProgressView().controlSize(.mini)
-                    Text("Generating \(kind) mask…").font(.caption2).foregroundStyle(.secondary)
-                } else {
-                    Text("\(kind.capitalized) mask · \(version)").font(.caption2).foregroundStyle(.secondary)
+        case .ai:
+            let shape = model.parameters.locals[i].shape
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    if model.generatingMasks.contains(model.parameters.locals[i].id) {
+                        ProgressView().controlSize(.mini)
+                        Text("Generating \(ModelMenus.rowTitle(for: shape, registry: .shared))…")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    } else {
+                        Text(ModelMenus.rowTitle(for: shape, registry: .shared))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    modelSwitch(i, shape: shape)
                 }
+                missingModelRow(shape)
             }
-        case .prompted(let points, _):
+        case .prompted(let points, let version):
+            let shape = model.parameters.locals[i].shape
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Button(model.maskTool == .prompt ? "Clicking…" : "Click to select") { model.maskTool = .prompt }
@@ -159,12 +189,59 @@ struct LocalAdjustmentsPanel: View {
                     if model.generatingMasks.contains(model.parameters.locals[i].id) {
                         ProgressView().controlSize(.mini)
                     }
+                    Spacer()
+                    modelSwitch(i, shape: shape)
                 }
-                Text(points.isEmpty
-                     ? "Click the thing you want. Option-click to exclude something. \(model.sam2Status)"
-                     : "\(points.count) point\(points.count == 1 ? "" : "s") · \(model.sam2Status)")
+                let status = model.promptModelID(for: version).flatMap { model.promptStatus[$0] } ?? ""
+                Text(ModelMenus.promptedRowText(for: shape, status: status, registry: .shared))
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                missingModelRow(shape)
+            }
+        }
+    }
+
+    /// Menu("Model"): the other installed models of the mask's kind, each
+    /// making the mask again.
+    @ViewBuilder
+    private func modelSwitch(_ i: Int, shape: MaskShape) -> some View {
+        let others = ModelMenus.alternatives(for: shape, registry: .shared)
+        if !others.isEmpty {
+            Menu("Model") {
+                ForEach(others) { entry in
+                    Button(entry.manifest.displayName) { model.rerunMask(at: i, with: entry) }
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .controlSize(.small)
+            .help("Make this mask again with another model")
+            .accessibilityLabel("Model for this mask")
+            .accessibilityHint("Makes the mask again with the model you choose")
+        }
+    }
+
+    /// "BiRefNet General is not installed — shown with Apple Vision
+    /// instead." with the ways to get it, when the edit names a model this
+    /// Mac lacks.
+    @ViewBuilder
+    private func missingModelRow(_ shape: MaskShape) -> some View {
+        if let sentence = ModelMenus.missingSentence(for: shape, registry: .shared) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(sentence)
+                    .font(.caption2).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    if let entry = ModelMenus.missingEntry(for: shape, registry: .shared) {
+                        Button("Get…") { NSWorkspace.shared.open(entry.manifest.sourceURL) }
+                            .help("Open the page for \(entry.manifest.displayName) in your browser; nothing is downloaded by Latent")
+                            .accessibilityLabel("Get \(entry.manifest.displayName), opens its page in your browser")
+                    }
+                    Button("Add Model…") { openSettings() }
+                        .help("Settings › AI › Models adds a converted model from disk")
+                        .accessibilityLabel("Add a model in Settings")
+                }
+                .controlSize(.small)
             }
         }
     }
@@ -232,5 +309,193 @@ struct LocalAdjustmentsPanel: View {
     /// between dabs, and a colour range of width 0 no edge to smooth.
     static func resetValue(_ defaultValue: Float, in range: ClosedRange<Float>) -> Float {
         min(max(defaultValue, range.lowerBound), range.upperBound)
+    }
+}
+
+extension AIMaskKind {
+    /// The mask in a status line: "subject", "sky".
+    var maskNoun: String { self == .subject ? "subject" : displayName.lowercased() }
+}
+
+/// What the Add menu and the mask rows say about models, as functions of
+/// a registry so ModelMenuTests can ask them of a fixture.
+enum ModelMenus {
+    /// Installed models of `kind` a new mask can be made with, the
+    /// default (Settings › AI › Models) first.
+    static func choices(kind: ModelManifest.Kind, registry: ModelRegistry) -> [ModelEntry] {
+        let installed = registry.entries(kind: kind).filter(\.isInstalled)
+        guard let preferred = defaultEntry(kind: kind, registry: registry),
+              let index = installed.firstIndex(where: { $0.id == preferred.id }) else { return installed }
+        var ordered = installed
+        ordered.remove(at: index)
+        ordered.insert(preferred, at: 0)
+        return ordered
+    }
+
+    /// The model a NEW mask of `kind` is made with; nil for a kind with
+    /// none installed.
+    static func defaultEntry(kind: ModelManifest.Kind, registry: ModelRegistry) -> ModelEntry? {
+        switch kind {
+        case .subjectSegmentation: return registry.defaultSubject()
+        case .promptedSegmentation: return registry.defaultPrompted()
+        case .semanticSegmentation: return registry.entries(kind: kind).first(where: \.isInstalled)
+        case .denoise: return nil
+        }
+    }
+
+    /// Apple Vision's row name: the stand-in for a missing subject model.
+    static func visionName(registry: ModelRegistry) -> String {
+        registry.entry(id: ModelRegistry.builtInSubjectID)?.manifest.displayName ?? "Apple Vision"
+    }
+
+    /// The entry a stored version names, installed or not, when the
+    /// registry lists it.
+    static func namedEntry(_ stored: String, registry: ModelRegistry) -> ModelEntry? {
+        ModelRef(stored: stored).flatMap { registry.entry(id: $0.id) }
+    }
+
+    /// The name to show for a stored version: the model's display name
+    /// when the registry lists it, else the id, else the string as stored.
+    static func modelName(_ stored: String, registry: ModelRegistry) -> String {
+        guard let ref = ModelRef(stored: stored) else { return stored }
+        return registry.entry(id: ref.id)?.manifest.displayName ?? ref.id
+    }
+
+    /// The installed subject model a stored version runs (Apple Vision
+    /// counts), or nil when Vision stands in (`AIMaskGenerator.generate`).
+    static func subjectEntry(running stored: String, registry: ModelRegistry) -> ModelEntry? {
+        registry.installed(ModelRef(stored: stored)).flatMap { $0.manifest.kind == .subjectSegmentation ? $0 : nil }
+    }
+
+    /// The click-to-select model a stored version runs: the one named when
+    /// installed, else the default (as export does); nil with none.
+    static func promptedEntry(running stored: String, registry: ModelRegistry) -> ModelEntry? {
+        if let named = registry.installed(ModelRef(stored: stored)), named.manifest.kind == .promptedSegmentation {
+            return named
+        }
+        return registry.defaultPrompted()
+    }
+
+    /// The class model a stored version runs: the one named when installed
+    /// as a class model, else the installed class model; nil when a
+    /// built-in estimate stands in.
+    static func semanticEntry(running stored: String, registry: ModelRegistry) -> ModelEntry? {
+        if let named = registry.installed(ModelRef(stored: stored)), named.manifest.kind == .semanticSegmentation {
+            return named
+        }
+        return registry.installed(ModelRef(id: SegmentationModel.modelID, version: 1))
+    }
+
+    /// What will make a mask of `kind` stored as `modelVersion`, for the
+    /// status line: "BiRefNet Lite", "Apple Vision", "SegFormer B2".
+    static func runningModelName(for kind: AIMaskKind, modelVersion: String,
+                                 registry: ModelRegistry = .shared) -> String {
+        switch kind {
+        case .subject:
+            return subjectEntry(running: modelVersion, registry: registry)?.manifest.displayName
+                ?? visionName(registry: registry)
+        case .sky:
+            return semanticEntry(running: modelVersion, registry: registry)?.manifest.displayName
+                ?? "the built-in sky estimate"
+        case .people:
+            return semanticEntry(running: modelVersion, registry: registry)?.manifest.displayName
+                ?? visionName(registry: registry)
+        default:
+            return semanticEntry(running: modelVersion, registry: registry)?.manifest.displayName
+                ?? modelName(modelVersion, registry: registry)
+        }
+    }
+
+    /// The mask row: "Subject · BiRefNet Lite", "Sky · SegFormer B2". A
+    /// click-to-select row is `promptedRowText`.
+    static func rowTitle(for shape: MaskShape, registry: ModelRegistry) -> String {
+        switch shape {
+        case .ai(let kindName, let version):
+            guard let kind = AIMaskKind(storedName: kindName) else { return "\(kindName.capitalized) mask" }
+            let noun = kind == .subject ? "Subject" : kind.displayName
+            return "\(noun) · \(runningModelName(for: kind, modelVersion: version, registry: registry))"
+        case .prompted(_, let version):
+            return promptedEntry(running: version, registry: registry)?.manifest.displayName
+                ?? modelName(version, registry: registry)
+        default:
+            return ""
+        }
+    }
+
+    /// "SAM 2.1 Large · 3 points · Image encoded in 640 ms — …", or the
+    /// instructions while there are no points.
+    static func promptedRowText(for shape: MaskShape, status: String, registry: ModelRegistry) -> String {
+        guard case .prompted(let points, _) = shape else { return "" }
+        let name = rowTitle(for: shape, registry: registry)
+        let count = points.isEmpty ? "Click the thing you want. Option-click to exclude something."
+            : "\(points.count) point\(points.count == 1 ? "" : "s")"
+        return [name, count, status].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// The model the edit names but this Mac lacks, when the registry
+    /// lists it (a catalogue row, so Get… has a page to open).
+    static func missingEntry(for shape: MaskShape, registry: ModelRegistry) -> ModelEntry? {
+        guard missingSentence(for: shape, registry: registry) != nil else { return nil }
+        let stored: String
+        switch shape {
+        case .ai(_, let version), .prompted(_, let version): stored = version
+        default: return nil
+        }
+        return namedEntry(stored, registry: registry).flatMap { $0.isInstalled ? nil : $0 }
+    }
+
+    /// "BiRefNet General is not installed — shown with Apple Vision
+    /// instead." when the mask's model is missing; nil when the mask is
+    /// made with the model it names. Mirrors what `AIMaskGenerator` and
+    /// `ExportWorker.regenerateMasks` report as substituted.
+    static func missingSentence(for shape: MaskShape, registry: ModelRegistry) -> String? {
+        switch shape {
+        case .ai(let kindName, let version):
+            guard let kind = AIMaskKind(storedName: kindName) else { return nil }
+            if kind == .subject {
+                guard subjectEntry(running: version, registry: registry) == nil else { return nil }
+                return "\(modelName(version, registry: registry)) is not installed — shown with "
+                    + "\(visionName(registry: registry)) instead."
+            }
+            // A class mask only reports a real model it names and lacks;
+            // the bundled class model or its estimate stands in silently,
+            // as the 0.9.0 beta did.
+            guard let ref = ModelRef(stored: version), ref.id != SegmentationModel.modelID,
+                  !ref.id.hasPrefix("latent."),
+                  registry.installed(ref).map({ $0.manifest.kind == .semanticSegmentation }) != true else { return nil }
+            return "\(modelName(version, registry: registry)) is not installed — shown with "
+                + "\(runningModelName(for: kind, modelVersion: version, registry: registry)) instead."
+        case .prompted(_, let version):
+            if let named = registry.installed(ModelRef(stored: version)), named.manifest.kind == .promptedSegmentation {
+                return nil
+            }
+            let name = modelName(version, registry: registry)
+            guard let fallback = registry.defaultPrompted() else {
+                return "\(name) is not installed, and no click-to-select model is, so the mask is empty."
+            }
+            return "\(name) is not installed — shown with \(fallback.manifest.displayName) instead."
+        default:
+            return nil
+        }
+    }
+
+    /// The other installed models of the mask's kind, for Menu("Model"):
+    /// everything installed but the one making it now.
+    static func alternatives(for shape: MaskShape, registry: ModelRegistry) -> [ModelEntry] {
+        let kind: ModelManifest.Kind
+        let current: String?
+        switch shape {
+        case .ai(let kindName, let version):
+            guard let maskKind = AIMaskKind(storedName: kindName) else { return [] }
+            kind = maskKind == .subject ? .subjectSegmentation : .semanticSegmentation
+            current = maskKind == .subject ? subjectEntry(running: version, registry: registry)?.id
+                : semanticEntry(running: version, registry: registry)?.id
+        case .prompted(_, let version):
+            kind = .promptedSegmentation
+            current = promptedEntry(running: version, registry: registry)?.id
+        default:
+            return []
+        }
+        return choices(kind: kind, registry: registry).filter { $0.id != current }
     }
 }

@@ -64,12 +64,6 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    // Optional high-quality model: download state.
-    @Published var modelDownloadProgress: Double?   // 0…1 while downloading
-    @Published var modelDownloadStatus = ""
-    @Published var highQualityModelInstalled = OptionalModel.nafnetWidth64.isInstalled
-    var modelDownloadTask: Task<Void, Never>?
-
     // MARK: - Spot removal tool
 
     /// Click a spot to heal it (the source is picked beside it); drag from
@@ -315,19 +309,15 @@ final class EditorModel: ObservableObject {
 
     // MARK: Click-to-select (Segment Anything 2)
 
-    /// The encoded image for SAM 2, built on first use per image. Encoding
-    /// is the expensive step (hundreds of ms); every click after it is a
-    /// few milliseconds.
-    var sam2Session: SAM2Session?
-    var sam2Encoding: Task<SAM2Session?, Never>?
-    @Published var sam2Status = ""
-
-    /// The encoded image per prompted model, by model id: a mask made with
-    /// SAM 2.1 Large clicks against Large's encoding while one made with
-    /// Small uses Small's. Reset in `closeImage` and the failed-open path.
-    /// Wave 2 moves the three fields above into these.
+    /// The encoded image per click-to-select model, by model id: a mask
+    /// made with SAM 2.1 Large clicks against Large's encoding while one
+    /// made with Small uses Small's. Encoding is the expensive step
+    /// (hundreds of ms, once per image and model); every click after it
+    /// is a few milliseconds. Reset in `closeImage` and the failed-open
+    /// path (EditorModel+Masks.swift).
     var promptSessions: [String: SAM2Session] = [:]
     var promptEncoding: [String: Task<SAM2Session?, Never>] = [:]
+    /// What the mask row says about each model's encoding.
     @Published var promptStatus: [String: String] = [:]
 
     // MARK: - GPU and the open image

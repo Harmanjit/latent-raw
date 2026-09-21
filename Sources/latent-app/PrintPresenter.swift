@@ -26,13 +26,20 @@ enum PrintPresenter {
                     items = try await SheetItems.selection(library: library, model: model)
                 }
                 guard !items.isEmpty, window.attachedSheet == nil else { return }
+                // The job keeps its renderer to itself; the one made last
+                // is the one the pages were rendered with, and it knows
+                // which photos needed a stand-in model.
+                let renderers = PrintRenderers()
                 let session = PrintSession(
                     items: items, thumbnails: SheetPreviewImages.libraryThumbnails(library),
                     makeRenderer: { profile in
                         // 16-bit Display P3 at the printer's resolution,
                         // AI denoise included: a print shows it.
-                        SheetRenderer(gpu: gpu, colorSpace: .displayP3, bitsPerComponent: 16, aiDenoiseFrom: 0,
-                                      profile: profile, cacheBudget: PrintRenderPolicy.cacheBudget)
+                        let renderer = SheetRenderer(gpu: gpu, colorSpace: .displayP3, bitsPerComponent: 16,
+                                                     aiDenoiseFrom: 0, profile: profile,
+                                                     cacheBudget: PrintRenderPolicy.cacheBudget)
+                        renderers.made(renderer)
+                        return renderer
                     },
                     // Previews of what has no thumbnail render small and in
                     // sRGB; they are never printed.
@@ -44,7 +51,12 @@ enum PrintPresenter {
                     sessions.removeAll { $0 === finished }
                     // A photo that couldn't be rendered is an empty cell on
                     // paper; the panel's preview, from thumbnails, showed it.
-                    if success, let message = PrintSession.unrenderedMessage(finished.job.unrenderedNames) {
+                    // One printed with a stand-in model looked right in the
+                    // preview too, so that is said as well.
+                    guard success else { return }
+                    let substituted = renderers.last?.maskSubstitutions ?? [:]
+                    if let message = PrintSession.printedMessage(unrendered: finished.job.unrenderedNames,
+                                                                 substitutions: substituted) {
                         model.lastError = message
                         Announcement.post(message, priority: .high)
                     }
@@ -161,6 +173,18 @@ final class PrintSession: NSObject {
         runningJob = nil
         completion?(self, success)
         completion = nil
+    }
+
+    /// What to tell the user after a print: the empty cells, then the
+    /// photos printed with a stand-in model ("2 photos used Apple Vision
+    /// because BiRefNet General is not installed"); nil when neither.
+    nonisolated static func printedMessage(unrendered: [String], substitutions: [String: [String]],
+                                           registry: ModelRegistry = .shared) -> String? {
+        let missing = Array(Set(substitutions.values.flatMap { $0 })).sorted()
+        let sentences = [unrenderedMessage(unrendered),
+                         MaskSubstitutions.pageSentence(photos: substitutions.count, missing: missing, registry: registry)]
+            .compactMap { $0 }
+        return sentences.isEmpty ? nil : sentences.joined(separator: ". ")
     }
 
     /// What to tell the user about photos that printed as empty cells.
@@ -338,4 +362,18 @@ struct PrintAccessoryView: View {
                 .accessibilityHidden(true)
         }
     }
+}
+
+/// The renderers a print made for the printer, so the presenter can ask
+/// the last one what it substituted once the job is over. The job makes
+/// a fresh one when the colour choice changes (`PrintJob.update`).
+final class PrintRenderers: @unchecked Sendable {
+    private let lock = NSLock()
+    private var renderers: [SheetRenderer] = []
+
+    func made(_ renderer: SheetRenderer) {
+        lock.withLock { renderers.append(renderer) }
+    }
+
+    var last: SheetRenderer? { lock.withLock { renderers.last } }
 }

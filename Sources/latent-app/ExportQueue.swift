@@ -145,6 +145,10 @@ final class ExportQueue: ObservableObject {
     @Published private(set) var total = 0
     @Published private(set) var currentName = ""
     @Published private(set) var failures: [Failure] = []
+    /// Exports that went through with a stand-in model: the edit names a
+    /// model this Mac lacks (`MaskSubstitutions.exportNote`). Shown under
+    /// the failures; the summary counts them.
+    @Published private(set) var notes: [String] = []
     @Published private(set) var summary = ""
 
     private var task: Task<Void, Never>?
@@ -176,7 +180,7 @@ final class ExportQueue: ObservableObject {
         guard !isGPUBusy, !records.isEmpty, let catalog = library.catalog, let root = library.folderURL else { return }
         isRunning = true
         stoppingForQuit = false
-        done = 0; total = records.count; failures = []; summary = ""
+        done = 0; total = records.count; failures = []; notes = []; summary = ""
         preset.save()
         // Held until the loop below finishes, however it finishes.
         let activity = ExportActivity(reason: "Exporting \(records.count) image\(records.count == 1 ? "" : "s")")
@@ -189,6 +193,7 @@ final class ExportQueue: ObservableObject {
             var totalPixels = 0
             let catalogName = root.lastPathComponent
             var skipped = 0
+            var substituted = 0
             var written: [URL] = []
             // Every name settled before the first file is written, so two
             // images whose template gives the same name never overwrite each
@@ -286,7 +291,13 @@ final class ExportQueue: ObservableObject {
                     guard let self else { return }
                     self.done += 1
                     switch outcome {
-                    case .success(let o): totalPixels += o.pixelWidth * o.pixelHeight; written.append(target)
+                    case .success(let o):
+                        totalPixels += o.pixelWidth * o.pixelHeight
+                        written.append(target)
+                        if !o.maskSubstitutions.isEmpty {
+                            substituted += 1
+                            self.notes.append(MaskSubstitutions.exportNote(name: name, missing: o.maskSubstitutions))
+                        }
                     case .failure(let e): self.failures.append(Failure(name: name, reason: "\(e)"))
                     }
                 }
@@ -299,9 +310,10 @@ final class ExportQueue: ObservableObject {
                 self.currentName = ""
                 let cancelled = Task.isCancelled ? " (cancelled)" : ""
                 let skippedNote = skipped > 0 ? " · \(skipped) skipped (already there)" : ""
-                self.summary = String(format: "%d of %d exported%@ in %.1fs · %.1f MP total%@",
+                self.summary = String(format: "%d of %d exported%@ in %.1fs · %.1f MP total%@%@",
                                       exported.count, self.total, cancelled, elapsed,
-                                      Double(totalPixels) / 1_000_000, skippedNote)
+                                      Double(totalPixels) / 1_000_000, skippedNote,
+                                      MaskSubstitutions.summarySuffix(count: substituted))
                 if preset.revealWhenDone, !exported.isEmpty, !self.stoppingForQuit {
                     NSWorkspace.shared.activateFileViewerSelecting(Array(exported.prefix(50)))
                 }
@@ -658,5 +670,67 @@ struct ExportSheet: View {
         Text(title).font(.caption).fontWeight(.semibold).foregroundStyle(.secondary).textCase(.uppercase)
             .padding(.top, 4)
             .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Words for masks made with a stand-in model: an export, a print or a
+/// contact sheet whose edit names a model this Mac lacks ran the kind's
+/// built-in or bundled one instead (docs/Retouch.md §5). `missing` are
+/// the display names `ExportWorker` reports.
+enum MaskSubstitutions {
+    /// " · 2 with substituted masks", or nothing.
+    static func summarySuffix(count: Int) -> String {
+        count > 0 ? " · \(count) with substituted masks" : ""
+    }
+
+    /// "DSC_0107.NEF used Apple Vision because BiRefNet General is not
+    /// installed", for the export panel's notes.
+    static func exportNote(name: String, missing: [String], registry: ModelRegistry = .shared) -> String {
+        "\(name) used \(standIn(for: missing, registry: registry)) because \(notInstalled(missing))"
+    }
+
+    /// The second sentence of a print's or contact sheet's message: "2
+    /// photos used Apple Vision because BiRefNet General is not
+    /// installed"; nil when no photo needed a stand-in.
+    static func pageSentence(photos: Int, missing: [String], registry: ModelRegistry = .shared) -> String? {
+        guard photos > 0, !missing.isEmpty else { return nil }
+        let subject = photos == 1 ? "1 photo" : "\(photos) photos"
+        return "\(subject) used \(standIn(for: missing, registry: registry)) because \(notInstalled(missing))"
+    }
+
+    /// "BiRefNet General is not installed" / "BiRefNet General and SAM 2.1
+    /// Large are not installed".
+    static func notInstalled(_ missing: [String]) -> String {
+        switch missing.count {
+        case 0: return "a model is not installed"
+        case 1: return "\(missing[0]) is not installed"
+        default: return missing.dropLast().joined(separator: ", ") + " and \(missing.last!) are not installed"
+        }
+    }
+
+    /// What ran instead: Apple Vision for a subject model, the default
+    /// click-to-select model for one of those, the installed class model
+    /// for a class model; "stand-in models" when several kinds are
+    /// missing or the name is not one the registry lists.
+    static func standIn(for missing: [String], registry: ModelRegistry = .shared) -> String {
+        let standIns = missing.map { standIn(forMissing: $0, registry: registry) }
+        guard let first = standIns.first, let name = first, standIns.allSatisfy({ $0 == name }) else {
+            return "stand-in models"
+        }
+        return name
+    }
+
+    static func standIn(forMissing name: String, registry: ModelRegistry) -> String? {
+        guard let entry = registry.entries().first(where: { $0.manifest.displayName == name }) else { return nil }
+        switch entry.manifest.kind {
+        case .subjectSegmentation:
+            return registry.entry(id: ModelRegistry.builtInSubjectID)?.manifest.displayName ?? "Apple Vision"
+        case .promptedSegmentation:
+            return registry.defaultPrompted()?.manifest.displayName
+        case .semanticSegmentation:
+            return registry.installed(ModelRef(id: SegmentationModel.modelID, version: 1))?.manifest.displayName
+        case .denoise:
+            return nil
+        }
     }
 }
