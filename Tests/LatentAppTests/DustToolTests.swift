@@ -101,6 +101,9 @@ final class DustToolTests: XCTestCase {
         let model = EditorModel()
         model.open(url: try XCTUnwrap(dng), catalogImageID: catalogImageID)
         XCTAssertTrue(model.hasImage)
+        // Opening picks the band the aperture predicts, which for an 800 px
+        // "full-frame" sensor is Small; the discs are drawn for Medium.
+        model.dustSize = .medium
         model.viewportDidResize(to: CGSize(width: 1200, height: 800))
         return model
     }
