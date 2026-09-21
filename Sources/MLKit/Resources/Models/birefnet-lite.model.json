@@ -1,0 +1,37 @@
+{
+  "id": "birefnet-lite",
+  "displayName": "BiRefNet Lite",
+  "purpose": "Subject masks in one shot, no clicks needed",
+  "version": 1,
+  "kind": "subjectSegmentation",
+  "licence": {
+    "name": "MIT",
+    "url": "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE",
+    "commercialUse": true
+  },
+  "sourceURL": "https://huggingface.co/ZhengPeng7/BiRefNet_lite",
+  "sizeMB": 103,
+  "inputSize": 1024,
+  "packages": [
+    {
+      "name": "BiRefNet_lite.mlpackage",
+      "sha256": "78d5cb0a10b5eccd5847669c36a6b016e90969cb414538441fa7a85da4f36ff4",
+      "inputNames": [
+        "image"
+      ],
+      "outputNames": [
+        "mask"
+      ]
+    }
+  ],
+  "outputActivation": "probabilities",
+  "refine": "none",
+  "computeUnits": "cpuAndGPU",
+  "converter": {
+    "script": "scripts/convert_birefnet.py",
+    "sourceRevision": "aa62cd87eafb9cc43056d08ef3615a14628b831d",
+    "coremltools": "9.0",
+    "torch": "2.14.0",
+    "date": "2026-09-21"
+  }
+}

@@ -32,6 +32,16 @@ Fetched with `scripts/fetch_test_assets.sh --merge` (about 390 MB, checksum-veri
 
 The files are unmodified. The Canon set is also a real camera with a masked sensor border: its readout is 5792 × 3804 and the active area 5634 × 3752 at (158, 52).
 
+## Portrait (`TestAssets/portrait/`)
+
+Fetched with `scripts/fetch_test_assets.sh --portrait` (3.7 MB, checksum-verified). The face-detection and touch-up tests skip when it is missing.
+
+| Filename | What | Licence and credit |
+|---|---|---|
+| `zena_cardman_nasa_portrait.jpg` | Official NASA portrait of astronaut candidate Zena Cardman, 2017, 4800 × 6000 JPEG (Hasselblad H6D-50c): frontal, studio-lit, smiling with teeth visible. Apple Vision finds one face (confidence 1.0) with left eye, right eye, outer lips and inner lips landmarks | Public domain: a work of NASA, a US government agency (`PD-USGov-NASA`; the Commons page states "This file is in the public domain in the United States because it was solely created by NASA"). NASA/Bill Stafford, photo ID JSC2017-E-116316, via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Zena_Cardman_official_portrait.jpg) (original on [NASA Johnson's Flickr](https://www.flickr.com/photos/nasa2explore/42953217460/)) |
+
+The file is unmodified.
+
 ## Photo Merge panorama (`TestAssets/pano/`)
 
 Harman's own photos, not redistributed (tests skip without them): Nikon D750 with an AF-S Nikkor 50mm f/1.4G, 17 frames (`HSB_6554.NEF` to `HSB_6570.NEF`), handheld, portrait orientation, one row across mountains, sky and a path at dusk. Shot at 1/400 s and ISO 100, but the aperture moves between f/2.5 and f/3.5, so frames differ by up to about 1 EV. People walk through frames 6565 to 6568, one of them close to the camera. That covers gain compensation, parallax and moving people, and makes a panorama wider than 16,384 px (the downsampling case).

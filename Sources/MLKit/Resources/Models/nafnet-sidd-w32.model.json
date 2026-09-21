@@ -1,0 +1,31 @@
+{
+  "id": "nafnet-sidd-w32",
+  "displayName": "NAFNet SIDD width 32",
+  "purpose": "AI noise reduction, 256 px tiles",
+  "version": 1,
+  "kind": "denoise",
+  "licence": {
+    "name": "MIT",
+    "url": "https://github.com/megvii-research/NAFNet/blob/main/LICENSE",
+    "commercialUse": true
+  },
+  "sourceURL": "https://huggingface.co/nyanko7/nafnet-models",
+  "sizeMB": 59,
+  "inputSize": 256,
+  "packages": [
+    {
+      "name": "NAFNet_SIDD_width32.mlpackage",
+      "sha256": "93070946ed4c11b74513338db8f9c9d10370ebe4ab2382e7b3b7619384d64d1d",
+      "inputNames": [
+        "image"
+      ],
+      "outputNames": [
+        "denoised"
+      ]
+    }
+  ],
+  "converter": {
+    "script": "scripts/convert_nafnet.py",
+    "sourceRevision": "08e8c701eb662688cccda3bf3074e90e902bcd3b"
+  }
+}
