@@ -287,10 +287,12 @@ public final class ModelRegistry: @unchecked Sendable {
             let task = Task.detached(priority: .userInitiated) { [self] () -> LoadedModel? in
                 let model = await Self.load(entry, computeUnits: units)
                 self.state.withLock { state in
-                    state.loading[id] = nil
                     // A release while this loaded means nobody wants it
-                    // kept; the caller still gets it for the ask in hand.
-                    if let model, state.generation == generation { state.loaded[id] = model }
+                    // kept, and a newer load may own the entry now; the
+                    // caller still gets it for the ask in hand.
+                    guard state.generation == generation else { return }
+                    state.loading[id] = nil
+                    if let model { state.loaded[id] = model }
                 }
                 return model
             }
