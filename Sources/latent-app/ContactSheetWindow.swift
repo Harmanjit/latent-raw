@@ -105,7 +105,7 @@ final class ContactSheetModel: ObservableObject {
                 SheetPageDrawer.drawPreviewPage(0, items: items, layout: layout, style: style, preview: images,
                                                 in: context)
             }
-            let box = image.map(RenderedImage.init)
+            let box = image.map { RenderedImage($0) }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { [weak self] in
                     guard let self, generation == self.previewGeneration else { return }
