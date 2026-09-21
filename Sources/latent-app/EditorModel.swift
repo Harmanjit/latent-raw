@@ -506,21 +506,6 @@ final class EditorModel: ObservableObject {
         Log.editor.error("\(what, privacy: .private) failed: \(String(describing: error), privacy: .private)")
     }
 
-    // MARK: - Dust and touch-up tool clicks (filled in by EditorModel+Dust and +TouchUp)
-
-    /// A click with the dust tool armed: a ring removes that spot, the
-    /// image adds one. Nothing yet: the dust panel and overlay come with
-    /// their own extension, which replaces this.
-    func dustToolBegan(at screen: CGPoint) {
-        // Wave 2 (EditorModel+Dust.swift).
-    }
-
-    /// A click with the touch-up tool armed: a ring keeps that spot, skin
-    /// adds one. Nothing yet, as for `dustToolBegan`.
-    func touchUpToolBegan(at screen: CGPoint) {
-        // Wave 2 (EditorModel+TouchUp.swift).
-    }
-
     // MARK: - Copy / paste / presets
 
     /// Groups to carry on the next paste. Persisted so the checklist
