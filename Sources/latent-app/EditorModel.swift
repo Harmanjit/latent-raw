@@ -78,7 +78,12 @@ final class EditorModel: ObservableObject {
     @Published var healToolActive = false {
         didSet {
             guard healToolActive != oldValue else { return }
-            if healToolActive { cropToolActive = false; maskTool = .none; redEyeToolActive = false } else { selectedHealIndex = nil }
+            if healToolActive {
+                cropToolActive = false; maskTool = .none; redEyeToolActive = false
+                dustToolActive = false; touchUpToolActive = false
+            } else {
+                selectedHealIndex = nil
+            }
         }
     }
     @Published var selectedHealIndex: Int?
@@ -101,7 +106,12 @@ final class EditorModel: ObservableObject {
     @Published var redEyeToolActive = false {
         didSet {
             guard redEyeToolActive != oldValue else { return }
-            if redEyeToolActive { cropToolActive = false; maskTool = .none; healToolActive = false } else { selectedRedEyeIndex = nil }
+            if redEyeToolActive {
+                cropToolActive = false; maskTool = .none; healToolActive = false
+                dustToolActive = false; touchUpToolActive = false
+            } else {
+                selectedRedEyeIndex = nil
+            }
         }
     }
     @Published var selectedRedEyeIndex: Int?
@@ -110,6 +120,74 @@ final class EditorModel: ObservableObject {
     @Published var detectingRedEyes = false
     var redEyeDrag: RedEyeDrag?
 
+    // MARK: - Sensor dust (EditorModel+Dust.swift)
+
+    /// Shows the dust spots as rings: click a ring to remove a false one,
+    /// click the image to add one. Arming it disarms every other on-image
+    /// tool, as they disarm it.
+    @Published var dustToolActive = false {
+        didSet {
+            guard dustToolActive != oldValue else { return }
+            if dustToolActive {
+                healToolActive = false; redEyeToolActive = false; cropToolActive = false; maskTool = .none
+                touchUpToolActive = false
+            } else {
+                selectedDustIndex = nil
+            }
+        }
+    }
+    /// Find Spots is looking for dust.
+    @Published var findingDust = false
+    @Published var dustSensitivity = 50
+    @Published var dustSize: DustSpotSize = .medium
+    /// The Visualise Spots pass over the viewport (never exports).
+    @Published var visualiseSpots = false {
+        didSet { if visualiseSpots != oldValue { rerender() } }
+    }
+    @Published var visualiseThreshold: Float = 0.5 {
+        didSet { if visualiseSpots, visualiseThreshold != oldValue { rerender() } }
+    }
+    @Published var selectedDustIndex: Int?
+    /// The map Find Spots detected on, kept so the sensitivity and size
+    /// controls re-detect without another render. Dropped on image change,
+    /// on disarm and at memory warning.
+    var dustAnalysis: DustDetector.Analysis?
+
+    // MARK: - Touch-up (EditorModel+TouchUp.swift)
+
+    /// Shows the enabled faces' boxes and a ring per blemish: click a ring
+    /// to keep that spot, click skin to add one. Same exclusivity as the
+    /// dust tool.
+    @Published var touchUpToolActive = false {
+        didSet {
+            guard touchUpToolActive != oldValue else { return }
+            if touchUpToolActive {
+                healToolActive = false; redEyeToolActive = false; cropToolActive = false; maskTool = .none
+                dustToolActive = false
+            } else {
+                selectedBlemishIndex = nil
+            }
+        }
+    }
+    @Published var findingFaces = false
+    @Published var findingBlemishes = false
+    @Published var selectedBlemishIndex: Int?
+    /// Show Skin Mask: the skin slice tinted over the image (viewport only).
+    @Published var showSkinMask = false {
+        didSet { if showSkinMask != oldValue { rerender() } }
+    }
+    /// A 40 pt upright thumbnail per face, by the face's id, for the panel.
+    @Published var faceThumbnails: [UUID: CGImage] = [:]
+    /// "Looking for faces…" and the like, for the panel.
+    @Published var touchUpStatus = ""
+    /// The mask regeneration under way, if any; a newer one replaces it.
+    var touchUpMaskTask: Task<Void, Never>?
+    /// Critical pressure took the touch-up masks; build them again once
+    /// memory recovers rather than in the middle of the shortage.
+    var touchUpReleasedUnderPressure = false
+    /// The geometry the masks were built for; a change regenerates them.
+    var touchUpGeometryKey: String?
+
     // MARK: - Crop and straighten
 
     /// While on, the viewport shows the whole (straightened) sensor with
@@ -117,7 +195,11 @@ final class EditorModel: ObservableObject {
     @Published var cropToolActive = false {
         didSet {
             guard cropToolActive != oldValue else { return }
-            if !cropToolActive { straightenBase = nil } else { healToolActive = false; redEyeToolActive = false }
+            if !cropToolActive {
+                straightenBase = nil
+            } else {
+                healToolActive = false; redEyeToolActive = false; dustToolActive = false; touchUpToolActive = false
+            }
             canvasDidChange()
             rerenderForViewport()
         }
@@ -206,7 +288,13 @@ final class EditorModel: ObservableObject {
     @Published var selectedLocalIndex: Int? {
         didSet { if selectedLocalIndex != oldValue { maskTool = .none; rerender() } }
     }
-    @Published var maskTool: MaskTool = .none
+    @Published var maskTool: MaskTool = .none {
+        didSet {
+            guard maskTool != .none, maskTool != oldValue else { return }
+            dustToolActive = false
+            touchUpToolActive = false
+        }
+    }
     @Published var showMaskOverlay = false {
         didSet { if showMaskOverlay != oldValue { rerender() } }
     }
@@ -233,6 +321,14 @@ final class EditorModel: ObservableObject {
     var sam2Session: SAM2Session?
     var sam2Encoding: Task<SAM2Session?, Never>?
     @Published var sam2Status = ""
+
+    /// The encoded image per prompted model, by model id: a mask made with
+    /// SAM 2.1 Large clicks against Large's encoding while one made with
+    /// Small uses Small's. Reset in `closeImage` and the failed-open path.
+    /// Wave 2 moves the three fields above into these.
+    var promptSessions: [String: SAM2Session] = [:]
+    var promptEncoding: [String: Task<SAM2Session?, Never>] = [:]
+    @Published var promptStatus: [String: String] = [:]
 
     // MARK: - GPU and the open image
 
@@ -408,6 +504,21 @@ final class EditorModel: ObservableObject {
     func reportFailure(_ what: String, _ error: Error) {
         lastError = "\(what) failed: \(error)"
         Log.editor.error("\(what, privacy: .private) failed: \(String(describing: error), privacy: .private)")
+    }
+
+    // MARK: - Dust and touch-up tool clicks (filled in by EditorModel+Dust and +TouchUp)
+
+    /// A click with the dust tool armed: a ring removes that spot, the
+    /// image adds one. Nothing yet: the dust panel and overlay come with
+    /// their own extension, which replaces this.
+    func dustToolBegan(at screen: CGPoint) {
+        // Wave 2 (EditorModel+Dust.swift).
+    }
+
+    /// A click with the touch-up tool armed: a ring keeps that spot, skin
+    /// adds one. Nothing yet, as for `dustToolBegan`.
+    func touchUpToolBegan(at screen: CGPoint) {
+        // Wave 2 (EditorModel+TouchUp.swift).
     }
 
     // MARK: - Copy / paste / presets

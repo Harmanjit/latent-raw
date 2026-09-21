@@ -54,8 +54,9 @@ extension EditorModel {
     private func wantedTileRegion() -> (x: Int, y: Int, width: Int, height: Int) {
         // A patch on screen must be able to read its source and, for a heal,
         // the surroundings, which may lie outside the visible area: widen
-        // the tile to include them.
-        let visible = HealPatch.regionIncludingSources(tileViewRegion, patches: parameters.heals, sensorSize: sensorSize)
+        // the tile to include them. Dust and blemishes are patches too.
+        let visible = HealPatch.regionIncludingSources(tileViewRegion, patches: parameters.allHealPatches,
+                                                       sensorSize: sensorSize)
         let width = min(Int(visible.width.rounded(.up)), Int(sensorSize.width))
         let height = min(Int(visible.height.rounded(.up)), Int(sensorSize.height))
         return (Int(visible.origin.x.rounded(.down)), Int(visible.origin.y.rounded(.down)),
@@ -185,7 +186,8 @@ extension EditorModel {
                             headroom: displayOutput.headroom)
         // Past the view region the tile can hold a patch that reads outside
         // it (it wasn't needed for the view), which a pan must not reveal.
-        tileHealedCoverage = HealPatch.isSelfContained(info.sensorRect, patches: renderParameters.heals, sensorSize: sensorSize)
+        tileHealedCoverage = HealPatch.isSelfContained(info.sensorRect, patches: renderParameters.allHealPatches,
+                                                       sensorSize: sensorSize)
             ? info.sensorRect : info.sensorRect.intersection(tileViewRegion)
         return "tile \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
