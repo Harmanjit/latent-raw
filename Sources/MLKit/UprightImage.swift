@@ -2,12 +2,9 @@ import Foundation
 import CoreGraphics
 import PixelEngine
 
-/// The turn that puts a sensor render the right way up for Vision.
-///
-/// A copy of `RedEyeDetector.rotated(_:by:)` for now: Wave 1 (W1-E) owns
-/// RedEyeDetector.swift and makes it call this one, at which point the
-/// copy there goes. Keep the two the same until then (RedEyeDetectorTests
-/// cover the original; the same test could run here).
+/// The turn that puts a sensor render the right way up for Vision, which
+/// `FaceLandmarker` runs for touch-up and red-eye alike
+/// (RedEyeDetectorTests check the turn through `RedEyeDetector.rotated`).
 enum UprightImage {
     /// `image` turned as `rotation` turns the sensor into what the user
     /// sees (`ImageRotation.imagePoint`), so faces are upright for Vision.

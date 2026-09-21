@@ -1,6 +1,5 @@
 import Foundation
 import CoreGraphics
-import Vision
 import PixelEngine
 
 /// Finds red eyes for the red-eye tool's Auto button, on device.
@@ -41,30 +40,18 @@ public enum RedEyeDetector {
         }
     }
 
-    /// Every eye Vision finds, red or not.
+    /// Every eye Vision finds, red or not, from the shared landmark pass.
     static func eyeCandidates(in image: CGImage) -> [Candidate] {
-        let request = VNDetectFaceLandmarksRequest()
-        let handler = VNImageRequestHandler(cgImage: image, options: [:])
-        do {
-            try handler.perform([request])
-        } catch {
-            return []
-        }
-        let size = CGSize(width: image.width, height: image.height)
         var candidates: [Candidate] = []
-        for face in request.results ?? [] {
-            guard let landmarks = face.landmarks else { continue }
-            for (eye, pupil) in [(landmarks.leftEye, landmarks.leftPupil), (landmarks.rightEye, landmarks.rightPupil)] {
-                // Vision's points are in pixels with the origin at the bottom left.
-                guard let outline = eye?.pointsInImage(imageSize: size), outline.count >= 2,
+        for face in FaceLandmarker.upright(in: image, seeds: nil) {
+            for (outline, pupil) in [(face.leftEye, face.leftPupil), (face.rightEye, face.rightPupil)] {
+                guard outline.count >= 2,
                       let minX = outline.map(\.x).min(), let maxX = outline.map(\.x).max(),
                       let minY = outline.map(\.y).min(), let maxY = outline.map(\.y).max() else { continue }
                 let eyeWidth = Double(maxX - minX)
                 guard eyeWidth > 2 else { continue }
-                let centre = pupil?.pointsInImage(imageSize: size).first
-                    ?? CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2)
-                candidates.append(Candidate(centre: CGPoint(x: centre.x, y: size.height - centre.y),
-                                            radius: eyeWidth * radiusPerEyeWidth))
+                let centre = pupil.first ?? CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2)
+                candidates.append(Candidate(centre: centre, radius: eyeWidth * radiusPerEyeWidth))
             }
         }
         return candidates
@@ -85,26 +72,10 @@ public enum RedEyeDetector {
     }
 
     /// `image` turned as `rotation` turns the sensor into what the user
-    /// sees (`ImageRotation.imagePoint`), so faces are upright for Vision.
+    /// sees, so faces are upright for Vision: `UprightImage.rotated`,
+    /// under the name RedEyeDetectorTests know it by.
     static func rotated(_ image: CGImage, by rotation: ImageRotation) -> CGImage? {
-        guard rotation != .none else { return image }
-        let w = CGFloat(image.width), h = CGFloat(image.height)
-        let out = rotation.imageSize(forSensorSize: CGSize(width: w, height: h))
-        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
-              let context = CGContext(data: nil, width: Int(out.width), height: Int(out.height), bitsPerComponent: 8,
-                                      bytesPerRow: 0, space: space,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        // Core Graphics draws y-up. With the source drawn at (0, 0, w, h),
-        // these place its top-left pixel (x, y) where `imagePoint` puts it.
-        switch rotation {
-        case .none: break
-        case .cw90: context.concatenate(CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: w))
-        case .cw180: context.concatenate(CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: w, ty: h))
-        case .cw270: context.concatenate(CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: h, ty: 0))
-        }
-        context.interpolationQuality = .none
-        context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-        return context.makeImage()
+        UprightImage.rotated(image, by: rotation)
     }
 
     /// The share of pixels within `radius` of `centre` (pixels, top-left
