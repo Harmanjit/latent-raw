@@ -187,7 +187,9 @@ public enum ExportWorker {
         }
 
         // Model-generated masks are not stored; make them again.
-        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
+        let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
+        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
+                                              rotation: rotation)
         lap("masks")
         try Task.checkCancellation()
 
@@ -204,7 +206,6 @@ public enum ExportWorker {
         let scale = ExportPlan.scale(for: file.summary, crop: parameters.crop, maxLongEdge: request.maxLongEdge)
         let texture = try pipeline.render(session, scale: scale,
                                           parameters: parameters, output: .file(request.colorSpace))
-        let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
         lap("render")
         try Task.checkCancellation()
 
@@ -261,10 +262,14 @@ public enum ExportWorker {
 
     /// Generates pixels for every AI and prompted local, the same way the
     /// editor does: from a ~1000px unrotated sRGB render of the defaults.
-    /// `substituted` names the models that stood in for missing ones,
-    /// once each, in the order met.
+    /// Each local runs the model its stored `modelVersion` names, resolved
+    /// through the registry; `rotation` (the turn that makes the render
+    /// upright) is passed to the subject models, which need it.
+    /// `substituted` names the models the edit asked for that this Mac
+    /// lacks, once each, in the order met (docs/Retouch.md §5).
     static func regenerateMasks(_ locals: [LocalAdjustment], session: ImageSession,
-                                pipeline: RenderPipeline, gpu: GPUContext) async throws -> (count: Int, substituted: [String]) {
+                                pipeline: RenderPipeline, gpu: GPUContext, rotation: ImageRotation = .none,
+                                registry: ModelRegistry = .shared) async throws -> (count: Int, substituted: [String]) {
         let needed = locals.filter { $0.shape.isModelGenerated }
         guard !needed.isEmpty else { return (0, []) }
         var defaults = EditParameters()
@@ -275,23 +280,47 @@ public enum ExportWorker {
                                       output: .file(.sRGB))
         let image = try Exporter(gpu: gpu).cgImage(from: tex, colorSpace: .sRGB)
 
-        var sam: SAM2Session?
+        // One encoded image per click-to-select model the edit uses.
+        var sessions: [String: SAM2Session] = [:]
         var count = 0
         var substituted: [String] = []
+        func note(_ name: String) { if !substituted.contains(name) { substituted.append(name) } }
         for local in needed {
             switch local.shape {
             case .ai(let kindName, let modelVersion):
                 guard let kind = AIMaskKind(storedName: kindName) else { continue }
-                let result = try await AIMaskGenerator.generate(kind, modelVersion: modelVersion, from: image)
+                let result = try await AIMaskGenerator.generate(kind, modelVersion: modelVersion, from: image,
+                                                                rotation: rotation, registry: registry)
                 session.setAIMask(result.mask, forLocal: local.id)
                 count += 1
-                if let name = result.substitutedModel, !substituted.contains(name) { substituted.append(name) }
-            case .prompted(let points, _):
+                if let name = result.substitutedModel { note(name) }
+            case .prompted(let points, let modelVersion):
                 guard !points.isEmpty else { continue }
-                if sam == nil, let models = await SAM2Models.shared.value {
-                    sam = try SAM2Session(models: models, image: image)
+                // The model named, else the bundled one, reported; with
+                // neither the local masks nothing.
+                let named = registry.installed(ModelRef(stored: modelVersion))
+                    .flatMap { $0.manifest.kind == .promptedSegmentation ? $0 : nil }
+                var chosen = named
+                var models: SAM2Models?
+                if let named { models = await registry.prompted(id: named.id) }
+                if models == nil {
+                    note(AIMaskGenerator.displayName(forMissing: modelVersion, registry: registry))
+                    chosen = registry.defaultPrompted()
+                    if let fallback = chosen, fallback.id != named?.id {
+                        models = await registry.prompted(id: fallback.id)
+                    }
                 }
-                guard let sam else { continue }
+                guard let chosen, let models else {
+                    exportLogger.error("no click-to-select model for \(local.name, privacy: .private): the mask is empty")
+                    continue
+                }
+                let sam: SAM2Session
+                if let existing = sessions[chosen.id] {
+                    sam = existing
+                } else {
+                    sam = try SAM2Session(models: models, image: image)
+                    sessions[chosen.id] = sam
+                }
                 let prediction = try sam.predict(points: points.map { PromptPoint(x: $0.x, y: $0.y, foreground: $0.foreground) })
                 session.setAIMask(prediction.mask, forLocal: local.id)
                 count += 1

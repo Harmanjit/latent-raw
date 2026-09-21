@@ -64,7 +64,9 @@ extension ExportWorker {
         } catch {
             throw ExportWorkerError.unreadableEdit(error)
         }
-        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
+        let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
+        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
+                                              rotation: rotation)
         if request.runsAIDenoise, parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
             let denoiser = try await AIDenoiser.load()
             try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
@@ -73,7 +75,6 @@ extension ExportWorker {
         let scale = ExportPlan.scale(for: file.summary, crop: parameters.crop, maxLongEdge: request.maxLongEdge)
         let texture = try pipeline.render(session, scale: scale, parameters: parameters,
                                           output: .file(request.colorSpace))
-        let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
         let image = try Exporter(gpu: gpu).cgImage(from: texture, colorSpace: request.colorSpace,
                                                    rotation: rotation, crop: parameters.crop,
                                                    bitsPerComponent: request.bitsPerComponent == 16 ? 16 : 8,
