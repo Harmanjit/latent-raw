@@ -611,6 +611,21 @@ final class SelectionJobQueueTests: XCTestCase {
         XCTAssertFalse(queue.gpuSlot.isGPUBusy)
     }
 
+    /// A pasted touch-up in the Library: the job runs over every target
+    /// but the image the editor holds, which finds its own faces as it
+    /// reloads; a refusal has words for the status bar.
+    func testThePasteJobLeavesTheEditorsImageToTheEditor() async throws {
+        let photos = try await photos()
+        let records = photos.records
+        XCTAssertEqual(ContentView.PastedTouchUp.jobTargets(records, handledByEditor: nil).map(\.fileName),
+                       BracketFolder.names)
+        XCTAssertEqual(ContentView.PastedTouchUp.jobTargets(records, handledByEditor: records[1].id).map(\.fileName),
+                       ["DSC_0106.dng", "DSC_0108.dng"])
+        XCTAssertEqual(ContentView.PastedTouchUp.jobTargets([records[0]], handledByEditor: records[0].id), [],
+                       "in Loupe the editor's search is the only one")
+        XCTAssertTrue(ContentView.PastedTouchUp.refused.hasPrefix("The touch-up sliders were saved, but faces couldn’t be looked for"))
+    }
+
     /// A job's result names the frame its geometry is measured on: a
     /// stack whose only module was a pasted touch-up has none, and read
     /// back on a bordered camera its boxes would otherwise be moved.
