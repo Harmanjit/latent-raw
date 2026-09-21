@@ -16,7 +16,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 - **Apple Silicon and macOS 15 only.** No Intel Macs, no Windows, no Linux, by design.
 - **Not notarised.** Without an Apple developer account, every other Mac shows the Gatekeeper dialog once.
-- **Large.** The three bundled machine-learning models alone are 198 MB.
+- **Large.** The four bundled machine-learning models alone are 311 MB, 103 MB of it the BiRefNet Lite subject model. Models added from disk take their own space: up to 457 MB each for the largest in the catalogue, and a second or more to load; on an 8 GB Mac the bundled ones are the safer choice.
 - **Neural Engine off by default** because its compiler hangs on some macOS 15 builds. The GPU is fast enough.
 
 ## Workflow
@@ -70,9 +70,13 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Class masks are soft-edged** at the model's native 128-pixel resolution.
 - **Spot healing copies the source's texture.** Tone and colour are matched to the surroundings, but a source with coarser or different texture than the target still shows; drag to pick a better source. A brush stroke heals from one source beside it along its whole length, so an edge running along the source, such as a horizon, shows as a line. A stroke keeps up to 256 points; a longer scribble is simplified.
 - **Red-eye Auto can miss small faces.** It looks for faces on a render about 1600 px across, so faces in a large group shot may not be found; add those spots by hand. Only red pupils change: an animal's green, yellow or white eyeshine is left as it is.
-- **AI denoise is a single model at one quality.** A larger variant exists in the conversion script but is not offered in the app.
+- **AI denoise is a single model at one quality.** A larger variant exists in the conversion script but is not offered in the app, and the Models list in Settings has no row for the denoiser.
+- **`latent-cli` renders and thumbnails leave out what needs a model:** model masks and Touch-up's smoothing, whitening and eyes. Dust spots and blemishes are heal patches and render everywhere. Exports, prints, contact sheets and slides carry everything.
+- **Sensor dust has been tested on synthetic dust** and checked on only a few real photos. It looks for round dark shadows: foliage, birds and stars can be taken for dust, and faint spots at wide apertures can be missed; the rings are there to correct it. A dust map is keyed by the camera's make and model, so two bodies of the same model share one.
+- **Touch-up works on faces at least 64 pixels wide** on a render about 4000 pixels across, seen more or less straight on; a turned head, glasses or hair across the face can defeat the landmarks. Smoothing acts on brightness only, so colour blotches stay; the teeth gate can catch a tongue or a lip highlight. Survey panes rebuild the regions when they open, which costs a moment per pane.
+- **Subject masks with BiRefNet take about half a second each** on an M4 and longer on an M1, so a Survey of four such photos takes a few seconds to settle. Added models run on the GPU only.
 - **Thumbnails ignore AI denoise**, since running the network in the background for every thumbnail would be too slow.
-- **Limits:** 8 local adjustments, 32 spot patches (a brush stroke counts as one) and 32 red-eye spots per image, 30 history steps.
+- **Limits:** 8 local adjustments, 32 spot patches (a brush stroke counts as one), 32 red-eye spots, 200 dust spots, 16 faces and 64 blemishes per image, 30 history steps.
 - **No process-version pinning.** When a rendering algorithm changes, existing edits render differently rather than being pinned to the old behaviour. This has already happened once: spot healing changed in September 2026, so heal patches made before then now render with the new method.
 
 ## Accessibility
@@ -80,11 +84,11 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - Grid cells have no VoiceOver action to open an image; they do have one per rating.
 - The waveform and vectorscope are named for VoiceOver but not described.
 - Compare has no focus highlight.
-- Placing patches, brush strokes, red-eye spots and masks, moving the crop, arranging a Custom sort and the magnifier need a pointer. See [Accessibility](Accessibility).
+- Placing patches, brush strokes, red-eye spots, dust spots, blemishes and masks by hand, moving the crop, arranging a Custom sort and the magnifier need a pointer; Find Spots, Find Faces and Find Blemishes place theirs without one. See [Accessibility](Accessibility).
 
 ## Development
 
-- **Golden-image tests don't cover AI noise reduction** or gain maps. Every other stage of the render is pinned against reference images; Core ML output varies between compute units, so neural denoise has only unit tests. What the magnifier and the slideshow draw on screen, and printed pages, aren't pictured by any test either.
+- **Golden-image tests don't cover AI noise reduction** or gain maps. Every other stage of the render is pinned against reference images, the touch-up stage with a fixed set of face regions; Core ML and Vision output varies between compute units and macOS versions, so neural denoise, the model masks and the face landmarks have only unit tests, and the dust detector is tested on synthetic scenes. What the magnifier and the slideshow draw on screen, and printed pages, aren't pictured by any test either.
 - **Red-eye's thresholds are written twice,** in `RedEye.metal` and in `RedEyeTuning` (`RedEye.swift`), which Auto uses to decide an eye is red. They are kept in step by hand; no test ties them.
 - Tests that render a raw need a sample that is not in the repository. `scripts/fetch_test_assets.sh` downloads the public-domain one the golden-image tests use, and with `--merge` the freely licensed brackets the Photo Merge tests use (about 390 MB), which skip without them; a few tests use the author's own samples and skip everywhere else, CI included.
 - **`LATENT_RAW_INPROCESS=1` only works in debug builds.** `scripts/make_app.sh` always builds release, so no bundle it makes can decode in process.

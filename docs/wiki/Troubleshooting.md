@@ -61,7 +61,22 @@ Slides are rendered from the raw with their edits at the size of the screen, and
 The application was moved or deleted after you chose it. The TIFF was still written; the message says where. Choose the application again in Settings › External Editor.
 
 **AI features are slow the first time.**
-Models compile on first use, once, into the app container. Subsequent runs are fast. If macOS ran short of memory, a model is loaded again from that compiled copy, which takes well under a second, and AI noise reduction may run again.
+Models compile on first use, once, into the app container. Subsequent runs are fast. If macOS ran short of memory, a model is loaded again from that compiled copy, which takes well under a second, and AI noise reduction may run again. A large added model, such as BiRefNet General or SAM 2.1 Large, takes a second or more to load every time it is loaded.
+
+**A mask says its model "is not installed".**
+The photo's edit names a model this Mac doesn't have, so the mask is shown with a built-in or bundled one instead (Apple Vision for a subject, SAM 2.1 Small for click to select) and exports say the same in their notes. Either is fine to keep. To get the model the edit names, click **Get…** beside the message to open its page, convert it with the script the page and the [Models](Models#adding-a-model) page name, then **Add Model…** in Settings › AI › Models; the mask is then made with it. Or choose another installed model from the mask's Model menu, which makes the mask again with that one.
+
+**Add Model… refused a folder, package or zip.**
+The sentence under the list says which check failed. The folder must hold exactly one `<id>.model.json` manifest and the Core ML packages it names, and nothing else; each package's contents must match the checksum in the manifest, which is why a model must be converted by the script in `scripts/` rather than assembled by hand or edited afterwards. "The manifest carries no checksums" means the folder holds a catalogue row copied from the app, not a converted model. "Core ML could not compile" names a package this macOS cannot build; the model page may say which version it needs. A refused import leaves nothing behind.
+
+**A dust map "is for a" different camera.**
+Dust sits on one sensor, so a map is keyed by the camera that made its reference photo and applies only to photos from that camera at the same sensor size. Save a map from a photo of the camera in question, or use Find Spots.
+
+**Find Spots finds nothing, or finds things that aren't dust.**
+Dust shows as faint round shadows on plain areas at small apertures, f/11 and beyond; wide open it blurs away and there may be nothing to find. Raise Sensitivity for fainter spots, choose the Spot Size that matches the shadows (Visualise Spots shows them), and click a ring to drop a false one; foliage, stars and birds can look like dust. Auto Adjust (⌘U) never runs Find Spots.
+
+**Touch-up finds no faces, or says a face "could not be found again".**
+Find Faces looks for faces at least 64 pixels wide on a render about 2000–4000 pixels across, so small faces in a group shot are skipped and counted "too small to retouch". A face found once is looked for again each time the photo opens; a turned head, glasses or hair can make that fail, and the face then stays in the list with nothing applied. Run Find Faces again to find the faces afresh. The Touch-up sliders do nothing until a face is found and switched on.
 
 **Quitting takes a few seconds.**
 Latent saves the last edit and waits for catalog writes to reach the sidecars before it quits, for at most 10 seconds, or up to a minute while a move or copy finishes the image under way. During an export (a batch or Export open image…) it first asks whether to finish the image being written; that can take up to a minute for a large image with AI noise reduction.

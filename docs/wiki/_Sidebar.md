@@ -6,6 +6,7 @@
 - [Getting Started](Getting-Started)
 - [Library](Library)
 - [Develop](Develop)
+- [Models](Models)
 - [Export](Export)
 - [Photo Merge](Photo-Merge)
 - [Keyboard Shortcuts](Keyboard-Shortcuts)

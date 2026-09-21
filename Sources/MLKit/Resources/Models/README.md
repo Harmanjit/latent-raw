@@ -112,15 +112,26 @@ Core ML cleanly. The width-64 variant (~464 MB of weights) scores about
 0.3 dB higher on SIDD at roughly four times the cost; width 32 is the
 sensible default for a 24 MP frame.
 
-## Optional models (dormant, not offered)
+The width-64 variant can be built with `scripts/convert_nafnet.py --width 64`
+(about 214 MB). Nothing offers it: the denoise picker stays hidden, since
+the edit names the model that made it, and the download path that once
+fetched it is gone. A `NAFNet_SIDD_width64.mlpackage` left flat in
+`~/Library/Application Support/latent/models/` by an old build is the one
+package still found there without a folder and manifest.
 
-| Package | What | Where | Size |
-|---|---|---|---|
-| `NAFNet_SIDD_width64.mlpackage` | NAFNet width 64: ~0.3 dB better, about four times the compute | Not published; built by `scripts/convert_nafnet.py --width 64` | 214 MB zip |
+## No model: sensor dust
 
-`OptionalModels.swift` can download this package into
-`~/Library/Application Support/latent/models/`, verify it against the
-SHA-256 recorded there, and leave it where the same lookup as the bundled
-packages finds it. Nothing uses that path: no view offers the download,
-the app has no network entitlement (`scripts/Latent.entitlements`), and
-the `models-v1` release its URL points at has not been published.
+Sensor dust uses no model. `BlobDetector` and `DustDetector` in
+`PixelEngine` are a classical difference-of-Gaussians detector in Swift
+and Accelerate, run on a binned, un-denoised camera-RGB render, so
+`PixelEngineTests` drive them without Core ML.
+
+## Built-in Vision: faces
+
+Red-eye Auto, Touch-up's Find Faces and the blemish finder share one
+Vision pass, `FaceLandmarker` (`VNDetectFaceLandmarksRequest` revision 3,
+76 points). A touch-up records the version string `vision.faceLandmarks.3`;
+the subject mask Apple Vision makes records `vision.foregroundInstance@1`
+(the legacy literal `vision.foregroundInstance.1` is still read). Neither
+has a package or a manifest; the registry lists Apple Vision as a built-in
+subject model so Settings can show it beside the others.

@@ -8,6 +8,8 @@ builds against are in the appendix.
 
 ## 0. Wave 0 findings (measured, 21 September 2026)
 
+**Status (21 September 2026):** Waves 0–3 have landed on `main`: the contracts, the BiRefNet-lite package and manifests, the engine (registry, importer, segmenter, blob and dust detectors, heal cache, touch-up kernel, face landmarks and regions), the app (Settings › AI › Models, the Add and Model menus, the Sensor Dust and Touch-up panels and tools, Photo › Remove Dust…, the `SelectionJobQueue` jobs), the conversion scripts for the catalogue and the docs. Where the code differs from the text below, the code and DESIGN.md are right: the bundled BiRefNet-lite package is 103 MB, not ~89; the models list shows Apple Vision as a built-in row; Find Faces after a pasted touch-up also runs for the image shown in Loupe, Compare and Survey (and Compare's Select pane and Survey's focused pane find faces on screen at once); the heal list's three caps are `HealPatch.maximumDustCount`, `maximumBlemishCount` and `TouchUp.maximumFaces`; `convert_sam2.py`'s hashes for Tiny, Base+ and Large are still `<pin me>`.
+
 - **BiRefNet-lite converts and is fast enough.** `ZhengPeng7/BiRefNet_lite`
   (MIT) at revision `aa62cd87eafb9cc43056d08ef3615a14628b831d`, safetensors
   SHA-256 `4417d897…0815`, converted with coremltools 9.0 / torch 2.14 to an

@@ -47,4 +47,4 @@ Select one or many images in the Library and press ⇧⌘E. Choose format, size,
 - Your photos: untouched, wherever they were.
 - The catalog: `_latent/` inside the photo folder.
 - Settings and compiled ML models: `~/Library/Containers/com.latent.app/`.
-- Saved edit presets: the same container, under Application Support.
+- Saved edit presets, dust maps and models you add: the same container, under Application Support (`latent/presets`, `latent/dust-maps.json` and `latent/models/`). See [Models](Models).
