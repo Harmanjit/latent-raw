@@ -1388,19 +1388,17 @@ struct ContentView: View {
     // MARK: - Remove Dust
 
     /// Photo › Remove Dust…. In memory (Develop), the open image alone,
-    /// through the editor's history; with no catalog row for it there is
-    /// nothing to keep a map for, so Find Spots runs straight away.
-    /// Otherwise the sheet over the selection (Library) or the primary
-    /// image (Loupe, Compare, Survey), for the job queue.
+    /// through the editor's history; a photo opened on its own, with no
+    /// catalog row, still names its camera in the file, which is all the
+    /// sheet needs to offer its maps. Otherwise the sheet over the
+    /// selection (Library) or the primary image (Loupe, Compare, Survey),
+    /// for the job queue.
     private func presentRemoveDust(inMemory: Bool) {
         let records: [ImageRecord]
         if inMemory {
-            guard let row = library.images.first(where: { $0.id == model.catalogImageID }) else {
-                model.findDustSpots()
-                return
-            }
-            records = [row]
-        } else {
+            if let row = library.images.first(where: { $0.id == model.catalogImageID }) {
+                records = [row]
+            } else {
                 guard let summary = model.session?.file.summary else { return }
                 let camera = DustPhoto.camera(for: summary)
                 removeDustSheet = RemoveDustSheetModel(

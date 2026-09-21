@@ -209,6 +209,48 @@ final class RemoveDustSheetTests: XCTestCase {
         XCTAssertEqual(memory.method, .find)
     }
 
+    /// A photo opened on its own (File › Open) has no catalog row, but
+    /// the dialog still offers the maps for the camera its file names,
+    /// in memory; with none it falls back to Find spots.
+    func testAnOpenImageWithoutARowIsKnownByItsFile() throws {
+        let nikon = map("Nikon D750", created: 1_000)
+        let canon = map("Canon EOS R5", created: 2_000)
+        for map in [nikon, canon] { try store!.add(map) }
+        DustRemovalPreferences(defaults: defaults).method = .map
+
+        let open = RemoveDustSheetModel(openImage: "DSC_0107.NEF", camera: "Nikon D750", sensorSize: Self.nikon,
+                                        store: store!, defaults: defaults)
+        XCTAssertTrue(open.inMemory)
+        XCTAssertEqual(open.records, [])
+        XCTAssertEqual(open.photos, [.init(name: "DSC_0107.NEF", camera: "Nikon D750", sensorSize: Self.nikon)])
+        XCTAssertEqual(open.title, "Remove dust from 1 photo")
+        XCTAssertEqual(open.maps.map(\.id), [nikon.id], "the file's camera's maps")
+        XCTAssertEqual(open.method, .map)
+        XCTAssertEqual(open.selectedMapID, nikon.id)
+        XCTAssertEqual(open.selectedMap?.id, nikon.id, "what the editor applies")
+        XCTAssertNil(open.noMapText)
+        XCTAssertNil(open.mismatchNote)
+        XCTAssertTrue(open.canRemove)
+        XCTAssertEqual(open.selectedPhotoName, "DSC_0107.NEF")
+        open.method = .find
+        XCTAssertTrue(open.canRemove)
+        open.method = .reference
+        XCTAssertEqual(open.method, .find, "no reference in memory")
+
+        let unnamed = RemoveDustSheetModel(openImage: "scan.dng", camera: nil, sensorSize: nil,
+                                           store: store!, defaults: defaults)
+        XCTAssertEqual(unnamed.maps, [])
+        XCTAssertEqual(unnamed.method, .find, "no map for a camera the file doesn't name")
+        XCTAssertEqual(unnamed.noMapText, "No dust map for this camera yet")
+        XCTAssertTrue(unnamed.canRemove)
+
+        // The same rules as for a catalog row of that camera.
+        let row = model([record("DSC_0107.NEF")], inMemory: true)
+        XCTAssertEqual(row.photos, open.photos)
+        XCTAssertEqual(row.maps.map(\.id), open.maps.map(\.id))
+        XCTAssertEqual(row.method, .map)
+    }
+
     /// The options are remembered as the dialog was last left, clamped,
     /// and read back by the next one; a reference is never remembered.
     func testRememberedOptionsRoundTrip() throws {
