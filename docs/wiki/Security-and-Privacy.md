@@ -2,7 +2,11 @@
 
 ## No network
 
-Latent makes no network requests. There is no telemetry, analytics, crash reporting or update check. The app bundle has no network entitlement, so the operating system enforces this: the process cannot open a socket. The Help window shows pages that ship inside the app; a web link in them opens in your browser, not in Latent. Red-eye's Auto button finds faces with Apple's Vision framework on your Mac, as the AI masks run their models there.
+Latent makes no network requests. There is no telemetry, analytics, crash reporting or update check. The app bundle has no network entitlement, so the operating system enforces this: the process cannot open a socket. The Help window shows pages that ship inside the app; a web link in them opens in your browser, not in Latent. Red-eye's Auto button and Touch-up's Find Faces find faces with Apple's Vision framework on your Mac, as the AI masks run their models there. Models are never downloaded: Settings › AI › Models lists models you can add, and its Get… button only opens the model's page in your browser; you convert the model yourself and add the result from disk (see [Models](Models)).
+
+## Added models
+
+A model added with Add Model… is a folder from your disk holding Core ML packages and a manifest naming them. Before anything is kept, the importer checks that the manifest is well formed (a plain id, web addresses only), that the folder holds exactly the packages named and nothing else, that each package holds only Core ML's three files and that their contents match the checksums the manifest records; a zip is copied into the app's container and its entries checked for paths that reach outside their folder before it is unpacked. Each package is then compiled once by Core ML, one at a time and off the main thread, and its inputs and outputs compared with the manifest. Any failure deletes the copy and reports one sentence. The checksums catch a damaged or mismatched package and key the compile cache; they are not a signature, since the manifest arrives from the same untrusted folder as the packages. The sandbox is the security boundary: a model is data Core ML runs, inside the same sandbox as the rest of the app, with no file or network access of its own. An added model runs on the GPU even when Settings chooses the Neural Engine.
 
 ## Sandbox and hardened runtime
 
@@ -36,7 +40,7 @@ Environment variables that change how the app works on the inside, such as `LATE
 
 ## Supply chain
 
-LibRaw is pinned by commit hash and refused if the tag moves. The one Swift dependency is pinned to an exact version. The conversion scripts pin NAFNet's weights by repository revision and SHA-256, and SegFormer's by repository revision only. The Segment Anything packages are Apple's own Core ML conversion, committed to the repository with no script to fetch or check them. Dependabot watches the Actions and Python dependencies.
+LibRaw is pinned by commit hash and refused if the tag moves. The one Swift dependency is pinned to an exact version. The conversion scripts pin the weights they convert by repository revision and SHA-256 (NAFNet, SegFormer and BiRefNet Lite), and refuse to run while a pin is still a placeholder. The Segment Anything packages are Apple's own Core ML conversion, committed to the repository; their manifest records each package's content hash, which a test checks on every run, as it does for every bundled package. Dependabot watches the Actions and Python dependencies.
 
 ## What is written, and where
 

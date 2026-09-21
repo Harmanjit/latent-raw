@@ -95,6 +95,20 @@ These work in Loupe and Develop; zooming and the magnifier work in Compare too.
 
 With several images selected, ⇧⌘V pastes copied settings onto all of them, and the Apply Preset menu applies a preset to all. Which parts travel is set under Presets and Clipboard in Develop; by default the look travels and masks and crops do not.
 
+A pasted or preset **Touch-up** carries its sliders but not the faces they were found on, so after the paste Latent finds the faces in each of those photos itself: a "Finding faces" job runs in the background, with its progress and a Cancel face search button in the left panel, and writes the faces (and, with Remove blemishes on, the blemishes) back as one undo step, "Find Faces (12 Images)". A photo with no face is left alone and named in the panel's notes. In Loupe, Compare and Survey the job runs for the image shown; in Develop the open image finds its faces on the spot.
+
+### Remove Dust
+
+**Photo › Remove Dust…** finds sensor dust in every selected photo and heals it, the batch version of Develop's Sensor Dust (see [Develop](Develop#modules)). In the Library it takes the selection; in Loupe, Compare and Survey the image shown; in Develop it works on the open image in memory, where ⌘Z takes it back. The dialog says how many photos it will touch and offers three ways to find the spots:
+
+- **Find spots in each photo** analyses every photo on its own.
+- **Use dust map:** looks in each photo for the spots of a saved map, and heals only the ones that are there. The popup lists the maps saved for the selected photos' cameras, newest first; with none it reads "No dust map for Nikon D750 yet".
+- **New dust map from reference photo…** makes a map first, from a raw you choose with **Choose File…** (a plain surface such as the sky at f/16 shows the dust best) or from the selected photo with **Use the selected photo**, saves it for that camera, then uses it on the selection.
+
+**Sensitivity** (0–100, 50 to start) and **Spot Size** (Small, Medium or Large) are the detector's settings, the same as in Develop, and are remembered, as is the last method and map. A map belongs to one camera at one sensor size, so a photo from another camera is skipped; the dialog counts them before you start ("3 of 12 photos are from another camera and will be skipped"). **Remove Dust** waits while an export or a merge has the graphics processor.
+
+The job runs in the background, one photo at a time, with "Photo 3 of 12: DSC_0107.NEF" and a Cancel dust removal button in the left panel; quitting stops it and keeps the photos already done. Nothing is written until the job ends, then every photo's spots are saved together as one undo step, "Remove Dust (12 Images)", and the panel reports "Removed dust from 11 photos (412 spots) in 38 s". A photo whose edit changed while the job ran, or that couldn't be read, is left alone and named in the notes. The spots go in as heal patches under Sensor Dust, ahead of any patches of your own, so a photo's existing spot removal is untouched; a spot already under one of your patches is not added twice.
+
 ## Undo
 
 ⌘Z and ⇧⌘Z undo and redo what you did in Library, Loupe, Compare and Survey: ratings, picks and rejects, rotation, keywords, settings pasted or presets applied, a Custom sort rearrangement, and moves, copies and renames. The Edit menu names the step, as in Undo Paste Settings (12 Images). Each image goes back to its own previous value. In Develop, ⌘Z steps through that image's edit history instead, and while you are typing in a field, ⌘Z undoes only the typing. Opening another folder clears the undo of ratings, flags, rotation, keywords, settings and rearrangements; moves, copies and renames can still be undone.
