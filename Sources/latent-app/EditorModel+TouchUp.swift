@@ -90,13 +90,17 @@ extension EditorModel {
         let passes = Self.touchUpPasses
         Task { @MainActor [weak self] in
             let found = await Task.detached(priority: .userInitiated) { passes.find(render, image) }.value
-            guard let self else { return }
+            // The user may have moved to another image meanwhile: the flag
+            // is that image's now (`resetTouchUpForNewImage`), not ours to
+            // clear.
+            guard let self, self.session === session else { return }
             self.findingFaces = false
-            // The user may have moved to another image meanwhile.
-            guard self.session === session else { return }
             session.setTouchUpMasks(found.masks)
             self.faceThumbnails = found.thumbnails.mapValues(\.cgImage)
-            self.touchUpGeometryKey = Self.touchUpGeometryKey(of: self.parameters)
+            // The masks were built on the render's geometry, which is what
+            // they are recorded for; the edit may have moved on since.
+            let builtKey = Self.touchUpGeometryKey(of: image.parameters)
+            self.touchUpGeometryKey = builtKey
             self.touchUpReleasedUnderPressure = false
             var touchUp = self.parameters.touchUp
             touchUp.faces = found.faces
@@ -106,7 +110,23 @@ extension EditorModel {
             self.status = SpokenText.facesFound(found: found.faces.count, tooSmall: found.tooSmall)
             self.touchUpStatus = self.status
             Announcement.post(self.status)
+            self.rebuildMasksIfGeometryMoved(since: builtKey)
             if thenBlemishes, !found.faces.isEmpty { self.findBlemishes(using: render, image: image) }
+        }
+    }
+
+    /// A lens or keystone change made while masks were being built moved
+    /// the grid they are sampled on, and the tick that would have
+    /// scheduled a rebuild found a build already under way (or a find,
+    /// which blocks one). Once the stale set is on the session, it is
+    /// built again for the current geometry, or dropped when no slider
+    /// wants it, so the first slider to leave zero builds a fresh one.
+    private func rebuildMasksIfGeometryMoved(since builtKey: String) {
+        guard let session, Self.touchUpGeometryKey(of: parameters) != builtKey else { return }
+        if parameters.touchUp.wantsMasks {
+            regenerateTouchUpMasksIfNeeded(force: true)
+        } else {
+            session.setTouchUpMasks(nil)
         }
     }
 
@@ -147,6 +167,14 @@ extension EditorModel {
             let built = await Task.detached(priority: .userInitiated) { passes.build(touchUp, render, image) }.value
             guard let self, !Task.isCancelled, self.session === session else { return }
             self.touchUpMaskTask = nil
+            // A geometry tick during the build was dropped (a build was
+            // under way): these masks are for the grid before it. They
+            // are not stored; a fresh build follows when a slider wants
+            // one, else the first slider to leave zero makes it.
+            guard Self.touchUpGeometryKey(of: self.parameters) == key else {
+                if self.parameters.touchUp.wantsMasks { self.regenerateTouchUpMasksIfNeeded(force: true) }
+                return
+            }
             session.setTouchUpMasks(built.masks)
             self.touchUpGeometryKey = key
             if self.faceThumbnails.isEmpty {
@@ -169,6 +197,19 @@ extension EditorModel {
     func touchUpParametersDidChange(from old: EditParameters) {
         guard let session, hasImage else { return }
         let touchUp = parameters.touchUp
+        // Undo, a history jump or a snapshot can bring back faces the
+        // session's masks were not built for (Find Faces mints new ids):
+        // the stage would composite nothing for them and the thumbnails
+        // would be blank. The set goes, and the paths below build one for
+        // these faces. Find Faces' own masks cover its faces, and a toggle
+        // or a slider keeps the ids, so neither is touched.
+        if let set = session.touchUpMasks,
+           !Set(touchUp.faces.map(\.id)).isSubset(of: Set(set.faces.map(\.id))) {
+            touchUpMaskTask?.cancel()
+            touchUpMaskTask = nil
+            session.setTouchUpMasks(nil)
+            faceThumbnails = [:]
+        }
         if touchUp.wantsMasks, !session.hasTouchUpMasks {
             regenerateTouchUpMasksIfNeeded()
             return
@@ -213,6 +254,11 @@ extension EditorModel {
     func resetTouchUpForNewImage() {
         touchUpMaskTask?.cancel()
         touchUpMaskTask = nil
+        // A find still running belongs to the old image and reports into
+        // nothing (its completion checks the session); with the flags
+        // left up, the new image's on-open build would refuse to start.
+        findingFaces = false
+        findingBlemishes = false
         touchUpGeometryKey = nil
         touchUpReleasedUnderPressure = false
         selectedBlemishIndex = nil
@@ -235,7 +281,13 @@ extension EditorModel {
     func findBlemishes() {
         guard hasImage, !findingBlemishes, !findingFaces else { return }
         guard !parameters.touchUp.enabledFaceIDs.isEmpty else {
-            status = "Find Faces first: there is no face to look for blemishes on"
+            // The panel's button needs an enabled face, so from there this
+            // is never reached; a caller that gets here is told what is
+            // true: no faces at all, or every one switched off (Find
+            // Faces would replace the list, when a tick is all it takes).
+            status = parameters.touchUp.faces.isEmpty
+                ? "Find Faces first: there is no face to look for blemishes on"
+                : "Turn on a face to look for blemishes on it"
             return
         }
         flushPendingSave()
@@ -261,13 +313,18 @@ extension EditorModel {
                 let set = masks ?? passes.build(touchUp, render, image).masks
                 return (set, passes.blemishes(render, set, touchUp, existing, image))
             }.value
-            guard let self else { return }
+            // Another image may have opened meanwhile; the flag is its.
+            guard let self, self.session === session else { return }
             self.findingBlemishes = false
-            guard self.session === session else { return }
+            var builtKey: String?
             if !session.hasTouchUpMasks {
                 session.setTouchUpMasks(result.masks)
-                self.touchUpGeometryKey = Self.touchUpGeometryKey(of: self.parameters)
+                builtKey = Self.touchUpGeometryKey(of: image.parameters)
+                self.touchUpGeometryKey = builtKey
             }
+            // A slider moved while the search ran is its own step, as
+            // `replaceDust` keeps one; the blemishes are one of their own.
+            self.flushPendingSave()
             var touchUp = self.parameters.touchUp
             touchUp.blemishes = result.blemishes
             touchUp.blemishRemoval = true
@@ -277,6 +334,7 @@ extension EditorModel {
             self.status = SpokenText.blemishesFound(result.blemishes.count)
             self.touchUpStatus = self.status
             Announcement.post(self.status)
+            if let builtKey { self.rebuildMasksIfGeometryMoved(since: builtKey) }
         }
     }
 
@@ -295,7 +353,7 @@ extension EditorModel {
     /// Keeps the selected spot: its patch goes (⌫, and VoiceOver's "Keep
     /// selected spot").
     func deleteSelectedBlemish() {
-        guard let i = selectedBlemishIndex, i < parameters.touchUp.blemishes.count else { return }
+        guard let i = selectedBlemishIndex, i < parameters.touchUp.blemishes.count, !findingBlemishes else { return }
         removeBlemish(at: i)
     }
 
@@ -324,8 +382,8 @@ extension EditorModel {
         return nil
     }
 
-    /// The enabled face whose box holds `p` (raw grid, as the viewport's
-    /// sensor coordinates are taken for the spot tools too).
+    /// The enabled face whose box holds `p` (raw grid, as the boxes are
+    /// stored; a click goes through `rawNormalized` first).
     private func face(containing p: SIMD2<Float>) -> TouchUpFace? {
         parameters.touchUp.faces.first { face in
             let b = face.boundingBox
@@ -345,15 +403,21 @@ extension EditorModel {
 
     /// A click with the touch-up tool armed: a ring keeps that spot (its
     /// patch goes), skin adds a patch 0.3 % of the face's width across
-    /// with its source beside it on the skin.
+    /// with its source beside it on the skin. The click is on the
+    /// corrected image; the patch, the face boxes and the ring hit test
+    /// are on the raw grid, the skin mask on the output grid, so the
+    /// point is kept in both. A click while Find Blemishes runs would be
+    /// replaced by its list, so it waits ("Looking for blemishes…" is
+    /// showing).
     func touchUpToolBegan(at screen: CGPoint) {
-        guard hasImage else { return }
-        let p = sensorNormalized(screen)
+        guard hasImage, !findingBlemishes else { return }
+        let out = sensorNormalized(screen)
+        let p = rawNormalized(out)
         if let i = hitBlemish(p) {
             removeBlemish(at: i)
             return
         }
-        guard let face = face(containing: p), isOnSkin(p, of: face) else { return }
+        guard let face = face(containing: p), isOnSkin(out, of: face) else { return }
         guard parameters.touchUp.blemishes.count < HealPatch.maximumBlemishCount else {
             status = "At most \(HealPatch.maximumBlemishCount) blemishes per image"
             return
@@ -363,14 +427,16 @@ extension EditorModel {
         let radius = max(0.003 * face.boundingBox.z * size.x, 1) / short
         // The source: 2.5 radii away on the skin, to the right first, as
         // Find Blemishes places one; beside it whatever is there when no
-        // direction is on skin.
+        // direction is on skin. Picked on the output grid, where the skin
+        // mask is, and stored on the raw grid like the target.
         let step = 2.5 * radius * short
         let directions: [SIMD2<Float>] = [
             SIMD2(1, 0), SIMD2(-1, 0), SIMD2(0, 1), SIMD2(0, -1),
             SIMD2(0.7071, 0.7071), SIMD2(-0.7071, 0.7071), SIMD2(0.7071, -0.7071), SIMD2(-0.7071, -0.7071)]
-        let candidates = directions.map { simd_clamp(p + $0 * step / size, SIMD2(0, 0), SIMD2(1, 1)) }
-        let source = candidates.first { self.face(containing: $0)?.id == face.id && isOnSkin($0, of: face) }
-            ?? candidates[p.x + step / size.x > 1 ? 1 : 0]
+        let candidates = directions.map { simd_clamp(out + $0 * step / size, SIMD2(0, 0), SIMD2(1, 1)) }
+        let chosen = candidates.first { self.face(containing: rawNormalized($0))?.id == face.id && isOnSkin($0, of: face) }
+            ?? candidates[out.x + step / size.x > 1 ? 1 : 0]
+        let source = simd_clamp(rawNormalized(chosen), SIMD2(0, 0), SIMD2(1, 1))
         var touchUp = parameters.touchUp
         touchUp.blemishes.append(HealPatch(target: p, source: source, radius: radius, feather: 0.5, mode: .heal))
         touchUp.blemishRemoval = true

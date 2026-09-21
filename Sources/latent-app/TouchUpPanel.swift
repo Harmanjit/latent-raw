@@ -66,8 +66,8 @@ struct TouchUpSection: View {
                         Text("Find Blemishes")
                     }
                 }
-                .disabled(model.findingBlemishes || model.findingFaces || faces.isEmpty)
-                .help("Look for spots on the enabled faces' skin on this Mac and heal each one; replaces the blemishes found last time")
+                .disabled(model.findingBlemishes || model.findingFaces || model.parameters.touchUp.enabledFaceIDs.isEmpty)
+                .help("Look for spots on the enabled faces' skin on this Mac and heal each one; replaces the blemishes found last time; needs an enabled face")
                 .accessibilityLabel("Find blemishes")
                 .accessibilityValue(model.findingBlemishes ? "Looking for blemishes" : "")
                 Spacer()

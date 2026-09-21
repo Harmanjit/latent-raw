@@ -86,18 +86,7 @@ final class EditorModelStateTests: XCTestCase {
         let url = try TestAssets.d750URL()
         _ = try await GPUContext.shared()
         let gate = Gate()
-        EditorModel.touchUpPasses = EditorModel.TouchUpPasses(
-            find: { _, image in
-                gate.wait()
-                let face = TouchUpFace(boundingBox: SIMD4(0.2, 0.2, 0.3, 0.3))
-                let summary = image.session.file.summary
-                let masks = TouchUpMaskSet.fixture(sensorWidth: summary.rawWidth, sensorHeight: summary.rawHeight,
-                                                   faces: [(id: face.id, skin: CGRect(x: 0.2, y: 0.2, width: 0.3, height: 0.3),
-                                                            teeth: nil, eyes: [])])
-                return TouchUpRegions.Found(faces: [face], tooSmall: 0, masks: masks, thumbnails: [:])
-            },
-            build: { _, _, _ in (TouchUpMaskSet(faces: [], width: 1, height: 1, modelVersion: ""), []) },
-            blemishes: { _, _, _, _, _ in [] })
+        EditorModel.touchUpPasses = heldFind(at: gate)
         defer { EditorModel.touchUpPasses = .live }
         let model = EditorModel()
         model.onEditSettled = { _, _ in }
@@ -108,22 +97,99 @@ final class EditorModelStateTests: XCTestCase {
 
         model.closeImage()
         model.resetTouchUpForNewImage()   // as the lead's closeImage does
+        XCTAssertFalse(model.findingFaces, "the flag went with the photo")
         model.open(url: url, catalogImageID: 2)
         let steps = model.history.steps.count
         gate.open()
-        await waitUntil("the stale Find Faces to report", seconds: 20) { !model.findingFaces }
+        await gate.settled()
         XCTAssertTrue(model.parameters.touchUp.faces.isEmpty, "another photo's faces")
         XCTAssertFalse(try XCTUnwrap(model.session).hasTouchUpMasks)
         XCTAssertTrue(model.faceThumbnails.isEmpty)
         XCTAssertEqual(model.history.steps.count, steps)
         XCTAssertNotEqual(model.status, "Found 1 face")
+        XCTAssertFalse(model.findingFaces)
     }
 
-    /// Holds a fake pass until the test lets it go.
+    /// A Find Faces still running for the last photo must not stand in
+    /// the way of the next one: its stored edit wants masks, and the
+    /// on-open build has to run although the old search has not reported
+    /// yet. When it does, it changes nothing of the new photo.
+    func testAFindStillRunningForTheLastPhotoDoesNotBlockTheNextOnesMasks() async throws {
+        let url = try TestAssets.d750URL()
+        _ = try await GPUContext.shared()
+        let gate = Gate()
+        EditorModel.touchUpPasses = heldFind(at: gate)
+        defer { EditorModel.touchUpPasses = .live }
+        let model = EditorModel()
+        model.onEditSettled = { _, _ in }
+        model.open(url: url, catalogImageID: 1)
+        model.findFaces()
+        XCTAssertTrue(model.findingFaces)
+
+        var stored = EditParameters()
+        stored.touchUp.faces = [TouchUpFace(boundingBox: SIMD4(0.2, 0.2, 0.2, 0.3)), TouchUpFace(boundingBox: SIMD4(0.55, 0.25, 0.2, 0.3))]
+        stored.touchUp.skinSmoothing = 40
+        stored.touchUp.modelVersion = FaceLandmarker.modelVersion
+        model.open(url: url, catalogImageID: 2, editStackJSON: try EditStack(parameters: stored).encodeJSON())
+        let session = try XCTUnwrap(model.session)
+        let faces = model.parameters.touchUp.faces
+        XCTAssertEqual(faces.count, 2)
+        XCTAssertFalse(model.findingFaces)
+        XCTAssertNotNil(model.touchUpMaskTask, "the on-open build started")
+        await waitUntil("the masks built on open", seconds: 20) { session.hasTouchUpMasks }
+        XCTAssertEqual(session.touchUpMasks?.faces.map(\.id), faces.map(\.id))
+        let steps = model.history.steps.count
+
+        gate.open()
+        await gate.settled()
+        XCTAssertEqual(model.parameters.touchUp.faces, faces, "the old search changed nothing")
+        XCTAssertEqual(session.touchUpMasks?.faces.map(\.id), faces.map(\.id))
+        XCTAssertEqual(model.history.steps.count, steps)
+        XCTAssertFalse(model.findingFaces)
+    }
+
+    /// Passes whose `find` waits at `gate` and then reports one face;
+    /// `build` makes the fixture set for the stored faces.
+    private func heldFind(at gate: Gate) -> EditorModel.TouchUpPasses {
+        EditorModel.TouchUpPasses(
+            find: { _, image in
+                gate.wait()
+                defer { gate.passed() }
+                let face = TouchUpFace(boundingBox: SIMD4(0.2, 0.2, 0.3, 0.3))
+                return TouchUpRegions.Found(faces: [face], tooSmall: 0, masks: Self.fixture(for: [face], image: image),
+                                            thumbnails: [:])
+            },
+            build: { touchUp, _, image in (Self.fixture(for: touchUp.faces, image: image), []) },
+            blemishes: { _, _, _, _, _ in [] })
+    }
+
+    /// The fixture set with each face's box as its skin.
+    nonisolated private static func fixture(for faces: [TouchUpFace], image: EditorModel.TouchUpContext) -> TouchUpMaskSet {
+        let summary = image.session.file.summary
+        return TouchUpMaskSet.fixture(sensorWidth: summary.rawWidth, sensorHeight: summary.rawHeight,
+                                      faces: faces.map { face in
+            let b = face.boundingBox
+            return (id: face.id, skin: CGRect(x: CGFloat(b.x), y: CGFloat(b.y), width: CGFloat(b.z), height: CGFloat(b.w)),
+                    teeth: nil, eyes: [])
+        })
+    }
+
+    /// Holds a fake pass until the test lets it go, and says when the
+    /// pass has returned so the test can wait for its completion to run.
     private final class Gate: @unchecked Sendable {
         private let semaphore = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var returned = 0
         func wait() { semaphore.wait() }
         func open() { semaphore.signal() }
+        func passed() { lock.withLock { returned += 1 } }
+        /// Waits for the held pass to return, then lets its main-actor
+        /// completion run (a few turns of the loop).
+        @MainActor func settled() async {
+            await waitUntil("the held pass to return", seconds: 20) { self.lock.withLock { self.returned } > 0 }
+            for _ in 0..<20 { await Task.yield() }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
     }
 
     /// Paste and presets outside the grid go to the image shown only.
