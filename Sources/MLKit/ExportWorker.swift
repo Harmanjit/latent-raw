@@ -190,6 +190,10 @@ public enum ExportWorker {
         let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
         let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
                                               rotation: rotation)
+        // Nor are the touch-up region masks: built again the way the
+        // editor built them, so the export smooths the same skin.
+        try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
+                                   name: request.sourceURL.lastPathComponent, logger: exportLogger)
         lap("masks")
         try Task.checkCancellation()
 
@@ -329,5 +333,22 @@ public enum ExportWorker {
             }
         }
         return (count, substituted)
+    }
+
+    /// The touch-up region masks the edit's faces need, built from the
+    /// analysis render and a seeded refit exactly as the editor builds
+    /// them (`TouchUpRegions.regenerate`; docs/Retouch.md §9). Nothing
+    /// happens for an edit without an enabled face and a slider. A face
+    /// Vision cannot find again keeps its box and smooths nothing; the
+    /// export has nowhere to say so, so the log keeps the fact.
+    static func regenerateTouchUpMasks(_ parameters: EditParameters, session: ImageSession, pipeline: RenderPipeline,
+                                       gpu: GPUContext, rotation: ImageRotation, name: String, logger: Logger) throws {
+        guard parameters.touchUp.wantsMasks else { return }
+        let missing = try TouchUpRegions.regenerate(parameters.touchUp, session: session, pipeline: pipeline, gpu: gpu,
+                                                    parameters: parameters, rotation: rotation)
+        for id in missing {
+            let number = (parameters.touchUp.faces.firstIndex { $0.id == id } ?? 0) + 1
+            logger.notice("\(name, privacy: .private): face \(number) could not be found again, so it is not retouched")
+        }
     }
 }

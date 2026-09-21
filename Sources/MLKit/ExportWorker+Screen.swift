@@ -46,6 +46,8 @@ extension ExportWorker {
         if !masks.substituted.isEmpty {
             slideLogger.notice("\(sourceURL.lastPathComponent, privacy: .private): masks made without \(masks.substituted.joined(separator: ", "), privacy: .public), which the edit names but this Mac lacks")
         }
+        try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
+                                   name: sourceURL.lastPathComponent, logger: slideLogger)
         try Task.checkCancellation()
 
         let sensor = CGSize(width: summary.rawWidth, height: summary.rawHeight)
