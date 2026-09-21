@@ -232,6 +232,15 @@ final class ModelSettingsModel: ObservableObject {
     }
 }
 
+/// The tallest row the Models list has laid out, so the list can be as
+/// tall as whole rows need (`ModelSettingsView.measuredRowHeight`).
+private struct RowHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// Settings › AI › Models: every model the app knows, with where it
 /// stands and what can be done about it. Mounted by `PreferencesView.aiTab`
 /// above the compute picker. A `List` of rows rather than a `Table`,
@@ -239,8 +248,21 @@ final class ModelSettingsModel: ObservableObject {
 struct ModelSettingsView: View {
     @StateObject private var model = ModelSettingsModel()
     @State private var removing: ModelEntry?
+    /// The tallest row on screen, measured (`RowHeightKey`). A row is a
+    /// name, up to two lines of purpose, a line of facts and a line of
+    /// buttons, so it is far taller than a plain list row and grows with
+    /// the text size; `rowHeight` is only the height before the first
+    /// row reports back.
+    @State private var measuredRowHeight: CGFloat = ModelSettingsView.rowHeight
 
-    private static let rowHeight: CGFloat = 78
+    private static let rowHeight: CGFloat = 104
+
+    /// Rows shown before the list scrolls, the half telling you it does.
+    private static let visibleRows: CGFloat = 4.5
+
+    /// What the List puts round a row's own content, which the measure
+    /// above does not see.
+    private static let rowInset: CGFloat = 8
 
     var body: some View {
         Section {
@@ -249,8 +271,17 @@ struct ModelSettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
             List(model.rows) { row in
                 ModelRowView(row: row, model: model) { removing = row.entry }
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: RowHeightKey.self, value: proxy.size.height)
+                    })
             }
-            .frame(height: min(CGFloat(model.rows.count), 4.5) * Self.rowHeight + 8)
+            .onPreferenceChange(RowHeightKey.self) { height in
+                // The list is sized from what a row really measures, so
+                // whole rows show at any text size.
+                guard height > 0 else { return }
+                Task { @MainActor in measuredRowHeight = height + Self.rowInset }
+            }
+            .frame(height: min(CGFloat(model.rows.count), Self.visibleRows) * measuredRowHeight + 8)
             .accessibilityLabel("Models")
             HStack {
                 Button("Add Model…") { model.addModel() }

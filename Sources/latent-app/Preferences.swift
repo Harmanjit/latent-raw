@@ -214,5 +214,10 @@ struct PreferencesView: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
+        // A grouped Form is a scroll view, which has no height of its
+        // own, so the window would open at its default and show three of
+        // the models. This tab is the tall one: ask for the room its
+        // list and compute picker need.
+        .frame(minHeight: 600)
     }
 }

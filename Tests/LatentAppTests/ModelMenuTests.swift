@@ -329,6 +329,40 @@ final class ModelMenuTests: XCTestCase {
                        "Saved “sheet.pdf”; a couldn’t be rendered")
     }
 
+    /// A click-to-select model nothing stood in for masks nothing, so the
+    /// note says the mask is empty instead of naming a stand-in
+    /// (docs/Retouch.md §5). Two ways round: the default model itself
+    /// would not load, or no click-to-select model is installed at all.
+    func testEmptyClickToSelectMaskIsNotReportedAsSubstituted() throws {
+        let registry = try fixture()
+        // SAM 2.1 Small is the default: nothing else can stand in for it.
+        XCTAssertNil(MaskSubstitutions.standIn(forMissing: "SAM 2.1 Small", registry: registry))
+        XCTAssertEqual(MaskSubstitutions.exportNote(name: "DSC_0111.NEF", missing: ["SAM 2.1 Small"], registry: registry),
+                       "DSC_0111.NEF has an empty click-to-select mask because SAM 2.1 Small could not be loaded")
+        XCTAssertEqual(MaskSubstitutions.pageSentence(photos: 3, missing: ["SAM 2.1 Small"], registry: registry),
+                       "3 photos have empty click-to-select masks because SAM 2.1 Small could not be loaded")
+        // A model the default can stand in for still reads as before.
+        XCTAssertEqual(MaskSubstitutions.exportNote(name: "DSC_0112.NEF", missing: ["SAM 2.1 Large"], registry: registry),
+                       "DSC_0112.NEF used SAM 2.1 Small because SAM 2.1 Large is not installed")
+
+        // With no click-to-select model installed there is no stand-in.
+        try FileManager.default.removeItem(at: bundled.appendingPathComponent("sam2.1-small.model.json"))
+        let bare = ModelRegistry(bundled: bundled, external: external, catalogue: catalogue, defaults: defaults)
+        XCTAssertNil(bare.defaultPrompted())
+        XCTAssertNil(MaskSubstitutions.standIn(forMissing: "SAM 2.1 Large", registry: bare))
+        XCTAssertEqual(MaskSubstitutions.exportNote(name: "DSC_0113.NEF", missing: ["SAM 2.1 Large"], registry: bare),
+                       "DSC_0113.NEF has an empty click-to-select mask because SAM 2.1 Large is not installed "
+                       + "and no click-to-select model is")
+        XCTAssertEqual(MaskSubstitutions.pageSentence(photos: 1, missing: ["SAM 2.1 Large"], registry: bare),
+                       "1 photo has an empty click-to-select mask because SAM 2.1 Large is not installed "
+                       + "and no click-to-select model is")
+        // A subject model still reports its stand-in, not an empty mask.
+        XCTAssertEqual(MaskSubstitutions.exportNote(name: "DSC_0114.NEF", missing: ["BiRefNet General"], registry: bare),
+                       "DSC_0114.NEF used Apple Vision because BiRefNet General is not installed")
+        // The count is unchanged: the plan counts these too.
+        XCTAssertEqual(MaskSubstitutions.summarySuffix(count: 1), " · 1 with substituted masks")
+    }
+
     /// A page renderer keeps what each render reported, by photo name,
     /// and only for photos that needed a stand-in.
     func testSheetRendererCollectsSubstitutionsPerPhoto() throws {

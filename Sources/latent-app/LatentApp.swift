@@ -3,6 +3,7 @@ import AppKit
 import Catalog
 import PixelEngine
 import MergeKit
+import MLKit
 
 /// Latent's application target.
 ///
@@ -139,6 +140,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if removed > 0 {
                 Log.export.error("Removed \(removed, privacy: .public) abandoned panorama scratch folder(s)")
             }
+            // The same for a model import a crash cut short: hidden
+            // half-copies under the models folder and staging folders in
+            // the temporary directory (docs/Retouch.md §5). The importer
+            // sweeps before each copy too; this catches the Mac that
+            // never imports again. Once per process, older than an hour.
+            ModelImporter.sweepAbandonedCopies()
         }
     }
 

@@ -145,7 +145,8 @@ final class ExportQueue: ObservableObject {
     @Published private(set) var total = 0
     @Published private(set) var currentName = ""
     @Published private(set) var failures: [Failure] = []
-    /// Exports that went through with a stand-in model: the edit names a
+    /// Exports that went through with a stand-in model, or with an empty
+    /// click-to-select mask when nothing could stand in: the edit names a
     /// model this Mac lacks (`MaskSubstitutions.exportNote`). Shown under
     /// the failures; the summary counts them.
     @Published private(set) var notes: [String] = []
@@ -684,9 +685,10 @@ enum MaskSubstitutions {
     }
 
     /// "DSC_0107.NEF used Apple Vision because BiRefNet General is not
-    /// installed", for the export panel's notes.
+    /// installed", for the export panel's notes; the empty-mask words
+    /// when nothing stood in (`clause(for:registry:)`).
     static func exportNote(name: String, missing: [String], registry: ModelRegistry = .shared) -> String {
-        "\(name) used \(standIn(for: missing, registry: registry)) because \(notInstalled(missing))"
+        "\(name) \(clause(for: missing, registry: registry))"
     }
 
     /// The second sentence of a print's or contact sheet's message: "2
@@ -695,7 +697,47 @@ enum MaskSubstitutions {
     static func pageSentence(photos: Int, missing: [String], registry: ModelRegistry = .shared) -> String? {
         guard photos > 0, !missing.isEmpty else { return nil }
         let subject = photos == 1 ? "1 photo" : "\(photos) photos"
-        return "\(subject) used \(standIn(for: missing, registry: registry)) because \(notInstalled(missing))"
+        return "\(subject) \(clause(for: missing, plural: photos != 1, registry: registry))"
+    }
+
+    /// What the file name or the photo count is followed by: "used Apple
+    /// Vision because BiRefNet General is not installed" when a stand-in
+    /// ran, else the empty-mask words. A click-to-select model with no
+    /// stand-in masks nothing at all (`ExportWorker.regenerateMasks`
+    /// logs "the mask is empty"), so saying a model was used would be
+    /// untrue.
+    static func clause(for missing: [String], plural: Bool = false,
+                       registry: ModelRegistry = .shared) -> String {
+        if let empty = emptyMaskClause(missing, plural: plural, registry: registry) { return empty }
+        return "used \(standIn(for: missing, registry: registry)) because \(notInstalled(missing))"
+    }
+
+    /// "has an empty click-to-select mask because SAM 2.1 Small could
+    /// not be loaded" (plural: "have empty click-to-select masks
+    /// because …") when every missing model is a click-to-select one
+    /// that nothing stood in for; nil when a stand-in ran. Mirrors
+    /// `ModelMenus.missingSentence`'s empty-mask wording.
+    static func emptyMaskClause(_ missing: [String], plural: Bool = false,
+                                registry: ModelRegistry = .shared) -> String? {
+        guard !missing.isEmpty else { return nil }
+        let entries = missing.map { name in registry.entries().first { $0.manifest.displayName == name } }
+        guard entries.allSatisfy({ $0?.manifest.kind == .promptedSegmentation }) else { return nil }
+        guard missing.allSatisfy({ standIn(forMissing: $0, registry: registry) == nil }) else { return nil }
+        let reason = entries.allSatisfy { $0?.isInstalled == true }
+            ? couldNotLoad(missing)
+            : "\(notInstalled(missing)) and no click-to-select model is"
+        let subject = plural ? "have empty click-to-select masks" : "has an empty click-to-select mask"
+        return "\(subject) because \(reason)"
+    }
+
+    /// "SAM 2.1 Small could not be loaded" / "A and B could not be
+    /// loaded", for a model that is installed but will not open.
+    static func couldNotLoad(_ missing: [String]) -> String {
+        switch missing.count {
+        case 0: return "a model could not be loaded"
+        case 1: return "\(missing[0]) could not be loaded"
+        default: return missing.dropLast().joined(separator: ", ") + " and \(missing.last!) could not be loaded"
+        }
     }
 
     /// "BiRefNet General is not installed" / "BiRefNet General and SAM 2.1
@@ -726,7 +768,11 @@ enum MaskSubstitutions {
         case .subjectSegmentation:
             return registry.entry(id: ModelRegistry.builtInSubjectID)?.manifest.displayName ?? "Apple Vision"
         case .promptedSegmentation:
-            return registry.defaultPrompted()?.manifest.displayName
+            // The default click-to-select model stands in — unless it is
+            // the very model that would not load, or there is none: then
+            // nothing ran and the mask is empty.
+            guard let fallback = registry.defaultPrompted(), fallback.id != entry.id else { return nil }
+            return fallback.manifest.displayName
         case .semanticSegmentation:
             return registry.installed(ModelRef(id: SegmentationModel.modelID, version: 1))?.manifest.displayName
         case .denoise:

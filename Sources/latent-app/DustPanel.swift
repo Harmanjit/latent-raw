@@ -47,7 +47,10 @@ struct DustSection: View {
                 .help("Higher finds fainter and less round spots; lower keeps only the clearest")
 
             HStack(spacing: 8) {
-                Text("Spot Size").font(.subheadline).accessibilityHidden(true)
+                // fixedSize: the label keeps one line and the segmented
+                // control gives way, rather than "Spot Size" wrapping
+                // when the panel is narrow.
+                Text("Spot Size").font(.subheadline).fixedSize().accessibilityHidden(true)
                 Picker("Spot size", selection: size) {
                     ForEach(DustSpotSize.allCases, id: \.self) { band in
                         Text(band.displayName).tag(band)
@@ -55,7 +58,7 @@ struct DustSection: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 180)
+                .frame(maxWidth: 180)
                 .help("How big the shadows are: Small 4 to 8, Medium 6 to 16, Large 12 to 40 pixels across the sensor, halved")
                 .accessibilityHint("The size of dust shadow to look for")
                 Spacer()
