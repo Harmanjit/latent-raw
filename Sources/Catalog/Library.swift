@@ -589,6 +589,12 @@ public final class Library: ObservableObject {
         return selectedImages.filter(shown)
     }
 
+    /// The images a batch job (Remove Dust, Find Faces) runs over: the
+    /// visible selection, or the primary only, exactly as a rating.
+    public func batchTargets(onlyPrimary: Bool) -> [ImageRecord] {
+        metadataTargets(onlyPrimary: onlyPrimary)
+    }
+
     /// A metadata change that failed on some of the selected images. The
     /// others were still changed; this names the ones that weren't.
     public struct SelectionChangeError: Error, CustomStringConvertible {
@@ -789,6 +795,60 @@ public final class Library: ObservableObject {
                 }
                 outcome.changed += 1
             }
+        }
+        if outcome.changed > 0, catalog === self.catalog { startThumbnailGeneration() }
+        return outcome
+    }
+
+    /// Writes precomputed edits for explicit images, as a batch job does
+    /// once its worker has finished (docs/Retouch.md §8): each image's new
+    /// stored edit (nil clears it), written only when its current stored
+    /// JSON equals `expected[id]` (nil = no edit), so an edit the user
+    /// made while the job ran is never overwritten. An image whose JSON
+    /// changed, or that is no longer in `images`, is skipped and named in
+    /// the outcome ("image 12" when its record is gone). Files ONE undo
+    /// group named `undoName` ("Remove Dust (12 Images)") for the images
+    /// written. Call inside `perform`, so quitting waits for it.
+    @discardableResult
+    public func setEdits(_ edits: [Int64: String?], expecting expected: [Int64: String?],
+                         schemaVersion: Int, processVersion: String,
+                         undoName: String) async throws -> TransformOutcome {
+        guard let catalog else { return TransformOutcome() }
+        var outcome = TransformOutcome()
+        var before: [Int64: StoredEdit?] = [:], after: [Int64: StoredEdit?] = [:]
+        defer {
+            fileFreshUndo(undoName, count: before.count, in: catalog, undo: .edits(before), redo: .edits(after))
+        }
+        let records = Dictionary(images.compactMap { record in record.id.map { ($0, record) } },
+                                 uniquingKeysWith: { first, _ in first })
+        for (id, next) in edits.sorted(by: { $0.key < $1.key }) {
+            guard let record = records[id] else {
+                outcome.skipped.append("image \(id)")
+                continue
+            }
+            let stored: StoredEdit?
+            do {
+                stored = try await catalog.storedEdit(forImageID: id)
+            } catch {
+                outcome.skipped.append(record.fileName)
+                Self.logger.error("Skipped \(record.fileName, privacy: .private): \(String(describing: error), privacy: .private)")
+                continue
+            }
+            let existing = stored?.json
+            guard existing == expected[id] ?? nil else {
+                outcome.skipped.append(record.fileName)
+                Self.logger.info("Skipped \(record.fileName, privacy: .private): its edit changed while the job ran")
+                continue
+            }
+            guard next != existing else { continue }
+            try await catalog.setEditStack(next, schemaVersion: schemaVersion,
+                                           processVersion: processVersion, forImageID: id)
+            before[id] = .some(stored)
+            after[id] = .some(next.map { StoredEdit(json: $0, schemaVersion: schemaVersion, processVersion: processVersion) })
+            if catalog === self.catalog {
+                if next == nil { editedImageIDs.remove(id) } else { editedImageIDs.insert(id) }
+            }
+            outcome.changed += 1
         }
         if outcome.changed > 0, catalog === self.catalog { startThumbnailGeneration() }
         return outcome

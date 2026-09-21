@@ -6,8 +6,8 @@ import RawCore
 /// Moving an edit's geometry from the whole sensor readout onto the
 /// camera's active area.
 ///
-/// Crops, masks, heals and red-eye spots are stored in normalized sensor
-/// coordinates: (0, 0) is the sensor plane's top-left, (1, 1) its
+/// Crops, masks, heals, red-eye spots, dust, faces and blemishes are
+/// stored in normalized sensor coordinates: (0, 0) is the sensor plane's top-left, (1, 1) its
 /// bottom-right. The plane used to be LibRaw's whole readout, masked
 /// border and padding included; it is now only the active area
 /// (`SensorActiveArea`). For most Nikons the two are the same and nothing
@@ -33,6 +33,9 @@ extension EditStack {
         if modules.locals != nil { groups.insert(.locals) }
         if modules.crop != nil { groups.insert(.crop) }
         if modules.heal != nil || modules.redeye != nil { groups.insert(.heal) }
+        if modules.dust != nil { groups.insert(.dust) }
+        // The sliders are not a place; only the faces and blemishes are.
+        if let t = modules.touchup, !t.faces.isEmpty || !t.blemishes.isEmpty { groups.insert(.touchUp) }
         return groups
     }
 
@@ -55,19 +58,26 @@ extension EditStack {
             local.shape = map.shape(local.shape)
             return local
         }
-        result.modules.heal = modules.heal?.map { patch in
-            var patch = patch
-            patch.target = map.point(patch.target)
-            patch.source = map.point(patch.source)
-            patch.radius *= map.shortSide
-            patch.stroke = patch.stroke?.map(map.offset)
-            return patch
-        }
+        result.modules.heal = modules.heal?.map(map.patch)
         result.modules.redeye = modules.redeye?.map { spot in
             var spot = spot
             spot.centre = map.point(spot.centre)
             spot.radius *= map.shortSide
             return spot
+        }
+        // Dust and blemishes are heal patches; a face box keeps its
+        // corner pixel and its size in pixels.
+        result.modules.dust = modules.dust?.map(map.patch)
+        if var t = modules.touchup {
+            t.blemishes = t.blemishes.map(map.patch)
+            t.faces = t.faces.map { face in
+                var face = face
+                let origin = map.point(SIMD2(face.boundingBox.x, face.boundingBox.y))
+                let size = SIMD2(face.boundingBox.z, face.boundingBox.w) * map.scale
+                face.boundingBox = SIMD4(origin.x, origin.y, size.x, size.y)
+                return face
+            }
+            result.modules.touchup = t
         }
         return result
     }
@@ -100,6 +110,17 @@ struct ReadoutToActiveArea {
 
     /// A displacement (heal stroke offsets, which are relative to the patch).
     func offset(_ d: SIMD2<Float>) -> SIMD2<Float> { d * scale }
+
+    /// A heal patch (the user's, a dust spot or a blemish): both centres,
+    /// the radius and the stroke's offsets.
+    func patch(_ patch: HealPatch) -> HealPatch {
+        var patch = patch
+        patch.target = point(patch.target)
+        patch.source = point(patch.source)
+        patch.radius *= shortSide
+        patch.stroke = patch.stroke?.map(offset)
+        return patch
+    }
 
     func shape(_ shape: MaskShape) -> MaskShape {
         switch shape {

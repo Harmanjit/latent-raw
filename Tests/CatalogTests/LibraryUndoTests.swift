@@ -213,6 +213,123 @@ final class LibraryUndoTests: XCTestCase {
         XCTAssertEqual(library.editedImageIDs, [a, b])
     }
 
+    /// A batch job's commit (`setEdits`): the images it names are written
+    /// in one undo group, and undo puts back each one's own stored edit.
+    func testSetEditsFilesOneGroupForTheImagesWritten() async throws {
+        let manager = UndoManager()
+        let library = try await openLibrary(manager)
+        let (a, b) = (id(library, "A.NEF"), id(library, "B.NEF"))
+        let original = "{\"schema\":1,\"exposure\":0.5}"
+        try await library.saveEditStack(original, schemaVersion: 1, processVersion: "0.9", forImageID: a)
+
+        let newA = "{\"schema\":1,\"dust\":true}", newB = "{\"schema\":1,\"dust\":2}"
+        let expected: [Int64: String?] = [a: original, b: nil]
+        let outcome = try await library.setEdits([a: newA, b: newB], expecting: expected,
+                                                 schemaVersion: 1, processVersion: "1.0", undoName: "Remove Dust")
+        endEvent(manager)
+        XCTAssertEqual(outcome.changed, 2)
+        XCTAssertEqual(outcome.skipped, [])
+        XCTAssertEqual(manager.undoMenuItemTitle, "Undo Remove Dust (2 Images)")
+        XCTAssertEqual(library.editedImageIDs, [a, b])
+        let writtenA = try await library.catalog!.storedEdit(forImageID: a)
+        XCTAssertEqual(writtenA, StoredEdit(json: newA, schemaVersion: 1, processVersion: "1.0"))
+
+        var restored: [(Set<Int64>, Library.RestoredAspect)] = []
+        library.didRestoreImages = { restored.append(($0, $1)) }
+        await undo(manager, library)
+        let editA = try await library.catalog!.storedEdit(forImageID: a)
+        let editB = try await library.catalog!.storedEdit(forImageID: b)
+        XCTAssertEqual(editA, StoredEdit(json: original, schemaVersion: 1, processVersion: "0.9"))
+        XCTAssertNil(editB)
+        XCTAssertEqual(library.editedImageIDs, [a])
+        XCTAssertEqual(restored.map(\.0), [[a, b]])
+        XCTAssertEqual(restored.map(\.1), [.edits])
+        XCTAssertFalse(manager.canUndo, "one group, not one per image")
+
+        await redo(manager, library)
+        let redoneB = try await library.catalog!.storedEdit(forImageID: b)
+        XCTAssertEqual(redoneB, StoredEdit(json: newB, schemaVersion: 1, processVersion: "1.0"))
+        XCTAssertEqual(library.editedImageIDs, [a, b])
+
+        // Writing what is already there changes nothing and files nothing.
+        let same = try await library.setEdits([a: newA], expecting: [a: newA],
+                                              schemaVersion: 1, processVersion: "1.0", undoName: "Remove Dust")
+        XCTAssertEqual(same.changed, 0)
+        XCTAssertEqual(manager.undoMenuItemTitle, "Undo Remove Dust (2 Images)")
+        // Clearing an edit is a write too.
+        let clearB: [Int64: String?] = [b: nil]
+        let cleared = try await library.setEdits(clearB, expecting: [b: newB],
+                                                 schemaVersion: 1, processVersion: "1.0", undoName: "Remove Dust")
+        endEvent(manager)
+        XCTAssertEqual(cleared.changed, 1)
+        XCTAssertEqual(manager.undoMenuItemTitle, "Undo Remove Dust")
+        XCTAssertEqual(library.editedImageIDs, [a])
+    }
+
+    /// An image whose stored edit changed while the job ran is skipped and
+    /// named, never overwritten; the others are still written.
+    func testSetEditsSkipsAnImageWhoseEditChangedMeanwhile() async throws {
+        let manager = UndoManager()
+        let library = try await openLibrary(manager)
+        let (a, b) = (id(library, "A.NEF"), id(library, "B.NEF"))
+        let readByJob = "{\"schema\":1,\"exposure\":0.5}"
+        try await library.saveEditStack(readByJob, schemaVersion: 1, processVersion: "1.0", forImageID: a)
+        // The user edits A while the job runs.
+        let meanwhile = "{\"schema\":1,\"exposure\":1}"
+        try await library.saveEditStack(meanwhile, schemaVersion: 1, processVersion: "1.0", forImageID: a)
+
+        let expected: [Int64: String?] = [a: readByJob, b: nil]
+        let outcome = try await library.setEdits([a: "{\"a\":1}", b: "{\"b\":1}"], expecting: expected,
+                                                 schemaVersion: 1, processVersion: "1.0", undoName: "Find Faces")
+        endEvent(manager)
+        XCTAssertEqual(outcome.changed, 1)
+        XCTAssertEqual(outcome.skipped, ["A.NEF"])
+        XCTAssertEqual(manager.undoMenuItemTitle, "Undo Find Faces")
+        let editA = try await library.catalog!.storedEdit(forImageID: a)
+        XCTAssertEqual(editA?.json, meanwhile, "the user's edit stands")
+        let editB = try await library.catalog!.storedEdit(forImageID: b)
+        XCTAssertEqual(editB?.json, "{\"b\":1}")
+
+        // Expecting no edit where one now exists is a mismatch too.
+        let expectNone: [Int64: String?] = [b: nil]
+        let second = try await library.setEdits([b: "{\"b\":2}"], expecting: expectNone,
+                                                schemaVersion: 1, processVersion: "1.0", undoName: "Find Faces")
+        XCTAssertEqual(second.changed, 0)
+        XCTAssertEqual(second.skipped, ["B.NEF"])
+        await undo(manager, library)
+        let undoneB = try await library.catalog!.storedEdit(forImageID: b)
+        XCTAssertNil(undoneB)
+        XCTAssertEqual(editA?.json, meanwhile)
+    }
+
+    /// An image no longer in the library (removed while the job ran) is
+    /// skipped and named by its id, and nothing is filed for it.
+    func testSetEditsSkipsAnImageNoLongerListed() async throws {
+        let manager = UndoManager()
+        let library = try await openLibrary(manager)
+        let a = id(library, "A.NEF")
+        let gone: Int64 = 424_242
+        XCTAssertFalse(library.images.contains { $0.id == gone })
+        let expected: [Int64: String?] = [gone: nil, a: nil]
+        let outcome = try await library.setEdits([gone: "{\"x\":1}", a: "{\"a\":1}"], expecting: expected,
+                                                 schemaVersion: 1, processVersion: "1.0", undoName: "Remove Dust")
+        endEvent(manager)
+        XCTAssertEqual(outcome.changed, 1)
+        XCTAssertEqual(outcome.skipped, ["image 424242"])
+        XCTAssertEqual(manager.undoMenuItemTitle, "Undo Remove Dust")
+        let stored = try await library.catalog!.storedEdit(forImageID: gone)
+        XCTAssertNil(stored)
+        // Nothing at all to write files nothing.
+        let none = try await library.setEdits([gone: "{\"x\":1}"], expecting: [:],
+                                              schemaVersion: 1, processVersion: "1.0", undoName: "Remove Dust")
+        XCTAssertEqual(none.changed, 0)
+        XCTAssertEqual(manager.undoMenuItemTitle, "Undo Remove Dust")
+        XCTAssertEqual(library.batchTargets(onlyPrimary: false).count, 0, "nothing selected")
+        library.selectAllVisible()
+        XCTAssertEqual(library.batchTargets(onlyPrimary: false).count, 2)
+        XCTAssertEqual(library.batchTargets(onlyPrimary: true).count, 1)
+    }
+
     /// Two undos in quick succession, the second asked for before the
     /// first has written, still end at the oldest value on every image,
     /// whatever order the images were changed in.

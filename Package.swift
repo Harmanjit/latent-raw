@@ -68,9 +68,11 @@ let package = Package(
             path: "Sources/MLKit",
             resources: [.copy("Resources/Models")]
         ),
+        // MergeKit for the linear DNG the touch-up export tests write
+        // from the portrait JPEG (docs/Retouch.md §11).
         .testTarget(
             name: "MLKitTests",
-            dependencies: ["MLKit", "PixelEngine", "RawCore"],
+            dependencies: ["MLKit", "PixelEngine", "RawCore", "MergeKit"],
             path: "Tests/MLKitTests"
         ),
         // Photo Merge: HDR and panorama merging, and the float DNG writer

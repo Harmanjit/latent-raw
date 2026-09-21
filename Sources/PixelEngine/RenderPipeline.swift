@@ -126,6 +126,11 @@ public struct EditParameters: Sendable, Equatable {
     public var heals: [HealPatch]
     /// Red-eye corrections, applied in camera space after the patches.
     public var redEyes: [RedEyeSpot] = []
+    /// Automatic sensor-dust patches (docs/Retouch.md §6), healed before
+    /// the touch-up blemishes and `heals`.
+    public var dust: [HealPatch] = []
+    /// Touch-up: faces, sliders and the automatic blemishes (§7).
+    public var touchUp: TouchUp = .neutral
     /// Presence: local contrast at two scales and haze removal, −1…1.
     public var texture: Float
     public var clarity: Float
@@ -165,6 +170,8 @@ public struct EditParameters: Sendable, Equatable {
                 locals: [LocalAdjustment] = [],
                 crop: CropParameters = .none,
                 heals: [HealPatch] = [],
+                dust: [HealPatch] = [],
+                touchUp: TouchUp = .neutral,
                 texture: Float = 0, clarity: Float = 0, dehaze: Float = 0,
                 vibrance: Float = 0,
                 defringePurple: Float = 0, defringeGreen: Float = 0,
@@ -194,12 +201,20 @@ public struct EditParameters: Sendable, Equatable {
         self.locals = locals
         self.crop = crop
         self.heals = heals
+        self.dust = dust
+        self.touchUp = touchUp
         self.texture = texture; self.clarity = clarity; self.dehaze = dehaze
         self.vibrance = vibrance
         self.defringePurple = defringePurple; self.defringeGreen = defringeGreen
         self.perspective = perspective
         self.aiDenoise = aiDenoise
     }
+
+    /// Stage 5's list, in order: dust, then the active blemishes, then the
+    /// user's patches, so a user patch over a dust spot reads the
+    /// dust-healed image. Every heal site (the stage, the tile planning,
+    /// the heal cache) reads this, never `heals` alone.
+    public var allHealPatches: [HealPatch] { dust + touchUp.activeBlemishes + heals }
 
     /// Whether the presence stage has anything to do.
     public var wantsLocalContrast: Bool {
@@ -226,11 +241,34 @@ public struct EditParameters: Sendable, Equatable {
             && a.toneCurve == b.toneCurve && a.hsl == b.hsl && a.splitToning == b.splitToning
             && a.locals == b.locals && a.crop == b.crop && a.heals == b.heals
             && a.redEyes == b.redEyes
+            && a.dust == b.dust && a.touchUp == b.touchUp
             && a.texture == b.texture && a.clarity == b.clarity && a.dehaze == b.dehaze
             && a.vibrance == b.vibrance
             && a.defringePurple == b.defringePurple && a.defringeGreen == b.defringeGreen
             && a.perspective == b.perspective && a.aiDenoise == b.aiDenoise
     }
+}
+
+/// Visualise Spots (docs/Retouch.md §6): the viewport's high-pass view
+/// of the display texture that makes faint dust shadows stand out.
+public struct SpotVisualisation: Sendable, Equatable {
+    /// 0…1, the Contrast slider: how faint a dip still shows.
+    public var threshold: Float
+    /// The band's radius, so the high-pass is tuned to spots of that size.
+    public var radiusSensorPx: Float
+
+    public init(threshold: Float, radiusSensorPx: Float) {
+        self.threshold = threshold
+        self.radiusSensorPx = radiusSensorPx
+    }
+}
+
+/// Mirror of `DustVisualiseParams` in Dust.metal.
+struct DustVisualiseGPU {
+    var threshold: Float
+    var radiusSensorPx: Float
+    var binSpan: Float
+    var padding: Float = 0
 }
 
 /// How the final pixels are encoded — which is about the *destination*,
@@ -252,6 +290,11 @@ public struct RenderOutput: Sendable, Equatable {
     /// Soft-proof table to apply, and whether to flag clipped colours.
     public var proof: SoftProofLUT? = nil
     public var gamutWarning = false
+    /// Visualise Spots, drawn over the viewport after sharpening. Never
+    /// set for a file, like `maskOverlay`.
+    public var spotVisualisation: SpotVisualisation? = nil
+    /// Tint the touch-up skin mask red on the viewport (Show Skin Mask).
+    public var touchUpOverlay = false
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -282,6 +325,7 @@ public struct RenderOutput: Sendable, Equatable {
             && a.headroom == b.headroom && a.encoded == b.encoded
             && a.toneMapped == b.toneMapped && a.maskOverlay == b.maskOverlay
             && a.proof?.id == b.proof?.id && a.gamutWarning == b.gamutWarning
+            && a.spotVisualisation == b.spotVisualisation && a.touchUpOverlay == b.touchUpOverlay
     }
 }
 
@@ -545,8 +589,9 @@ public final class RenderPipeline {
         }
 
         // Stage 5: spot removal, in camera space, before the lens stage
-        // moves pixels.
-        let activeHeals = parameters.heals.filter {
+        // moves pixels: the dust spots, then the touch-up blemishes, then
+        // the user's patches (`allHealPatches`).
+        let activeHeals = parameters.allHealPatches.filter {
             $0.targetBounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(sourceInfo.sensorRect)
         }
         // Stage 6: red eyes, on the same working texture.
@@ -576,7 +621,18 @@ public final class RenderPipeline {
                                           output: output,
                                           renderInfo: renderInfo, binSpan: binSpan)
 
-        // Stage 16: presence (texture, clarity, dehaze, defringe),
+        // Stage 16: touch-up (skin, teeth, eyes), display-referred, on the
+        // faces' region masks. Only with masks to work on: the session
+        // holds them once MLKit has built them (docs/Retouch.md §7), and a
+        // render without them (a thumbnail, the CLI) skips the stage.
+        if parameters.touchUp.wantsMasks,
+           let masks = session.touchUpMaskTexture(enabled: parameters.touchUp.enabledFaceIDs) {
+            final = try applyTouchUp(session: session, cmdBuffer: cmdBuffer, input: final, masks: masks,
+                                     preview: displayRole != .display, parameters: parameters,
+                                     output: output, renderInfo: renderInfo, binSpan: binSpan)
+        }
+
+        // Stage 17: presence (texture, clarity, dehaze, defringe),
         // display-referred, before sharpening so the sharpener sees the
         // final tonality.
         if parameters.wantsLocalContrast {
@@ -586,11 +642,20 @@ public final class RenderPipeline {
                                            renderInfo: renderInfo, binSpan: binSpan)
         }
 
-        // Stage 17: sharpening, on the display-referred result.
+        // Stage 18: sharpening, on the display-referred result.
         if parameters.sharpenAmount > 0 {
             final = try applySharpen(session: session, cmdBuffer: cmdBuffer, input: final,
                                      outputRole: displayRole == .display ? .sharpened : .sharpenedPreview,
                                      parameters: parameters, output: output, binSpan: binSpan)
+        }
+
+        // Display pass: Visualise Spots, for the viewport only (a file
+        // never asks for it), after every stage so it shows the picture
+        // as it is on screen.
+        if let visualisation = output.spotVisualisation {
+            final = try applyDustVisualise(session: session, cmdBuffer: cmdBuffer, input: final,
+                                           outputRole: displayRole == .display ? .visualised : .visualisedPreview,
+                                           visualisation: visualisation, binSpan: binSpan)
         }
 
         cmdBuffer.commit()
@@ -734,6 +799,48 @@ public final class RenderPipeline {
         let maxX = min(Int(reads.maxX.rounded(.up)), Int(sensor.width))
         let maxY = min(Int(reads.maxY.rounded(.up)), Int(sensor.height))
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY).union(region)
+    }
+
+    /// Where the corrected image's sensor point `p` (the output grid: what
+    /// a render of the whole frame shows at that pixel) reads from in the
+    /// uncorrected one: the green channel of `LensSampling.sourcePoints`.
+    /// The point itself when no lens correction is wanted. A face box found
+    /// on a render goes through here to the raw grid the sidecar stores
+    /// (docs/Retouch.md §7), so lens and keystone edits never move it.
+    public func rawSensorPoint(forOutputPoint p: SIMD2<Float>, session: ImageSession,
+                               parameters: EditParameters) -> SIMD2<Float> {
+        guard Self.wantsLensCorrection(session: session, parameters: parameters) else { return p }
+        return LensSampling(session: session, parameters: parameters).sourcePoints(forSensorPoint: p)[0]
+    }
+
+    /// The inverse: where the raw-grid point `p` lands on the corrected
+    /// image. `sourcePoints` has no closed inverse (a polynomial in the
+    /// radius, then keystone), so this is Newton's method from `p` itself
+    /// with a central-difference Jacobian. A profile moves a pixel by a
+    /// few tens of pixels and three steps land within 0.05 px; a strong
+    /// keystone moves the corners by thousands and needs a few more, so
+    /// it runs until the residual is under a thousandth of a pixel, at
+    /// most eight steps (each five `sourcePoints`). Identity without lens
+    /// correction. Where the map folds (a manual distortion strong enough
+    /// that the radius stops growing before the corner) there is no
+    /// inverse and the last iterate is returned. SensorPointTests.
+    public func outputSensorPoint(forRawPoint p: SIMD2<Float>, session: ImageSession,
+                                  parameters: EditParameters) -> SIMD2<Float> {
+        guard Self.wantsLensCorrection(session: session, parameters: parameters) else { return p }
+        let sampling = LensSampling(session: session, parameters: parameters)
+        func raw(_ q: SIMD2<Float>) -> SIMD2<Float> { sampling.sourcePoints(forSensorPoint: q)[0] }
+        let h: Float = 0.5
+        var q = p
+        for _ in 0..<8 {
+            let residual = raw(q) - p
+            guard simd_length(residual) > 1e-3 else { break }
+            let dx = (raw(q + SIMD2(h, 0)) - raw(q - SIMD2(h, 0))) / (2 * h)
+            let dy = (raw(q + SIMD2(0, h)) - raw(q - SIMD2(0, h))) / (2 * h)
+            let jacobian = simd_float2x2(columns: (dx, dy))
+            guard abs(jacobian.determinant) > 1e-8 else { break }
+            q -= jacobian.inverse * residual
+        }
+        return q
     }
 
     /// The lens pass. Reads `input`, which covers `source.sensorRect`, and
@@ -888,6 +995,54 @@ public final class RenderPipeline {
             e.setBytes(&isLinear, length: 4, index: 5)
             e.setBytes(&headroom, length: 4, index: 6)
         }
+        return result
+    }
+
+    // MARK: - Touch-up
+
+    /// The touch-up stage (TouchUpStage.swift, Shaders/TouchUp.metal) on
+    /// the display-referred image, over the session's region masks.
+    private func applyTouchUp(session: ImageSession, cmdBuffer: MTLCommandBuffer, input: MTLTexture,
+                              masks: MTLTexture, preview: Bool, parameters p: EditParameters,
+                              output: RenderOutput, renderInfo: RenderInfo, binSpan: Float) throws -> MTLTexture {
+        let result = try session.texture(width: input.width, height: input.height, pixelFormat: .rgba16Float,
+                                         role: preview ? .touchUpPreview : .touchUp)
+        let summary = session.file.summary
+        let sensorSize = SIMD2<Float>(Float(summary.rawWidth), Float(summary.rawHeight))
+        // The blur scales are sensor pixels, converted to this render's.
+        let faceWidth = p.touchUp.medianFaceWidthPixels(sensorSize: sensorSize)
+        let params = TouchUpStage.Params(
+            skin: p.touchUp.skinSmoothing / 100, teeth: p.touchUp.teethWhitening / 100, eyes: p.touchUp.eyes / 100,
+            sigmaFine: 1.5 / binSpan, sigmaMid: TouchUp.sigmaMid(faceWidth: faceWidth) / binSpan,
+            isLinear: !output.encoded, headroom: output.headroom,
+            tileOrigin: SIMD2(Float(renderInfo.sensorRect.origin.x), Float(renderInfo.sensorRect.origin.y)),
+            binSpan: binSpan, sensorSize: sensorSize, overlay: output.touchUpOverlay)
+        try TouchUpStage.encode(input: input, output: result, masks: masks, params: params,
+                                session: session, preview: preview, gpu: gpu, commandBuffer: cmdBuffer)
+        return result
+    }
+
+    // MARK: - Visualise Spots
+
+    /// The high-pass view of the display texture (Shaders/Dust.metal,
+    /// `dustVisualise`), tuned to the spot radius the panel is looking for.
+    private func applyDustVisualise(session: ImageSession, cmdBuffer: MTLCommandBuffer, input: MTLTexture,
+                                    outputRole: ImageSession.TextureRole, visualisation: SpotVisualisation,
+                                    binSpan: Float) throws -> MTLTexture {
+        let pso = try gpu.lazyPipeline(.dustVisualise)
+        let result = try session.texture(width: input.width, height: input.height,
+                                         pixelFormat: .rgba16Float, role: outputRole)
+        guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+            throw RenderError.commandBufferFailed
+        }
+        var params = DustVisualiseGPU(threshold: visualisation.threshold,
+                                      radiusSensorPx: visualisation.radiusSensorPx, binSpan: binSpan)
+        encoder.setComputePipelineState(pso)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(result, index: 1)
+        encoder.setBytes(&params, length: MemoryLayout<DustVisualiseGPU>.stride, index: 0)
+        dispatch(encoder, pso: pso, width: input.width, height: input.height)
+        encoder.endEncoding()
         return result
     }
 

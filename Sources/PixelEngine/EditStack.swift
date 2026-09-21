@@ -23,8 +23,9 @@ public struct EditStack: Codable, Equatable, Sendable {
     public var schema: Int = EditStack.schemaVersion
     public var process: String = EditStack.processVersion
     /// Which grid the normalized geometry (crop, local masks, heals,
-    /// red-eye) measures: `EditStack.activeAreaFrame`, the camera's active
-    /// area, for anything written since the sensor plane was cut to it.
+    /// red-eye, dust, faces and blemishes) measures:
+    /// `EditStack.activeAreaFrame`, the camera's active area, for anything
+    /// written since the sensor plane was cut to it.
     /// Absent from older stacks, whose (0, 0)...(1, 1) spanned the whole
     /// sensor readout, masked border included; `migratingGeometry(to:)`
     /// moves those onto the active area. Only written when there is
@@ -57,6 +58,11 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var toneranges: ToneRanges?
         /// Red-eye corrections. Absent when there are none.
         public var redeye: [RedEyeSpot]?
+        /// Automatic sensor-dust patches (docs/Retouch.md §6). Absent
+        /// when there are none, so the 0.9.0 beta reads the rest.
+        public var dust: [HealPatch]?
+        /// Touch-up (docs/Retouch.md §7). Absent when neutral.
+        public var touchup: TouchUp?
     }
 
     public struct AIDenoise: Codable, Equatable, Sendable {
@@ -195,6 +201,8 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.locals = p.locals.isEmpty ? nil : p.locals
         modules.heal = p.heals.isEmpty ? nil : p.heals
         modules.redeye = p.redEyes.isEmpty ? nil : p.redEyes
+        modules.dust = p.dust.isEmpty ? nil : p.dust
+        modules.touchup = p.touchUp.isNeutral ? nil : p.touchUp
         modules.presence = (p.texture == 0 && p.clarity == 0 && p.dehaze == 0) ? nil
             : Presence(texture: p.texture, clarity: p.clarity, dehaze: p.dehaze)
         modules.vibrance = p.vibrance == 0 ? nil : Vibrance(amount: p.vibrance)
@@ -266,6 +274,8 @@ public struct EditStack: Codable, Equatable, Sendable {
         // arithmetic, or a stroke of a million points take minutes.
         p.heals = (modules.heal ?? []).prefix(HealPatch.maximumCount).compactMap(\.sanitized)
         p.redEyes = (modules.redeye ?? []).prefix(RedEyeSpot.maximumCount).compactMap(\.sanitized)
+        p.dust = (modules.dust ?? []).prefix(HealPatch.maximumDustCount).compactMap(\.sanitized)
+        p.touchUp = (modules.touchup ?? .neutral).sanitized
         if let pr = modules.presence { p.texture = pr.texture; p.clarity = pr.clarity; p.dehaze = pr.dehaze }
         else { p.texture = 0; p.clarity = 0; p.dehaze = 0 }
         p.vibrance = modules.vibrance?.amount ?? 0

@@ -63,7 +63,9 @@ struct HealFieldLayout {
 /// RenderPipeline so tests can run it on a synthetic texture.
 enum HealStage {
     /// Writes `input` with `patches` applied, in order, into `output` (same
-    /// size and format), then `redEyes` (RedEye.swift) on top. `sensorSize`
+    /// size and format), then `redEyes` (RedEye.swift) on top. The list is
+    /// the caller's to cap: each stored list (dust, blemishes, the user's
+    /// patches) is capped on decode, and stage 5 concatenates them. `sensorSize`
     /// is the whole sensor; `tileOrigin` and `binSpan` place the texture on
     /// it, as for the other stages. `cameraToWorking` is only read for red
     /// eyes, which judge colour after the camera matrix.
@@ -82,7 +84,7 @@ enum HealStage {
         blit.copy(from: input, to: output)
         blit.endEncoding()
 
-        let perPatch = patches.prefix(HealPatch.maximumCount).map {
+        let perPatch = patches.map {
             placements($0, width: input.width, height: input.height,
                        sensorSize: sensorSize, tileOrigin: tileOrigin, binSpan: binSpan)
         }

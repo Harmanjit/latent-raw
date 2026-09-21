@@ -71,6 +71,58 @@ final class HealTests: XCTestCase {
         XCTAssertEqual(HealPatch.regionIncludingSources(offEdge, patches: [big], sensorSize: s).minX, -128)
     }
 
+    /// Tile planning runs over stage 5's whole list: a dust spot's source
+    /// far from the view must be in the tile, or the tile heals it from
+    /// nothing while the preview heals it from the source.
+    func testRegionPlanningCoversDustAndBlemishesToo() {
+        let s = CGSize(width: 6000, height: 4000)
+        let region = CGRect(x: 1000, y: 1000, width: 400, height: 400)
+        var p = EditParameters()
+        p.dust = [HealPatch(target: [0.2, 0.3], source: [0.8, 0.8], radius: 0.003, feather: 0.5)]
+        p.touchUp.blemishes = [HealPatch(target: [0.21, 0.3], source: [0.1, 0.9], radius: 0.002, feather: 0.5)]
+        p.touchUp.blemishRemoval = true
+        p.heals = [HealPatch(target: [0.22, 0.3], source: [0.9, 0.1], radius: 0.01)]
+        let grown = HealPatch.regionIncludingSources(region, patches: p.allHealPatches, sensorSize: s)
+        XCTAssertTrue(grown.contains(p.dust[0].sourceBounds(sensorSize: s)))
+        XCTAssertTrue(grown.contains(p.touchUp.blemishes[0].sourceBounds(sensorSize: s)))
+        XCTAssertTrue(grown.contains(p.heals[0].sourceBounds(sensorSize: s)))
+        // Over the user's patches alone, as the sites used to plan, the
+        // dust's source is left out.
+        XCTAssertFalse(HealPatch.regionIncludingSources(region, patches: p.heals, sensorSize: s)
+            .contains(p.dust[0].sourceBounds(sensorSize: s)))
+        XCTAssertFalse(HealPatch.isSelfContained(region, patches: p.allHealPatches, sensorSize: s))
+        XCTAssertTrue(HealPatch.isSelfContained(grown, patches: p.allHealPatches, sensorSize: s))
+    }
+
+    /// GPU: the stage no longer caps the list at 32. With 200 dust spots,
+    /// 64 blemishes and 32 user patches, the 233rd (the first user patch)
+    /// and the 296th change pixels like the first.
+    func testStageHealsTheWholeConcatenatedList() throws {
+        let gpu = try GPUContext()
+        let w = 512, h = 384
+        // Left half a dark flat, right half a light one: every target is
+        // on the left and copies from the same spot on the right.
+        let dark = SIMD3<Double>(0.2, 0.25, 0.3), light = SIMD3<Double>(0.8, 0.7, 0.6)
+        let input = try HealQualityTests.texture(width: w, height: h, gpu: gpu) { x, _ in x < w / 2 ? dark : light }
+        let size = SIMD2<Float>(Float(w), Float(h))
+        func cell(_ i: Int) -> SIMD2<Float> {
+            SIMD2(10 + Float(i % 12) * 20, 8 + Float(i / 12) * 15)
+        }
+        let patches = (0..<296).map { i in
+            HealPatch(target: cell(i) / size, source: (cell(i) + SIMD2(256, 0)) / size,
+                      radius: 5 / Float(min(w, h)), feather: 0, mode: .clone)
+        }
+        XCTAssertEqual(patches.count, HealPatch.maximumDustCount + HealPatch.maximumBlemishCount + HealPatch.maximumCount)
+        let healed = try HealQualityTests.healed(input, patches: patches, sensorSize: size, gpu: gpu)
+        func at(_ i: Int) -> SIMD3<Double> { healed(Int(cell(i).x), Int(cell(i).y)) }
+        for i in [0, 31, 32, 199, 200, 232, 233, 295] {
+            XCTAssertLessThan(simd_length(at(i) - light), 0.01, "patch \(i + 1) copied its source")
+        }
+        // Between the cells the left half is still dark.
+        XCTAssertLessThan(simd_length(healed(20, 15) - dark), 0.01)
+        XCTAssertLessThan(simd_length(healed(w / 2 + 10, 15) - light), 0.01)
+    }
+
     func testEditStackRoundTrip() throws {
         var p = EditParameters()
         p.heals = [HealPatch(target: [0.2, 0.3], source: [0.4, 0.5], radius: 0.02, feather: 0.5, mode: .clone)]
