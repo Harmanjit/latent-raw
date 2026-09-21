@@ -96,6 +96,36 @@ final class LensRegionTests: XCTestCase {
         }
     }
 
+    /// Dust spots, a blemish and a user patch are healed before the lens
+    /// pass, on the widened source window, so a region with the profile
+    /// shows each of them exactly as the full render does; a spot far
+    /// from the region is left out of its heal list without harm. (The
+    /// raw ↔ output point maps that place a spot are SensorPointTests'.)
+    func testRegionsWithDustAndBlemishesMatchTheFullRender() throws {
+        let path = TestAssets.path("golden_nikon_d750_cc0.nef")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
+        // Sensor pixels of the golden raw; 0.003 of the short side is 12 px.
+        let size = SIMD2<Float>(6016, 4016)
+        func spot(_ target: SIMD2<Float>, _ source: SIMD2<Float>, radius: Float, mode: HealPatch.Mode = .heal) -> HealPatch {
+            HealPatch(target: target / size, source: source / size, radius: radius, feather: 0.5, mode: mode)
+        }
+        var parameters = EditParameters()
+        parameters.dust = [spot(SIMD2(3000, 270), SIMD2(3100, 270), radius: 0.003),
+                           spot(SIMD2(600, 3600), SIMD2(700, 3600), radius: 0.004)]
+        parameters.touchUp.blemishRemoval = true
+        parameters.touchUp.blemishes = [spot(SIMD2(3250, 200), SIMD2(3300, 200), radius: 0.002)]
+        parameters.heals = [spot(SIMD2(2900, 350), SIMD2(3200, 350), radius: 0.005, mode: .clone)]
+        let regions = [(x: 2700, y: 120, w: 700, h: 300), (x: 5600, y: 1500, w: 400, h: 600)]
+        // A patch reads at `source − tileOrigin` in the region and at
+        // `source` in the full render; the two round differently in
+        // float32, so a copied pixel can come out one half-float step
+        // apart (measured 1.2e-4 on the clone). The band, or a patch
+        // reading past the window, would be a hundred times that.
+        for (worst, label) in try compareRegions(path: path, parameters: parameters, regions: regions) {
+            XCTAssertLessThanOrEqual(worst, 1e-3, label)
+        }
+    }
+
     /// The case the band was first seen on: the Ihrke bracket's tree
     /// against the sky, `latent-cli render IMG_7224.CR2 --region
     /// 2900,500,900,600`.
