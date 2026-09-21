@@ -95,6 +95,54 @@ final class MemoryPressureTests: XCTestCase {
         XCTAssertFalse(session.releaseMemory(for: .normal))
     }
 
+    /// The touch-up masks go at critical only, and the session says so
+    /// (`droppedTouchUpMasks`) until they are set again, so the editor
+    /// knows to build them once pressure lifts (docs/Retouch.md §10).
+    func testCriticalDropsTheTouchUpMasksAndSaysSo() throws {
+        let (session, pipeline, _) = try openSession()
+        _ = try renderLikeTheViewport(session, pipeline)
+        let id = UUID()
+        let summary = session.file.summary
+        session.setTouchUpMasks(TouchUpMaskSet.fixture(sensorWidth: summary.rawWidth, sensorHeight: summary.rawHeight, faces: [
+            (id: id, skin: CGRect(x: 0.4, y: 0.4, width: 0.2, height: 0.2), teeth: nil, eyes: []),
+        ]))
+        XCTAssertNotNil(session.touchUpMaskTexture(enabled: [id]))
+        XCTAssertFalse(session.droppedTouchUpMasks)
+
+        session.releaseMemory(for: .warning)
+        XCTAssertTrue(session.hasTouchUpMasks, "a warning keeps them: a face pass to rebuild")
+        XCTAssertFalse(session.droppedTouchUpMasks)
+        XCTAssertGreaterThan(session.approximateBytesHeld, session.sensorBuffer.length, "the mask texture is still counted")
+
+        session.releaseMemory(for: .critical)
+        XCTAssertFalse(session.hasTouchUpMasks)
+        XCTAssertTrue(session.droppedTouchUpMasks)
+        XCTAssertNil(session.touchUpMaskTexture(enabled: [id]))
+        XCTAssertEqual(session.approximateBytesHeld, session.sensorBuffer.length)
+        session.setTouchUpMasks(nil)
+        XCTAssertFalse(session.droppedTouchUpMasks, "cleared once the editor has acted on it")
+    }
+
+    /// A warning drops the heal cache with the pooled textures it points
+    /// into: the next render heals again, and the one after is served.
+    func testWarningClearsTheHealCache() throws {
+        let (session, pipeline, _) = try openSession()
+        var p = EditParameters()
+        p.heals = [HealPatch(target: [0.5, 0.5], source: [0.6, 0.6], radius: 0.03)]
+        func render() throws -> Bool {
+            var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: false)
+            _ = try pipeline.render(session, scale: .binned(quads: 2), parameters: p, info: &info)
+            return info.healWasCached
+        }
+        XCTAssertFalse(try render())
+        XCTAssertTrue(try render())
+        session.releaseMemory(for: .warning)
+        XCTAssertFalse(try render(), "healed again after the warning")
+        XCTAssertTrue(try render())
+        session.releaseMemory(for: .critical)
+        XCTAssertFalse(try render(), "and after critical")
+    }
+
     // MARK: - Footprint benchmark
 
     /// Process footprint of a session through a viewport's life and each

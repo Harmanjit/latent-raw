@@ -178,6 +178,88 @@ final class GoldenImageTests: XCTestCase {
         })
     }
 
+    /// Twelve sensor-dust spots of the sizes the detector finds (6 to 48
+    /// pixels across) spread over the frame, and one user heal over the
+    /// spot on the ball. Stage 5 heals the dust first, so the patch reads
+    /// the dust-healed image (docs/Retouch.md §4); the detail window sits
+    /// on that overlap. The heal kernel is unchanged, so these are final.
+    func testDust() throws {
+        try check(Recipe(name: "dust", detail: Self.ballCentre) {
+            $0.dust = Self.dustSpots
+            $0.heals = [HealPatch(id: Self.uuid(9), target: [0.508, 0.556], source: [0.44, 0.50], radius: 0.012, mode: .heal)]
+        })
+    }
+
+    /// Centre and radius (fraction of the short side) of each spot; the
+    /// first is on the ball. Sources 2.75 radii to the right, where the
+    /// placer puts them (2/3 turns a short-side fraction into a width one).
+    static let dustSpots: [HealPatch] = {
+        let spots: [(x: Float, y: Float, radius: Float)] = [
+            (0.50, 0.55, 0.004), (0.10, 0.12, 0.0015), (0.25, 0.30, 0.002), (0.40, 0.10, 0.003),
+            (0.62, 0.22, 0.005), (0.80, 0.14, 0.0025), (0.90, 0.40, 0.006), (0.15, 0.60, 0.008),
+            (0.33, 0.75, 0.003), (0.55, 0.85, 0.010), (0.75, 0.70, 0.004), (0.92, 0.88, 0.012),
+        ]
+        return spots.enumerated().map { i, s in
+            HealPatch(id: uuid(20 + i), target: [s.x, s.y], source: [s.x + 2.75 * s.radius * 2 / 3, s.y],
+                      radius: s.radius, feather: 0.5, mode: .heal)
+        }
+    }()
+
+    /// Two enabled faces and a disabled one, with fixed region masks set
+    /// on the session as MLKit would set the real ones, and all three
+    /// sliders up: the touch-up stage on the ball's dense detail.
+    ///
+    /// Generated from the Wave 0 copy-through kernel; regenerate once the
+    /// real kernel lands (`LATENT_UPDATE_GOLDEN=1`, see the class comment).
+    func testTouchUp() throws {
+        try check(Recipe(name: "touch-up", detail: Self.ballCentre) {
+            $0.touchUp.faces = Self.touchUpFaces
+            $0.touchUp.skinSmoothing = 60
+            $0.touchUp.teethWhitening = 50
+            $0.touchUp.eyes = 40
+        }, session: { session in
+            let summary = session.file.summary
+            session.setTouchUpMasks(Self.touchUpMasks(sensorWidth: summary.rawWidth, sensorHeight: summary.rawHeight))
+        })
+    }
+
+    /// The same faces with every slider at zero (the stage doesn't run)
+    /// and three fixed blemish patches with Remove Blemishes on: stage 5
+    /// heals them as it heals dust, so this one is final too.
+    func testTouchUpBlemishes() throws {
+        try check(Recipe(name: "touch-up-blemishes", detail: Self.ballCentre) {
+            $0.touchUp.faces = Self.touchUpFaces
+            $0.touchUp.blemishRemoval = true
+            $0.touchUp.blemishes = [
+                HealPatch(id: Self.uuid(40), target: [0.49, 0.54], source: [0.496, 0.54], radius: 0.002, feather: 0.5, mode: .heal),
+                HealPatch(id: Self.uuid(41), target: [0.515, 0.565], source: [0.515, 0.572], radius: 0.003, feather: 0.5, mode: .heal),
+                HealPatch(id: Self.uuid(42), target: [0.74, 0.16], source: [0.748, 0.16], radius: 0.0025, feather: 0.5, mode: .heal),
+            ]
+        })
+    }
+
+    /// Boxes on the raw grid (x, y, w, h): the ball, a second face at the
+    /// top right, and a disabled one whose masks must not show.
+    static let touchUpFaces = [
+        TouchUpFace(id: uuid(30), boundingBox: SIMD4(0.38, 0.40, 0.24, 0.30)),
+        TouchUpFace(id: uuid(31), boundingBox: SIMD4(0.68, 0.08, 0.16, 0.22)),
+        TouchUpFace(id: uuid(32), boundingBox: SIMD4(0.10, 0.60, 0.20, 0.28), enabled: false),
+    ]
+
+    /// The fixture masks for `touchUpFaces`, in normalised output-grid
+    /// coordinates inside each box.
+    static func touchUpMasks(sensorWidth: Int, sensorHeight: Int) -> TouchUpMaskSet {
+        TouchUpMaskSet.fixture(sensorWidth: sensorWidth, sensorHeight: sensorHeight, faces: [
+            (id: uuid(30), skin: CGRect(x: 0.40, y: 0.42, width: 0.20, height: 0.26),
+             teeth: CGRect(x: 0.47, y: 0.62, width: 0.06, height: 0.03),
+             eyes: [CGRect(x: 0.44, y: 0.48, width: 0.04, height: 0.03), CGRect(x: 0.52, y: 0.48, width: 0.04, height: 0.03)]),
+            (id: uuid(31), skin: CGRect(x: 0.70, y: 0.10, width: 0.12, height: 0.18),
+             teeth: CGRect(x: 0.74, y: 0.24, width: 0.04, height: 0.02),
+             eyes: [CGRect(x: 0.72, y: 0.14, width: 0.03, height: 0.02), CGRect(x: 0.77, y: 0.14, width: 0.03, height: 0.02)]),
+            (id: uuid(32), skin: CGRect(x: 0.12, y: 0.62, width: 0.16, height: 0.24), teeth: nil, eyes: []),
+        ])
+    }
+
     func testLocalAdjustments() throws {
         try check(Recipe(name: "local-adjustments") {
             $0.locals = [
@@ -215,6 +297,23 @@ final class GoldenImageTests: XCTestCase {
         let again = try render(Self.asShot, session: session, pipeline: pipeline)
         XCTAssertTrue(first.overview == again.overview, "overview changed between identical renders")
         XCTAssertTrue(first.detail == again.detail, "detail changed between identical renders")
+
+        // The heal cache too: the dust recipe, something else, then the
+        // dust recipe served from the cache, and once more after the cache
+        // is dropped.
+        let dust = Recipe(name: "dust", detail: Self.ballCentre) {
+            $0.dust = Self.dustSpots
+            $0.heals = [HealPatch(id: Self.uuid(9), target: [0.508, 0.556], source: [0.44, 0.50], radius: 0.012, mode: .heal)]
+        }
+        let healed = try render(dust, session: session, pipeline: pipeline)
+        _ = try render(Self.whiteBalance, session: session, pipeline: pipeline)
+        let cached = try render(dust, session: session, pipeline: pipeline)
+        XCTAssertTrue(healed.overview == cached.overview, "overview changed with the heal cache warm")
+        XCTAssertTrue(healed.detail == cached.detail, "detail changed with the heal cache warm")
+        session.releasePooledTextures()
+        let cold = try render(dust, session: session, pipeline: pipeline)
+        XCTAssertTrue(healed.overview == cold.overview, "overview changed after the caches were dropped")
+        XCTAssertTrue(healed.detail == cold.detail, "detail changed after the caches were dropped")
     }
 
     /// The tolerances must not be so loose that a real change slips by.
@@ -306,12 +405,16 @@ final class GoldenImageTests: XCTestCase {
     /// makes: the edit saved as edit-stack JSON and rebuilt over the
     /// image's defaults, the render scale, the rotation; then the
     /// exporter's GPU pass for rotation, crop, resize and quantisation.
-    /// Only the file encode is left out (ImageIO's, not ours).
+    /// Only the file encode is left out (ImageIO's, not ours). `prepare`
+    /// sets session state the edit alone doesn't carry (the touch-up
+    /// masks), as export sets it before rendering.
     private func render(_ recipe: Recipe, session existing: ImageSession? = nil,
-                        pipeline existingPipeline: RenderPipeline? = nil) throws -> Rendered {
+                        pipeline existingPipeline: RenderPipeline? = nil,
+                        prepare: ((ImageSession) throws -> Void)? = nil) throws -> Rendered {
         let (file, gpu) = try fixture()
         let session = try existing ?? ImageSession(file: file, gpu: gpu)
         let pipeline = existingPipeline ?? RenderPipeline(gpu: gpu)
+        try prepare?(session)
 
         // As the editor saves an untouched image: white balance "as shot".
         var edited = EditParameters()
@@ -347,8 +450,10 @@ final class GoldenImageTests: XCTestCase {
         return Rendered(overview: overview, detail: detail)
     }
 
-    private func check(_ recipe: Recipe, file: StaticString = #filePath, line: UInt = #line) throws {
-        let rendered = try render(recipe)
+    /// `session` prepares the fresh session before the render (see `render`).
+    private func check(_ recipe: Recipe, session prepare: ((ImageSession) throws -> Void)? = nil,
+                       file: StaticString = #filePath, line: UInt = #line) throws {
+        let rendered = try render(recipe, prepare: prepare)
         if recipe.overview {
             try compare(rendered.overview, name: recipe.name, file: file, line: line)
         }

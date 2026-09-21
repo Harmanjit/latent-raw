@@ -216,6 +216,21 @@ public struct EditParameters: Sendable, Equatable {
     /// the heal cache) reads this, never `heals` alone.
     public var allHealPatches: [HealPatch] { dust + touchUp.activeBlemishes + heals }
 
+    /// Sensor pixels a full-resolution tile (the 100 % view, the magnifier)
+    /// must reach beyond its usual `margin` past what it shows, so every
+    /// pixel shown is touched up as the whole frame is: the touch-up
+    /// stage's wide blur reads up to `TouchUp.blurReachPixels` past a
+    /// pixel it writes, and a tile's edge clamps those reads. Zero unless
+    /// the edit wants the stage at all (`touchUp.wantsMasks`), so a tile's
+    /// size only changes when the faces or sliders do, never when the
+    /// masks arrive. The tile-planning sites add this to their margin
+    /// (docs/Retouch.md §7).
+    public func touchUpTileReach(beyondMargin margin: CGFloat, sensorSize: CGSize) -> CGFloat {
+        guard touchUp.wantsMasks else { return 0 }
+        let faceWidth = touchUp.medianFaceWidthPixels(sensorSize: SIMD2(Float(sensorSize.width), Float(sensorSize.height)))
+        return max(0, CGFloat(TouchUp.blurReachPixels(faceWidth: faceWidth)) - margin)
+    }
+
     /// Whether the presence stage has anything to do.
     public var wantsLocalContrast: Bool {
         texture != 0 || clarity != 0 || dehaze != 0 || defringePurple > 0 || defringeGreen > 0
@@ -346,11 +361,16 @@ public struct RenderInfo: Sendable {
     /// True when the demosaic stage was skipped because the session had an
     /// identical result cached; only the colour/tone stage ran.
     public let demosaicWasCached: Bool
+    /// True when stages 3 to 5 (neural denoise, noise reduction, spot
+    /// removal) were skipped because the session held their result for
+    /// exactly these inputs (docs/Retouch.md §6, the heal cache).
+    public let healWasCached: Bool
     public var usedBinnedPath: Bool { !isFullResolution }
 
     public init(outputWidth: Int, outputHeight: Int, binQuads: Int,
                 isFullResolution: Bool, demosaicUsed: DemosaicMethod? = nil,
-                sensorRect: CGRect = .zero, demosaicWasCached: Bool = false) {
+                sensorRect: CGRect = .zero, demosaicWasCached: Bool = false,
+                healWasCached: Bool = false) {
         self.outputWidth = outputWidth
         self.outputHeight = outputHeight
         self.binQuads = binQuads
@@ -358,6 +378,14 @@ public struct RenderInfo: Sendable {
         self.demosaicUsed = demosaicUsed
         self.sensorRect = sensorRect
         self.demosaicWasCached = demosaicWasCached
+        self.healWasCached = healWasCached
+    }
+
+    /// The same render with `healWasCached` set.
+    func markingHealCached(_ cached: Bool) -> RenderInfo {
+        RenderInfo(outputWidth: outputWidth, outputHeight: outputHeight, binQuads: binQuads,
+                   isFullResolution: isFullResolution, demosaicUsed: demosaicUsed, sensorRect: sensorRect,
+                   demosaicWasCached: demosaicWasCached, healWasCached: cached)
     }
 }
 
@@ -569,40 +597,66 @@ public final class RenderPipeline {
 
         var colourInput = cameraRGB
 
-        // Stage 3: neural denoise. Blend the session's cached full-frame
-        // result in, re-binned and re-white-balanced to match this render.
-        // Never for a linear source (`ImageSession.supportsAIDenoise`): an
-        // edit copied from a raw may carry a strength, but no result exists.
-        if parameters.aiDenoise > 0, session.supportsAIDenoise, let denoised = session.aiDenoisedCameraRGB {
-            colourInput = try applyAIDenoise(session: session, cmdBuffer: cmdBuffer, input: cameraRGB,
-                                             denoised: denoised, strength: parameters.aiDenoise,
-                                             multipliers: multipliers, renderInfo: sourceInfo,
-                                             outputRole: displayRole == .display ? .aiDenoised : .aiDenoisedPreview)
-        }
+        // Heal cache (docs/Retouch.md §6): everything stages 3 to 5 read,
+        // beyond the demosaic's own key. The lists are the ones the stage
+        // applies (the blemishes only while Remove Blemishes is on), so a
+        // toggle misses; the strength and model of the neural denoise are
+        // here and its pixels are covered by `setAIDenoised` clearing the
+        // cache. On a hit the three stages are skipped outright: with 200
+        // dust spots that is about a thousand dispatches a slider tick no
+        // longer pays for.
+        let healKey = ImageSession.HealKey(
+            stageKey: stageKey, aiDenoise: parameters.aiDenoise, aiDenoiseModel: session.aiDenoiseModel,
+            denoiseLuminance: parameters.denoiseLuminance, denoiseColor: parameters.denoiseColor,
+            dust: parameters.dust, blemishes: parameters.touchUp.activeBlemishes, heals: parameters.heals,
+            redEyes: parameters.redEyes)
+        let cachedHealed = session.cachedHealed(for: healKey)
 
-        // Stage 4: noise reduction, in camera space, before the matrix.
-        if parameters.denoiseLuminance > 0 || parameters.denoiseColor > 0 {
-            // colourInput, not cameraRGB: it may already carry the AI denoise blend.
-            colourInput = try applyDenoise(session: session, cmdBuffer: cmdBuffer,
-                                           input: colourInput, parameters: parameters,
-                                           binSpan: binSpan)
-        }
+        if let cachedHealed {
+            colourInput = cachedHealed
+        } else {
+            // Stage 3: neural denoise. Blend the session's cached full-frame
+            // result in, re-binned and re-white-balanced to match this render.
+            // Never for a linear source (`ImageSession.supportsAIDenoise`): an
+            // edit copied from a raw may carry a strength, but no result exists.
+            if parameters.aiDenoise > 0, session.supportsAIDenoise, let denoised = session.aiDenoisedCameraRGB {
+                colourInput = try applyAIDenoise(session: session, cmdBuffer: cmdBuffer, input: cameraRGB,
+                                                 denoised: denoised, strength: parameters.aiDenoise,
+                                                 multipliers: multipliers, renderInfo: sourceInfo,
+                                                 outputRole: displayRole == .display ? .aiDenoised : .aiDenoisedPreview)
+            }
 
-        // Stage 5: spot removal, in camera space, before the lens stage
-        // moves pixels: the dust spots, then the touch-up blemishes, then
-        // the user's patches (`allHealPatches`).
-        let activeHeals = parameters.allHealPatches.filter {
-            $0.targetBounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(sourceInfo.sensorRect)
+            // Stage 4: noise reduction, in camera space, before the matrix.
+            if parameters.denoiseLuminance > 0 || parameters.denoiseColor > 0 {
+                // colourInput, not cameraRGB: it may already carry the AI denoise blend.
+                colourInput = try applyDenoise(session: session, cmdBuffer: cmdBuffer,
+                                               input: colourInput, parameters: parameters,
+                                               binSpan: binSpan)
+            }
+
+            // Stage 5: spot removal, in camera space, before the lens stage
+            // moves pixels: the dust spots, then the touch-up blemishes, then
+            // the user's patches (`allHealPatches`).
+            let activeHeals = parameters.allHealPatches.filter {
+                $0.targetBounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(sourceInfo.sensorRect)
+            }
+            // Stage 6: red eyes, on the same working texture.
+            let activeRedEyes = parameters.redEyes.filter {
+                !$0.isIdentity && $0.bounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(sourceInfo.sensorRect)
+            }
+            if !activeHeals.isEmpty || !activeRedEyes.isEmpty {
+                colourInput = try applyHeal(session: session, cmdBuffer: cmdBuffer, input: colourInput,
+                                            patches: activeHeals, redEyes: activeRedEyes, cameraToWorking: cameraToWorking,
+                                            renderInfo: sourceInfo, binSpan: binSpan, preview: displayRole != .display)
+                // Only a texture the heal stage wrote is worth keeping: it
+                // has its own role, so nothing but a later heal render
+                // overwrites it, and `storeHealed` evicts that entry then.
+                // A denoised-only result lives in a role other renders
+                // reuse, and the demosaic alone is the stage cache's job.
+                session.storeHealed(colourInput, for: healKey)
+            }
         }
-        // Stage 6: red eyes, on the same working texture.
-        let activeRedEyes = parameters.redEyes.filter {
-            !$0.isIdentity && $0.bounds(sensorSize: CGSize(width: rawW, height: rawH)).intersects(sourceInfo.sensorRect)
-        }
-        if !activeHeals.isEmpty || !activeRedEyes.isEmpty {
-            colourInput = try applyHeal(session: session, cmdBuffer: cmdBuffer, input: colourInput,
-                                        patches: activeHeals, redEyes: activeRedEyes, cameraToWorking: cameraToWorking,
-                                        renderInfo: sourceInfo, binSpan: binSpan)
-        }
+        renderInfo = renderInfo.markingHealCached(cachedHealed != nil)
 
         // Stage 7: lens corrections, still in camera space.
         if Self.wantsLensCorrection(session: session, parameters: parameters) {
@@ -1029,21 +1083,36 @@ public final class RenderPipeline {
     private func applyDustVisualise(session: ImageSession, cmdBuffer: MTLCommandBuffer, input: MTLTexture,
                                     outputRole: ImageSession.TextureRole, visualisation: SpotVisualisation,
                                     binSpan: Float) throws -> MTLTexture {
-        let pso = try gpu.lazyPipeline(.dustVisualise)
         let result = try session.texture(width: input.width, height: input.height,
                                          pixelFormat: .rgba16Float, role: outputRole)
-        guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
+        try Self.encodeDustVisualise(input: input, output: result, visualisation: visualisation,
+                                     binSpan: binSpan, gpu: gpu, commandBuffer: cmdBuffer)
+        return result
+    }
+
+    /// Encodes `dustVisualise` from `input` into `output` (same size). On
+    /// its own so DustVisualiseTests can run the kernel on a synthetic
+    /// texture, as HealStage's tests do.
+    static func encodeDustVisualise(input: MTLTexture, output: MTLTexture, visualisation: SpotVisualisation,
+                                    binSpan: Float, gpu: GPUContext, commandBuffer: MTLCommandBuffer) throws {
+        guard input.width == output.width, input.height == output.height else {
+            throw RenderError.commandBufferFailed
+        }
+        let pso = try gpu.lazyPipeline(.dustVisualise)
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
             throw RenderError.commandBufferFailed
         }
         var params = DustVisualiseGPU(threshold: visualisation.threshold,
                                       radiusSensorPx: visualisation.radiusSensorPx, binSpan: binSpan)
         encoder.setComputePipelineState(pso)
         encoder.setTexture(input, index: 0)
-        encoder.setTexture(result, index: 1)
+        encoder.setTexture(output, index: 1)
         encoder.setBytes(&params, length: MemoryLayout<DustVisualiseGPU>.stride, index: 0)
-        dispatch(encoder, pso: pso, width: input.width, height: input.height)
+        let tw = pso.threadExecutionWidth
+        let th = max(1, pso.maxTotalThreadsPerThreadgroup / tw)
+        encoder.dispatchThreadgroups(MTLSize(width: (input.width + tw - 1) / tw, height: (input.height + th - 1) / th, depth: 1),
+                                     threadsPerThreadgroup: MTLSize(width: tw, height: th, depth: 1))
         encoder.endEncoding()
-        return result
     }
 
     // MARK: - Neural denoise
@@ -1079,13 +1148,15 @@ public final class RenderPipeline {
 
     // MARK: - Spot removal
 
-    /// Patches in order, each over its own bounding box (HealStage).
+    /// Patches in order, each over its own bounding box (HealStage). The
+    /// preview and the tile write different roles so a tile the size of
+    /// the preview never overwrites the preview's heal cache entry.
     private func applyHeal(session: ImageSession, cmdBuffer: MTLCommandBuffer,
                            input: MTLTexture, patches: [HealPatch],
                            redEyes: [RedEyeSpot], cameraToWorking: simd_float3x3,
-                           renderInfo: RenderInfo, binSpan: Float) throws -> MTLTexture {
+                           renderInfo: RenderInfo, binSpan: Float, preview: Bool) throws -> MTLTexture {
         let output = try session.texture(width: input.width, height: input.height,
-                                         pixelFormat: .rgba16Float, role: .healed)
+                                         pixelFormat: .rgba16Float, role: preview ? .healedPreview : .healed)
         let summary = session.file.summary
         try HealStage.encode(patches: patches, redEyes: redEyes, cameraToWorking: cameraToWorking,
                              input: input, output: output,
