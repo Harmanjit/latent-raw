@@ -275,6 +275,52 @@ final class ActiveAreaMigrationTests: XCTestCase {
         XCTAssertEqual(EditStack(parameters: reloaded.parameters()).frame, EditStack.activeAreaFrame)
     }
 
+    /// Dust spots and blemishes move exactly as a heal patch does; a face
+    /// box keeps its corner pixel and its size in pixels; the landmark
+    /// version and the sliders come through untouched.
+    func testDustBlemishesAndFaceBoxesMoveLikeHeals() throws {
+        var p = EditParameters()
+        let patch = HealPatch(target: [0.3, 0.4], source: [0.35, 0.42], radius: 0.01)
+        p.heals = [patch]
+        p.dust = [patch]
+        p.touchUp.blemishes = [patch]
+        p.touchUp.blemishRemoval = true
+        p.touchUp.faces = [TouchUpFace(boundingBox: SIMD4(0.41, 0.18, 0.12, 0.17))]
+        p.touchUp.skinSmoothing = 45
+        p.touchUp.modelVersion = "vision.faceLandmarks.3"
+        var old = EditStack(parameters: p)
+        old.frame = nil
+        let new = old.migratingGeometry(to: canon)
+        XCTAssertEqual(new.frame, EditStack.activeAreaFrame)
+        let heal = try XCTUnwrap(new.modules.heal?.first)
+        XCTAssertNotEqual(heal, patch, "it moved")
+        XCTAssertEqual(new.modules.dust, [heal])
+        XCTAssertEqual(new.modules.touchup?.blemishes, [heal])
+        let face = try XCTUnwrap(new.modules.touchup?.faces.first)
+        let size = SIMD2<Float>(Float(canon.width), Float(canon.height))
+        let corner = SIMD2(face.boundingBox.x, face.boundingBox.y) * size
+        XCTAssertEqual(corner.x, activePixel([0.41, 0.18], canon).x, accuracy: 0.05)
+        XCTAssertEqual(corner.y, activePixel([0.41, 0.18], canon).y, accuracy: 0.05)
+        XCTAssertEqual(face.boundingBox.z * size.x, 0.12 * Float(canon.fullWidth), accuracy: 0.05)
+        XCTAssertEqual(face.boundingBox.w * size.y, 0.17 * Float(canon.fullHeight), accuracy: 0.05)
+        XCTAssertTrue(face.enabled)
+        XCTAssertEqual(face.id, p.touchUp.faces[0].id)
+        XCTAssertEqual(new.modules.touchup?.modelVersion, "vision.faceLandmarks.3")
+        XCTAssertEqual(new.modules.touchup?.skinSmoothing, 45)
+        XCTAssertEqual(new.migratingGeometry(to: canon), new, "once only")
+
+        // Sliders alone are not geometry: nothing to move, nothing marked.
+        var slidersOnly = EditStack()
+        slidersOnly.modules.touchup = TouchUp()
+        slidersOnly.modules.touchup?.eyes = 20
+        XCTAssertEqual(slidersOnly.migratingGeometry(to: canon), slidersOnly)
+        XCTAssertNil(slidersOnly.migratingGeometry(to: canon).frame)
+        // Dust alone is.
+        var dustOnly = EditStack()
+        dustOnly.modules.dust = [patch]
+        XCTAssertEqual(dustOnly.migratingGeometry(to: canon).modules.dust, [heal])
+    }
+
     func testCameraWithoutABorderOnlyGetsMarked() {
         let d750 = SensorActiveArea(left: 0, top: 0, width: 6032, height: 4032, fullWidth: 6032, fullHeight: 4032)
         let old = legacyStack()
