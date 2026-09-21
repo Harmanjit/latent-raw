@@ -234,6 +234,52 @@ final class ModelManifestTests: XCTestCase {
         XCTAssertThrowsError(try PackageHash.sha256(ofPackageAt: root.appendingPathComponent("nowhere.mlpackage")))
     }
 
+    /// A link reads as its target, so the hash would pin bytes outside
+    /// the package; a link to a file or to a folder is refused before
+    /// anything is hashed, and one of the three named files is refused
+    /// even when it is a link to the right bytes.
+    func testHashRefusesSymbolicLinks() throws {
+        let (root, package) = try temporaryNAFNet()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fm = FileManager.default
+        let weights = package.appendingPathComponent("Data/com.apple.CoreML/weights/weight.bin")
+        let elsewhere = root.appendingPathComponent("weight.bin")
+        try fm.moveItem(at: weights, to: elsewhere)
+        try fm.createSymbolicLink(at: weights, withDestinationURL: elsewhere)
+        XCTAssertThrowsError(try PackageHash.sha256(ofPackageAt: package)) { error in
+            XCTAssertEqual(error as? PackageHashError, .symbolicLink("Data/com.apple.CoreML/weights/weight.bin"))
+        }
+        try fm.removeItem(at: weights)
+        try fm.moveItem(at: elsewhere, to: weights)
+
+        let linkedFolder = package.appendingPathComponent("Extra")
+        try fm.createSymbolicLink(at: linkedFolder, withDestinationURL: package.appendingPathComponent("Data"))
+        XCTAssertThrowsError(try PackageHash.sha256(ofPackageAt: package)) { error in
+            XCTAssertEqual(error as? PackageHashError, .symbolicLink("Extra"))
+        }
+    }
+
+    /// The manifest and labels of a package chosen on its own sit at its
+    /// root; named to the hash they are passed over, and the value is
+    /// the one the same package hashes to without them. Unnamed, or
+    /// deeper than the root, they are strays as before.
+    func testHashPassesOverNamedRootFiles() throws {
+        let (root, package) = try temporaryNAFNet()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let original = try PackageHash.sha256(ofPackageAt: package)
+        try "{}".write(to: package.appendingPathComponent("x.model.json"), atomically: true, encoding: .utf8)
+        try "[]".write(to: package.appendingPathComponent("labels.json"), atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try PackageHash.sha256(ofPackageAt: package)) { error in
+            XCTAssertEqual(error as? PackageHashError, .unexpectedFile("labels.json"))
+        }
+        XCTAssertEqual(try PackageHash.sha256(ofPackageAt: package, ignoringRootFiles: ["x.model.json", "labels.json"]), original)
+        XCTAssertThrowsError(try PackageHash.sha256(ofPackageAt: package, ignoringRootFiles: ["x.model.json"]))
+        try "{}".write(to: package.appendingPathComponent("Data/x.model.json"), atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try PackageHash.sha256(ofPackageAt: package, ignoringRootFiles: ["x.model.json", "labels.json"])) { error in
+            XCTAssertEqual(error as? PackageHashError, .unexpectedFile("Data/x.model.json"))
+        }
+    }
+
     /// Every bundled manifest names packages whose contents hash to what
     /// it says (the CI check of docs/Retouch.md §2 A). Vacuous until the
     /// manifests land beside the packages.

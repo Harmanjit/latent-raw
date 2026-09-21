@@ -212,6 +212,16 @@ public struct ModelManifest: Codable, Sendable, Identifiable, Equatable {
         id.range(of: idPattern, options: .regularExpression) == id.startIndex..<id.endIndex
     }
 
+    /// What `packages[].name` and `labelsFile` may look like: one file
+    /// name, no separator and no `..`, since the importer appends them to
+    /// its copy's path and the compile cache keys on the package name.
+    public static let fileNamePattern = "^[A-Za-z0-9._-]{1,255}$"
+
+    public static func isPlainFileName(_ name: String) -> Bool {
+        name != "." && name != ".."
+            && name.range(of: fileNamePattern, options: .regularExpression) == name.startIndex..<name.endIndex
+    }
+
     // MARK: - Decoding helpers
 
     /// A required key, or `ManifestError.missingKey` naming it (with its
@@ -303,24 +313,38 @@ public enum PackageHash {
     /// SHA-256 over `hashedFiles` in that order, each as relative-path
     /// bytes + 0x00 + file bytes. Throws `PackageHashError.unexpectedFile`
     /// for any other regular file in the package (hidden ones included,
-    /// as the script counts them) and `.missingFile` for one of the three
-    /// that isn't there.
-    public static func sha256(ofPackageAt url: URL) throws -> String {
+    /// as the script counts them), `.missingFile` for one of the three
+    /// that isn't there, and `.symbolicLink` for any link, file or
+    /// folder: a link's bytes live outside the package, so the hash
+    /// would pin something the copy does not carry. `ignoringRootFiles`
+    /// names files at the package root the walk passes over: the
+    /// manifest and labels of a package chosen on its own, which the
+    /// importer moves out again (the value never changes, since only
+    /// the three files are hashed).
+    public static func sha256(ofPackageAt url: URL, ignoringRootFiles ignored: Set<String> = []) throws -> String {
         let fm = FileManager.default
         let root = url.standardizedFileURL
         // Every regular file, before any hashing, so a package with a file
         // the hash would not cover is refused whole.
-        let expected = Set(hashedFiles)
-        if let walk = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: []) {
+        let expected = Set(hashedFiles).union(ignored)
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey]
+        if let walk = fm.enumerator(at: root, includingPropertiesForKeys: Array(keys), options: []) {
             for case let file as URL in walk {
-                guard (try? file.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+                let values = try? file.resourceValues(forKeys: keys)
                 let relative = relativePath(of: file, under: root)
+                if values?.isSymbolicLink == true { throw PackageHashError.symbolicLink(relative) }
+                guard values?.isRegularFile == true else { continue }
                 if !expected.contains(relative) { throw PackageHashError.unexpectedFile(relative) }
             }
         }
         var hasher = SHA256()
         for relative in hashedFiles {
             let file = root.appendingPathComponent(relative)
+            // Refused even when the walk was skipped: `fileExists` and the
+            // handle both follow a link.
+            if (try? file.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true {
+                throw PackageHashError.symbolicLink(relative)
+            }
             var isDirectory: ObjCBool = false
             guard fm.fileExists(atPath: file.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
                 throw PackageHashError.missingFile(relative)
@@ -345,4 +369,4 @@ public enum PackageHash {
     }
 }
 
-public enum PackageHashError: Error, Equatable { case missingFile(String), unexpectedFile(String) }
+public enum PackageHashError: Error, Equatable { case missingFile(String), unexpectedFile(String), symbolicLink(String) }
