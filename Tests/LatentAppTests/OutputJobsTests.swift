@@ -283,6 +283,40 @@ final class OutputJobsTests: XCTestCase {
         for job in jobs.running { jobs.end(job.id) }
     }
 
+    /// Remove Dust and Find Faces are jobs like a merge: the keep-awake
+    /// reason names the first photo, and the quit alert says that stopping
+    /// keeps the photos already done.
+    func testDustRemovalAndFaceSearchAreJobsQuittingStops() {
+        let jobs = OutputJobs()
+        var stopped: [String] = []
+        let dust = jobs.begin(.dustRemoval, name: "DSC_0107.NEF") { stopped.append("dust") }
+        var text = OutputJobs.quitAlert(for: jobs.running)
+        XCTAssertEqual(text.message, "Latent is still removing sensor dust from photos")
+        XCTAssertEqual(text.information, "Quitting now stops the dust removal, which keeps the photos already done.")
+        XCTAssertEqual(text.button, "Stop and Quit")
+        jobs.end(dust)
+
+        let faces = jobs.begin(.findFaces, name: "DSC_0107.NEF") { stopped.append("faces") }
+        text = OutputJobs.quitAlert(for: jobs.running)
+        XCTAssertEqual(text.message, "Latent is still finding faces for touch-up")
+        XCTAssertEqual(text.information, "Quitting now stops the face search, which keeps the photos already done.")
+        XCTAssertEqual(text.button, "Stop and Quit")
+
+        // Beside a print and a merge, in the order the message names them.
+        _ = jobs.begin(.print, name: "12 Photos")
+        _ = jobs.begin(.photoMerge, name: "DSC_0106.NEF")
+        text = OutputJobs.quitAlert(for: jobs.running)
+        XCTAssertEqual(text.message, "Latent is still printing “12 Photos”, making an HDR merge and finding faces for touch-up")
+        XCTAssertEqual(text.information, "Quitting now stops the HDR merge, which leaves no photo, and the face search, "
+                       + "which keeps the photos already done, and waits for the print to reach the printing system, then quits.")
+        XCTAssertEqual(text.button, "Finish Printing and Quit")
+        jobs.cancelAll()
+        XCTAssertEqual(stopped, ["faces"])
+        XCTAssertTrue(jobs.running.contains { $0.id == faces })
+        for job in jobs.running { jobs.end(job.id) }
+        XCTAssertFalse(jobs.isRunning)
+    }
+
     /// Files don't move or change name under a print or contact sheet.
     func testFileCommandsWaitForPrintsAndContactSheets() {
         var state = CommandState()
