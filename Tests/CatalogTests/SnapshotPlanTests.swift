@@ -74,6 +74,14 @@ final class SnapshotPlanTests: XCTestCase {
                        [.fullscreen, .fullscreenLeft, .fullscreenRight, .fullscreenBottom])
     }
 
+    /// The Wave 2 steps, and which steps open a tool's group at the end
+    /// of the adjustments panel.
+    func testRetouchSteps() throws {
+        XCTAssertEqual(try SnapshotPlan.parseSteps("dust,touchup,models"), [.dust, .touchUp, .models])
+        XCTAssertEqual(SnapshotPlan.Step.allCases.filter(\.armsATool), [.crop, .heal, .redEye, .dust, .touchUp])
+        XCTAssertFalse(SnapshotPlan.Step.models.armsATool)
+    }
+
     func testSizeParsing() {
         XCTAssertEqual(SnapshotPlan.parseSize(" 1200 x 800 "), CGSize(width: 1200, height: 800))
         XCTAssertNil(SnapshotPlan.parseSize("0x900"))

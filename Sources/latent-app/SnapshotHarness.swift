@@ -17,7 +17,12 @@ import Catalog
 ///     LATENT_SNAPSHOT_STEPS="library;loupe"     states to picture, in order (default:
 ///                                               library;loupe;develop;crop;heal;compare;
 ///                                               survey;export;settings). Also `next`, which moves
-///                                               the selection on; `redeye`; `contactsheet`, the dialog;
+///                                               the selection on; `redeye`; `dust`, Develop with the
+///                                               Sensor Dust group open and its tool armed after Find
+///                                               Spots on the selected image (the one step that changes
+///                                               an edit, undone before the step ends); `touchup`, the
+///                                               Touch-up group open; `models`, Settings on its AI tab;
+///                                               `contactsheet`, the dialog;
 ///                                               `contactsheetfile`, page 1 of the PDF it saves
 ///                                               (written to the snapshot folder, the only
 ///                                               file a step writes); `print`, the print panel;
@@ -55,9 +60,10 @@ import Catalog
 /// the picture being wrong.
 ///
 /// The steps only look: they switch modes, arm tools and open sheets, but
-/// never change an edit, a rating or a file. The catalog in the opened
-/// folder is still created or updated as opening any folder does, so point
-/// it at a copy when that matters.
+/// never change an edit, a rating or a file (`dust` runs Find Spots to have
+/// rings to show, and undoes it before the step ends). The catalog in the
+/// opened folder is still created or updated as opening any folder does,
+/// so point it at a copy when that matters.
 ///
 /// The picture is made inside the app by asking the window's views to
 /// render into a bitmap, not by reading the screen, which is why no
@@ -76,6 +82,13 @@ enum SnapshotHarness {
     /// Whether full-screen image mode may really take the window full
     /// screen during the run (LATENT_SNAPSHOT_FULLSCREEN=system).
     private(set) static var usesSystemFullScreen = false
+
+    /// Scrolls Develop's adjustment panel so the group with the given id
+    /// (`ContentView.sensorDustGroup`, `touchUpGroup`) starts at its top.
+    /// Set by the panel, which alone can reach its ScrollViewReader; the
+    /// headers SwiftUI draws have no views or accessibility elements an
+    /// AppKit walk can find.
+    static var scrollAdjustments: ((String) -> Void)?
 
     /// Called by ContentView when it appears. Returns true when a snapshot
     /// run has started, in which case ContentView must not open a folder
@@ -263,6 +276,15 @@ enum SnapshotHarness {
         for subview in root.subviews { forEachVisibleView(in: subview, body) }
     }
 
+    /// Visits the accessibility tree under `root`: the views and the
+    /// elements AppKit controls publish for their parts, such as a
+    /// toolbar's items.
+    private static func forEachAccessibilityElement(under root: Any, _ body: (any NSAccessibilityProtocol) -> Void) {
+        guard let element = root as? any NSAccessibilityProtocol else { return }
+        body(element)
+        for child in element.accessibilityChildren() ?? [] { forEachAccessibilityElement(under: child, body) }
+    }
+
     static func write(_ image: CGImage, to url: URL) -> Bool {
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
@@ -390,7 +412,7 @@ enum SnapshotHarness {
                 _ = perform(.step(1))
                 // Survey keeps its selection and moves its focus instead.
                 if showing > 0, library.selectedImageIDs.count <= 1 { await waitForImage(views: showing) }
-            case .loupe, .develop, .crop, .heal, .redEye:
+            case .loupe, .develop, .crop, .heal, .redEye, .dust, .touchUp:
                 guard library.selectedImage != nil else { fail("\(step.rawValue): no image selected"); return nil }
                 _ = perform(step == .loupe ? .loupe : .develop)
                 await waitForImage(views: 1)
@@ -398,10 +420,28 @@ enum SnapshotHarness {
                 if step == .crop, !model.cropToolActive { _ = perform(.crop) }
                 if step == .heal, !model.healToolActive { _ = perform(.heal) }
                 if step == .redEye, !model.redEyeToolActive { _ = perform(.redEye) }
+                if step == .dust {
+                    // Find Spots arms the tool itself, with rings to show
+                    // where it found any; `leave` takes the spots back.
+                    let model = model
+                    dustStepsBefore = model.history.steps.count
+                    model.findDustSpots()
+                    _ = await wait("Find Spots", upTo: 60) { !model.findingDust }
+                    if !model.dustToolActive { _ = perform(.dust) }
+                }
+                if step == .touchUp, !model.touchUpToolActive { _ = perform(.touchUp) }
                 // The tools' sections open below the everyday ones, out of
                 // sight; the panel's end shows both, with only collapsed
-                // groups after them.
-                if step == .crop || step == .heal || step == .redEye { await pause(0.2); scrollAdjustments(toEnd: true) }
+                // groups after them. The dust and touch-up groups have too
+                // many collapsed groups after them for that, so the panel
+                // is scrolled to their headers instead.
+                if step == .dust || step == .touchUp {
+                    await pause(0.2)
+                    guard let scroll = SnapshotHarness.scrollAdjustments else { fail("\(step.rawValue): no panel to scroll"); return nil }
+                    scroll(step == .dust ? ContentView.sensorDustGroup : ContentView.touchUpGroup)
+                } else if step.armsATool {
+                    await pause(0.2); scrollAdjustments(toEnd: true)
+                }
             case .compare:
                 guard let selected = library.selectedImage else { fail("compare: no image selected"); return nil }
                 // Compare's left pane takes the other selected image; with
@@ -477,7 +517,7 @@ enum SnapshotHarness {
                         && SnapshotHarness.imageViews(in: root).count >= 1
                 }
                 return second
-            case .settings:
+            case .settings, .models:
                 let before = Set(NSApp.windows.map(ObjectIdentifier.init))
                 // The menu item rather than its action: SwiftUI's handler
                 // isn't reachable down the responder chain when the app
@@ -495,7 +535,10 @@ enum SnapshotHarness {
                             && $0.identifier?.rawValue.contains("Settings") == true }
                     return settings != nil
                 }
-                guard let settings else { fail("settings: the window did not open"); return nil }
+                guard let settings else { fail("\(step.rawValue): the window did not open"); return nil }
+                if step == .models, !selectSettingsTab(named: "AI", in: settings) {
+                    fail("models: no AI tab in the Settings window")
+                }
                 return settings
             case .quality:
                 guard let record = library.selectedImages.first ?? library.selectedImage,
@@ -587,17 +630,43 @@ enum SnapshotHarness {
             case .export: exportSheet.wrappedValue = false
             case .rename: if let sheet = window.attachedSheet { window.endSheet(sheet) }
             case .hdrMerge, .panoramaMerge: PhotoMergeSnapshots.leave(window: window)
-            case .settings: window.close()
+            case .settings, .models: window.close()
             case .quality: QualityCompareWindow.close()
             case .contactSheet, .contactSheetFile, .print: SheetSnapshots.leave(step, window: window)
             case .slideshow: SlideshowController.current?.end()
             case .fullscreen, .fullscreenLeft, .fullscreenRight, .fullscreenBottom: FullScreenImageMode.shared.leave()
             case .secondDisplay: SecondaryDisplay.shared.close()
-            case .crop, .heal, .redEye:
+            case .crop, .heal, .redEye, .dust, .touchUp:
                 _ = perform(.disarmTools)
+                // The spots Find Spots added are the step's only edit; the
+                // stored edit ends as it began.
+                if step == .dust, let before = dustStepsBefore {
+                    while model.history.steps.count > before, model.canUndo { model.undo() }
+                    model.flushPendingSave()
+                }
                 scrollAdjustments(toEnd: false)
             default: break
             }
+        }
+
+        /// How many history steps the image had before the dust step's
+        /// Find Spots, so `leave` can undo exactly that.
+        var dustStepsBefore: Int?
+
+        /// Selects the Settings tab labelled `name`. SwiftUI's TabView in
+        /// the Settings window is a toolbar underneath, one item per tab;
+        /// the item's button is pressed as VoiceOver would press it.
+        func selectSettingsTab(named name: String, in window: NSWindow) -> Bool {
+            guard let root = window.contentView?.superview ?? window.contentView else { return false }
+            var pressed = false
+            SnapshotHarness.forEachAccessibilityElement(under: root) { element in
+                guard !pressed, element.accessibilityRole() == .button, element.accessibilityLabel() == name else { return }
+                pressed = element.accessibilityPerformPress()
+            }
+            if pressed { return true }
+            guard let item = window.toolbar?.items.first(where: { $0.label == name }), let action = item.action else { return false }
+            window.toolbar?.selectedItemIdentifier = item.itemIdentifier
+            return NSApp.sendAction(action, to: item.target, from: item)
         }
 
         /// Scrolls Develop's adjustment panel, the right-most scroll view
