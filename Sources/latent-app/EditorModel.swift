@@ -39,6 +39,7 @@ final class EditorModel: ObservableObject {
                 if parameters.crop != oldValue.crop { canvasDidChange() }
                 rerender()
                 scheduleSave()
+                touchUpParametersDidChange(from: oldValue)
             }
         }
     }
@@ -127,6 +128,7 @@ final class EditorModel: ObservableObject {
                 touchUpToolActive = false
             } else {
                 selectedDustIndex = nil
+                dustToolDidDisarm()
             }
         }
     }

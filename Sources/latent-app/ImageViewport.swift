@@ -73,6 +73,12 @@ struct ImageViewport: View {
                 if allowsTools && model.redEyeToolActive {
                     RedEyeOverlay(model: model)
                 }
+                if allowsTools && model.dustToolActive {
+                    DustOverlay(model: model)
+                }
+                if allowsTools && model.touchUpToolActive {
+                    TouchUpOverlay(model: model)
+                }
             } else {
                 VStack(spacing: 12) {
                     Text(model.isReady ? "No image open" : model.setupError == nil ? "Starting…" : "Metal unavailable")

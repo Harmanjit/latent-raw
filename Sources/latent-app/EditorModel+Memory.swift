@@ -16,16 +16,19 @@ extension EditorModel {
     /// to rebuild), every model the registry has loaded (they reload from
     /// compiled copies on disk), and the click-to-select encodings unless
     /// the prompt tool is armed, when only the selected mask's model keeps
-    /// its encoding. Critical adds every encoding regardless, brush mask
-    /// rasters and the neural denoise result, which takes about 11 s to
-    /// recompute. The layers on screen keep their own textures, so the
-    /// picture doesn't change and nothing re-renders until the user acts.
+    /// its encoding, and the dust analysis Find Spots kept for the
+    /// sliders. Critical adds every encoding regardless, brush mask
+    /// rasters, the touch-up masks and the neural denoise result, which
+    /// takes about 11 s to recompute. The layers on screen keep their own
+    /// textures, so the picture doesn't change and nothing re-renders
+    /// until the user acts.
     func releaseMemory(for level: MemoryPressureLevel) {
         guard level >= .warning else {
             if aiDenoiseReleasedUnderPressure {
                 aiDenoiseReleasedUnderPressure = false
                 regenerateAIDenoiseIfNeeded()
             }
+            touchUpMemoryDidRecover()
             return
         }
         if isOffScreen {
@@ -41,15 +44,18 @@ extension EditorModel {
         } else {
             resetPromptSessions(keeping: selectedPromptModelID)
         }
+        dustAnalysis = nil
         // The denoise worker renders from this session off the main thread
-        // when it starts, so its pool is left alone until the run is done.
-        guard let session, !aiDenoiseRunning else { return }
+        // when it starts, as Find Spots does, so its pool is left alone
+        // until the run is done.
+        guard let session, !aiDenoiseRunning, !findingDust else { return }
         if session.releaseMemory(for: level) {
             aiDenoiseReleasedUnderPressure = true
             if parameters.aiDenoise > 0 {
                 status = "Memory is low: AI denoise will run again when memory recovers"
             }
         }
+        touchUpMemoryDidDrop()
     }
 
     /// Lets go of the open image and everything built from it, saving a
@@ -63,6 +69,8 @@ extension EditorModel {
         guard hasImage || catalogImageID != nil else { return }
         flushPendingSave()
         disarmTools()
+        dustImageWillChange()
+        resetTouchUpForNewImage()
         pendingRender?.cancel()
         stopAIDenoise()
         aiDenoiseReleasedUnderPressure = false

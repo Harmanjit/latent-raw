@@ -36,6 +36,8 @@ extension EditorModel {
             return
         }
         flushPendingSave()
+        // The analysis and the tool belong to the image being left.
+        dustImageWillChange()
         status = "Opening \(url.lastPathComponent)…"
         do {
             let file = try RawFile(path: url.path)
@@ -44,6 +46,7 @@ extension EditorModel {
             // history on hand are the previous photo's.
             self.catalogImageID = catalogImageID
             session = newSession
+            resetTouchUpForNewImage()
             sourceURL = url
             imageTitle = url.lastPathComponent
             asShotWhiteBalance = newSession.asShotWhiteBalance
@@ -96,8 +99,10 @@ extension EditorModel {
             snapshots = []
             stopAIDenoise()
             aiDenoiseReleasedUnderPressure = false
+            dustImageDidOpen()
             rerender()
             regenerateMissingAIMasks()
+            regenerateTouchUpMasksIfNeeded()
             regenerateAIDenoiseIfNeeded()
         } catch {
             // Nothing of the previous photo may outlive a failed open: with
