@@ -75,7 +75,7 @@
         "outputNames": ["low_res_masks", "scores"]
       }
     ],
-    "converter": { "script": "scripts/convert_sam2.py --size baseplus" }
+    "converter": { "script": "scripts/convert_sam2.py --size base-plus" }
   },
   {
     "id": "sam2.1-large",
