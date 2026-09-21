@@ -46,6 +46,7 @@ struct ContentView: View {
     @ObservedObject private var library = MainWindowModels.shared.library
     @ObservedObject private var exportQueue = MainWindowModels.shared.exportQueue
     @ObservedObject private var photoMerge = MainWindowModels.shared.photoMerge
+    @ObservedObject private var selectionJobs = MainWindowModels.shared.selectionJobs
     @ObservedObject private var prefs = AppPreferences.shared
     @ObservedObject private var handOff = ExternalEditorHandOff.shared
     @ObservedObject private var fileOperations = MainWindowModels.shared.library.fileOperations
@@ -63,6 +64,9 @@ struct ContentView: View {
     /// The HDR Panorama dialog's state, while it is up (Photo › Photo Merge ›
     /// HDR Panorama…, experimental).
     @State private var hdrPanoramaMergeSheet: HDRPanoramaMergeSheetModel?
+    /// Photo › Remove Dust… over the selection, or over the open image in
+    /// Develop (then in memory, through the editor's history).
+    @State private var removeDustSheet: RemoveDustSheetModel?
     /// Compare's left pane ("Select"): its own render, created the first
     /// time Compare opens. The right pane ("Candidate") is the main model,
     /// which follows the selection as arrow keys move it.
@@ -72,6 +76,8 @@ struct ContentView: View {
     @State private var cropExpanded = false
     @State private var presenceExpanded = true
     @State private var healExpanded = false
+    @State private var dustExpanded = false
+    @State private var touchUpExpanded = false
     @State private var compareRecord: ImageRecord?
     /// The sidebar and filmstrip stay as the user left them.
     @AppStorage("latent.sidebarVisible") private var sidebarVisible = true
@@ -193,6 +199,11 @@ struct ContentView: View {
         .onChange(of: model.isExporting) { wasExporting, exporting in
             if wasExporting, !exporting { Announcement.post(model.status) }
         }
+        // Find Spots and the Remove Dust sheet arm the tool themselves, from
+        // wherever the panel happens to be; the rings' controls open with it.
+        .onChange(of: model.dustToolActive) { _, armed in
+            if armed { dustExpanded = true }
+        }
         .sheet(isPresented: $showingExportSheet) {
             ExportSheet(count: library.selectedImageIDs.count,
                         sample: library.selectedImages.first ?? library.selectedImage,
@@ -223,6 +234,10 @@ struct ContentView: View {
             HDRPanoramaMergeSheet(model: sheet, thumbnail: { await library.loadThumbnail(for: $0) },
                                   onMerge: { startHDRPanoramaMerge($0, options: $1, from: sheet) },
                                   canMerge: !exportQueue.isGPUBusy)
+                .motionFollowsAccessibility()
+        }
+        .sheet(item: $removeDustSheet) { sheet in
+            RemoveDustSheet(model: sheet, onRemove: { startRemoveDust(from: $0) }, canRemove: !exportQueue.isGPUBusy)
                 .motionFollowsAccessibility()
         }
         .sheet(item: $renaming) { record in
@@ -280,7 +295,8 @@ struct ContentView: View {
     }
 
     private var libraryPanel: some View {
-        LibraryPanel(library: library, exportQueue: exportQueue, photoMerge: photoMerge, model: model,
+        LibraryPanel(library: library, exportQueue: exportQueue, photoMerge: photoMerge, selectionJobs: selectionJobs,
+                     model: model,
                      onOpenFolder: showOpenFolderPanel,
                      onRate: rate, onFlag: flag,
                      onExport: { showingExportSheet = true },
@@ -1031,14 +1047,15 @@ struct ContentView: View {
         case .dust:
             guard mode == .develop, model.hasImage else { break }
             model.dustToolActive.toggle()
+            if model.dustToolActive { dustExpanded = true }
         case .touchUp:
             guard mode == .develop, model.hasImage else { break }
             model.touchUpToolActive.toggle()
+            if model.touchUpToolActive { touchUpExpanded = true }
         case .deleteHeal:
             if model.redEyeToolActive { model.deleteSelectedRedEye(); break }
-            // Wave 2: the dust and touch-up rings' Delete (EditorModel+Dust,
-            // +TouchUp); nothing can select one yet.
-            if model.dustToolActive || model.touchUpToolActive { break }
+            if model.dustToolActive { model.deleteSelectedDust(); break }
+            if model.touchUpToolActive { model.deleteSelectedBlemish(); break }
             guard model.healToolActive else { return false }
             model.deleteSelectedHeal()
         case .disarmTools:
@@ -1073,9 +1090,7 @@ struct ContentView: View {
         case .photoMergeHDRPanorama:
             beginHDRPanoramaMerge()
         case .removeDust:
-            // Wave 2: the Remove Dust sheet over the selection (DustRemovalJob
-            // on the selection job queue), or Find Spots in memory in Develop.
-            break
+            presentRemoveDust(inMemory: mode == .develop)
         case .slideshow:
             SlideshowController.start(model: model, library: library)
         case .editExternally:
@@ -1121,8 +1136,9 @@ struct ContentView: View {
             case .linear: model.addLocal(.linear)
             case .radial: model.addLocal(.radial)
             case .brush: model.addLocal(.brush)
-            // Wave 2: a local with the default subject or prompted model.
-            case .subject, .prompt: break
+            // The registry's default models; the Add menu's submenus pick one.
+            case .subject: model.addAIMask(.subject)
+            case .prompt: model.addPromptedMask()
             }
         case .toggleMaskOverlay:
             model.showMaskOverlay.toggle()
@@ -1206,9 +1222,9 @@ struct ContentView: View {
         state.redEyeToolActive = model.redEyeToolActive
         state.hasSelectedRedEye = model.selectedRedEye != nil
         state.dustToolActive = model.dustToolActive
-        state.hasSelectedDust = model.selectedDustIndex.map { $0 < model.parameters.dust.count } ?? false
+        state.hasSelectedDust = model.hasSelectedDust
         state.touchUpToolActive = model.touchUpToolActive
-        state.hasSelectedBlemish = model.selectedBlemishIndex.map { $0 < model.parameters.touchUp.blemishes.count } ?? false
+        state.hasSelectedBlemish = model.hasSelectedBlemish
         state.toolSizeAdjustable = model.toolSizeAdjustable
         state.canAddMask = model.hasImage && model.parameters.locals.count < LocalAdjustment.maximumCount
         state.hasSelectedMask = model.selectedLocal != nil
@@ -1319,6 +1335,65 @@ struct ContentView: View {
                target == .primary || library.selectedImageIDs.contains(selected.id ?? -1) {
                 model.apply(stack, groups: groups)
             }
+            // A pasted touch-up wants faces the stored edits don't have:
+            // the job finds them per photo, leaving alone any that don't
+            // need it, so every target may be passed.
+            if groups.contains(.touchUp), FaceFindJob.needsFaces(stack.modules.touchup), let gpu = model.gpuContext {
+                model.flushPendingSave()
+                selectionJobs.start(FaceFindJob(), records: library.batchTargets(onlyPrimary: target == .primary),
+                                    library: library, gpu: gpu)
+            }
+        }
+    }
+
+    // MARK: - Remove Dust
+
+    /// Photo › Remove Dust…. In memory (Develop), the open image alone,
+    /// through the editor's history; with no catalog row for it there is
+    /// nothing to keep a map for, so Find Spots runs straight away.
+    /// Otherwise the sheet over the selection (Library) or the primary
+    /// image (Loupe, Compare, Survey), for the job queue.
+    private func presentRemoveDust(inMemory: Bool) {
+        let records: [ImageRecord]
+        if inMemory {
+            guard let row = library.images.first(where: { $0.id == model.catalogImageID }) else {
+                model.findDustSpots()
+                return
+            }
+            records = [row]
+        } else {
+            records = library.batchTargets(onlyPrimary: mode != .library)
+        }
+        let urls = records.compactMap { library.fileURL(for: $0) }
+        guard !records.isEmpty, urls.count == records.count else { return }
+        removeDustSheet = RemoveDustSheetModel(records: records, urls: urls, inMemory: inMemory)
+    }
+
+    /// Remove Dust was pressed. In memory the editor does the work (the
+    /// reference-photo method makes a map, which the sheet doesn't offer
+    /// there); otherwise the job runs over the records on the queue, after
+    /// the editor's pending edit is saved so the job reads the stored edit
+    /// on screen.
+    private func startRemoveDust(from sheet: RemoveDustSheetModel) {
+        if sheet.inMemory {
+            sheet.remember()
+            switch sheet.method {
+            case .find:
+                model.dustSensitivity = sheet.sensitivity
+                model.dustSize = sheet.size
+                model.findDustSpots()
+            case .map:
+                if let map = sheet.selectedMap { model.applyDustMap(map, options: sheet.options) }
+            case .reference:
+                break
+            }
+        } else {
+            guard let gpu = model.gpu, let job = sheet.job() else { return }
+            model.flushPendingSave()
+            guard selectionJobs.start(job, records: sheet.records, library: library, gpu: gpu) else {
+                library.lastError = "Dust removal couldn’t start: an export or another job is using the graphics processor, or the photos are no longer in the open folder."
+                return
+            }
         }
     }
 
@@ -1355,6 +1430,7 @@ struct ContentView: View {
 
     private var adjustmentPanel: some View {
         ScrollView {
+            ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 20) {
                 ScopePanel(model: model)
 
@@ -1400,6 +1476,26 @@ struct ContentView: View {
                         if model.healToolActive || model.redEyeToolActive { activeToolBadge }
                     }
                 }
+
+                DisclosureGroup(isExpanded: $dustExpanded) {
+                    DustSection(model: model, fromDustMap: { presentRemoveDust(inMemory: true) }).padding(.top, 8)
+                } label: {
+                    HStack {
+                        disclosureLabel("Sensor Dust")
+                        if model.dustToolActive { activeToolBadge }
+                    }
+                }
+                .id(Self.sensorDustGroup)
+
+                DisclosureGroup(isExpanded: $touchUpExpanded) {
+                    TouchUpSection(model: model).padding(.top, 8)
+                } label: {
+                    HStack {
+                        disclosureLabel("Touch-up")
+                        if model.touchUpToolActive { activeToolBadge }
+                    }
+                }
+                .id(Self.touchUpGroup)
 
                 EmptyView()
                 DisclosureGroup {
@@ -1564,10 +1660,21 @@ struct ContentView: View {
                 Spacer(minLength: 0)
             }
             .padding(16)
+            #if DEBUG
+            // The snapshot harness pictures the dust and touch-up groups,
+            // which sit too far from the panel's end to reach by scrolling
+            // there as the other tool steps do.
+            .onAppear { SnapshotHarness.scrollAdjustments = { id in proxy.scrollTo(id, anchor: .top) } }
+            #endif
+            }
         }
         // A number typed for one photo must not land on the next.
         .sliderFieldSubject(model.sourceURL)
     }
+
+    /// Scroll targets in the adjustments panel.
+    static let sensorDustGroup = "sensor-dust-group"
+    static let touchUpGroup = "touch-up-group"
 
     /// Temperature gets its own row because the slider travels in mired
     /// while reading out in Kelvin, and its range is centred on this
@@ -1715,8 +1822,6 @@ struct ContentView: View {
                 Text(model.aiDenoiseStatus).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            // The optional width-64 model (OptionalModel, ModelDownloader and
-            // the .high variant) is wired up but not offered here for now.
             Text("NAFNet (SIDD) on the GPU, in camera space before colour. About 11 s per 24 MP frame; the result is kept while the image is open and recomputed on export.")
                 .font(.caption2).foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -3,6 +3,9 @@ import CoreGraphics
 import RawCore
 import PixelEngine
 import ColorKit
+import os
+
+private let pageLogger = Logger(subsystem: "com.latent.app", category: "pages")
 
 /// A rendered picture handed across threads. CGImage is immutable, but the
 /// SDK doesn't say it is Sendable.
@@ -67,6 +70,8 @@ extension ExportWorker {
         let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
         let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
                                               rotation: rotation)
+        try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
+                                   name: request.sourceURL.lastPathComponent, logger: pageLogger)
         if request.runsAIDenoise, parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
             let denoiser = try await AIDenoiser.load()
             try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)

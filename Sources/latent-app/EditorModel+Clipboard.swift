@@ -39,6 +39,9 @@ extension EditorModel {
         var next = current.merged(with: onThisImage(stack), groups: groups).parameters(defaults: defaultParameters)
         if next.whiteBalance.isAsShot { next.whiteBalance = defaultParameters.whiteBalance }
         parameters = next
+        // A pasted touch-up keeps this image's own faces, of which it may
+        // have none yet.
+        findFacesIfPastedTouchUpNeedsThem()
     }
 
     func pasteSettings() {

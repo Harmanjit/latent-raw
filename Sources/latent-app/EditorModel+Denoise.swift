@@ -13,41 +13,6 @@ extension EditorModel {
     /// with no image open, so the panel doesn't flash its explanation.
     var aiDenoiseSupported: Bool { session?.supportsAIDenoise ?? true }
 
-    func downloadHighQualityModel() {
-        guard modelDownloadProgress == nil else { return }
-        let model = OptionalModel.nafnetWidth64
-        modelDownloadProgress = 0
-        modelDownloadStatus = "Downloading \(model.title) (\(model.sizeMB) MB)…"
-        modelDownloadTask = Task { [weak self] in
-            do {
-                try await ModelDownloader.install(model) { [weak self] received, expected in
-                    Task { @MainActor in
-                        self?.modelDownloadProgress = expected > 0 ? Double(received) / Double(expected) : 0
-                    }
-                }
-                self?.modelDownloadProgress = nil
-                self?.highQualityModelInstalled = model.isInstalled
-                self?.modelDownloadStatus = "Installed. Choose “High quality” above."
-            } catch is CancellationError {
-                self?.modelDownloadProgress = nil
-                self?.modelDownloadStatus = ""
-            } catch {
-                self?.modelDownloadProgress = nil
-                self?.modelDownloadStatus = "\(error)"
-            }
-        }
-    }
-
-    func cancelModelDownload() { modelDownloadTask?.cancel() }
-
-    func removeHighQualityModel() {
-        do { try ModelDownloader.remove(.nafnetWidth64) } catch { reportFailure("Removing the model", error) }
-        highQualityModelInstalled = OptionalModel.nafnetWidth64.isInstalled
-        Self.sharedDenoisers[.high] = nil
-        if aiDenoiseVariant == .high { aiDenoiseVariant = .standard }
-        modelDownloadStatus = "Removed."
-    }
-
     /// Runs the network over the open image (once; the result lives with
     /// the session) and re-renders. ~12 s for 24 MP on the GPU.
     func runAIDenoise() {

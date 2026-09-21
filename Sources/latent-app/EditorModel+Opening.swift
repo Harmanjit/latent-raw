@@ -36,6 +36,8 @@ extension EditorModel {
             return
         }
         flushPendingSave()
+        // The analysis and the tool belong to the image being left.
+        dustImageWillChange()
         status = "Opening \(url.lastPathComponent)…"
         do {
             let file = try RawFile(path: url.path)
@@ -44,6 +46,7 @@ extension EditorModel {
             // history on hand are the previous photo's.
             self.catalogImageID = catalogImageID
             session = newSession
+            resetTouchUpForNewImage()
             sourceURL = url
             imageTitle = url.lastPathComponent
             asShotWhiteBalance = newSession.asShotWhiteBalance
@@ -90,16 +93,16 @@ extension EditorModel {
                 status = "\(file.summary.cameraMake) \(file.summary.cameraModel) · " +
                          "\(file.summary.rawWidth)×\(file.summary.rawHeight)"
             }
-            sam2Session = nil
-            sam2Encoding?.cancel()
-            sam2Encoding = nil
-            sam2Status = ""
+            // The last image's encodings, per model, answer nothing here.
+            resetPromptSessions()
             history = EditHistory(initial: EditStack(parameters: parameters))
             snapshots = []
             stopAIDenoise()
             aiDenoiseReleasedUnderPressure = false
+            dustImageDidOpen()
             rerender()
             regenerateMissingAIMasks()
+            regenerateTouchUpMasksIfNeeded()
             regenerateAIDenoiseIfNeeded()
         } catch {
             // Nothing of the previous photo may outlive a failed open: with

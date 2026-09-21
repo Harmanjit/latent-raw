@@ -27,6 +27,13 @@ public struct SnapshotPlan: Equatable, Sendable {
         case heal
         /// Develop with the red-eye tool armed, under Spot Removal.
         case redEye = "redeye"
+        /// Develop with the Sensor Dust group open and its tool armed,
+        /// after Find Spots on the selected image (undone afterwards).
+        case dust
+        /// Develop with the Touch-up group open.
+        case touchUp = "touchup"
+        /// The Settings window on its AI tab, where the models are listed.
+        case models
         /// Compare, on the selection and the image after it.
         case compare
         /// Survey, on the selection and the images after it, four in all
@@ -76,6 +83,12 @@ public struct SnapshotPlan: Equatable, Sendable {
         /// The steps that picture full-screen image mode.
         public var isFullScreen: Bool {
             [.fullscreen, .fullscreenLeft, .fullscreenRight, .fullscreenBottom].contains(self)
+        }
+
+        /// The Develop steps that arm a tool, whose group opens at the
+        /// end of the adjustments panel.
+        public var armsATool: Bool {
+            [.crop, .heal, .redEye, .dust, .touchUp].contains(self)
         }
     }
 

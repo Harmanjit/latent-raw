@@ -122,13 +122,20 @@ final class SheetRenderer: @unchecked Sendable {
     private let serial = NSLock()
     private let failureLock = NSLock()
     private var failed: [String] = []
+    /// What the renders reported as stood in for (`RenderedImage.maskSubstitutions`).
+    private let substitutions: MaskSubstitutionLog
 
     /// Names of the photos that couldn't be rendered, in the order tried.
     var failedNames: [String] { failureLock.withLock { failed } }
 
-    init(cache: SheetImageCache, render: @escaping Render) {
+    /// By photo name, the models its edit names but this Mac lacks; only
+    /// photos that needed a stand-in appear.
+    var maskSubstitutions: [String: [String]] { substitutions.byName }
+
+    init(cache: SheetImageCache, render: @escaping Render, substitutions: MaskSubstitutionLog = MaskSubstitutionLog()) {
         self.cache = cache
         self.render = render
+        self.substitutions = substitutions
     }
 
     /// Renders through ExportWorker in `colorSpace` at `bitsPerComponent`;
@@ -138,7 +145,10 @@ final class SheetRenderer: @unchecked Sendable {
     /// on the long edge (0 always, `Int.max` never): a small cell can't show it.
     convenience init(gpu: GPUContext, colorSpace: ColorKit.OutputSpace, bitsPerComponent: Int, aiDenoiseFrom: Int,
                      profile: SheetProfile?, cacheBudget: Int) {
-        self.init(cache: SheetImageCache(byteBudget: cacheBudget)) { item, longEdge in
+        // The closure is made before the renderer, so the log it writes
+        // to is shared rather than captured.
+        let substitutions = MaskSubstitutionLog()
+        self.init(cache: SheetImageCache(byteBudget: cacheBudget), render: { item, longEdge in
             let request = ExportWorker.ImageRequest(sourceURL: item.sourceURL, editStackJSON: item.editStackJSON,
                                                     userRotation: item.userRotation, colorSpace: colorSpace,
                                                     maxLongEdge: longEdge, bitsPerComponent: bitsPerComponent,
@@ -156,9 +166,10 @@ final class SheetRenderer: @unchecked Sendable {
                 Log.editor.error("page render of \(item.name, privacy: .private) failed: \(String(describing: error), privacy: .private)")
                 return nil
             }
+            substitutions.record(item.name, missing: rendered.maskSubstitutions)
             guard let profile else { return rendered.cgImage }
             return SheetColorConversion.convert(rendered.cgImage, to: profile.colorSpace) ?? rendered.cgImage
-        }
+        }, substitutions: substitutions)
     }
 
     /// The picture for a cell needing `longEdge` pixels, from the cache or
@@ -201,6 +212,24 @@ final class SheetRenderer: @unchecked Sendable {
     private final class ResultBox<T>: @unchecked Sendable {
         var value: T?
     }
+}
+
+/// The models a page's renders stood in for, by photo name, written from
+/// the render closure and read once the page is done. Thread-safe: the
+/// print thread and a GCD worker both render.
+final class MaskSubstitutionLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [String: [String]] = [:]
+
+    init() {}
+
+    /// Nothing is kept for a photo that needed no stand-in.
+    func record(_ name: String, missing: [String]) {
+        guard !missing.isEmpty else { return }
+        lock.withLock { entries[name] = missing }
+    }
+
+    var byName: [String: [String]] { lock.withLock { entries } }
 }
 
 /// A printer or paper profile chosen for Soft Proof, read once.

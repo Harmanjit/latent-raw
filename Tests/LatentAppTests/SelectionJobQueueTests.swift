@@ -413,3 +413,273 @@ final class SelectionJobQueueTests: XCTestCase {
         XCTAssertEqual(queue.summary, "Dust removal cancelled · 1 photo kept")
     }
 }
+
+// MARK: - Remove Dust on the queue
+
+/// A folder of synthetic "dirty sensor" photos (`DustDNG`): two from a
+/// Nikon D750 and one from a Canon, all with the same dust, which the
+/// catalog opens like any raw.
+@MainActor
+struct DustFolder {
+    static let names = ["DSC_0201.dng", "DSC_0202.dng", "IMG_0203.dng"]
+
+    let base: URL
+    let root: URL
+    let library: Library
+
+    static func make() async throws -> DustFolder {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("latent-remove-dust-\(UUID().uuidString)", isDirectory: true)
+        let root = base.appendingPathComponent("Dusty", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try DustDNG.write(to: root.appendingPathComponent(names[0]), seed: 1)
+        try DustDNG.write(to: root.appendingPathComponent(names[1]), seed: 2)
+        try DustDNG.write(to: root.appendingPathComponent(names[2]), make: "Canon", model: "EOS R5", seed: 3)
+        let library = Library()
+        try await library.open(folder: root, defaultSubfolderMode: .independent)
+        return DustFolder(base: base, root: root, library: library)
+    }
+
+    func remove() { try? FileManager.default.removeItem(at: base) }
+
+    var records: [ImageRecord] {
+        Self.names.compactMap { name in library.images.first { $0.fileName == name } }
+    }
+
+    var store: DustMapStore { DustMapStore(url: base.appendingPathComponent("dust-maps.json")) }
+
+    /// A map of the discs for the Nikon, as a reference photo would give.
+    var nikonMap: DustMap {
+        let short = Float(min(DustDNG.width, DustDNG.height))
+        return DustMap(camera: "Nikon D750", sensorSize: SIMD2(DustDNG.width, DustDNG.height), referenceName: "sky.dng",
+                       spots: DustDNG.spots.map {
+                           DustMapSpot(centre: $0.centre / DustDNG.sensorSize, radius: $0.radius / short, contrast: 0.5)
+                       })
+    }
+}
+
+/// A real job with a gate before each photo, so a test can hold the
+/// queue between photos and cancel it there.
+final class GatedJob: SelectionJob, @unchecked Sendable {
+    let job: DustRemovalJob
+    private let lock = NSLock()
+    private var _gateOpen = true
+    private var _heldName: String?
+    private var _processing = ""
+
+    init(_ job: DustRemovalJob) { self.job = job }
+
+    var processing: String { lock.withLock { _processing } }
+    func closeGate(for name: String) { lock.withLock { _gateOpen = false; _heldName = name } }
+    func openGate() { lock.withLock { _gateOpen = true } }
+
+    var title: String { job.title }
+    var outputKind: OutputJobs.Kind { job.outputKind }
+    var undoName: String { job.undoName }
+
+    func prepare(gpu: GPUContext, progress: @Sendable (MergeProgress) -> Void) async throws {
+        try await job.prepare(gpu: gpu, progress: progress)
+    }
+
+    func process(_ input: SelectionJobInput, gpu: GPUContext) async throws -> SelectionJobResult {
+        lock.withLock { _processing = input.record.fileName }
+        while lock.withLock({ !_gateOpen && _heldName == input.record.fileName }) {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        return try await job.process(input, gpu: gpu)
+    }
+
+    func summary(changed: Int, counted: Int, skipped: Int, elapsed: TimeInterval) -> String {
+        job.summary(changed: changed, counted: counted, skipped: skipped, elapsed: elapsed)
+    }
+
+    func announcement(changed: Int) -> String { job.announcement(changed: changed) }
+}
+
+@MainActor
+final class DustRemovalJobTests: XCTestCase {
+    nonisolated(unsafe) var folder: DustFolder?
+    nonisolated(unsafe) var gpuContext: GPUContext?
+
+    override func setUp() async throws {
+        gpuContext = try await GPUContext.shared()
+        folder = try await DustFolder.make()
+        XCTAssertEqual(folder?.records.count, 3, "the catalog opens the stand-in DNGs")
+    }
+
+    override func tearDown() async throws {
+        await MainActor.run { folder?.remove() }
+    }
+
+    private var gpu: GPUContext { gpuContext! }
+    private var photos: DustFolder { folder! }
+
+    private func stored(_ name: String) async throws -> EditStack? {
+        let id = try XCTUnwrap(photos.library.images.first { $0.fileName == name }?.id)
+        guard let json = try await photos.library.catalog!.storedEdit(forImageID: id)?.json else { return nil }
+        return try EditStack.decode(json: json)
+    }
+
+    private func run(_ job: any SelectionJob, records: [ImageRecord]? = nil) async -> SelectionJobQueue {
+        let queue = SelectionJobQueue(gpuSlot: ExportQueue(), jobs: OutputJobs())
+        XCTAssertTrue(queue.start(job, records: records ?? photos.records, library: photos.library, gpu: gpu))
+        await queue.waitUntilDone()
+        await photos.library.waitForPendingWork()
+        return queue
+    }
+
+    /// Find spots: every photo is analysed and its discs healed, in one
+    /// undo group, with the frame named; a user's own patch in a stored
+    /// edit is kept beside the new spots.
+    func testFindSpotsHealsEveryPhotoInOneUndoGroupKeepingUserHeals() async throws {
+        let manager = UndoManager()
+        photos.library.undoManager = manager
+        let heal = HealPatch(target: [0.9, 0.9], source: [0.8, 0.9], radius: 0.03)
+        var edit = EditParameters()
+        edit.exposureEV = 0.5
+        edit.heals = [heal]
+        let existing = EditStack(parameters: edit)
+        let id = try XCTUnwrap(photos.records[1].id)
+        try await photos.library.saveEditStack(try existing.encodeJSON(), schemaVersion: EditStack.schemaVersion,
+                                               processVersion: EditStack.processVersion, forImageID: id)
+
+        let queue = await run(DustRemovalJob(method: .find, options: DustDetector.Options(), store: photos.store))
+        for name in DustFolder.names {
+            let written = try await stored(name)
+            let stack = try XCTUnwrap(written, name)
+            XCTAssertEqual(stack.modules.dust?.count, DustDNG.spots.count, name)
+            XCTAssertEqual(stack.frame, EditStack.activeAreaFrame, name)
+            for patch in stack.modules.dust ?? [] {
+                XCTAssertNotNil(DustDNG.spot(under: patch), "\(name): a patch sits on a disc")
+            }
+        }
+        let editedStack = try await stored(DustFolder.names[1])
+        let edited = try XCTUnwrap(editedStack)
+        XCTAssertEqual(edited.modules.heal, [heal], "the user's patch is untouched")
+        XCTAssertEqual(edited.modules.exposure?.ev, 0.5)
+        XCTAssertEqual(manager.undoMenuItemTitle, "Undo Remove Dust (3 Images)")
+        XCTAssertTrue(queue.summary.hasPrefix("Removed dust from 3 photos (\(3 * DustDNG.spots.count) spots) in "),
+                      queue.summary)
+        XCTAssertEqual(queue.notes, [])
+        XCTAssertNil(photos.library.lastError)
+
+        // A second run finds the same spots already patched: nothing changes.
+        let again = await run(DustRemovalJob(method: .find, options: DustDetector.Options(), store: photos.store))
+        XCTAssertTrue(again.summary.hasPrefix("No dust spots found in "), again.summary)
+        XCTAssertEqual(manager.undoMenuItemTitle, "Undo Remove Dust (3 Images)", "nothing new filed")
+    }
+
+    /// Use dust map: the map's spots are verified in each photo of its
+    /// camera; a photo from another camera is skipped with a note.
+    func testADustMapSkipsAnotherCameraWithANote() async throws {
+        let job = DustRemovalJob(method: .map(photos.nikonMap), options: DustDetector.Options(), store: photos.store)
+        let queue = await run(job)
+        let first = try await stored(DustFolder.names[0])
+        XCTAssertEqual(first?.modules.dust?.count, DustDNG.spots.count)
+        let second = try await stored(DustFolder.names[1])
+        XCTAssertEqual(second?.modules.dust?.count, DustDNG.spots.count)
+        let canon = try await stored(DustFolder.names[2])
+        XCTAssertNil(canon, "the Canon is left alone")
+        XCTAssertEqual(queue.notes, ["IMG_0203.dng is from a Canon EOS R5, not the map’s Nikon D750, so it was skipped"])
+        XCTAssertTrue(queue.summary.hasPrefix("Removed dust from 2 photos (\(2 * DustDNG.spots.count) spots) in "),
+                      queue.summary)
+    }
+
+    /// New dust map from a reference photo: `prepare` finds the discs in
+    /// the reference and saves them as a map for its camera, which the
+    /// photos are then checked against.
+    func testAReferencePhotoMakesAMapThatIsSavedAndUsed() async throws {
+        let reference = photos.root.appendingPathComponent(DustFolder.names[0])
+        let job = DustRemovalJob(method: .reference(url: reference, name: DustFolder.names[0]),
+                                 options: DustDetector.Options(), store: photos.store)
+        var seen: [String] = []
+        let queue = SelectionJobQueue(gpuSlot: ExportQueue(), jobs: OutputJobs())
+        let watch = queue.$progress.sink { if let stage = $0?.stage { seen.append(stage) } }
+        defer { watch.cancel() }
+        XCTAssertTrue(queue.start(job, records: photos.records, library: photos.library, gpu: gpu))
+        await queue.waitUntilDone()
+        await photos.library.waitForPendingWork()
+
+        let maps = photos.store.load()
+        XCTAssertEqual(maps.count, 1)
+        let map = try XCTUnwrap(maps.first)
+        XCTAssertEqual(map.camera, "Nikon D750")
+        XCTAssertEqual(map.sensorSize, SIMD2(DustDNG.width, DustDNG.height))
+        XCTAssertEqual(map.referenceName, DustFolder.names[0])
+        XCTAssertEqual(map.spots.count, DustDNG.spots.count)
+        XCTAssertEqual(job.map?.id, map.id)
+        XCTAssertEqual(seen.first, "Looking for dust in DSC_0201.dng")
+        let second = try await stored(DustFolder.names[1])
+        XCTAssertEqual(second?.modules.dust?.count, DustDNG.spots.count)
+        let canon = try await stored(DustFolder.names[2])
+        XCTAssertNil(canon)
+        XCTAssertEqual(queue.notes.count, 1, "the Canon")
+
+        // A reference with no dust makes no map and stops the job.
+        let clean = photos.base.appendingPathComponent("clean.dng")
+        try DustDNG.write(to: clean, spots: [])
+        let failing = DustRemovalJob(method: .reference(url: clean, name: "clean.dng"), options: DustDetector.Options(),
+                                     store: photos.store)
+        let failed = await run(failing)
+        XCTAssertEqual(photos.library.lastError,
+                       "Dust removal failed: No dust spots were found in clean.dng, so no dust map was made. "
+                       + "Try a higher sensitivity, or a photo of a plain sky at f/16")
+        XCTAssertEqual(failed.summary, "")
+        XCTAssertEqual(photos.store.load().count, 1, "no second map")
+    }
+
+    /// A photo the job can't read is noted and the others are written.
+    func testAPhotoThatCannotBeReadIsNoted() async throws {
+        try Data("not a raw any more".utf8).write(to: photos.root.appendingPathComponent(DustFolder.names[1]))
+        let queue = await run(DustRemovalJob(method: .find, options: DustDetector.Options(), store: photos.store))
+        let first = try await stored(DustFolder.names[0])
+        XCTAssertEqual(first?.modules.dust?.count, DustDNG.spots.count)
+        let broken = try await stored(DustFolder.names[1])
+        XCTAssertNil(broken)
+        let third = try await stored(DustFolder.names[2])
+        XCTAssertEqual(third?.modules.dust?.count, DustDNG.spots.count)
+        XCTAssertEqual(queue.notes.count, 1)
+        XCTAssertTrue(queue.notes[0].hasPrefix("DSC_0202.dng couldn’t be read: "), queue.notes[0])
+        XCTAssertTrue(queue.summary.hasPrefix("Removed dust from 2 photos"), queue.summary)
+        XCTAssertNil(photos.library.lastError, "a note, not an error")
+    }
+
+    /// Cancelled between photos: the photos done are written and the rest
+    /// are left, in one undo group of their own.
+    func testCancelKeepsThePhotosDone() async throws {
+        let manager = UndoManager()
+        photos.library.undoManager = manager
+        let job = GatedJob(DustRemovalJob(method: .find, options: DustDetector.Options(), store: photos.store))
+        job.closeGate(for: DustFolder.names[1])
+        let queue = SelectionJobQueue(gpuSlot: ExportQueue(), jobs: OutputJobs())
+        XCTAssertTrue(queue.start(job, records: photos.records, library: photos.library, gpu: gpu))
+        await waitUntil("the second photo", seconds: 30) { job.processing == DustFolder.names[1] }
+        queue.cancel()
+        await queue.waitUntilDone()
+        await photos.library.waitForPendingWork()
+        let first = try await stored(DustFolder.names[0])
+        XCTAssertEqual(first?.modules.dust?.count, DustDNG.spots.count)
+        let second = try await stored(DustFolder.names[1])
+        XCTAssertNil(second)
+        let third = try await stored(DustFolder.names[2])
+        XCTAssertNil(third, "never reached")
+        XCTAssertEqual(queue.summary, "Dust removal cancelled · 1 photo kept")
+        XCTAssertEqual(manager.undoMenuItemTitle, "Undo Remove Dust")
+        XCTAssertNil(photos.library.lastError)
+    }
+
+    func testTheWordsOfTheSummary() {
+        let job = DustRemovalJob(method: .find, options: DustDetector.Options())
+        XCTAssertEqual(job.summary(changed: 11, counted: 412, skipped: 0, elapsed: 38.2), "Removed dust from 11 photos (412 spots) in 38 s")
+        XCTAssertEqual(job.summary(changed: 1, counted: 1, skipped: 1, elapsed: 2.34), "Removed dust from 1 photo (1 spot) in 2.3 s · 1 skipped")
+        XCTAssertEqual(job.summary(changed: 0, counted: 0, skipped: 0, elapsed: 12), "No dust spots found in 12 s")
+        XCTAssertEqual(job.announcement(changed: 11), "Dust removal finished: removed dust from 11 photos")
+        XCTAssertEqual(job.announcement(changed: 0), "Dust removal finished: no dust spots found")
+        XCTAssertEqual(job.title, "Dust removal")
+        XCTAssertEqual(job.undoName, "Remove Dust")
+        XCTAssertEqual(job.outputKind, .dustRemoval)
+        XCTAssertEqual(DustRemovalError.noDustInReference("sky.nef").errorDescription,
+                       "No dust spots were found in sky.nef, so no dust map was made. Try a higher sensitivity, or a photo of a plain sky at f/16")
+    }
+}

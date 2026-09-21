@@ -79,6 +79,53 @@ final class EditorModelStateTests: XCTestCase {
         XCTAssertEqual(ExportActivity.activeCount, held)
     }
 
+    /// Find Faces runs off the main actor; the photo it was started on may
+    /// be closed before it reports. Its faces, masks and status then go
+    /// nowhere: the next photo's edit must not get another photo's faces.
+    func testFacesFoundAfterThePhotoClosedGoNowhere() async throws {
+        let url = try TestAssets.d750URL()
+        _ = try await GPUContext.shared()
+        let gate = Gate()
+        EditorModel.touchUpPasses = EditorModel.TouchUpPasses(
+            find: { _, image in
+                gate.wait()
+                let face = TouchUpFace(boundingBox: SIMD4(0.2, 0.2, 0.3, 0.3))
+                let summary = image.session.file.summary
+                let masks = TouchUpMaskSet.fixture(sensorWidth: summary.rawWidth, sensorHeight: summary.rawHeight,
+                                                   faces: [(id: face.id, skin: CGRect(x: 0.2, y: 0.2, width: 0.3, height: 0.3),
+                                                            teeth: nil, eyes: [])])
+                return TouchUpRegions.Found(faces: [face], tooSmall: 0, masks: masks, thumbnails: [:])
+            },
+            build: { _, _, _ in (TouchUpMaskSet(faces: [], width: 1, height: 1, modelVersion: ""), []) },
+            blemishes: { _, _, _, _, _ in [] })
+        defer { EditorModel.touchUpPasses = .live }
+        let model = EditorModel()
+        model.onEditSettled = { _, _ in }
+        model.open(url: url, catalogImageID: 1)
+        XCTAssertTrue(model.hasImage)
+        model.findFaces()
+        XCTAssertTrue(model.findingFaces)
+
+        model.closeImage()
+        model.resetTouchUpForNewImage()   // as the lead's closeImage does
+        model.open(url: url, catalogImageID: 2)
+        let steps = model.history.steps.count
+        gate.open()
+        await waitUntil("the stale Find Faces to report", seconds: 20) { !model.findingFaces }
+        XCTAssertTrue(model.parameters.touchUp.faces.isEmpty, "another photo's faces")
+        XCTAssertFalse(try XCTUnwrap(model.session).hasTouchUpMasks)
+        XCTAssertTrue(model.faceThumbnails.isEmpty)
+        XCTAssertEqual(model.history.steps.count, steps)
+        XCTAssertNotEqual(model.status, "Found 1 face")
+    }
+
+    /// Holds a fake pass until the test lets it go.
+    private final class Gate: @unchecked Sendable {
+        private let semaphore = DispatchSemaphore(value: 0)
+        func wait() { semaphore.wait() }
+        func open() { semaphore.signal() }
+    }
+
     /// Paste and presets outside the grid go to the image shown only.
     /// Outside Develop that is always its stored edit, whose Library undo
     /// is what Undo there takes back, even with the editor holding it.

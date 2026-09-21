@@ -21,7 +21,8 @@ extension EditorModel {
     /// What the pipeline renders for the screen: linear Display P3, so
     /// the presenter can hand it to the EDR layer untouched. While a local
     /// is selected and its mask should be visible, the overlay index rides
-    /// along — a display setting, never part of the edit.
+    /// along — a display setting, never part of the edit. So do the dust
+    /// visualisation and the skin-mask tint: exports never build this.
     var displayOutput: RenderOutput {
         // Proofing simulates an SDR file, so the display headroom is
         // dropped to 1 while it's on: an EDR highlight can't be in a JPEG.
@@ -31,6 +32,8 @@ extension EditorModel {
         }
         output.proof = proofLUT
         output.gamutWarning = gamutWarning
+        output.spotVisualisation = dustVisualisation
+        output.touchUpOverlay = touchUpOverlayWanted
         return output
     }
 

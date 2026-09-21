@@ -76,6 +76,8 @@ final class MainWindowModels {
     let exportQueue: ExportQueue
     /// Photo › Photo Merge, taking turns with the export queue for the GPU.
     let photoMerge: PhotoMergeQueue
+    /// Remove Dust and Find Faces over a selection, on the same GPU slot.
+    let selectionJobs: SelectionJobQueue
     /// Set once the first window has opened the launch folder or file; a
     /// window opened again finds everything as it was left.
     var openedAtLaunch = false
@@ -84,6 +86,7 @@ final class MainWindowModels {
         let queue = ExportQueue()
         exportQueue = queue
         photoMerge = PhotoMergeQueue(gpuSlot: queue)
+        selectionJobs = SelectionJobQueue(gpuSlot: queue)
     }
 }
 

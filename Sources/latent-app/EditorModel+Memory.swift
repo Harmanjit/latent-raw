@@ -13,18 +13,22 @@ extension EditorModel {
     /// Gives back what can be rebuilt when macOS runs short of memory.
     ///
     /// Warning: the session's pooled textures and demosaic cache (one render
-    /// to rebuild), the shared Core ML models (they reload from compiled
-    /// copies on disk), and the SAM 2 image encoding unless click-to-select
-    /// is in use. Critical adds the encoding regardless, brush mask rasters
-    /// and the neural denoise result, which takes about 11 s to recompute.
-    /// The layers on screen keep their own textures, so the picture doesn't
-    /// change and nothing re-renders until the user acts.
+    /// to rebuild), every model the registry has loaded (they reload from
+    /// compiled copies on disk), and the click-to-select encodings unless
+    /// the prompt tool is armed, when only the selected mask's model keeps
+    /// its encoding, and the dust analysis Find Spots kept for the
+    /// sliders. Critical adds every encoding regardless, brush mask
+    /// rasters, the touch-up masks and the neural denoise result, which
+    /// takes about 11 s to recompute. The layers on screen keep their own
+    /// textures, so the picture doesn't change and nothing re-renders
+    /// until the user acts.
     func releaseMemory(for level: MemoryPressureLevel) {
         guard level >= .warning else {
             if aiDenoiseReleasedUnderPressure {
                 aiDenoiseReleasedUnderPressure = false
                 regenerateAIDenoiseIfNeeded()
             }
+            touchUpMemoryDidRecover()
             return
         }
         if isOffScreen {
@@ -34,20 +38,24 @@ extension EditorModel {
         // Dropping these caches never disturbs work in flight: a running
         // denoise or encode holds its own reference to the model.
         Self.sharedDenoisers.removeAll()
-        SAM2Models.shared.release()
-        SegmentationModel.shared.release()
+        ModelRegistry.shared.releaseAll()
         if level == .critical || maskTool != .prompt {
-            sam2Session = nil
+            resetPromptSessions()
+        } else {
+            resetPromptSessions(keeping: selectedPromptModelID)
         }
+        dustAnalysis = nil
         // The denoise worker renders from this session off the main thread
-        // when it starts, so its pool is left alone until the run is done.
-        guard let session, !aiDenoiseRunning else { return }
+        // when it starts, as Find Spots does, so its pool is left alone
+        // until the run is done.
+        guard let session, !aiDenoiseRunning, !findingDust else { return }
         if session.releaseMemory(for: level) {
             aiDenoiseReleasedUnderPressure = true
             if parameters.aiDenoise > 0 {
                 status = "Memory is low: AI denoise will run again when memory recovers"
             }
         }
+        touchUpMemoryDidDrop()
     }
 
     /// Lets go of the open image and everything built from it, saving a
@@ -61,13 +69,12 @@ extension EditorModel {
         guard hasImage || catalogImageID != nil else { return }
         flushPendingSave()
         disarmTools()
+        dustImageWillChange()
+        resetTouchUpForNewImage()
         pendingRender?.cancel()
         stopAIDenoise()
         aiDenoiseReleasedUnderPressure = false
-        sam2Encoding?.cancel()
-        sam2Encoding = nil
-        sam2Session = nil
-        sam2Status = ""
+        resetPromptSessions()
         session = nil
         sourceURL = nil
         catalogImageID = nil
@@ -83,5 +90,12 @@ extension EditorModel {
         history = EditHistory(initial: EditStack(parameters: parameters))
         snapshots = []
         status = "Open a raw file to begin"
+    }
+
+    /// The model the armed prompt tool clicks against: the selected
+    /// click-to-select mask's, resolved as its clicks are.
+    private var selectedPromptModelID: String? {
+        guard case .prompted(_, let version)? = selectedLocal?.shape else { return nil }
+        return promptModelID(for: version)
     }
 }

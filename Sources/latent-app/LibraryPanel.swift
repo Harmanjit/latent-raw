@@ -8,6 +8,8 @@ struct LibraryPanel: View {
     @ObservedObject var library: Library
     @ObservedObject var exportQueue: ExportQueue
     @ObservedObject var photoMerge: PhotoMergeQueue
+    /// Remove Dust and Find Faces over a selection.
+    @ObservedObject var selectionJobs: SelectionJobQueue
     @ObservedObject var model: EditorModel
     @State private var metadataExpanded = true
     @State private var historyExpanded = false
@@ -169,6 +171,10 @@ struct LibraryPanel: View {
                 Text(photoMerge.summary).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if !selectionJobs.isRunning, !selectionJobs.summary.isEmpty {
+                Text(selectionJobs.summary).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if !exportQueue.isRunning, !exportQueue.summary.isEmpty {
                 Text(exportQueue.summary).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -176,6 +182,13 @@ struct LibraryPanel: View {
                     Text("✗ \(f.name): \(f.reason)").font(.caption2).foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityLabel("Failed: \(f.name): \(f.reason)")
+                }
+                // A mask rendered with a stand-in model: the export worked,
+                // so a note, not a failure.
+                ForEach(exportQueue.notes, id: \.self) { note in
+                    Text(note).font(.caption2).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Note: \(note)")
                 }
             }
         }
@@ -189,11 +202,14 @@ struct LibraryPanel: View {
     ///
     /// Beside the progress and outside the Export group for the same
     /// reason: HDR Merge Without Dialog has no other channel for them, and
-    /// a folded-away section would swallow them.
+    /// a folded-away section would swallow them. A Remove Dust or Find
+    /// Faces job's notes (a photo that couldn't be read, one skipped for
+    /// another camera's map) show here for the same reason.
     @ViewBuilder private var mergeNotes: some View {
-        if !photoMerge.isRunning, !photoMerge.notes.isEmpty {
+        let notes = (photoMerge.isRunning ? [] : photoMerge.notes) + (selectionJobs.isRunning ? [] : selectionJobs.notes)
+        if !notes.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(photoMerge.notes.enumerated()), id: \.offset) { _, note in
+                ForEach(Array(notes.enumerated()), id: \.offset) { _, note in
                     Label(note, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption2).foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
@@ -203,15 +219,41 @@ struct LibraryPanel: View {
         }
     }
 
-    /// The export or Photo Merge under way, with its Cancel. They take
-    /// turns over one GPU slot, so only one of the two is ever running.
+    /// The Cancel button's spoken name for a selection job: the plan's
+    /// words rather than the title's, which read oddly as a verb phrase
+    /// ("cancel finding faces").
+    static func cancelLabel(forJob title: String) -> String {
+        title == "Finding faces" ? "Cancel face search" : "Cancel \(title.lowercased())"
+    }
+
+    /// The export, Photo Merge or selection job under way, with its
+    /// Cancel. They take turns over one GPU slot, so only one of the three
+    /// is ever running.
     ///
     /// Outside the Export disclosure group on purpose: the panel is the
-    /// only place either job's progress and its only Cancel appear, and a
+    /// only place a job's progress and its only Cancel appear, and a
     /// folded-away section would hide them (and leave Export and Photo
     /// Merge greyed out with nothing on screen to say why).
     @ViewBuilder private var runningJob: some View {
-        if photoMerge.isRunning {
+        if selectionJobs.isRunning {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(selectionJobs.title).font(.caption2)
+                    Spacer()
+                    Button("Cancel") { selectionJobs.cancel() }
+                        .controlSize(.mini)
+                        .accessibilityLabel(Self.cancelLabel(forJob: selectionJobs.title))
+                }
+                ProgressView(value: selectionJobs.progress?.fraction ?? 0, total: 1)
+                    .controlSize(.small)
+                    .accessibilityLabel("\(selectionJobs.title) progress")
+                    .accessibilityValue(SelectionJobQueue.spokenProgress(selectionJobs.progress))
+                // "Photo 3 of 12: DSC_0107.NEF", the photo's name included.
+                Text(selectionJobs.progress?.stage ?? "Starting…").font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                    .accessibilityHidden(true)
+            }
+        } else if photoMerge.isRunning {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
                     Text(photoMerge.kind.title).font(.caption2)
