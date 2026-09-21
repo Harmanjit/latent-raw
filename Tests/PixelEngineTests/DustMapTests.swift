@@ -42,6 +42,60 @@ final class DustMapTests: XCTestCase {
         XCTAssertEqual(empty.title, "Canon EOS R5 · 12 Sep 2026 · 0 spots")
     }
 
+    /// What the file says goes straight to the detector, whose window
+    /// around a spot grows with the radius: a map with an absurd radius
+    /// would take gigabytes or overflow an Int, and one with millions of
+    /// spots would verify each of them per photo. Loading clamps every
+    /// spot and count, and drops a map without a sensor size, so the
+    /// detector runs on what is left in bounded time.
+    func testLoadSanitisesWhatTheFileSays() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("latent-dust-map-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("dust-maps.json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let many = (0..<(HealPatch.maximumDustCount + 100)).map { _ in #"{"centre":[0.5,0.5],"radius":0.002,"contrast":0.2}"# }
+        let json = """
+        {"version": 1, "maps": [
+          {"id": "7A1C0000-0000-0000-0000-000000000001", "camera": "Synthetic Camera", "sensorSize": [800, 600],
+           "created": "2026-09-12T10:00:00Z", "referenceName": "r.dng", "options": {"sensitivity": 50, "size": "medium"},
+           "spots": [{"centre": [0.5, 0.5], "radius": 1e30, "contrast": 0.3},
+                     {"centre": [0.5, 0.5], "radius": 2.0, "contrast": 0.3},
+                     {"centre": [2, -3], "radius": 0.002, "contrast": 0.3},
+                     {"centre": [0.4, 0.4], "radius": -0.5, "contrast": 0.3},
+                     {"centre": [0.25, 0.25], "radius": 0.003, "contrast": 0.2}]},
+          {"id": "7A1C0000-0000-0000-0000-000000000002", "camera": "Synthetic Camera", "sensorSize": [800, 600],
+           "created": "2026-09-13T10:00:00Z", "referenceName": "s.dng", "options": {"sensitivity": 50, "size": "medium"},
+           "spots": [\(many.joined(separator: ","))]},
+          {"id": "7A1C0000-0000-0000-0000-000000000003", "camera": "Synthetic Camera", "sensorSize": [0, 600],
+           "created": "2026-09-14T10:00:00Z", "referenceName": "t.dng", "options": {"sensitivity": 50, "size": "medium"},
+           "spots": []}
+        ]}
+        """
+        try json.write(to: url, atomically: true, encoding: .utf8)
+        let maps = DustMapStore(url: url).load()
+        XCTAssertEqual(maps.count, 2, "a map without a sensor size is dropped")
+        let first = try XCTUnwrap(maps.first { $0.referenceName == "r.dng" })
+        XCTAssertEqual(first.spots.count, 5)
+        XCTAssertEqual(first.spots[0].radius, DustMapSpot.maximumRadius)
+        XCTAssertEqual(first.spots[1].radius, DustMapSpot.maximumRadius)
+        XCTAssertEqual(first.spots[2].centre, SIMD2(1, 0))
+        XCTAssertEqual(first.spots[3].radius, 0)
+        XCTAssertEqual(first.spots[4], DustMapSpot(centre: [0.25, 0.25], radius: 0.003, contrast: 0.2), "a sane spot is untouched")
+        XCTAssertEqual(maps.first { $0.referenceName == "s.dng" }?.spots.count, HealPatch.maximumDustCount)
+        XCTAssertNil(DustMapSpot(centre: [.nan, 0.5], radius: 0.002, contrast: 0.2).sanitized)
+        XCTAssertNil(DustMapSpot(centre: [0.5, 0.5], radius: .infinity, contrast: 0.2).sanitized)
+        XCTAssertNil(DustMapSpot(centre: [0.5, 0.5], radius: 0.002, contrast: .nan).sanitized)
+        XCTAssertGreaterThan(DustMapSpot.maximumRadius * 4000, 40 * 1.5 + 2, "the widest band's spots are kept")
+
+        // The clamped spots verify in bounded time on a real analysis;
+        // the raw ones would have cut a window of gigabytes.
+        let a = DustDetectorTests.analysis(DustScene.make(noise: 0.02, spotCount: 0, decoys: false, seed: 303))
+        let t0 = Date()
+        _ = DustDetector.verify(first.spots, in: a, options: first.options, existing: [])
+        XCTAssertLessThan(Date().timeIntervalSince(t0), 10)
+    }
+
     /// Detect on a reference photo, save as a map, load it back and verify
     /// it on a second photo of the same sensor with different noise and
     /// sky: the same spots come back, with the patch geometry the detector
