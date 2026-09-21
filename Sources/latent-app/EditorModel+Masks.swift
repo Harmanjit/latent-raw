@@ -63,10 +63,11 @@ extension EditorModel {
     }
 
     /// Makes the mask at `index` again with another model: an ordinary
-    /// parameter change (undo and history cover it) that rewrites the
-    /// stored `modelVersion`, drops the old pixels and regenerates. A
-    /// click-to-select mask keeps its points and answers them against
-    /// the new model's encoding.
+    /// parameter change that rewrites the stored `modelVersion`, drops
+    /// the old pixels and regenerates; undo and history cover it because
+    /// the restore paths run `syncModelMasks`, which does the same for a
+    /// shape they bring back. A click-to-select mask keeps its points
+    /// and answers them against the new model's encoding.
     func rerunMask(at index: Int, with entry: ModelEntry) {
         guard index < parameters.locals.count, let session else { return }
         let local = parameters.locals[index]
@@ -90,6 +91,27 @@ extension EditorModel {
         guard let session else { return }
         for local in parameters.locals where local.shape.isModelGenerated {
             if !session.hasAIMask(forLocal: local.id), !generatingMasks.contains(local.id) {
+                generateAIMask(for: local)
+            }
+        }
+    }
+
+    /// Undo, Redo, a history jump or a snapshot put `parameters` back
+    /// without touching the session, whose mask pixels are keyed by the
+    /// local's id alone: a model-generated local whose stored shape came
+    /// back different (another model, other prompt points) would keep
+    /// rendering the pixels of the shape it no longer names. Those are
+    /// dropped and made again; a local with no pixels at all gets them
+    /// too, as on open. Called from the restore paths with the value
+    /// `parameters` had before.
+    func syncModelMasks(from old: EditParameters) {
+        guard let session else { return }
+        let before = Dictionary(old.locals.map { ($0.id, $0.shape) }, uniquingKeysWith: { a, _ in a })
+        for local in parameters.locals where local.shape.isModelGenerated {
+            if let previous = before[local.id], previous != local.shape {
+                session.setAIMask(nil, forLocal: local.id)
+                generateAIMask(for: local)
+            } else if !session.hasAIMask(forLocal: local.id), !generatingMasks.contains(local.id) {
                 generateAIMask(for: local)
             }
         }
@@ -152,8 +174,13 @@ extension EditorModel {
             self.generatingMasks.remove(localID)
             switch outcome {
             case .success(let result):
-                // The user may have moved to another image while the model ran.
-                guard self.session === session else { return }
+                // The user may have moved to another image while the model
+                // ran, or Undo may have given the local back its previous
+                // model: pixels for a shape the edit no longer names would
+                // land on top of the ones being made for it.
+                guard self.session === session,
+                      let now = self.parameters.locals.first(where: { $0.id == localID }),
+                      case .ai(_, let current) = now.shape, current == modelVersion else { return }
                 session.setAIMask(result.mask, forLocal: localID)
                 let made = result.substitutedModel.map { "\(runner), \($0) is not installed" } ?? runner
                 self.status = String(format: "%@ mask (%@): %.0f ms on device, %.0f%% of the frame",
@@ -216,7 +243,11 @@ extension EditorModel {
                 guard let models = await ModelRegistry.shared.prompted(id: id) else { return nil }
                 return try? SAM2Session(models: models, image: input.cgImage)
             }.value
-            guard let self, self.session === session else { return nil }
+            // Awaiting the detached encode does not carry this task's
+            // cancellation into it, so a memory warning that cancelled
+            // the encode (`resetPromptSessions`) is checked here: the
+            // encoding it asked to be rid of must not land after all.
+            guard let self, !Task.isCancelled, self.session === session else { return nil }
             self.promptSessions[id] = result
             self.promptEncoding[id] = nil
             self.promptStatus[id] = result.map { String(format: "Image encoded in %.0f ms — click the subject; option-click to exclude", $0.encodeSeconds * 1000) }
@@ -266,6 +297,7 @@ extension EditorModel {
         guard let sam = promptSessions[id] else { ensurePromptSession(for: id); return }
         let prompts = points.map { PromptPoint(x: $0.x, y: $0.y, foreground: $0.foreground) }
         let localID = local.id
+        let shape = local.shape
         generatingMasks.insert(localID)
         Task { @MainActor [weak self] in
             let outcome = await Task.detached(priority: .userInitiated) {
@@ -275,6 +307,9 @@ extension EditorModel {
             self.generatingMasks.remove(localID)
             switch outcome {
             case .success(let prediction):
+                // Another click or Undo changed the points meanwhile: the
+                // answer to the old ones would land on the new mask.
+                guard self.parameters.locals.first(where: { $0.id == localID })?.shape == shape else { return }
                 session.setAIMask(prediction.mask, forLocal: localID)
                 self.status = String(format: "Selection: %.0f ms, confidence %.2f, %.0f%% of the frame",
                                      prediction.seconds * 1000, prediction.score, prediction.mask.coverage * 100)
@@ -297,11 +332,32 @@ extension EditorModel {
     var maskToolActive: Bool { maskTool != .none && selectedLocal != nil && !cropToolActive }
 
     /// Screen pixel -> normalized sensor coordinate, through the viewport
-    /// (rotated image space) and the rotation (back to the sensor).
+    /// (rotated image space) and the rotation (back to the sensor). The
+    /// point is on the output grid: what the viewport shows, after the
+    /// lens stage has moved pixels.
     func sensorNormalized(_ screen: CGPoint) -> SIMD2<Float> {
         let canvas = viewport.sensorPoint(forScreenPoint: screen, drawableSize: drawableSize)
         let sensor = frame.sensorPoint(fromCanvasPoint: canvas)
         return SIMD2(Float(sensor.x / sensorSize.width), Float(sensor.y / sensorSize.height))
+    }
+
+    /// Output-grid normalised point -> raw grid, through the lens map. A
+    /// heal patch is applied before the lens stage, so a click on the
+    /// corrected image goes through here to the pixel it is over; the
+    /// point itself without lens correction.
+    func rawNormalized(_ out: SIMD2<Float>) -> SIMD2<Float> {
+        guard let pipeline, let session, sensorSize.width > 0, sensorSize.height > 0 else { return out }
+        let size = SIMD2(Float(sensorSize.width), Float(sensorSize.height))
+        return pipeline.rawSensorPoint(forOutputPoint: out * size, session: session, parameters: parameters) / size
+    }
+
+    /// The inverse: where a raw-grid normalised point (a stored patch
+    /// target or face box) shows on the corrected image the overlays draw
+    /// on.
+    func outputNormalized(_ raw: SIMD2<Float>) -> SIMD2<Float> {
+        guard let pipeline, let session, sensorSize.width > 0, sensorSize.height > 0 else { return raw }
+        let size = SIMD2(Float(sensorSize.width), Float(sensorSize.height))
+        return pipeline.outputSensorPoint(forRawPoint: raw * size, session: session, parameters: parameters) / size
     }
 
     func maskToolBegan(at screen: CGPoint) {

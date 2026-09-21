@@ -268,10 +268,20 @@ final class ModelMenuTests: XCTestCase {
         XCTAssertTrue(model.status.hasPrefix("Generating subject mask with Apple Vision"), model.status)
         model.flushPendingSave()
         XCTAssertTrue(model.canUndo, "the rerun is a step of its own")
+        // The new model's pixels land (stood in for): Undo names the old
+        // model again, so they go and its mask is made again.
+        session.setAIMask(MaskBitmap(width: 1, height: 1, data: [255]), forLocal: local.id)
         model.undo()
         guard case .ai(_, let before) = model.parameters.locals[0].shape else { return XCTFail("shape changed") }
         XCTAssertEqual(before, "birefnet-lite@1", "undo brings the old model back")
+        XCTAssertFalse(session.hasAIMask(forLocal: local.id), "the other model's pixels are gone")
+        XCTAssertTrue(model.generatingMasks.contains(local.id))
+        XCTAssertTrue(model.status.hasPrefix("Generating subject mask with"), model.status)
+        session.setAIMask(MaskBitmap(width: 1, height: 1, data: [255]), forLocal: local.id)
         model.redo()
+        guard case .ai(_, let after) = model.parameters.locals[0].shape else { return XCTFail("shape changed") }
+        XCTAssertEqual(after, "vision.foregroundInstance@1")
+        XCTAssertFalse(session.hasAIMask(forLocal: local.id), "redo drops them the same way")
         // Out of range, or a hand-drawn mask: nothing happens.
         model.rerunMask(at: 5, with: vision)
         model.parameters.locals.append(LocalAdjustment(name: "G", shape: .linear(start: .zero, end: .one)))
