@@ -19,10 +19,10 @@ import RawCore
 ///
 /// **What is written.** The stored edit, migrated onto the active area
 /// (`ImageSession.stackForThisImage`), with `modules.dust` set and the
-/// frame named: a stored stack with no frame, or with readout-frame
-/// patches, is migrated in the same write, or the next open would shift
-/// the dust by the masked border on bordered cameras. A photo in which
-/// nothing is found is left alone.
+/// frame named (`SelectionJobResult.writing`): a stored stack with no
+/// frame, or with readout-frame patches, is migrated in the same write,
+/// or the next open would shift the dust by the masked border on
+/// bordered cameras. A photo in which nothing is found is left alone.
 final class DustRemovalJob: SelectionJob, @unchecked Sendable {
     enum Method: Sendable {
         /// Detect in each photo.
@@ -123,8 +123,7 @@ final class DustRemovalJob: SelectionJob, @unchecked Sendable {
         var stack = try input.storedJSON.map { try session.stackForThisImage(EditStack.decode(json: $0)) } ?? EditStack()
         let dust = Array((parameters.dust + found).prefix(HealPatch.maximumDustCount))
         stack.modules.dust = dust
-        stack.frame = EditStack.activeAreaFrame
-        return SelectionJobResult(newJSON: .some(try stack.encodeJSON()), count: dust.count - parameters.dust.count)
+        return try .writing(stack, count: dust.count - parameters.dust.count)
     }
 
     /// "Removed dust from 11 photos (412 spots) in 38 s", "· 1 skipped"

@@ -2,6 +2,7 @@ import XCTest
 import Combine
 @testable import Catalog
 import PixelEngine
+import RawCore
 @testable import latent_app
 
 // The one batch-job queue (docs/Retouch.md §8) against a fake job: Remove
@@ -411,6 +412,33 @@ final class SelectionJobQueueTests: XCTestCase {
         let stored17 = try await stored(photos.library, "DSC_0107.dng")
         XCTAssertNil(stored17)
         XCTAssertEqual(queue.summary, "Dust removal cancelled · 1 photo kept")
+    }
+
+    /// A job's result names the frame its geometry is measured on: a
+    /// stack whose only module was a pasted touch-up has none, and read
+    /// back on a bordered camera its boxes would otherwise be moved.
+    func testAJobResultNamesTheActiveAreaFrame() throws {
+        var pasted = TouchUp()
+        pasted.skinSmoothing = 40
+        pasted.faces = [TouchUpFace(boundingBox: SIMD4(0.5, 0.4, 0.2, 0.3))]
+        pasted.blemishes = [HealPatch(target: [0.55, 0.45], source: [0.6, 0.45], radius: 0.01)]
+        var stack = EditStack()
+        stack.modules.touchup = pasted
+        XCTAssertNil(stack.frame, "as the Library paste writes it")
+
+        let result = try SelectionJobResult.writing(stack, count: 1)
+        let json = try XCTUnwrap(result.newJSON ?? nil)
+        let written = try EditStack.decode(json: json)
+        XCTAssertEqual(written.frame, EditStack.activeAreaFrame)
+        XCTAssertEqual(result.count, 1)
+        // A readout 140 columns wider than the picture on the left.
+        let bordered = SensorActiveArea(left: 140, top: 0, width: 5860, height: 4000, fullWidth: 6000, fullHeight: 4000)
+        let read = written.migratingGeometry(to: bordered)
+        XCTAssertEqual(read.modules.touchup?.faces.map(\.boundingBox), pasted.faces.map(\.boundingBox))
+        XCTAssertEqual(read.modules.touchup?.blemishes, pasted.blemishes)
+        let unnamed = stack.migratingGeometry(to: bordered)
+        XCTAssertNotEqual(unnamed.modules.touchup?.faces.map(\.boundingBox), pasted.faces.map(\.boundingBox),
+                          "without the name the boxes move")
     }
 }
 

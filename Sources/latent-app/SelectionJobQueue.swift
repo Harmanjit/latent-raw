@@ -27,6 +27,19 @@ struct SelectionJobResult: Sendable {
         self.count = count
         self.note = note
     }
+
+    /// The result that writes `stack`, whose geometry the job measured on
+    /// the image's active area, with that frame named. A stack whose only
+    /// module was a pasted touch-up carries no frame, and a stack with
+    /// readout-frame patches was migrated as it was read; either way the
+    /// boxes and patches the job adds sit on the active area, and written
+    /// without the name they would be moved by the masked border on the
+    /// next open of a bordered camera's photo.
+    static func writing(_ stack: EditStack, count: Int) throws -> SelectionJobResult {
+        var stack = stack
+        stack.frame = EditStack.activeAreaFrame
+        return SelectionJobResult(newJSON: .some(try stack.encodeJSON()), count: count)
+    }
 }
 
 /// A job the `SelectionJobQueue` runs over explicit catalog rows, one photo
