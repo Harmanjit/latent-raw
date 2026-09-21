@@ -2,6 +2,9 @@ import Foundation
 import CoreGraphics
 import RawCore
 import PixelEngine
+import os
+
+private let slideLogger = Logger(subsystem: "com.latent.app", category: "slideshow")
 
 extension ExportWorker {
     /// One image with its edit, rendered for a screen rather than a file:
@@ -34,7 +37,12 @@ extension ExportWorker {
             throw ExportWorkerError.unreadableEdit(error)
         }
         try Task.checkCancellation()
-        _ = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
+        // A slide has nowhere to say a mask was made with another model;
+        // the log keeps the fact.
+        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
+        if !masks.substituted.isEmpty {
+            slideLogger.notice("\(sourceURL.lastPathComponent, privacy: .private): masks made with \(masks.substituted.joined(separator: ", "), privacy: .public) instead of the models the edit names")
+        }
         try Task.checkCancellation()
 
         let summary = file.summary

@@ -63,6 +63,10 @@ public enum ExportWorker {
         public let pixelHeight: Int
         public let seconds: TimeInterval
         public let masksGenerated: Int
+        /// Display names of the models that stood in for ones the edit
+        /// names but this Mac lacks (docs/Retouch.md §5); empty when every
+        /// mask was made with its own model.
+        public let maskSubstitutions: [String]
         /// Where the time went, in seconds: "unpack", "masks", "render", "pack", "write".
         public let phases: [(String, TimeInterval)]
 
@@ -86,6 +90,8 @@ public enum ExportWorker {
         /// The request's settings with the watermark's tokens filled in.
         public let settings: ExportSettings
         public let masksGenerated: Int
+        /// As `Outcome.maskSubstitutions`.
+        public let maskSubstitutions: [String]
         public let phases: [(String, TimeInterval)]
         let start: Date
         /// What `finished` needs: the space the pixels are in, the source's
@@ -94,6 +100,21 @@ public enum ExportWorker {
         let colorSpace: ColorKit.OutputSpace
         let sourceName: String
         let readMetadata: ExportMetadata
+
+        init(image: Exporter.EncodableImage, metadata: ExportMetadata?, settings: ExportSettings, masksGenerated: Int,
+             maskSubstitutions: [String] = [], phases: [(String, TimeInterval)], start: Date,
+             colorSpace: ColorKit.OutputSpace, sourceName: String, readMetadata: ExportMetadata) {
+            self.image = image
+            self.metadata = metadata
+            self.settings = settings
+            self.masksGenerated = masksGenerated
+            self.maskSubstitutions = maskSubstitutions
+            self.phases = phases
+            self.start = start
+            self.colorSpace = colorSpace
+            self.sourceName = sourceName
+            self.readMetadata = readMetadata
+        }
 
         public var pixelWidth: Int { image.image.width }
         public var pixelHeight: Int { image.image.height }
@@ -119,8 +140,8 @@ public enum ExportWorker {
             carried.includeLocation = includeLocation
             return Rendered(image: try image.watermarked(settings.watermark, colorSpace: colorSpace),
                             metadata: includeMetadata ? carried : nil, settings: settings,
-                            masksGenerated: masksGenerated, phases: phases, start: start, colorSpace: colorSpace,
-                            sourceName: sourceName, readMetadata: readMetadata)
+                            masksGenerated: masksGenerated, maskSubstitutions: maskSubstitutions, phases: phases,
+                            start: start, colorSpace: colorSpace, sourceName: sourceName, readMetadata: readMetadata)
         }
     }
 
@@ -133,7 +154,7 @@ public enum ExportWorker {
         let phases = rendered.phases + [("write", Date().timeIntervalSince(mark))]
         return Outcome(pixelWidth: rendered.pixelWidth, pixelHeight: rendered.pixelHeight,
                        seconds: Date().timeIntervalSince(rendered.start), masksGenerated: rendered.masksGenerated,
-                       phases: phases)
+                       maskSubstitutions: rendered.maskSubstitutions, phases: phases)
     }
 
     /// The export's pixels and metadata without writing a file; the request's
@@ -166,7 +187,7 @@ public enum ExportWorker {
         }
 
         // Model-generated masks are not stored; make them again.
-        let masksGenerated = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
+        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
         lap("masks")
         try Task.checkCancellation()
 
@@ -232,17 +253,20 @@ public enum ExportWorker {
             })
         lap("pack")
         return Rendered(image: image, metadata: request.includeMetadata ? metadata : nil, settings: settings,
-                        masksGenerated: masksGenerated, phases: phases, start: start, colorSpace: request.colorSpace,
+                        masksGenerated: masks.count, maskSubstitutions: masks.substituted, phases: phases,
+                        start: start, colorSpace: request.colorSpace,
                         sourceName: request.sourceURL.deletingPathExtension().lastPathComponent,
                         readMetadata: metadata)
     }
 
     /// Generates pixels for every AI and prompted local, the same way the
     /// editor does: from a ~1000px unrotated sRGB render of the defaults.
+    /// `substituted` names the models that stood in for missing ones,
+    /// once each, in the order met.
     static func regenerateMasks(_ locals: [LocalAdjustment], session: ImageSession,
-                                pipeline: RenderPipeline, gpu: GPUContext) async throws -> Int {
+                                pipeline: RenderPipeline, gpu: GPUContext) async throws -> (count: Int, substituted: [String]) {
         let needed = locals.filter { $0.shape.isModelGenerated }
-        guard !needed.isEmpty else { return 0 }
+        guard !needed.isEmpty else { return (0, []) }
         var defaults = EditParameters()
         defaults.whiteBalance = session.asShotWhiteBalance
         let longEdge = max(session.file.summary.rawWidth, session.file.summary.rawHeight)
@@ -253,13 +277,15 @@ public enum ExportWorker {
 
         var sam: SAM2Session?
         var count = 0
+        var substituted: [String] = []
         for local in needed {
             switch local.shape {
-            case .ai(let kindName, _):
+            case .ai(let kindName, let modelVersion):
                 guard let kind = AIMaskKind(storedName: kindName) else { continue }
-                let result = try await AIMaskGenerator.generate(kind, from: image)
+                let result = try await AIMaskGenerator.generate(kind, modelVersion: modelVersion, from: image)
                 session.setAIMask(result.mask, forLocal: local.id)
                 count += 1
+                if let name = result.substitutedModel, !substituted.contains(name) { substituted.append(name) }
             case .prompted(let points, _):
                 guard !points.isEmpty else { continue }
                 if sam == nil, let models = await SAM2Models.shared.value {
@@ -273,6 +299,6 @@ public enum ExportWorker {
                 continue
             }
         }
-        return count
+        return (count, substituted)
     }
 }

@@ -49,6 +49,17 @@ public final class SAM2Models: @unchecked Sendable {
         return SAM2Models(encoder: try await e, promptEncoder: try await p, decoder: try await d)
     }
 
+    /// The three packages of a promptedSegmentation manifest, by role
+    /// (docs/Retouch.md §5). Wave 1 (W1-A) reads the manifest's packages;
+    /// until then only the bundled SAM 2.1 Small loads, through the
+    /// loader above, and any other entry throws.
+    public static func load(_ entry: ModelEntry, computeUnits: MLComputeUnits) async throws -> SAM2Models {
+        guard entry.id == ModelRegistry.defaultPromptedID else {
+            throw NotYetImplemented("Loading \(entry.manifest.displayName)")
+        }
+        return try await load(computeUnits: computeUnits)
+    }
+
     init(encoder: MLModel, promptEncoder: MLModel, decoder: MLModel) {
         self.encoder = encoder
         self.promptEncoder = promptEncoder

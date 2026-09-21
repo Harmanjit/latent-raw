@@ -10,16 +10,24 @@ import CoreML
 public enum CoreMLStore {
     public enum StoreError: Error, CustomStringConvertible {
         case modelMissing(String)
+        /// A catalogue row's package: listed, not installed, so no hash to key its compiled copy by.
+        case noChecksum(String)
         public var description: String {
             switch self {
             case .modelMissing(let n): return "Core ML model '\(n)' is not bundled (see Sources/MLKit/Resources/Models/README.md)"
+            case .noChecksum(let n): return "Core ML package '\(n)' has no checksum in its manifest, so it is not installed"
             }
         }
     }
 
-    static var modelsDirectory: URL? {
+    /// The bundled packages, their manifests and the catalogue.
+    public static var modelsDirectory: URL? {
         Bundle.latentResources.url(forResource: "Models", withExtension: nil)
     }
+
+    /// The rows Settings › AI › Models offers with a source link but no
+    /// package (docs/Retouch.md §5); nil when the bundle has no Models folder.
+    public static var catalogueURL: URL? { modelsDirectory?.appendingPathComponent("ModelCatalog.json") }
 
     /// Where optional, downloaded models live (see `OptionalModel`). Kept
     /// out of the app bundle so the app itself stays small and a model can
@@ -94,8 +102,33 @@ public enum CoreMLStore {
         let attrs = (try? FileManager.default.attributesOfItem(atPath: weights.path)) ?? [:]
         let size = (attrs[.size] as? Int) ?? 0
         let mtime = Int((attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)
-        let compiled = cacheDirectory.appendingPathComponent("\(name)-\(size)-\(mtime).mlmodelc")
+        return try await load(package: package, cacheKey: "\(name)-\(size)-\(mtime).mlmodelc",
+                              computeUnits: computeUnits)
+    }
 
+    /// Compiles and loads one package of `manifest` from `directory`
+    /// (docs/Retouch.md §2 A). Cache key
+    /// "<manifest.id>-<package.name>-<sha256.prefix(16)>.mlmodelc": the
+    /// content hash, so a replaced package recompiles and a package copied
+    /// elsewhere does not. Older "<id>-<name>-*" entries are deleted first;
+    /// each model keeps one compiled copy.
+    public static func load(_ package: ModelManifest.Package, of manifest: ModelManifest, at directory: URL,
+                            computeUnits: MLComputeUnits) async throws -> MLModel {
+        guard let sha256 = package.sha256 else { throw StoreError.noChecksum(package.name) }
+        let url = directory.appendingPathComponent(package.name)
+        guard FileManager.default.fileExists(atPath: url.path) else { throw StoreError.modelMissing(package.name) }
+        let prefix = "\(manifest.id)-\(package.name)-"
+        let key = prefix + String(sha256.prefix(16)) + ".mlmodelc"
+        let fm = FileManager.default
+        let stale = ((try? fm.contentsOfDirectory(atPath: cacheDirectory.path)) ?? [])
+            .filter { $0.hasPrefix(prefix) && $0 != key }
+        for entry in stale { try? fm.removeItem(at: cacheDirectory.appendingPathComponent(entry)) }
+        return try await load(package: url, cacheKey: key, computeUnits: computeUnits)
+    }
+
+    /// The compile-once-and-load step both loaders share.
+    private static func load(package: URL, cacheKey: String, computeUnits: MLComputeUnits) async throws -> MLModel {
+        let compiled = cacheDirectory.appendingPathComponent(cacheKey)
         if !FileManager.default.fileExists(atPath: compiled.path) {
             try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
             let temp = try await MLModel.compileModel(at: package)
@@ -111,9 +144,17 @@ public enum CoreMLStore {
 
     /// Bundled JSON next to a model (class labels).
     public static func json<T: Decodable>(_ fileName: String, as type: T.Type) -> T? {
-        guard let dir = modelsDirectory,
-              let data = try? Data(contentsOf: dir.appendingPathComponent(fileName)) else { return nil }
-        return try? JSONDecoder().decode(type, from: data)
+        json(fileName, in: nil, as: type)
+    }
+
+    /// JSON beside a model: `directory` first (an imported model's folder),
+    /// then the bundled Models directory.
+    public static func json<T: Decodable>(_ fileName: String, in directory: URL?, as type: T.Type) -> T? {
+        for dir in [directory, modelsDirectory].compactMap({ $0 }) {
+            guard let data = try? Data(contentsOf: dir.appendingPathComponent(fileName)) else { continue }
+            return try? JSONDecoder().decode(type, from: data)
+        }
+        return nil
     }
 }
 
