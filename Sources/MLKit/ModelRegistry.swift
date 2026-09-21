@@ -62,6 +62,11 @@ public final class ModelRegistry: @unchecked Sendable {
     private struct State {
         var listing: [ModelEntry]?
         var loaded: [String: LoadedModel] = [:]
+        /// Loads under way, so two asks for one id share a load.
+        var loading: [String: Task<LoadedModel?, Never>] = [:]
+        /// Bumped by every release: a load that began before one finishes
+        /// into the bin, not the dictionary.
+        var generation = 0
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
 
@@ -243,37 +248,124 @@ public final class ModelRegistry: @unchecked Sendable {
 
     // MARK: - Loaded models
 
-    /// The loaded subject model for `id`, loading it on the first ask;
-    /// nil when it is not installed or fails to load. Wave 1 fills this
-    /// in (docs/Retouch.md §14); until then nothing loads through the
-    /// registry, and `installed` still answers what is on disk.
+    /// The loaded subject model for `id`, loading it on the first ask
+    /// through `CoreMLStore.load(_:of:at:computeUnits:)` at the entry's
+    /// effective compute units; nil when it is not installed, is another
+    /// kind, or fails to load (logged). One load per id: a second ask
+    /// while the first is under way waits for it.
     public func subject(id: String) async -> SubjectSegmenter? {
-        if case .subject(let model)? = loaded(id: id) { return model }
+        if case .subject(let model)? = await loadedModel(id: id, kind: .subjectSegmentation) { return model }
         return nil
     }
 
     public func prompted(id: String) async -> SAM2Models? {
-        if case .prompted(let model)? = loaded(id: id) { return model }
+        if case .prompted(let model)? = await loadedModel(id: id, kind: .promptedSegmentation) { return model }
         return nil
     }
 
     public func semantic(id: String) async -> SegmentationModel? {
-        if case .semantic(let model)? = loaded(id: id) { return model }
+        if case .semantic(let model)? = await loadedModel(id: id, kind: .semanticSegmentation) { return model }
         return nil
     }
 
+    /// What is loaded for `id` right now, without loading.
     func loaded(id: String) -> LoadedModel? {
         state.withLock { $0.loaded[id] }
     }
 
+    /// The model for `id`, loaded once. Built-in Vision has nothing to
+    /// load and a catalogue row nothing on disk; both answer nil without
+    /// a log line, as does a model asked for as the wrong kind.
+    func loadedModel(id: String, kind: ModelManifest.Kind) async -> LoadedModel? {
+        if let model = loaded(id: id) { return model }
+        guard let entry = entry(id: id), entry.isInstalled, entry.location != nil,
+              entry.manifest.kind == kind else { return nil }
+        let units = effectiveComputeUnits(for: entry)
+        let task: Task<LoadedModel?, Never> = state.withLock { state in
+            if let running = state.loading[id] { return running }
+            let generation = state.generation
+            let task = Task.detached(priority: .userInitiated) { [self] () -> LoadedModel? in
+                let model = await Self.load(entry, computeUnits: units)
+                self.state.withLock { state in
+                    state.loading[id] = nil
+                    // A release while this loaded means nobody wants it
+                    // kept; the caller still gets it for the ask in hand.
+                    if let model, state.generation == generation { state.loaded[id] = model }
+                }
+                return model
+            }
+            state.loading[id] = task
+            return task
+        }
+        return await task.value
+    }
+
+    /// The load itself, by kind; a failure is logged and answered nil so
+    /// the kind's fallback can run (the mask row says what happened).
+    private static func load(_ entry: ModelEntry, computeUnits: MLComputeUnits) async -> LoadedModel? {
+        do {
+            switch entry.manifest.kind {
+            case .subjectSegmentation:
+                return .subject(try await SubjectSegmenter.load(entry, computeUnits: computeUnits))
+            case .promptedSegmentation:
+                return .prompted(try await SAM2Models.load(entry, computeUnits: computeUnits))
+            case .semanticSegmentation:
+                return .semantic(try await SegmentationModel.load(entry, computeUnits: computeUnits))
+            case .denoise:
+                // AIDenoiser keeps its own loading (docs/Retouch.md §2 A).
+                return nil
+            }
+        } catch {
+            registryLogger.error("model \(entry.id, privacy: .public) failed to load: \(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }
+
     /// Drops the shared reference to one model; anyone still using it
-    /// keeps it alive until they finish.
+    /// keeps it alive until they finish. A load under way for it is not
+    /// kept either.
     public func release(id: String) {
-        state.withLock { _ = $0.loaded.removeValue(forKey: id) }
+        state.withLock { state in
+            state.loaded[id] = nil
+            state.loading[id] = nil
+            state.generation += 1
+        }
     }
 
     /// Memory warning: every loaded model goes.
     public func releaseAll() {
-        state.withLock { $0.loaded.removeAll() }
+        state.withLock { state in
+            state.loaded.removeAll()
+            state.loading.removeAll()
+            state.generation += 1
+        }
     }
+}
+
+/// One registry model seen the way the app's memory-pressure code still
+/// addresses it (`SAM2Models.shared.release()`, `.shared.value`): a view
+/// onto one id, so that code keeps working until W2-M (docs/Retouch.md
+/// §14) calls the registry itself. `release()` releases the registry's
+/// copy, so memory really does come back.
+public struct RegistryModel<Model: Sendable>: Sendable {
+    let id: String
+    let pick: @Sendable (LoadedModel) -> Model?
+
+    init(id: String, pick: @escaping @Sendable (LoadedModel) -> Model?) {
+        self.id = id
+        self.pick = pick
+    }
+
+    /// The model, loading it first if no one has since the last release;
+    /// nil when it is not installed or fails to load.
+    public var value: Model? {
+        get async {
+            guard let kind = ModelRegistry.shared.entry(id: id)?.manifest.kind else { return nil }
+            return await ModelRegistry.shared.loadedModel(id: id, kind: kind).flatMap(pick)
+        }
+    }
+
+    public var isLoaded: Bool { ModelRegistry.shared.loaded(id: id) != nil }
+
+    public func release() { ModelRegistry.shared.release(id: id) }
 }

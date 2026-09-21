@@ -15,7 +15,11 @@ import PixelEngine
 /// graph would cost far more than resizing the one mask that is wanted.
 public final class SegmentationModel: @unchecked Sendable {
     public static let packageName = "SegFormer_segformer_b2_finetuned_ade_512_512"
-    public static let modelVersion = "segformer-b2-ade20k-512.1"
+    /// The bundled model's id in the registry (docs/Retouch.md §2 A).
+    public static let modelID = "segformer-b2-ade20k-512"
+    /// What a new class mask stores; the 0.9.0 literal
+    /// "segformer-b2-ade20k-512.1" is still read (`ModelRef.legacy`).
+    public static let modelVersion = "segformer-b2-ade20k-512@1"
 
     public let labels: [String]
     public let inputSize: Int
@@ -23,15 +27,39 @@ public final class SegmentationModel: @unchecked Sendable {
     private let inputName: String
     private let outputName: String
 
-    /// Loaded on first use and shared; nil when the package isn't
-    /// bundled. Released under memory pressure (see `SharedModel`).
-    public static let shared = SharedModel<SegmentationModel> { try? await SegmentationModel.load() }
+    /// The bundled model as the registry holds it, loaded on first use;
+    /// nil when the package isn't bundled. `release()` releases the
+    /// registry's copy (see `RegistryModel`).
+    public static let shared = RegistryModel<SegmentationModel>(id: modelID) {
+        if case .semantic(let model) = $0 { return model }
+        return nil
+    }
 
-    public static var isAvailable: Bool { CoreMLStore.isAvailable(packageName) }
+    public static var isAvailable: Bool {
+        ModelRegistry.shared.installed(ModelRef(id: modelID, version: 1)) != nil
+    }
 
+    /// The bundled model, at the registry's effective compute units (see
+    /// `CoreMLStore.defaultComputeUnits`).
     public static func load() async throws -> SegmentationModel {
-        let model = try await CoreMLStore.load(packageName)   // see CoreMLStore.defaultComputeUnits
-        let labels = CoreMLStore.json(packageName + ".labels.json", as: [String].self) ?? []
+        guard let entry = ModelRegistry.shared.installed(ModelRef(id: modelID, version: 1)) else {
+            throw CoreMLStore.StoreError.modelMissing(packageName)
+        }
+        return try await load(entry, computeUnits: ModelRegistry.shared.effectiveComputeUnits(for: entry))
+    }
+
+    /// A semanticSegmentation entry's one package, with the class labels
+    /// from the JSON its manifest names in the model's own folder.
+    public static func load(_ entry: ModelEntry, computeUnits: MLComputeUnits) async throws -> SegmentationModel {
+        guard entry.manifest.kind == .semanticSegmentation else { throw SegmentationModelError.wrongKind(entry.id) }
+        guard let location = entry.location, let package = entry.manifest.packages.first else {
+            throw SegmentationModelError.noPackage(entry.id)
+        }
+        let model = try await CoreMLStore.load(package, of: entry.manifest, at: location, computeUnits: computeUnits)
+        guard let file = entry.manifest.labelsFile,
+              let labels = CoreMLStore.json(file, in: location, as: [String].self) else {
+            throw SegmentationModelError.noLabels(entry.id)
+        }
         return SegmentationModel(model: model, labels: labels)
     }
 
@@ -79,6 +107,17 @@ public final class SegmentationModel: @unchecked Sendable {
 
     public func indices(forLabels names: [String]) -> [Int] {
         names.compactMap { name in labels.firstIndex(of: name) }
+    }
+}
+
+public enum SegmentationModelError: Error, Equatable, CustomStringConvertible {
+    case wrongKind(String), noPackage(String), noLabels(String)
+    public var description: String {
+        switch self {
+        case .wrongKind(let id): return "'\(id)' is not a class model"
+        case .noPackage(let id): return "'\(id)' names no package to load"
+        case .noLabels(let id): return "'\(id)' has no readable labels file beside its package"
+        }
     }
 }
 
