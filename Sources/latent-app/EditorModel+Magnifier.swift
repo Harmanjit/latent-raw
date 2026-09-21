@@ -105,6 +105,8 @@ extension EditorModel {
         // and a heal patch in view (dust and blemishes included) reads its
         // source and surroundings.
         var view = loupeSensorRect(loupe, clampedToSensor: false)
+        let reach = parameters.touchUpTileReach(beyondMargin: Self.magnifierMargin, sensorSize: sensorSize)
+        view = view.insetBy(dx: -reach, dy: -reach)
         if !parameters.perspective.isIdentity {
             view = parameters.perspective.sourceRect(forSensorRect: view, sensorSize: sensorSize)
                 .insetBy(dx: -4, dy: -4)

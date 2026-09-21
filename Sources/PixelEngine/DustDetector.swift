@@ -30,15 +30,10 @@ public enum DustSpotSize: String, Codable, CaseIterable, Sendable {
 public enum DustDetectorError: Error, CustomStringConvertible {
     /// The analysis render came back with no pixels.
     case emptyRender
-    /// No longer thrown: Wave 0's stubs threw it, and
-    /// `DustStackTests.testStubsFindNothing` still names it. Goes with
-    /// that test.
-    case notImplemented
 
     public var description: String {
         switch self {
         case .emptyRender: return "The photo could not be rendered for dust analysis"
-        case .notImplemented: return "Sensor dust analysis is not implemented yet"
         }
     }
 }

@@ -322,29 +322,4 @@ final class TouchUpTests: XCTestCase {
         XCTAssertFalse(session.droppedTouchUpMasks)
         XCTAssertNotNil(session.touchUpMaskTexture(enabled: [id]))
     }
-
-    /// The Wave 0 stages copy through: a render with the touch-up stage
-    /// and the spot visualisation on gives the same pixels as one without,
-    /// which also proves the two kernels compile and encode.
-    func testStubStagesCopyThrough() throws {
-        let (gpu, session, pipeline) = try openFixture()
-        let id = UUID()
-        session.setTouchUpMasks(fixtureSet(id, sensor: SIMD2(64, 48)))
-        func pixels(_ p: EditParameters, _ output: RenderOutput) throws -> [Float16] {
-            try TextureReadback.float16Pixels(of: try pipeline.render(session, scale: .full, parameters: p, output: output), gpu: gpu)
-        }
-        let plain = try pixels(EditParameters(), .file(.sRGB))
-        var p = EditParameters()
-        p.touchUp.faces = [TouchUpFace(id: id, boundingBox: SIMD4(0.25, 0.25, 0.5, 0.5))]
-        p.touchUp.skinSmoothing = 60
-        XCTAssertTrue(p.touchUp.wantsMasks)
-        var output = RenderOutput.file(.sRGB)
-        output.touchUpOverlay = true
-        output.spotVisualisation = SpotVisualisation(threshold: 0.5, radiusSensorPx: 8)
-        XCTAssertNotEqual(output, .file(.sRGB), "both display fields count in ==")
-        XCTAssertEqual(try pixels(p, output), plain)
-        // Binned too, through the preview roles.
-        let preview = try pipeline.render(session, scale: .binned(quads: 1), parameters: p, output: output)
-        XCTAssertEqual(preview.width, 32)
-    }
 }

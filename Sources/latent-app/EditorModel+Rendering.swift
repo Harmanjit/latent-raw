@@ -42,6 +42,10 @@ extension EditorModel {
     /// What the tile is rendered for: the visible area and margin.
     private var tileViewRegion: CGRect {
         var visible = visibleSensorRect.insetBy(dx: -Self.tileMargin, dy: -Self.tileMargin)
+        // The touch-up stage's wide blur reads past the margin for large
+        // faces; a tile that stops short would smooth its edge differently.
+        let reach = parameters.touchUpTileReach(beyondMargin: Self.tileMargin, sensorSize: sensorSize)
+        visible = visible.insetBy(dx: -reach, dy: -reach)
         // Keystone reads pixels from elsewhere in the frame; widen the tile
         // to the source region so the corrected view is complete.
         if !parameters.perspective.isIdentity {

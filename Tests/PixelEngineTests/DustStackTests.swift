@@ -176,29 +176,6 @@ final class DustStackTests: XCTestCase {
         XCTAssertEqual(a, expected)
     }
 
-    /// Wave 0's stubs: honest about doing nothing.
-    func testStubsFindNothing() throws {
-        let map = BlobDetector.Map(values: [Float](repeating: 0, count: 64 * 32), width: 64, height: 32)
-        let p = DustDetector.blobParameters(options: .init(), expectedRadius: nil, binSpan: 2)
-        XCTAssertEqual(BlobDetector.detect(map, p), [])
-        XCTAssertEqual(BlobDetector.localNoise(map).count, 64 * 32)
-        XCTAssertEqual(BlobDetector.differenceOfGaussians(map, sigma: 3).count, 64 * 32)
-        let analysis = DustDetector.Analysis(map: map.values, width: 64, height: 32, binSpan: 2,
-                                             sensorSize: SIMD2(128, 64), noise: BlobDetector.localNoise(map))
-        XCTAssertEqual(DustDetector.detect(analysis, options: .init(), expectedRadius: nil, existing: []), [])
-        XCTAssertEqual(DustDetector.verify([], in: analysis, options: .init(), existing: []), [])
-        XCTAssertEqual(DustDetector.mapSpots(from: [spot(0.5, 0.5)], analysis: analysis), [])
-        XCTAssertNil(DustSourcePlacer.place(.init(centre: [64, 32], radius: 4), avoiding: [],
-                                            sensorSize: SIMD2(128, 64), analysis: nil))
-
-        let gpu = try GPUContext()
-        let session = try ImageSession(file: try RawFile(path: LinearFixtures.path(LinearFixtures.plain)), gpu: gpu)
-        XCTAssertThrowsError(try DustDetector.analyse(session: session, pipeline: RenderPipeline(gpu: gpu), gpu: gpu,
-                                                      parameters: EditParameters())) { error in
-            guard case DustDetectorError.notImplemented = error else { return XCTFail("\(error)") }
-        }
-    }
-
     // MARK: - Dust maps
 
     private func map(_ camera: String, created: Date, spots: Int, id: UUID = UUID()) -> DustMap {
