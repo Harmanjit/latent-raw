@@ -95,12 +95,17 @@ public enum FaceLandmarker {
         let uprightSeeds = seeds.map {
             uprightSeed($0, margin: seedMargin, rotation: rotation, sensorSize: sensorSize, uprightSize: uprightSize)
         }
-        let faces = upright(in: image, seeds: uprightSeeds)
+        // A seed Vision would refuse (a stored box off the image, or one
+        // too small to be a face) fails the whole request, every other
+        // seed with it, so it is left out of the request and answered nil
+        // on its own.
+        let faces = upright(in: image, seeds: uprightSeeds.filter(seedIsUsable))
         // Vision answers one observation per input, but nothing promises
         // the order or that every input comes back with landmarks, so each
         // seed takes the face that overlaps it most, once.
         var taken = Set<Int>()
         return uprightSeeds.map { seed -> FaceObservation? in
+            guard seedIsUsable(seed) else { return nil }
             var best: (index: Int, overlap: CGFloat)?
             for (index, face) in faces.enumerated() where !taken.contains(index) {
                 let overlap = intersectionOverUnion(seed, face.boundingBox)
@@ -180,6 +185,14 @@ public enum FaceLandmarker {
         let upright = rotation.imageRect(fromSensorRect: sensorRect, sensorSize: sensorSize)
         let grown = upright.insetBy(dx: -upright.width * margin / 2, dy: -upright.height * margin / 2)
         return grown.intersection(CGRect(origin: .zero, size: uprightSize))
+    }
+
+    /// Whether Vision can refit inside `seed` (upright pixels): a box
+    /// clipped to nothing by the image's edge is `CGRect.null`, whose
+    /// origin is infinite, and Vision throws for a crop of "zero or near
+    /// zero" size, so a seed needs a pixel each way.
+    static func seedIsUsable(_ seed: CGRect) -> Bool {
+        !seed.isNull && seed.minX.isFinite && seed.minY.isFinite && seed.width >= 1 && seed.height >= 1
     }
 
     /// An upright face turned back to normalised sensor coordinates.

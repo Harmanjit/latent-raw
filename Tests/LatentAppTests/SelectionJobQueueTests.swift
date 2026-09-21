@@ -2,6 +2,7 @@ import XCTest
 import Combine
 @testable import Catalog
 import PixelEngine
+import RawCore
 @testable import latent_app
 
 // The one batch-job queue (docs/Retouch.md §8) against a fake job: Remove
@@ -9,7 +10,8 @@ import PixelEngine
 // tiny float DNGs of PhotoMergeTests, which the catalog opens like any raw.
 
 /// A stand-in selection job that follows a script per photo and records
-/// what it was given.
+/// what it was given. Photos are named by file name, or by relative path
+/// where two share a name.
 final class FakeSelectionJob: SelectionJob, @unchecked Sendable {
     enum Script: Sendable {
         /// Writes "{"schema":1,"dust":<count>}" with `count` spots.
@@ -44,7 +46,8 @@ final class FakeSelectionJob: SelectionJob, @unchecked Sendable {
     /// What `process` was given, in order.
     var inputs: [SelectionJobInput] { lock.withLock { _inputs } }
     var prepared: Int { lock.withLock { _prepared } }
-    /// The photo being processed, while the gate is closed.
+    /// The photo being processed (its relative path), while the gate is
+    /// closed.
     var processing: String { lock.withLock { _processing } }
 
     /// Holds `process` at its start until `openGate`: every photo's, or
@@ -65,12 +68,13 @@ final class FakeSelectionJob: SelectionJob, @unchecked Sendable {
     }
 
     func process(_ input: SelectionJobInput, gpu: GPUContext) async throws -> SelectionJobResult {
-        lock.withLock { _inputs.append(input); _processing = input.record.fileName }
-        while lock.withLock({ !_gateOpen && (_heldName == nil || _heldName == input.record.fileName) }) {
+        let record = input.record
+        lock.withLock { _inputs.append(input); _processing = record.relPath }
+        while lock.withLock({ !_gateOpen && (_heldName == nil || _heldName == record.fileName || _heldName == record.relPath) }) {
             try Task.checkCancellation()
             try await Task.sleep(for: .milliseconds(5))
         }
-        switch lock.withLock({ scripts[input.record.fileName] }) ?? .leave(count: 0) {
+        switch lock.withLock({ scripts[record.relPath] ?? scripts[record.fileName] }) ?? .leave(count: 0) {
         case .write(let count):
             return SelectionJobResult(newJSON: .some(Self.json(count)), count: count, note: note)
         case .leave(let count):
@@ -97,9 +101,43 @@ final class FakeSelectionJob: SelectionJob, @unchecked Sendable {
     func announcement(changed: Int) -> String { "Dust removal finished: \(changed) photos" }
 }
 
+/// A folder whose two included subfolders each hold a DSC_0106.dng: two
+/// catalog rows with one file name, which only the relative path tells
+/// apart.
+@MainActor
+struct SubfolderFolder {
+    static let paths = ["2024/DSC_0106.dng", "2025/DSC_0106.dng"]
+
+    let base: URL
+    let root: URL
+    let library: Library
+
+    static func make() async throws -> SubfolderFolder {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("latent-subfolders-\(UUID().uuidString)", isDirectory: true)
+        let root = base.appendingPathComponent("Years", isDirectory: true)
+        for (index, path) in paths.enumerated() {
+            let url = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try DustDNG.write(to: url, seed: UInt32(index + 1))
+        }
+        let library = Library()
+        try await library.open(folder: root, defaultSubfolderMode: .included)
+        return SubfolderFolder(base: base, root: root, library: library)
+    }
+
+    func remove() { try? FileManager.default.removeItem(at: base) }
+
+    /// The rows in `paths` order.
+    var records: [ImageRecord] {
+        Self.paths.compactMap { path in library.images.first { $0.relPath == path } }
+    }
+}
+
 @MainActor
 final class SelectionJobQueueTests: XCTestCase {
     nonisolated(unsafe) var folder: BracketFolder?
+    nonisolated(unsafe) var subfolders: SubfolderFolder?
     nonisolated(unsafe) var gpuContext: GPUContext?
 
     override func setUp() async throws {
@@ -107,7 +145,10 @@ final class SelectionJobQueueTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        await MainActor.run { folder?.remove() }
+        await MainActor.run {
+            folder?.remove()
+            subfolders?.remove()
+        }
     }
 
     private var gpu: GPUContext { gpuContext! }
@@ -125,6 +166,19 @@ final class SelectionJobQueueTests: XCTestCase {
 
     private func stored(_ library: Library, _ name: String) async throws -> String? {
         let id = try XCTUnwrap(library.images.first { $0.fileName == name }?.id)
+        return try await library.catalog!.storedEdit(forImageID: id)?.json
+    }
+
+    private func years() async throws -> SubfolderFolder {
+        let made = try await SubfolderFolder.make()
+        subfolders = made
+        XCTAssertEqual(made.records.count, 2, "both subfolders are included")
+        XCTAssertEqual(made.records.map(\.fileName), ["DSC_0106.dng", "DSC_0106.dng"], "one name, two photos")
+        return made
+    }
+
+    private func stored(_ library: Library, path: String) async throws -> String? {
+        let id = try XCTUnwrap(library.images.first { $0.relPath == path }?.id)
         return try await library.catalog!.storedEdit(forImageID: id)?.json
     }
 
@@ -411,6 +465,192 @@ final class SelectionJobQueueTests: XCTestCase {
         let stored17 = try await stored(photos.library, "DSC_0107.dng")
         XCTAssertNil(stored17)
         XCTAssertEqual(queue.summary, "Dust removal cancelled · 1 photo kept")
+    }
+
+    /// Another folder opened while the job ran: its photos have the same
+    /// ids, so the results are written nowhere and the panel says why.
+    func testTheCommitIsRefusedWhenAnotherFolderOpened() async throws {
+        let photos = try await photos()
+        let manager = UndoManager()
+        photos.library.undoManager = manager
+        let other = photos.base.appendingPathComponent("Other", isDirectory: true)
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        for (index, name) in BracketFolder.names.enumerated() {
+            try DustDNG.write(to: other.appendingPathComponent(name), seed: UInt32(index + 1))
+        }
+        let job = FakeSelectionJob(["DSC_0106.dng": .write(count: 1), "DSC_0107.dng": .write(count: 2),
+                                    "DSC_0108.dng": .write(count: 3)], note: "Sensitivity was lowered")
+        job.closeGate(for: "DSC_0108.dng")
+        let queue = queue()
+        var restored: [Set<Int64>] = []
+        photos.library.didRestoreImages = { ids, _ in restored.append(ids) }
+        let first = try XCTUnwrap(photos.library.catalog)
+        queue.start(job, records: photos.records, library: photos.library, gpu: gpu)
+        await waitUntil("the last photo") { job.processing == "DSC_0108.dng" }
+
+        let opened = try await photos.library.open(folder: other, defaultSubfolderMode: .independent)
+        XCTAssertTrue(opened)
+        let second = try XCTUnwrap(photos.library.catalog)
+        XCTAssertTrue(first !== second)
+        XCTAssertEqual(photos.library.images.map(\.fileName), BracketFolder.names, "the same names and ids")
+        job.openGate()
+        await queue.waitUntilDone()
+        await photos.library.waitForPendingWork()
+
+        XCTAssertEqual(queue.summary, "Dust removal cancelled · the folder changed, so nothing was written")
+        XCTAssertEqual(queue.notes, ["Sensitivity was lowered", "Sensitivity was lowered", "Sensitivity was lowered"])
+        for record in photos.library.images {
+            let id = try XCTUnwrap(record.id)
+            let inSecond = try await second.storedEdit(forImageID: id)?.json
+            XCTAssertNil(inSecond, "\(record.fileName): the new folder's photo is untouched")
+            let inFirst = try await first.storedEdit(forImageID: id)?.json
+            XCTAssertNil(inFirst, "\(record.fileName): nor is the old one's")
+        }
+        XCTAssertEqual(restored, [])
+        XCTAssertFalse(manager.canUndo)
+        XCTAssertNil(photos.library.lastError)
+        XCTAssertFalse(queue.isRunning)
+        XCTAssertFalse(queue.gpuSlot.isGPUBusy)
+    }
+
+    /// The lead's hook runs before the commit: an edit it saves (the
+    /// open image's pending one) is what the commit compares against, so
+    /// that photo is left alone and noted rather than overwritten, and
+    /// the reload that follows has nothing pending.
+    func testThePreCommitHookRunsBeforeTheEditsAreCompared() async throws {
+        let photos = try await photos()
+        let manager = UndoManager()
+        photos.library.undoManager = manager
+        let job = FakeSelectionJob(["DSC_0106.dng": .write(count: 1), "DSC_0107.dng": .write(count: 2),
+                                    "DSC_0108.dng": .write(count: 3)])
+        let queue = queue()
+        var restored: [Set<Int64>] = []
+        photos.library.didRestoreImages = { ids, _ in restored.append(ids) }
+        let meanwhile = "{\"schema\":1,\"exposure\":1}"
+        let id = try XCTUnwrap(photos.records[1].id)
+        var hookRan = 0
+        queue.beforeCommit = {
+            hookRan += 1
+            XCTAssertEqual(job.inputs.count, 3, "after the worker, before the write")
+            try? await photos.library.saveEditStack(meanwhile, schemaVersion: EditStack.schemaVersion,
+                                                    processVersion: EditStack.processVersion, forImageID: id)
+        }
+        queue.start(job, records: photos.records, library: photos.library, gpu: gpu)
+        await queue.waitUntilDone()
+        await photos.library.waitForPendingWork()
+        XCTAssertEqual(hookRan, 1)
+        let stored18 = try await stored(photos.library, "DSC_0107.dng")
+        XCTAssertEqual(stored18, meanwhile, "the edit saved by the hook stands")
+        let stored19 = try await stored(photos.library, "DSC_0106.dng")
+        XCTAssertEqual(stored19, FakeSelectionJob.json(1))
+        XCTAssertEqual(queue.notes, ["DSC_0107.dng was edited while dust removal ran, so it was left alone"])
+        XCTAssertEqual(queue.summary, "Removed dust from 2 photos (4 spots), 1 skipped")
+        XCTAssertEqual(restored, [Set([photos.records[0].id!, photos.records[2].id!])])
+        XCTAssertEqual(manager.undoMenuItemTitle, "Undo Remove Dust (2 Images)")
+    }
+
+    /// Two photos with one file name in included subfolders: the one
+    /// edited meanwhile is skipped by name, and the other, which was
+    /// written, is still reloaded and counted.
+    func testSameNamedPhotosInSubfoldersAreToldApart() async throws {
+        let years = try await years()
+        let job = FakeSelectionJob(["DSC_0106.dng": .write(count: 1)])
+        job.closeGate(for: SubfolderFolder.paths[1])
+        let queue = queue()
+        var restored: [Set<Int64>] = []
+        years.library.didRestoreImages = { ids, _ in restored.append(ids) }
+        queue.start(job, records: years.records, library: years.library, gpu: gpu)
+        await waitUntil("the second photo") { job.processing == SubfolderFolder.paths[1] }
+        // Read by the job (no edit yet), then edited by the user.
+        let meanwhile = "{\"schema\":1,\"exposure\":1}"
+        let id = try XCTUnwrap(years.records[1].id)
+        try await years.library.saveEditStack(meanwhile, schemaVersion: EditStack.schemaVersion,
+                                              processVersion: EditStack.processVersion, forImageID: id)
+        job.openGate()
+        await queue.waitUntilDone()
+        await years.library.waitForPendingWork()
+        let stored20 = try await stored(years.library, path: SubfolderFolder.paths[0])
+        XCTAssertEqual(stored20, FakeSelectionJob.json(1))
+        let stored21 = try await stored(years.library, path: SubfolderFolder.paths[1])
+        XCTAssertEqual(stored21, meanwhile)
+        XCTAssertEqual(queue.notes, ["DSC_0106.dng was edited while dust removal ran, so it was left alone"])
+        XCTAssertEqual(queue.summary, "Removed dust from 1 photos (1 spots), 1 skipped")
+        XCTAssertEqual(restored, [Set([years.records[0].id!])], "the written one is reloaded, the skipped one not")
+    }
+
+    /// A write that fails partway (a subfolder's sidecars can't be
+    /// written): the error reaches the status bar, the photos written
+    /// before it are reloaded so the editor doesn't save over them, and
+    /// the notes gathered during the run still reach the panel.
+    func testAWriteThatStopsPartwayReloadsThePhotosWrittenAndKeepsTheNotes() async throws {
+        let years = try await years()
+        let manager = UndoManager()
+        years.library.undoManager = manager
+        let catalog = try XCTUnwrap(years.library.catalog)
+        let sidecars = await catalog.sidecarURL(forRelPath: SubfolderFolder.paths[1]).deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: sidecars, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: sidecars.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: sidecars.path) }
+        let job = FakeSelectionJob([SubfolderFolder.paths[0]: .write(count: 1), SubfolderFolder.paths[1]: .write(count: 2)],
+                                   note: "Sensitivity was lowered")
+        let queue = queue()
+        var restored: [Set<Int64>] = []
+        years.library.didRestoreImages = { ids, _ in restored.append(ids) }
+        queue.start(job, records: years.records, library: years.library, gpu: gpu)
+        await queue.waitUntilDone()
+        await years.library.waitForPendingWork()
+        let stored22 = try await stored(years.library, path: SubfolderFolder.paths[0])
+        XCTAssertEqual(stored22, FakeSelectionJob.json(1), "written before the failure")
+        XCTAssertTrue(years.library.lastError?.hasPrefix("Dust removal failed: ") == true, years.library.lastError ?? "")
+        XCTAssertEqual(restored.count, 1)
+        XCTAssertTrue(restored[0].contains(years.records[0].id!), "the photo written is reloaded")
+        XCTAssertTrue(queue.summary.hasPrefix("Dust removal stopped · "), queue.summary)
+        XCTAssertEqual(queue.notes, ["Sensitivity was lowered", "Sensitivity was lowered"])
+        XCTAssertEqual(manager.undoMenuItemTitle, "Undo Remove Dust", "the photo written is undoable")
+        XCTAssertFalse(queue.isRunning)
+        XCTAssertFalse(queue.gpuSlot.isGPUBusy)
+    }
+
+    /// A pasted touch-up in the Library: the job runs over every target
+    /// but the image the editor holds, which finds its own faces as it
+    /// reloads; a refusal has words for the status bar.
+    func testThePasteJobLeavesTheEditorsImageToTheEditor() async throws {
+        let photos = try await photos()
+        let records = photos.records
+        XCTAssertEqual(ContentView.PastedTouchUp.jobTargets(records, handledByEditor: nil).map(\.fileName),
+                       BracketFolder.names)
+        XCTAssertEqual(ContentView.PastedTouchUp.jobTargets(records, handledByEditor: records[1].id).map(\.fileName),
+                       ["DSC_0106.dng", "DSC_0108.dng"])
+        XCTAssertEqual(ContentView.PastedTouchUp.jobTargets([records[0]], handledByEditor: records[0].id), [],
+                       "in Loupe the editor's search is the only one")
+        XCTAssertTrue(ContentView.PastedTouchUp.refused.hasPrefix("The touch-up sliders were saved, but faces couldn’t be looked for"))
+    }
+
+    /// A job's result names the frame its geometry is measured on: a
+    /// stack whose only module was a pasted touch-up has none, and read
+    /// back on a bordered camera its boxes would otherwise be moved.
+    func testAJobResultNamesTheActiveAreaFrame() throws {
+        var pasted = TouchUp()
+        pasted.skinSmoothing = 40
+        pasted.faces = [TouchUpFace(boundingBox: SIMD4(0.5, 0.4, 0.2, 0.3))]
+        pasted.blemishes = [HealPatch(target: [0.55, 0.45], source: [0.6, 0.45], radius: 0.01)]
+        var stack = EditStack()
+        stack.modules.touchup = pasted
+        XCTAssertNil(stack.frame, "as the Library paste writes it")
+
+        let result = try SelectionJobResult.writing(stack, count: 1)
+        let json = try XCTUnwrap(result.newJSON ?? nil)
+        let written = try EditStack.decode(json: json)
+        XCTAssertEqual(written.frame, EditStack.activeAreaFrame)
+        XCTAssertEqual(result.count, 1)
+        // A readout 140 columns wider than the picture on the left.
+        let bordered = SensorActiveArea(left: 140, top: 0, width: 5860, height: 4000, fullWidth: 6000, fullHeight: 4000)
+        let read = written.migratingGeometry(to: bordered)
+        XCTAssertEqual(read.modules.touchup?.faces.map(\.boundingBox), pasted.faces.map(\.boundingBox))
+        XCTAssertEqual(read.modules.touchup?.blemishes, pasted.blemishes)
+        let unnamed = stack.migratingGeometry(to: bordered)
+        XCTAssertNotEqual(unnamed.modules.touchup?.faces.map(\.boundingBox), pasted.faces.map(\.boundingBox),
+                          "without the name the boxes move")
     }
 }
 

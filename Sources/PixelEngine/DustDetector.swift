@@ -183,12 +183,22 @@ public enum DustDetector {
             maximumSurroundGradient: 0.01, maximumCount: HealPatch.maximumDustCount)
     }
 
-    /// Spots as heal patches (best first, cap `HealPatch.maximumDustCount`)
-    /// with sources from `DustSourcePlacer`, excluding blobs centred inside
-    /// any of `existing` (dust, blemishes, heals).
+    /// How many blobs the detector is asked for: well over the patch cap,
+    /// because `patches(for:)` drops the ones inside an existing target or
+    /// with nowhere to copy from before it caps the list, and a cap on the
+    /// blobs would leave room unfilled while spots remain. Bounded still,
+    /// since the detector's duplicate check costs each blob a look at
+    /// every one kept so far.
+    static let blobCount = 4 * HealPatch.maximumDustCount
+
+    /// Spots as heal patches (best first, cap `HealPatch.maximumDustCount`
+    /// applied after the filters) with sources from `DustSourcePlacer`,
+    /// excluding blobs centred inside any of `existing` (dust, blemishes,
+    /// heals).
     public static func detect(_ a: Analysis, options: Options, expectedRadius: Float?, existing: [HealPatch]) -> [HealPatch] {
         guard a.width > 0, a.height > 0, a.map.count == a.width * a.height else { return [] }
-        let p = blobParameters(options: options, expectedRadius: expectedRadius, binSpan: a.binSpan)
+        var p = blobParameters(options: options, expectedRadius: expectedRadius, binSpan: a.binSpan)
+        p.maximumCount = Self.blobCount
         let blobs = BlobDetector.detect(a.blobMap, p, noise: a.noise.count == a.map.count ? a.noise : nil)
         let spots = blobs.map { spot(centre: $0.centre, radius: $0.radius, in: a) }
         return patches(for: spots, in: a, existing: existing)

@@ -59,7 +59,10 @@ struct FaceFindJob: SelectionJob {
         }
         var written = stack
         written.modules.touchup = touchUp
-        return SelectionJobResult(newJSON: .some(try written.encodeJSON()), count: found.faces.count)
+        // With the frame named, as the dust job writes: the stack of a
+        // pasted touch-up alone has none, and boxes written without it
+        // would be moved onto the active area again on the next open.
+        return try .writing(written, count: found.faces.count)
     }
 
     /// "Found faces in 8 photos"; a photo that changed meanwhile or

@@ -27,6 +27,19 @@ struct SelectionJobResult: Sendable {
         self.count = count
         self.note = note
     }
+
+    /// The result that writes `stack`, whose geometry the job measured on
+    /// the image's active area, with that frame named. A stack whose only
+    /// module was a pasted touch-up carries no frame, and a stack with
+    /// readout-frame patches was migrated as it was read; either way the
+    /// boxes and patches the job adds sit on the active area, and written
+    /// without the name they would be moved by the masked border on the
+    /// next open of a bordered camera's photo.
+    static func writing(_ stack: EditStack, count: Int) throws -> SelectionJobResult {
+        var stack = stack
+        stack.frame = EditStack.activeAreaFrame
+        return SelectionJobResult(newJSON: .some(try stack.encodeJSON()), count: count)
+    }
 }
 
 /// A job the `SelectionJobQueue` runs over explicit catalog rows, one photo
@@ -77,7 +90,18 @@ protocol SelectionJob: Sendable {
 /// .edits)` is then called, which reloads the editor if the open image is
 /// among them, exactly as an undo does. Before the queue reads the stored
 /// edits, ContentView flushes the open image's pending save, so the edit
-/// the job reads is the one on screen.
+/// the job reads is the one on screen; and just before the commit the
+/// queue calls `beforeCommit`, which ContentView points at the same flush
+/// and a wait for the catalog's pending writes, so an edit made while
+/// the job ran is on record and its photo is skipped rather than
+/// overwritten, and the reload that follows has nothing pending to save
+/// over the job's result.
+///
+/// The commit goes to the catalog the job read. Image ids restart in
+/// every catalog, so if another folder is open by then the job's edits
+/// would land on that folder's photos: the commit is refused instead,
+/// and the panel says the folder changed. ContentView also cancels the
+/// job when a folder is about to be replaced, so the worker stops early.
 ///
 /// **Memory.** The worker is a detached task holding one photo at a time
 /// (that is the job's business), and between photos it waits while memory
@@ -101,6 +125,11 @@ final class SelectionJobQueue: ObservableObject {
     /// The GPU slot shared with exports and Photo Merge.
     let gpuSlot: ExportQueue
     let jobs: OutputJobs
+    /// Called once the worker is done, before its results are written:
+    /// the lead saves the open image's pending edit here and waits for
+    /// the catalog's pending writes, so the commit compares against what
+    /// the user has really done.
+    var beforeCommit: (@MainActor () async -> Void)?
 
     private var task: Task<Void, Never>?
     /// Bumped for every job, so a late progress report from an earlier one
@@ -148,8 +177,8 @@ final class SelectionJobQueue: ObservableObject {
             await ExportPreviewRenderer.waitForDiscardedRenders()
             let started = Date()
             let outcome = await run(job, records: records, catalog: catalog, gpu: gpu, generation: generation)
-            await finish(job, outcome: outcome, records: records, elapsed: Date().timeIntervalSince(started),
-                         library: library)
+            await finish(job, outcome: outcome, elapsed: Date().timeIntervalSince(started),
+                         library: library, catalog: catalog)
             isRunning = false
             gpuSlot.releaseSlot()
             jobs.end(outputJob)
@@ -277,8 +306,10 @@ final class SelectionJobQueue: ObservableObject {
     // MARK: - The commit
 
     /// Writes what the worker made, in one undo group, and says how it went.
-    private func finish(_ job: any SelectionJob, outcome: WorkerOutcome, records: [ImageRecord],
-                        elapsed: TimeInterval, library: Library) async {
+    /// `catalog` is the one the job read; the commit is refused when it is
+    /// no longer the open one.
+    private func finish(_ job: any SelectionJob, outcome: WorkerOutcome, elapsed: TimeInterval,
+                        library: Library, catalog: Catalog) async {
         if let failure = outcome.failure {
             summary = ""
             library.lastError = "\(job.title) failed: \(PhotoMergeQueue.describe(failure))"
@@ -293,6 +324,14 @@ final class SelectionJobQueue: ObservableObject {
         var changed = 0
         var counted = 0
         if !outcome.edits.isEmpty {
+            await beforeCommit?()
+            // The ids the job holds are this catalog's; in another folder
+            // they are other photos.
+            guard catalog === library.catalog else {
+                summary = "\(job.title) cancelled · the folder changed, so nothing was written"
+                self.notes = notes
+                return
+            }
             // Inside `perform`, so quitting waits for the write and a
             // failure goes to the status bar as every catalog write's does.
             let committed: Result<Library.TransformOutcome, any Error> = await withCheckedContinuation { continuation in
@@ -309,27 +348,29 @@ final class SelectionJobQueue: ObservableObject {
                     }
                 }
             }
+            // Whether the write went through or stopped partway (the status
+            // bar has its error), the photos holding the job's edit are
+            // reloaded, or the editor's next save would put its old edit
+            // back over the job's.
+            let landed = await landedIDs(outcome, in: catalog, library: library)
             guard case .success(let written) = committed else {
-                summary = ""
+                if !landed.isEmpty { library.didRestoreImages?(landed, .edits) }
+                summary = landed.isEmpty ? ""
+                    : "\(job.title) stopped · \(landed.count) photo\(landed.count == 1 ? "" : "s") kept"
+                self.notes = notes
                 return
             }
             changed = written.changed
-            let skipped = Set(written.skipped)
-            let names = Dictionary(records.compactMap { record in record.id.map { ($0, record.fileName) } },
-                                   uniquingKeysWith: { first, _ in first })
-            // The library names a skipped photo by its file, or by its id
-            // when its row is gone.
-            func wasSkipped(_ id: Int64) -> Bool {
-                skipped.contains("image \(id)") || names[id].map { skipped.contains($0) } ?? false
-            }
-            let changedIDs = Set(outcome.edits.keys.filter { !wasSkipped($0) })
-            counted = outcome.counts.filter { !wasSkipped($0.key) }.values.reduce(0, +)
+            // A photo left alone still counts what it found; one with an
+            // edit counts once the edit is in.
+            counted = outcome.counts.filter { !outcome.edits.keys.contains($0.key) || landed.contains($0.key) }
+                .values.reduce(0, +)
             notes += written.skipped.map { name in
                 name.hasPrefix("image ")
                     ? "\(name) is no longer in the folder, so it was left alone"
                     : "\(name) was edited while \(job.title.lowercased()) ran, so it was left alone"
             }
-            if !changedIDs.isEmpty { library.didRestoreImages?(changedIDs, .edits) }
+            if !landed.isEmpty { library.didRestoreImages?(landed, .edits) }
             if outcome.cancelled {
                 summary = "\(job.title) cancelled · \(changed) photo\(changed == 1 ? "" : "s") kept"
             } else {
@@ -348,6 +389,26 @@ final class SelectionJobQueue: ObservableObject {
                               + (notes.isEmpty ? ""
                                  : ", with \(notes.count) note\(notes.count == 1 ? "" : "s") in the library panel"))
         }
+    }
+
+    /// The photos, still in the folder, whose stored edit is now the job's:
+    /// the ones the commit wrote, and any that already held it. Read back
+    /// from the catalog rather than worked out from the names the library
+    /// reports as skipped, which two photos in included subfolders can
+    /// share; one that can't be read is counted in, since reloading a
+    /// photo the job left alone costs nothing and not reloading one it
+    /// wrote loses the job's work on the editor's next save.
+    private func landedIDs(_ outcome: WorkerOutcome, in catalog: Catalog, library: Library) async -> Set<Int64> {
+        let listed = Set(library.images.compactMap(\.id))
+        var landed: Set<Int64> = []
+        for (id, next) in outcome.edits where listed.contains(id) {
+            do {
+                if try await catalog.storedEdit(forImageID: id)?.json == next { landed.insert(id) }
+            } catch {
+                landed.insert(id)
+            }
+        }
+        return landed
     }
 
     /// The progress bar's value for VoiceOver: "Photo 3 of 12: DSC_0107.NEF,

@@ -359,6 +359,9 @@ struct ContentView: View {
             library.willReplaceCatalog = {
                 FolderNavigator.shared.remember(library)
                 closeEditorForFolderChange()
+                // Its results belong to the folder being left; the queue
+                // refuses the commit anyway, this stops the work sooner.
+                selectionJobs.cancel()
             }
             mode = .library
             await attachEditedThumbnailRenderer()
@@ -742,6 +745,14 @@ struct ContentView: View {
             library.perform("Saving history") { try await library.setHistory(steps, forImageID: imageID, in: catalog) }
         }
         library.didRestoreImages = { ids, aspect in editorFollowUndo(ids, aspect) }
+        // Before a batch job writes its results: the open image's pending
+        // edit is saved and on record, so the commit leaves that photo
+        // alone rather than overwrite the edit, and the reload that
+        // follows has nothing pending to save over the job's result.
+        selectionJobs.beforeCommit = {
+            model.flushPendingSave()
+            await library.waitForPendingWork()
+        }
         model.onSnapshotsChanged = { imageID, snapshots in
             guard let catalog = library.catalog else { return }
             library.perform("Saving snapshots") {
@@ -1330,37 +1341,72 @@ struct ContentView: View {
                 message += " · skipped \(outcome.skipped.count) with unreadable edits: " + outcome.skipped.joined(separator: ", ")
             }
             model.reportError(message)
-            // If the open image was among them, reload its sliders.
+            // If the open image was among them, reload its sliders. The
+            // editor then finds its faces itself when a pasted touch-up
+            // wants them, so the job below leaves that photo out: one
+            // search, not two, and no note that it was edited meanwhile.
+            var handledByEditor: Int64?
             if let selected = library.selectedImage, model.imageTitle == selected.fileName,
                target == .primary || library.selectedImageIDs.contains(selected.id ?? -1) {
                 model.apply(stack, groups: groups)
+                handledByEditor = selected.id
             }
             // A pasted touch-up wants faces the stored edits don't have:
             // the job finds them per photo, leaving alone any that don't
-            // need it, so every target may be passed.
+            // need it, so every other target may be passed.
             if groups.contains(.touchUp), FaceFindJob.needsFaces(stack.modules.touchup), let gpu = model.gpuContext {
                 model.flushPendingSave()
-                selectionJobs.start(FaceFindJob(), records: library.batchTargets(onlyPrimary: target == .primary),
-                                    library: library, gpu: gpu)
+                let targets = PastedTouchUp.jobTargets(library.batchTargets(onlyPrimary: target == .primary),
+                                                       handledByEditor: handledByEditor)
+                if !targets.isEmpty,
+                   !selectionJobs.start(FaceFindJob(), records: targets, library: library, gpu: gpu) {
+                    library.lastError = PastedTouchUp.refused
+                }
             }
         }
+    }
+
+    /// The Find Faces job a pasted or preset touch-up starts over the
+    /// Library's targets (docs/Retouch.md §7).
+    enum PastedTouchUp {
+        /// `records` less the image the editor holds and has already
+        /// reloaded, which finds its own faces: the job's pass on it would
+        /// only be skipped at the commit as edited meanwhile.
+        static func jobTargets(_ records: [ImageRecord], handledByEditor: Int64?) -> [ImageRecord] {
+            guard let handledByEditor else { return records }
+            return records.filter { $0.id != handledByEditor }
+        }
+
+        /// The sliders are written whether or not the job can start, so a
+        /// refusal (an export holds the GPU) is said rather than left for
+        /// the user to notice as smoothing that does nothing.
+        static let refused = "The touch-up sliders were saved, but faces couldn’t be looked for: an export or another "
+            + "job is using the graphics processor. Try again when it finishes, or open each photo in Develop "
+            + "and press Find Faces."
     }
 
     // MARK: - Remove Dust
 
     /// Photo › Remove Dust…. In memory (Develop), the open image alone,
-    /// through the editor's history; with no catalog row for it there is
-    /// nothing to keep a map for, so Find Spots runs straight away.
-    /// Otherwise the sheet over the selection (Library) or the primary
-    /// image (Loupe, Compare, Survey), for the job queue.
+    /// through the editor's history; a photo opened on its own, with no
+    /// catalog row, still names its camera in the file, which is all the
+    /// sheet needs to offer its maps. Otherwise the sheet over the
+    /// selection (Library) or the primary image (Loupe, Compare, Survey),
+    /// for the job queue.
     private func presentRemoveDust(inMemory: Bool) {
         let records: [ImageRecord]
         if inMemory {
-            guard let row = library.images.first(where: { $0.id == model.catalogImageID }) else {
-                model.findDustSpots()
+            if let row = library.images.first(where: { $0.id == model.catalogImageID }) {
+                records = [row]
+            } else {
+                guard let summary = model.session?.file.summary else { return }
+                let camera = DustPhoto.camera(for: summary)
+                removeDustSheet = RemoveDustSheetModel(
+                    openImage: model.sourceURL?.lastPathComponent ?? model.imageTitle ?? "",
+                    camera: camera.isEmpty ? nil : camera,
+                    sensorSize: SIMD2(summary.rawWidth, summary.rawHeight))
                 return
             }
-            records = [row]
         } else {
             records = library.batchTargets(onlyPrimary: mode != .library)
         }

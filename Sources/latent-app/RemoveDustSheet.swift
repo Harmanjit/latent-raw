@@ -61,7 +61,9 @@ struct DustRemovalPreferences {
 /// for the selection's camera, and with no map at all to Find spots.
 ///
 /// **In memory** (Develop, the open image): Find spots and Use dust map
-/// only; the editor does the work and Undo takes it back.
+/// only; the editor does the work and Undo takes it back. The open image
+/// may have been opened on its own, with no catalog row: then the dialog
+/// knows it by what its file says (`init(openImage:camera:sensorSize:)`).
 @MainActor
 final class RemoveDustSheetModel: ObservableObject, Identifiable {
     enum Method: String, CaseIterable, Sendable {
@@ -79,11 +81,34 @@ final class RemoveDustSheetModel: ObservableObject, Identifiable {
         let isSelectedPhoto: Bool
     }
 
-    /// The photos, in the grid's order; the first is the primary.
+    /// What the dialog knows of a photo: enough to say which maps fit it
+    /// and which photos a map or reference would skip.
+    struct Photo: Equatable {
+        let name: String
+        let camera: String?
+        let sensorSize: SIMD2<Int>?
+
+        init(name: String, camera: String?, sensorSize: SIMD2<Int>?) {
+            self.name = name
+            self.camera = camera
+            self.sensorSize = sensorSize
+        }
+
+        init(_ record: ImageRecord) {
+            self.init(name: record.fileName, camera: record.camera,
+                      sensorSize: record.width.flatMap { width in record.height.map { SIMD2(width, $0) } })
+        }
+    }
+
+    /// The photos, in the grid's order; the first is the primary. Empty
+    /// for an open image with no catalog row, which `photos` still lists.
     let records: [ImageRecord]
     /// The photos' files, one each, in the same order.
     let urls: [URL]
     let inMemory: Bool
+    /// The photos as the dialog reasons about them, one per record, or
+    /// the one open image.
+    let photos: [Photo]
     /// The maps for the selection's cameras, newest first.
     let maps: [DustMap]
 
@@ -111,18 +136,34 @@ final class RemoveDustSheetModel: ObservableObject, Identifiable {
     ///
     /// - Parameter defaults: where the options are remembered; tests pass
     ///   a suite of their own.
-    init(records: [ImageRecord], urls: [URL], inMemory: Bool = false, store: DustMapStore = DustMapStore(),
-         defaults: UserDefaults = .standard) {
+    convenience init(records: [ImageRecord], urls: [URL], inMemory: Bool = false, store: DustMapStore = DustMapStore(),
+                     defaults: UserDefaults = .standard) {
+        self.init(records: records, urls: urls, inMemory: inMemory, photos: records.map(Photo.init), store: store,
+                  defaults: defaults)
+    }
+
+    /// The image open in Develop with no catalog row (File › Open), known
+    /// by its file's name, camera and sensor size: Find spots and Use dust
+    /// map, on the editor.
+    convenience init(openImage name: String, camera: String?, sensorSize: SIMD2<Int>?,
+                     store: DustMapStore = DustMapStore(), defaults: UserDefaults = .standard) {
+        self.init(records: [], urls: [], inMemory: true,
+                  photos: [Photo(name: name, camera: camera, sensorSize: sensorSize)], store: store, defaults: defaults)
+    }
+
+    private init(records: [ImageRecord], urls: [URL], inMemory: Bool, photos: [Photo], store: DustMapStore,
+                 defaults: UserDefaults) {
         self.records = records
         self.urls = urls
         self.inMemory = inMemory
+        self.photos = photos
         self.store = store
         let preferences = DustRemovalPreferences(defaults: defaults)
         self.preferences = preferences
         // Each camera's maps, newest first, in the order the cameras appear.
         var cameras: [String] = []
-        for record in records {
-            if let camera = record.camera, !cameras.contains(camera) { cameras.append(camera) }
+        for photo in photos {
+            if let camera = photo.camera, !cameras.contains(camera) { cameras.append(camera) }
         }
         maps = cameras.flatMap { store.maps(forCamera: $0) }
         sensitivity = preferences.sensitivity
@@ -144,7 +185,7 @@ final class RemoveDustSheetModel: ObservableObject, Identifiable {
 
     /// "Remove dust from 12 photos".
     var title: String {
-        records.count == 1 ? "Remove dust from 1 photo" : "Remove dust from \(records.count) photos"
+        photos.count == 1 ? "Remove dust from 1 photo" : "Remove dust from \(photos.count) photos"
     }
 
     var selectedMap: DustMap? {
@@ -154,11 +195,11 @@ final class RemoveDustSheetModel: ObservableObject, Identifiable {
     /// Why Use dust map is disabled: "No dust map for Nikon D750 yet".
     var noMapText: String? {
         guard maps.isEmpty else { return nil }
-        return "No dust map for \(records.first?.camera ?? "this camera") yet"
+        return "No dust map for \(photos.first?.camera ?? "this camera") yet"
     }
 
     /// The selected photo, for Use the selected photo.
-    var selectedPhotoName: String? { records.first?.fileName }
+    var selectedPhotoName: String? { photos.first?.name }
 
     var options: DustDetector.Options {
         DustDetector.Options(sensitivity: min(max(sensitivity, 0), 100), size: size)
@@ -178,10 +219,10 @@ final class RemoveDustSheetModel: ObservableObject, Identifiable {
     /// camera (or sensor size) than the map's or the reference's.
     var skippedCount: Int {
         guard let target = targetCamera else { return 0 }
-        return records.filter { record in
-            guard record.camera == target.camera else { return true }
-            guard let size = target.sensorSize, let width = record.width, let height = record.height else { return false }
-            return SIMD2(width, height) != size
+        return photos.filter { photo in
+            guard photo.camera == target.camera else { return true }
+            guard let size = target.sensorSize, let own = photo.sensorSize else { return false }
+            return own != size
         }.count
     }
 
@@ -190,12 +231,12 @@ final class RemoveDustSheetModel: ObservableObject, Identifiable {
     var mismatchNote: String? {
         let skipped = skippedCount
         guard skipped > 0 else { return nil }
-        if skipped == records.count {
-            return records.count == 1
+        if skipped == photos.count {
+            return photos.count == 1
                 ? "This photo is from another camera, so there is nothing to do"
-                : "All \(records.count) photos are from another camera, so there is nothing to do"
+                : "All \(photos.count) photos are from another camera, so there is nothing to do"
         }
-        return "\(skipped) of \(records.count) photo\(records.count == 1 ? " is" : "s are") from another camera and will be skipped"
+        return "\(skipped) of \(photos.count) photo\(photos.count == 1 ? " is" : "s are") from another camera and will be skipped"
     }
 
     /// Whether Remove Dust has what it needs: a map to use, a reference
@@ -203,12 +244,12 @@ final class RemoveDustSheetModel: ObservableObject, Identifiable {
     var canRemove: Bool {
         switch method {
         case .find:
-            return !records.isEmpty
+            return !photos.isEmpty
         case .map:
-            return selectedMap != nil && skippedCount < records.count
+            return selectedMap != nil && skippedCount < photos.count
         case .reference:
             guard let reference, !isReadingReference else { return false }
-            return reference.camera == nil || skippedCount < records.count
+            return reference.camera == nil || skippedCount < photos.count
         }
     }
 

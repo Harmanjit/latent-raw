@@ -202,6 +202,36 @@ final class FaceLandmarkerTests: XCTestCase {
         }
     }
 
+    /// A stored box off the image, or one with no size, would make Vision
+    /// refuse the whole refit; each is answered nil on its own and the
+    /// face beside them is still fitted.
+    func testAnUnusableSeedIsNilOnItsOwn() throws {
+        let image = try PortraitFixture.image(longEdge: 1500)
+        let detected = try XCTUnwrap(FaceLandmarker.detect(in: image, rotation: .none).first)
+        let outside = CGRect(x: 1.4, y: 0.2, width: 0.1, height: 0.1)
+        let empty = CGRect(x: 0, y: 0, width: 0, height: 0)
+        for seeds in [[detected.boundingBox, outside, empty], [outside, detected.boundingBox], [empty]] {
+            let refits = FaceLandmarker.refit(in: image, rotation: .none, seeds: seeds)
+            XCTAssertEqual(refits.count, seeds.count)
+            for (seed, refit) in zip(seeds, refits) {
+                if seed == detected.boundingBox {
+                    XCTAssertGreaterThanOrEqual(refit?.leftEye.count ?? 0, 3, "the face is still fitted")
+                } else {
+                    XCTAssertNil(refit, "\(seed)")
+                }
+            }
+        }
+        let size = CGSize(width: 400, height: 200)
+        XCTAssertFalse(FaceLandmarker.seedIsUsable(CGRect.null))
+        XCTAssertFalse(FaceLandmarker.seedIsUsable(CGRect(x: 10, y: 10, width: 0.5, height: 20)))
+        XCTAssertTrue(FaceLandmarker.seedIsUsable(CGRect(x: 10, y: 10, width: 1, height: 1)))
+        // A box that only touches the edge clips to an empty rectangle
+        // that is not null, which is just as unusable.
+        let touching = FaceLandmarker.uprightSeed(CGRect(x: 1, y: 0.2, width: 0.1, height: 0.1), margin: 0,
+                                                  rotation: .none, sensorSize: size, uprightSize: size)
+        XCTAssertFalse(FaceLandmarker.seedIsUsable(touching))
+    }
+
     /// The red-eye detector reads the same pass: on the portrait it finds
     /// two eyes (neither red).
     func testRedEyeDetectorSeesBothEyes() throws {

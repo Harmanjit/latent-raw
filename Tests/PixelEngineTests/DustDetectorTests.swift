@@ -208,6 +208,17 @@ final class DustDetectorTests: XCTestCase {
         let a = Self.analysis(scene)
         let patches = DustDetector.detect(a, options: .init(sensitivity: 60, size: .medium), expectedRadius: nil, existing: [])
         XCTAssertEqual(patches.count, HealPatch.maximumDustCount)
+
+        // Hand heals over the 30 strongest spots free 30 slots, which the
+        // next-best spots take: the cap is on the patches, not the blobs.
+        let healed = Array(patches.prefix(30))
+        let rest = DustDetector.detect(a, options: .init(sensitivity: 60, size: .medium), expectedRadius: nil,
+                                       existing: healed)
+        XCTAssertEqual(rest.count, HealPatch.maximumDustCount)
+        for patch in rest {
+            XCTAssertFalse(healed.contains { simd_distance($0.target, patch.target) < $0.radius },
+                           "a healed spot is not patched again")
+        }
     }
 
     func testSensitivityAndSizeChangeTheList() {
