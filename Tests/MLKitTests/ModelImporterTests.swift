@@ -110,6 +110,8 @@ final class ModelImporterTests: XCTestCase {
         } catch let error as ModelImportError {
             XCTAssertTrue(check(error), "\(error)", file: file, line: line)
             XCTAssertTrue(error.description.hasSuffix("."), "a plain sentence: \(error.description)", file: file, line: line)
+            XCTAssertFalse(error.description.contains("Error Domain"), "no NSError dump: \(error.description)", file: file, line: line)
+            XCTAssertFalse(error.description.contains(root.path), "no path: \(error.description)", file: file, line: line)
         } catch {
             XCTFail("\(error)", file: file, line: line)
         }
@@ -240,6 +242,15 @@ final class ModelImporterTests: XCTestCase {
         let badLabels = try makeFolder(kind: "semanticSegmentation", labelsFile: "labels.json")
         try "not a list".write(to: badLabels.appendingPathComponent("labels.json"), atomically: true, encoding: .utf8)
         await assertRefused(badLabels) { $0 == .semanticWithoutLabels }
+        // A labels name matching a bundled file must not pass on the
+        // bundled copy: the check reads this folder alone. And a missing
+        // labels file is missing for any kind, before the copy step
+        // stumbles on it.
+        await assertRefused(try makeFolder(kind: "semanticSegmentation",
+                                           labelsFile: "SegFormer_segformer_b2_finetuned_ade_512_512.labels.json")) {
+            $0 == .semanticWithoutLabels
+        }
+        await assertRefused(try makeFolder(labelsFile: "labels.json")) { $0 == .missingLabels("labels.json") }
 
         // Past the folder checks: the compile check and feature names.
         await assertRefused(try makeFolder(inputNames: ["picture"])) { $0 == .featureMismatch(Self.packageName) }
@@ -248,6 +259,165 @@ final class ModelImporterTests: XCTestCase {
             if case .compileFailed(let name, _) = $0 { return name == Self.packageName }
             return false
         }
+    }
+
+    /// A package or labels name with a path in it would be appended to
+    /// the staging copy's path, so `../<id>` would land the copy straight
+    /// in external/<id>/ before the compile check and stay there when the
+    /// check fails. Refused whole, from a folder and from a zip.
+    func testNamesWithPathsAreRefused() async throws {
+        let fm = FileManager.default
+        // What `../<id>` would copy: a folder beside the source named as
+        // the model, holding a manifest, with the package's model corrupt
+        // so the compile check fails after the copy.
+        let planted = root.appendingPathComponent(Self.id)
+        try fm.createDirectory(at: planted, withIntermediateDirectories: true)
+        let climbing = try makeFolder(kind: "subjectSegmentation", labelsFile: "../\(Self.id)", corruptModel: true)
+        try fm.copyItem(at: climbing.appendingPathComponent("\(Self.id).model.json"),
+                        to: planted.appendingPathComponent("\(Self.id).model.json"))
+        await assertRefused(climbing) { $0 == .badFileName("../\(Self.id)") }
+        await assertRefused(try zip(climbing, keepParent: true)) { $0 == .badFileName("../\(Self.id)") }
+
+        let packageNamed = try makeFolder()
+        let manifestFile = packageNamed.appendingPathComponent("\(Self.id).model.json")
+        let json = try String(contentsOf: manifestFile, encoding: .utf8)
+            .replacingOccurrences(of: "\"name\": \"\(Self.packageName)\"", with: "\"name\": \"../x\"")
+        try json.write(to: manifestFile, atomically: true, encoding: .utf8)
+        await assertRefused(packageNamed) { $0 == .badFileName("../x") }
+        for bad in ["", ".", "..", "a/b", "a\\b", "with space", "ümlaut"] {
+            XCTAssertFalse(ModelManifest.isPlainFileName(bad), bad)
+        }
+        for good in ["A.mlpackage", "labels.json", "x-y_z.1", ".hidden"] {
+            XCTAssertTrue(ModelManifest.isPlainFileName(good), good)
+        }
+    }
+
+    /// A link inside a package reads as its target, so the hash would pin
+    /// bytes the copy does not carry; refused before anything is copied.
+    func testLinkedFileInAPackageIsRefused() async throws {
+        let fm = FileManager.default
+        let folder = try makeFolder()
+        let weights = folder.appendingPathComponent("\(Self.packageName)/Data/com.apple.CoreML/weights/weight.bin")
+        let elsewhere = root.appendingPathComponent("weight.bin")
+        try fm.moveItem(at: weights, to: elsewhere)
+        try fm.createSymbolicLink(at: weights, withDestinationURL: elsewhere)
+        await assertRefused(folder) { $0 == .linkedFile(Self.packageName, "Data/com.apple.CoreML/weights/weight.bin") }
+    }
+
+    /// A folder that exists but cannot be listed (the sandbox grants the
+    /// chosen item, not its parent) is refused with a sentence, never the
+    /// file system's dump with the path in it.
+    func testUnlistableFolderIsASentence() async throws {
+        let fm = FileManager.default
+        let folder = try makeFolder()
+        try fm.setAttributes([.posixPermissions: 0o300], ofItemAtPath: folder.path)
+        addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path) }
+        await assertRefused(folder) {
+            if case .unreadableFolder(let name, let why) = $0 { return name == folder.lastPathComponent && !why.isEmpty }
+            return false
+        }
+    }
+
+    /// An .mlpackage chosen on its own: the sandbox opens the package and
+    /// nothing beside it, so its manifest (and labels) travel inside it
+    /// and are moved beside it on the way in. The folder around it is
+    /// made unlistable here, as the sandbox leaves it.
+    func testPackageAloneWithItsManifestInside() async throws {
+        let fm = FileManager.default
+        let folder = try makeFolder(labelsFile: "labels.json")
+        let package = folder.appendingPathComponent(Self.packageName)
+        try fm.moveItem(at: folder.appendingPathComponent("\(Self.id).model.json"),
+                        to: package.appendingPathComponent("\(Self.id).model.json"))
+        try "[\"a\"]".write(to: package.appendingPathComponent("labels.json"), atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o300], ofItemAtPath: folder.path)
+        addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path) }
+        XCTAssertNil(try? fm.contentsOfDirectory(atPath: folder.path), "the folder around the package is out of reach")
+
+        let manifest = try await ModelImporter.importModel(from: package, into: registry)
+        XCTAssertEqual(manifest.id, Self.id)
+        let installed = external.appendingPathComponent(Self.id)
+        XCTAssertEqual(externalContents(), [Self.id])
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: installed.path).sorted(),
+                       [Self.packageName, "labels.json", "\(Self.id).model.json"].sorted(), "sidecars beside the package")
+        XCTAssertEqual(try PackageHash.sha256(ofPackageAt: installed.appendingPathComponent(Self.packageName)),
+                       manifest.packages[0].sha256, "nothing left inside the package")
+        XCTAssertEqual(registry.entry(id: Self.id)?.status, .installed)
+        try ModelImporter.remove(id: Self.id, from: registry)
+    }
+
+    /// The package-alone refusals say where a manifest was looked for.
+    func testPackageAloneRefusals() async throws {
+        let fm = FileManager.default
+        let folder = try makeFolder()
+        let package = folder.appendingPathComponent(Self.packageName)
+        try fm.removeItem(at: folder.appendingPathComponent("\(Self.id).model.json"))
+        await assertRefused(package) { $0 == .packageWithoutManifest(Self.packageName, besideUnreadable: false) }
+        XCTAssertTrue(ModelImportError.packageWithoutManifest("P.mlpackage", besideUnreadable: false).description
+            .contains("beside P.mlpackage or inside it"))
+
+        try fm.setAttributes([.posixPermissions: 0o300], ofItemAtPath: folder.path)
+        addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path) }
+        await assertRefused(package) { $0 == .packageWithoutManifest(Self.packageName, besideUnreadable: true) }
+        let sentence = ModelImportError.packageWithoutManifest("P.mlpackage", besideUnreadable: true).description
+        XCTAssertTrue(sentence.contains("inside P.mlpackage") && sentence.contains("could not be read"), sentence)
+
+        // A manifest inside naming another package besides this one.
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        let two = try makeFolder()
+        let twoManifest = two.appendingPathComponent("\(Self.id).model.json")
+        let json = try String(contentsOf: twoManifest, encoding: .utf8)
+            .replacingOccurrences(of: "\"packages\": [", with: "\"packages\": [{\"name\": \"Other.mlpackage\", \"sha256\": \"00\"}, ")
+        try json.write(to: two.appendingPathComponent("\(Self.packageName)/\(Self.id).model.json"), atomically: true, encoding: .utf8)
+        try fm.removeItem(at: twoManifest)
+        await assertRefused(two.appendingPathComponent(Self.packageName)) { $0 == .manifestNamesOtherPackages(Self.packageName) }
+    }
+
+    /// A crash during the compile check leaves the hidden staging copy
+    /// under external/ (and an archive's staging folder in the temporary
+    /// directory); the sweep takes those old enough to be abandoned and
+    /// leaves a fresh one, which may be another import under way.
+    func testAbandonedCopiesAreSwept() throws {
+        let fm = FileManager.default
+        let old = Date(timeIntervalSinceNow: -2 * ModelImporter.abandonedAge)
+        let stale = external.appendingPathComponent(".importing-\(Self.id)-\(UUID().uuidString)")
+        let fresh = external.appendingPathComponent(".importing-\(Self.id)-\(UUID().uuidString)")
+        let staleStaging = fm.temporaryDirectory.appendingPathComponent("latent-import-\(UUID().uuidString)")
+        let freshStaging = fm.temporaryDirectory.appendingPathComponent("latent-import-\(UUID().uuidString)")
+        let named = fm.temporaryDirectory.appendingPathComponent("latent-import-test-\(UUID().uuidString)")
+        for url in [stale, fresh, staleStaging, freshStaging, named] {
+            try fm.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        addTeardownBlock { for url in [staleStaging, freshStaging, named] { try? FileManager.default.removeItem(at: url) } }
+        for url in [stale, staleStaging, named] { try fm.setAttributes([.creationDate: old], ofItemAtPath: url.path) }
+
+        ModelImporter.sweepAbandonedCopies(in: registry)
+        XCTAssertFalse(fm.fileExists(atPath: stale.path), "an old copy goes")
+        XCTAssertTrue(fm.fileExists(atPath: fresh.path), "a fresh copy may be an import under way")
+        XCTAssertFalse(fm.fileExists(atPath: staleStaging.path), "an old staging folder goes")
+        XCTAssertTrue(fm.fileExists(atPath: freshStaging.path))
+        XCTAssertTrue(fm.fileExists(atPath: named.path), "only latent-import-<uuid> is the importer's")
+        // Once per process for a registry: a second call leaves a copy
+        // that has aged since (an import still running).
+        try fm.setAttributes([.creationDate: old], ofItemAtPath: fresh.path)
+        ModelImporter.sweepAbandonedCopies(in: registry)
+        XCTAssertTrue(fm.fileExists(atPath: fresh.path))
+    }
+
+    /// File-system errors reach the Settings row as one sentence naming
+    /// the file, never the domain, code and full path.
+    func testReasonIsASentenceWithoutAPath() {
+        let missing = root.appendingPathComponent("nowhere.mlpackage")
+        do {
+            try FileManager.default.copyItem(at: missing, to: root.appendingPathComponent("copy"))
+            XCTFail("copied nothing")
+        } catch {
+            let why = ModelImporter.reason(error)
+            XCTAssertTrue(why.contains("nowhere.mlpackage"), why)
+            XCTAssertFalse(why.contains(root.path), why)
+            XCTAssertFalse(why.contains("Error Domain"), why)
+        }
+        XCTAssertEqual(ModelImporter.reason(PackageHashError.missingFile("x")), "missingFile(\"x\")",
+                       "an error of our own with no sentence is described as it is")
     }
 
     /// A refused re-import keeps the model that was there.

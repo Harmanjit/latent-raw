@@ -146,7 +146,8 @@ final class ModelSettingsModel: ObservableObject {
         do {
             try ModelImporter.remove(id: entry.id, from: registry)
         } catch {
-            message = "Removing \(entry.manifest.displayName) failed: \(error)"
+            // A sentence, not a domain, a code and the folder's path.
+            message = "Removing \(entry.manifest.displayName) failed: \(PhotoMergeQueue.describe(error))"
             messageIsError = true
             reload()
             return
@@ -195,7 +196,8 @@ final class ModelSettingsModel: ObservableObject {
             message = "Added \(manifest.displayName) (\(manifest.sizeMB) MB)"
             messageIsError = false
         } catch {
-            message = String(describing: error)
+            // The importer's own sentence; anything else as a sentence too.
+            message = PhotoMergeQueue.describe(error)
             messageIsError = true
         }
         importing = nil
@@ -204,16 +206,21 @@ final class ModelSettingsModel: ObservableObject {
     }
 
     /// The display name of the manifest beside what was chosen, when one
-    /// can be read without unpacking anything: a folder's, or the folder
-    /// holding an .mlpackage. A zip's is known only once it is unpacked.
+    /// can be read without unpacking anything: a folder's, or, for an
+    /// .mlpackage, the one in the folder holding it or else inside it
+    /// (the folder is out of reach when only the package was chosen). A
+    /// zip's is known only once it is unpacked.
     nonisolated static func manifestName(at url: URL) -> String? {
-        let folder = url.pathExtension.lowercased() == "mlpackage" ? url.deletingLastPathComponent() : url
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue,
-              let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return nil }
-        let manifests = names.filter { $0.hasSuffix(".model.json") }.sorted()
-        guard manifests.count == 1 else { return nil }
-        return (try? ModelManifest.load(from: folder.appendingPathComponent(manifests[0])))?.displayName
+        let folders = url.pathExtension.lowercased() == "mlpackage" ? [url.deletingLastPathComponent(), url] : [url]
+        for folder in folders {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue,
+                  let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { continue }
+            let manifests = names.filter { $0.hasSuffix(".model.json") }.sorted()
+            guard manifests.count == 1 else { continue }
+            return (try? ModelManifest.load(from: folder.appendingPathComponent(manifests[0])))?.displayName
+        }
+        return nil
     }
 
     /// Shows the models folder in Finder, making it first if it has never
