@@ -13,7 +13,7 @@ Repository: `Harmanjit/latent-raw`.
   `xcodebuild -downloadComponent MetalToolchain`) the shaders compile at first
   launch.
 - **License:** GPLv3. See `LICENSE`.
-- **Status:** version 0.9, a beta review build. Editing (with red-eye and brush healing), a catalog with a folder sidebar, Custom sort, Finder tags, moving and renaming images with their edits, undo in the Library, AI masks, Loupe, Compare and Survey, full-screen and second-display viewing, export (with optional HDR gain maps and a watermark), soft-proofing, printing, contact sheets, a slideshow, hand-off to an external editor and Photo Merge — HDR of handheld or tripod brackets (Photo › Photo Merge › HDR…, ⌃H), single-row Panoramas (Panorama…, ⌃M) and, marked experimental, HDR Panorama (⌃⇧M), all writing a DNG — work; DNG export does not exist. HDR Panorama has never been checked on a real bracketed sweep, because nobody has shot one for Latent yet. Expect rough edges.
+- **Status:** version 0.9, a beta review build. Editing (with red-eye and brush healing), sensor dust removal (found per photo or from a saved dust map, on one image or a whole selection), portrait touch-up (skin, teeth, eyes and blemishes, per face), a catalog with a folder sidebar, Custom sort, Finder tags, moving and renaming images with their edits, undo in the Library, AI masks (subject, click to select and by class, with a choice of subject-selection models and more addable from disk), Loupe, Compare and Survey, full-screen and second-display viewing, export (with optional HDR gain maps and a watermark), soft-proofing, printing, contact sheets, a slideshow, hand-off to an external editor and Photo Merge — HDR of handheld or tripod brackets (Photo › Photo Merge › HDR…, ⌃H), single-row Panoramas (Panorama…, ⌃M) and, marked experimental, HDR Panorama (⌃⇧M), all writing a DNG — work; DNG export does not exist. HDR Panorama has never been checked on a real bracketed sweep, because nobody has shot one for Latent yet, and the dust detector has been tested on synthetic dust and only a few real photos. Expect rough edges.
 - **Name:** the project was called *rawhead* until September 2026. Folders
   catalogued by those builds have a `_rawhead/` container; opening them in
   Latent renames it to `_latent/` in place, keeping every edit and sidecar.
@@ -34,17 +34,18 @@ under **Help > Latent Help**.
 Sources/
   RawCore/            LibRaw wrapper: unpacking, EXIF, embedded previews, the XPC decoder client, export metadata
   latent-rawdecoder/  The sandboxed XPC service that runs LibRaw
-  PixelEngine/        Metal pipeline: kernels, stage cache, heal, red-eye, tone ranges, presenter, exporter, watermark, gain maps, page layout, slideshow transitions
+  PixelEngine/        Metal pipeline: kernels, stage cache, heal (with the heal cache), red-eye, the sensor dust detector (BlobDetector, DustDetector, DustMap) and Visualise Spots, the touch-up stage and its mask set (TouchUp, TouchUpMasks, TouchUpStage), tone ranges, presenter, exporter, watermark, gain maps, page layout, slideshow transitions
   ColorKit/           Camera matrices, white balance, working space
   LensKit/            Lensfun database and lens matching
   Catalog/            Per-folder catalogs: GRDB schema, XMP read/write, reconciliation, thumbnails, sorting and Finder tags, moving and renaming images, undo, export naming
-  MLKit/              Core ML and Vision: masks, AI denoise, red-eye detection, the export worker
+  MLKit/              Core ML and Vision: the model registry, manifests and importer (ModelRegistry, ModelManifest, ModelImporter), the bundled models and catalogue under Resources/Models, masks (SAM 2, SegFormer, SubjectSegmenter), AI denoise, the shared face-landmark pass (FaceLandmarker) behind red-eye detection, touch-up regions (TouchUpAnalysis, TouchUpRegions) and the blemish finder, the export worker
   MergeKit/           Photo Merge: alignment, deghosting, the HDR merge, the panorama geometry and stitcher, the HDR panorama, the LinearRaw DNG writer and the latent:Merge recipe
   HelpKit/            The Help window's content: the wiki's Markdown, links and search
   latent-cli/         Headless renderer for benchmarks, and the merge commands (merge-hdr, pano-layout, merge-pano, merge-hdrpano)
-  latent-app/         The SwiftUI/AppKit app (viewport, grid, sidebar, adjustments, export, print, slideshow, menus)
+  latent-app/         The SwiftUI/AppKit app (viewport, grid, sidebar, adjustments, export, print, slideshow, menus; the Sensor Dust and Touch-up panels, overlays and editor extensions, the Remove Dust sheet, Settings › AI › Models, and SelectionJobQueue with its Remove Dust and Find Faces jobs)
 Tests/                Unit, golden-image, help-page and app-logic tests
-docs/                 PhotoMerge.md, the Photo Merge plan and algorithm
+docs/                 PhotoMerge.md, the Photo Merge plan and algorithm; Retouch.md, the sensor dust, touch-up and subject-model plan
+scripts/              Build, packaging and test-asset scripts, and the Core ML conversion scripts with latent_manifest.py, which writes and checks model manifests
 docs/wiki/            The user guide (GitHub wiki and in-app Help)
 vendor/               LibRaw, the one C/C++ dependency, built here as an XCFramework (not committed)
 Assets/               The app icon: Latent.pdf, the vector original, and the AppIcon.icns and AppIcon.png made from it
@@ -92,10 +93,13 @@ from the command line and the bundle cannot.
 ## Privacy
 
 Latent makes no network requests. There is no telemetry, no analytics,
-no crash reporting and no update check. The only code that can reach
-the network is the optional model download, which is not offered in the
-current build and, when it is, fetches one fixed URL and verifies a
-checksum before installing anything.
+no crash reporting and no update check, and nothing in the code base
+downloads a model: Settings › AI › Models lists models you can add, its
+Get… button only opens the model's page in your browser, and Add Model…
+imports a folder, `.mlpackage` or `.zip` you converted yourself with the
+scripts in `scripts/` (see `Sources/MLKit/Resources/Models/README.md`),
+after checking its manifest and package hashes. Face finding, for red-eye
+and Touch-up, uses Apple's Vision framework on this Mac.
 
 What it writes, and where:
 
@@ -112,7 +116,8 @@ What it writes, and where:
 - `~/Library/Containers/com.latent.app/Data/Library/Application Support/latent/`
   (`~/Library/Application Support/latent/` for `swift run` and
   `make_app.sh --dev` builds, which aren't sandboxed): compiled Core ML
-  models and your saved presets.
+  models, models you add (`models/<id>/`), saved dust maps
+  (`dust-maps.json`) and your saved presets.
 - The temporary folder: a panorama's prepared frames and HDR Panorama's
   intermediate DNGs while a merge runs, removed when it ends.
 - Settings in the app's UserDefaults, including bookmarks for the last
@@ -134,9 +139,11 @@ unless you opt in.
 
 Theme (system/light/dark), accent colour, image surround grey, render
 timings, default export folder, subfolder policy for new catalogs, whether
-the arrow keys pan a zoomed-in image, the Core ML compute choice, the
-slideshow (timing, transition, captions, music) and the external editor
-(application and folder). Export naming templates, sequence numbers,
+the arrow keys pan a zoomed-in image, the models behind the masks (which
+is the default for new subject and click-to-select masks, Add Model…,
+Remove) and the Core ML compute choice, the slideshow (timing,
+transition, captions, music) and the external editor (application and
+folder). Export naming templates, sequence numbers,
 letter case, collision policy, date subfolders, the HDR gain map, the
 watermark and saved export presets live in the export sheet (⇧⌘E); the
 print layout lives in the print panel (⌘P).
@@ -195,8 +202,10 @@ redistributable-but-not-ours). `scripts/fetch_test_assets.sh` downloads
 the public-domain D750 raw the golden-image tests render, which is all CI
 uses. `TestAssets/README.md` describes the optional samples; tests whose
 sample is missing skip themselves, and tests that need any D750 raw use the
-public-domain one. `LATENT_CI_ASSETS_ONLY=1 swift test` hides every other
-file, so a local run skips what CI skips.
+public-domain one. `scripts/fetch_test_assets.sh --portrait` adds the
+public-domain NASA portrait the face-landmark and touch-up tests use, and
+`--merge` the Photo Merge brackets. `LATENT_CI_ASSETS_ONLY=1 swift test`
+hides every other file, so a local run skips what CI skips.
 
 ## Contributing
 
