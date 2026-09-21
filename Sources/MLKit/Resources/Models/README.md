@@ -77,19 +77,22 @@ each one with the script named, which writes the folder to add.
 
 | Model id | What | Licence | Script | Size |
 |---|---|---|---|---|
-| `sam2.1-tiny`, `sam2.1-base-plus`, `sam2.1-large` | Segment Anything 2.1, Apple's fp16 packages | Apache-2.0 | `scripts/convert_sam2.py --size tiny\|baseplus\|large` | 80, 166, 457 MB |
+| `sam2.1-tiny`, `sam2.1-base-plus`, `sam2.1-large` | Segment Anything 2.1, Apple's fp16 packages | Apache-2.0 | `scripts/convert_sam2.py --size tiny\|base-plus\|large` (downloads Apple's packages once their revisions and hashes are pinned in the script; `--from-local DIR` describes a set already on disk) | 80, 166, 457 MB |
 | `birefnet-general`, `birefnet-portrait` | BiRefNet Swin-L: the finest hair and structure; the portrait variant is tuned for people. GPU only, like lite | MIT | `scripts/convert_birefnet.py --variant general\|portrait` (once their revisions are pinned in the script) | 446 MB each |
-| `u2net`, `u2net-small` | U²-Net salient-object masks, 320²; guided-filter refinement | Apache-2.0 | `scripts/convert_u2net.py [--small]` | 88 MB, 3 MB |
-| `modnet` | MODNet portrait matting, 512²; people only | Apache-2.0 | `scripts/convert_modnet.py` | 13 MB |
-| `isnet` | IS-Net (DIS) fine wiry detail, 1024². The code is Apache-2.0 but the DIS5K training data is research-only, so `commercialUse: false` and the row reads "Research use only" | Apache-2.0 code, DIS5K research-only | `scripts/convert_isnet.py` | 88 MB |
+| `u2net`, `u2net-small` | U²-Net salient-object masks, 320²; guided-filter refinement | Apache-2.0 | `scripts/convert_u2net.py [--small] --weights u2net.pth\|u2netp.pth` (the weights come from the link in the U²-Net README; once the commit and hashes are pinned in the script) | 88 MB, 3 MB |
+| `modnet` | MODNet portrait matting, 512²; people only | Apache-2.0 | `scripts/convert_modnet.py --weights modnet_photographic_portrait_matting.ckpt` (the weights come from the link in the MODNet README; once the commit and hash are pinned in the script) | 13 MB |
+| `isnet` | IS-Net (DIS) fine wiry detail, 1024². The code is Apache-2.0 but the DIS5K training data is research-only, so `commercialUse: false` and the row reads "Research use only" | Apache-2.0 code, DIS5K research-only | `scripts/convert_isnet.py --weights isnet-general-use.pth` (the weights come from the link in the DIS README; once the commit and hash are pinned in the script) | 88 MB |
 
 Left out on purpose: RMBG-1.4/2.0 (commercial use needs an agreement with
 BRIA), BEN2 (no Core ML path yet) and ViTMatte (needs a trimap; a refiner,
 not a selector).
 
-The scripts for the catalogue rows other than BiRefNet are written in Wave
-3 of docs/Retouch.md; a row whose script does not exist yet still shows in
-Settings with its source link.
+Every script pins the upstream revision and the SHA-256 of the weights it
+converts and refuses to run while a pin still reads `<pin me>`: a row
+whose script is not pinned yet still shows in Settings with its source
+link. Each script writes the folder to add (packages plus manifest) and
+verifies the package against PyTorch before the manifest is written;
+`--verify-only` re-runs that check on a folder already there.
 
 ## AI noise reduction
 

@@ -18,9 +18,14 @@ training framework. The state dict is loaded strictly, so any mismatch
 with the published layout fails loudly.
 
 Output: Sources/MLKit/Resources/Models/NAFNet_SIDD_width32.mlpackage
+        and nafnet-sidd-w32.model.json beside it, written last through
+        scripts/latent_manifest.py once the package has been timed.
 Input:  "image"  1x3x256x256 float, sRGB-like values in [0, 1]
 Output: "denoised" 1x3x256x256
+
+    python scripts/convert_nafnet.py --verify-only    # time the package already there; no manifest
 """
+import datetime
 import os
 import sys
 import time
@@ -33,10 +38,14 @@ import coremltools as ct
 from huggingface_hub import hf_hub_download
 
 import argparse
-import hashlib
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import latent_manifest
+
 _args = argparse.ArgumentParser()
 _args.add_argument("--width", type=int, default=32, help="32 (bundled) or 64 (not bundled or published; convert it yourself)")
 _args.add_argument("--out", default=None, help="output directory (default: the bundled Models folder)")
+_args.add_argument("--verify-only", action="store_true",
+                   help="no download or conversion: time the package already in --out and exit")
 ARGS = _args.parse_args()
 
 TILE = 256
@@ -148,18 +157,54 @@ WEIGHTS_SHA256 = {
 }
 
 
-def sha256_of(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+def time_package(out_path, noisy):
+    """Times the package the way the app runs it (GPU; the ANE compiler
+    hangs on macOS 15.7 for some graphs, so the app defaults to CPU+GPU)
+    and checks the tile still comes out flatter than it went in."""
+    m = ct.models.MLModel(out_path, compute_units=ct.ComputeUnit.CPU_AND_GPU)
+    x = {"image": noisy.numpy()}
+    m.predict(x)
+    t = time.time()
+    for _ in range(5):
+        y = m.predict(x)["denoised"]
+    per = (time.time() - t) / 5
+    print(f"Core ML (CPU+GPU): {per * 1000:.0f} ms per 256x256 tile; out std {y.std():.4f}")
+    print(f"≈ {per * 400:.0f} s for a 24 MP image at 400 tiles (before overlap)")
+    assert y.std() < noisy.std() * 0.5, "the package did not denoise"
+
+
+def write_manifest(out_path):
+    """`nafnet-sidd-w<width>.model.json` beside the package: the registry's
+    row for it, with the content hash and feature names read from the
+    package."""
+    row = latent_manifest.package_entry(out_path)
+    row["_bytes"] = latent_manifest.package_size(out_path)
+    manifest = latent_manifest.build_manifest(
+        id=f"nafnet-sidd-w{WIDTH}", display_name=f"NAFNet SIDD width {WIDTH}",
+        purpose="AI noise reduction, 256 px tiles", version=1, kind="denoise",
+        licence_name="MIT", licence_url="https://github.com/megvii-research/NAFNet/blob/main/LICENSE",
+        commercial_use=True, source_url=f"https://huggingface.co/{WEIGHTS_REPO}", input_size=TILE,
+        packages=[row],
+        converter={"script": "scripts/convert_nafnet.py" + (f" --width {WIDTH}" if WIDTH != 32 else ""),
+                   "sourceRevision": WEIGHTS_REVISION,
+                   "coremltools": ct.__version__, "torch": torch.__version__.split("+")[0],
+                   "date": datetime.date.today().isoformat()})
+    print("Wrote", latent_manifest.write_manifest(manifest, os.path.dirname(os.path.abspath(out_path))))
 
 
 def main():
+    out_path = os.path.join(OUT_DIR, PACKAGE)
+    torch.manual_seed(0)
+    clean = torch.full((1, 3, TILE, TILE), 0.5)
+    noisy = (clean + 0.05 * torch.randn_like(clean)).clamp(0, 1)
+    if ARGS.verify_only:
+        time_package(out_path, noisy)
+        print("Verified")
+        return
+
     print(f"Downloading NAFNet-SIDD-width{WIDTH}.pth (official weights, MIT)…")
     path = hf_hub_download(WEIGHTS_REPO, f"NAFNet-SIDD-width{WIDTH}.pth", revision=WEIGHTS_REVISION)
-    digest = sha256_of(path)
+    digest = latent_manifest.file_sha256(path)
     if digest != WEIGHTS_SHA256[WIDTH]:
         print(f"Weight file checksum mismatch: {digest} != {WEIGHTS_SHA256[WIDTH]}; refusing to convert")
         sys.exit(1)
@@ -175,8 +220,6 @@ def main():
 
     # Sanity: a noisy flat patch should come out flatter.
     with torch.no_grad():
-        clean = torch.full((1, 3, TILE, TILE), 0.5)
-        noisy = (clean + 0.05 * torch.randn_like(clean)).clamp(0, 1)
         out = model(noisy)
         print(f"noise std in {noisy.std():.4f} -> out {out.std():.4f}")
         assert out.std() < noisy.std() * 0.5, "model did not denoise; wrong weights?"
@@ -194,21 +237,12 @@ def main():
     mlmodel.author = "Converted for Latent from official NAFNet weights (Chen et al. 2022, MIT)"
     mlmodel.short_description = f"NAFNet SIDD width{WIDTH} real-noise denoiser, 256x256 tiles"
     os.makedirs(OUT_DIR, exist_ok=True)
-    out_path = os.path.join(OUT_DIR, PACKAGE)
     mlmodel.save(out_path)
     print("Saved", out_path)
 
-    # Time it the way the app runs it (GPU; the ANE compiler hangs on
-    # macOS 15.7 for some graphs, so the app defaults to CPU+GPU).
-    m = ct.models.MLModel(out_path, compute_units=ct.ComputeUnit.CPU_AND_GPU)
-    x = {"image": noisy.numpy()}
-    m.predict(x)
-    t = time.time()
-    for _ in range(5):
-        y = m.predict(x)["denoised"]
-    per = (time.time() - t) / 5
-    print(f"Core ML (CPU+GPU): {per * 1000:.0f} ms per 256x256 tile; out std {y.std():.4f}")
-    print(f"≈ {per * 400:.0f} s for a 24 MP image at 400 tiles (before overlap)")
+    time_package(out_path, noisy)
+    # The manifest comes last, so a package that failed above never gets one.
+    write_manifest(out_path)
 
 
 if __name__ == "__main__":

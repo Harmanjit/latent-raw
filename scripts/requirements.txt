@@ -1,21 +1,32 @@
 # Python tooling for the model conversion scripts, pinned to the versions
 # the bundled models were built with. Newer versions may work; these are
-# known to.
+# known to. git must be on the PATH too: convert_modnet.py, convert_isnet.py
+# and convert_u2net.py clone their model code at a pinned commit.
 #   python3.12 -m venv ~/latent-ml && source ~/latent-ml/bin/activate
 #   pip install -r scripts/requirements.txt
+#
+# Every script: torch (tracing), coremltools (conversion, package specs
+# for latent_manifest.py's feature names) and numpy (the verify steps).
 torch==2.14.0
-transformers==5.17.0
 coremltools==9.0
-huggingface_hub==1.31.0
 numpy==2.5.3
+# convert_birefnet.py and convert_segformer.py load their models through
+# transformers; convert_birefnet.py, convert_segformer.py, convert_nafnet.py
+# and convert_sam2.py download from Hugging Face through huggingface_hub.
+transformers==5.17.0
+huggingface_hub==1.31.0
+# convert_birefnet.py's weights are a safetensors file, which transformers
+# reads through this.
 safetensors==0.8.0
-# convert_segformer.py's check prediction needs Pillow, which the packages
-# above require only through optional extras.
+# Every verify step feeds the package a test photo as a PIL image; the
+# packages above require Pillow only through optional extras.
 pillow==12.3.0
 # convert_birefnet.py: the model code BiRefNet ships (birefnet.py, loaded
 # through trust_remote_code) imports all of these; kornia only on its
 # training path, and torchvision for the deform_conv2d the PyTorch
-# reference runs before the grid_sample replacement goes in.
+# reference runs before the grid_sample replacement goes in. The DIS and
+# U²-Net model files convert_isnet.py and convert_u2net.py import also
+# import torchvision.
 torchvision==0.29.0
 timm==1.0.29
 einops==0.8.2

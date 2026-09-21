@@ -66,6 +66,10 @@ COMPUTE_UNITS = ["cpuOnly", "cpuAndGPU", "cpuAndNeuralEngine", "all"]
 ACTIVATIONS = ["sigmoid", "probabilities"]
 REFINES = ["none", "guided"]
 ROLES = ["imageEncoder", "promptEncoder", "maskDecoder"]
+# What a conversion script writes for a revision or weight hash it has not
+# vetted yet. A script must refuse to run while any pin it needs still
+# reads this, so an unvetted upload never becomes a package.
+PLACEHOLDER = "<pin me>"
 
 
 class PackageError(Exception):
@@ -91,6 +95,16 @@ def package_hash(package):
         with open(path, "rb") as f:
             for chunk in iter(lambda: f.read(1 << 20), b""):
                 h.update(chunk)
+    return h.hexdigest()
+
+
+def file_sha256(path):
+    """SHA-256 of one file, streamed; what the conversion scripts pin their
+    downloaded weights against."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
     return h.hexdigest()
 
 
