@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """
 Writes and checks the `<id>.model.json` manifest that sits beside a model's
-Core ML package(s) in Sources/MLKit/Resources/Models (bundled) or in
-`~/Library/Application Support/latent/external/<id>/` (imported). The shape
+Core ML package(s) in Sources/MLKit/Resources/Models (bundled) or, for a
+model added with Settings > AI > Models > Add Model..., in the folder the
+app copies it into: `Application Support/latent/models/<id>/`, inside the
+app's container for the sandboxed app
+(`~/Library/Containers/com.latent.app/Data/Library/Application Support/latent/models/<id>/`)
+and plain `~/Library/Application Support/latent/models/<id>/` for `swift run`
+and `make_app.sh --dev` builds; Reveal in Finder there opens it. The shape
 is `ModelManifest` in Sources/MLKit/ModelManifest.swift; docs/Retouch.md
 contract A is the reference, and the field names here must match it to the
 letter because a Swift `Codable` decoder reads the file.
@@ -27,7 +32,15 @@ Several packages with roles (a prompted model): give each package as
         SAM2_1SmallMaskDecoderFLOAT16.mlpackage@maskDecoder \
         --id sam2.1-small --kind promptedSegmentation … --out Sources/MLKit/Resources/Models
 
-Check existing manifests (the packages are looked up beside each file):
+A manifest inside the package (`--inside`, one package only): the sandboxed
+app may read only what was chosen in the open panel, so a package chosen on
+its own must carry its manifest (and labels file) at its root. Add Model...
+moves them beside the package on the way in:
+
+    python scripts/latent_manifest.py BiRefNet_general.mlpackage --inside --id birefnet-general …
+
+Check existing manifests (the packages are looked up beside each file, or
+the manifest's own package when it sits inside one):
 
     python scripts/latent_manifest.py --check Sources/MLKit/Resources/Models/*.model.json
 
@@ -40,10 +53,12 @@ The package hash is SHA-256 over the three files a Core ML package holds,
 `Data/com.apple.CoreML/weights/weight.bin`, in that order, each fed to one
 hasher as the relative-path bytes, a 0x00 byte, then the file bytes. A
 package holding any other regular file is refused, so a stray file can
-never be smuggled past the hash. `PackageHash.sha256(ofPackageAt:)` in
-MLKit computes the same value; it keys the compile cache and catches
-corruption, which is why a re-conversion (never byte-identical) means a new
-manifest.
+never be smuggled past the hash, and so is one holding a symbolic link
+(its bytes live outside the package); a manifest or labels file at the root
+of a package written with `--inside` is passed over, and the value is the
+same either way. `PackageHash.sha256(ofPackageAt:)` in MLKit computes the
+same value; it keys the compile cache and catches corruption, which is why
+a re-conversion (never byte-identical) means a new manifest.
 
 Feature names are read from the package spec through coremltools, so the
 manifest states what the package really accepts and the importer can
@@ -73,21 +88,28 @@ PLACEHOLDER = "<pin me>"
 
 
 class PackageError(Exception):
-    """A package that cannot be hashed: a hashed file missing, or a file present that is not one of the three."""
+    """A package that cannot be hashed: a hashed file missing, a file present
+    that is not one of the three, or a symbolic link anywhere in it."""
 
 
-def package_hash(package):
-    """SHA-256 of a package's contents, as `PackageHash.sha256(ofPackageAt:)` computes it."""
+def package_hash(package, ignore_root=()):
+    """SHA-256 of a package's contents, as `PackageHash.sha256(ofPackageAt:)`
+    computes it. `ignore_root` names files at the package root the walk
+    passes over (a manifest and labels file written `--inside`)."""
     package = os.path.normpath(package)
-    expected = set(HASHED_FILES)
-    for root, _, files in os.walk(package):
-        for name in files:
+    expected = set(HASHED_FILES) | set(ignore_root)
+    for root, dirs, files in os.walk(package):
+        for name in dirs + files:
             rel = os.path.relpath(os.path.join(root, name), package).replace(os.sep, "/")
-            if rel not in expected:
+            if os.path.islink(os.path.join(root, name)):
+                raise PackageError(f"{package}: symbolic link {rel}")
+            if name in files and rel not in expected:
                 raise PackageError(f"{package}: unexpected file {rel}")
     h = hashlib.sha256()
     for rel in HASHED_FILES:
         path = os.path.join(package, *rel.split("/"))
+        if os.path.islink(path):
+            raise PackageError(f"{package}: symbolic link {rel}")
         if not os.path.isfile(path):
             raise PackageError(f"{package}: missing {rel}")
         h.update(rel.encode("utf-8"))
@@ -121,12 +143,12 @@ def feature_names(package):
             [f.name for f in spec.description.output])
 
 
-def package_entry(package, role=None, features=True):
+def package_entry(package, role=None, features=True, ignore_root=()):
     """One `packages[]` row for `package`: name, role, hash and feature names."""
     entry = {"name": os.path.basename(os.path.normpath(package))}
     if role is not None:
         entry["role"] = role
-    entry["sha256"] = package_hash(package)
+    entry["sha256"] = package_hash(package, ignore_root)
     inputs, outputs = feature_names(package) if features else ([], [])
     entry["inputNames"] = inputs
     entry["outputNames"] = outputs
@@ -174,7 +196,8 @@ def build_manifest(*, id, display_name, purpose, version, kind, licence_name, li
 
 
 def write_manifest(manifest, out_dir):
-    """Writes `<id>.model.json` into `out_dir` and returns its path."""
+    """Writes `<id>.model.json` into `out_dir` (a folder, or the package
+    itself for `--inside`) and returns its path."""
     path = os.path.join(out_dir, manifest["id"] + ".model.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
@@ -183,13 +206,22 @@ def write_manifest(manifest, out_dir):
 
 
 def check_manifest(path, features=True):
-    """Verifies every package named by the manifest at `path`, beside it:
-    present, content hash equal, and (with coremltools) the feature names
-    equal. Returns a list of problems; empty means the manifest is good."""
+    """Verifies every package named by the manifest at `path`, beside it or,
+    when the manifest sits inside its one package, that package: present,
+    content hash equal, and (with coremltools) the feature names equal.
+    Returns a list of problems; empty means the manifest is good."""
     problems = []
     with open(path, encoding="utf-8") as f:
         manifest = json.load(f)
     folder = os.path.dirname(os.path.abspath(path))
+    rows = manifest.get("packages", [])
+    # Inside a package: the folder is the package, and the manifest and
+    # labels at its root are not strays.
+    inside = len(rows) == 1 and rows[0].get("name") == os.path.basename(folder)
+    ignore_root = ()
+    if inside:
+        ignore_root = tuple(n for n in (os.path.basename(path), manifest.get("labelsFile")) if n)
+        folder = os.path.dirname(folder)
     if not ID_PATTERN.match(manifest.get("id", "")):
         problems.append(f"id {manifest.get('id')!r} does not match {ID_PATTERN.pattern}")
     if os.path.basename(path) != manifest.get("id", "") + ".model.json":
@@ -209,7 +241,7 @@ def check_manifest(path, features=True):
             problems.append(f"{row['name']}: package missing")
             continue
         try:
-            digest = package_hash(package)
+            digest = package_hash(package, ignore_root)
         except PackageError as e:
             problems.append(str(e))
             continue
@@ -258,6 +290,9 @@ def main(argv=None):
     w.add_argument("--torch")
     w.add_argument("--date", help="conversion date, YYYY-MM-DD")
     w.add_argument("--out", help="directory for <id>.model.json (default: the first package's folder)")
+    w.add_argument("--inside", action="store_true",
+                   help="write <id>.model.json inside the package (one package only), so the package can be "
+                        "added on its own; put the labels file there too")
     args = p.parse_args(argv)
 
     if args.hash:
@@ -284,13 +319,17 @@ def main(argv=None):
     missing = [name for name in required if not getattr(args, name)]
     if missing:
         p.error("writing a manifest needs " + ", ".join("package paths" if m == "paths" else "--" + m.replace("_", "-") for m in missing))
+    if args.inside and (len(args.paths) != 1 or args.out):
+        p.error("--inside takes exactly one package and no --out")
 
     rows = []
     for spec in args.paths:
         path, _, role = spec.partition("@")
         if role and role not in ROLES:
             p.error(f"role {role!r} is not one of {ROLES}")
-        row = package_entry(path, role or None)
+        # A manifest already inside the package (a rewrite) is not a stray.
+        ignore_root = (args.id + ".model.json", args.labels_file) if args.inside else ()
+        row = package_entry(path, role or None, ignore_root=tuple(n for n in ignore_root if n))
         row["_bytes"] = package_size(path)
         rows.append(row)
     converter = None
@@ -304,7 +343,8 @@ def main(argv=None):
         input_size=args.input_size, packages=rows, output_activation=args.output_activation,
         refine=args.refine, labels_file=args.labels_file, compute_units=args.compute_units,
         converter=converter)
-    out_dir = args.out or os.path.dirname(os.path.abspath(args.paths[0].partition("@")[0]))
+    first = os.path.abspath(args.paths[0].partition("@")[0])
+    out_dir = first if args.inside else (args.out or os.path.dirname(first))
     path = write_manifest(manifest, out_dir)
     print(f"Wrote {path} ({manifest['sizeMB']} MB, {len(rows)} package{'s' if len(rows) != 1 else ''})")
     return 0
