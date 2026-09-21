@@ -1028,8 +1028,17 @@ struct ContentView: View {
             guard mode == .develop, model.hasImage else { break }
             model.redEyeToolActive.toggle()
             if model.redEyeToolActive { healExpanded = true }
+        case .dust:
+            guard mode == .develop, model.hasImage else { break }
+            model.dustToolActive.toggle()
+        case .touchUp:
+            guard mode == .develop, model.hasImage else { break }
+            model.touchUpToolActive.toggle()
         case .deleteHeal:
             if model.redEyeToolActive { model.deleteSelectedRedEye(); break }
+            // Wave 2: the dust and touch-up rings' Delete (EditorModel+Dust,
+            // +TouchUp); nothing can select one yet.
+            if model.dustToolActive || model.touchUpToolActive { break }
             guard model.healToolActive else { return false }
             model.deleteSelectedHeal()
         case .disarmTools:
@@ -1063,6 +1072,10 @@ struct ContentView: View {
             beginPanoramaMerge()
         case .photoMergeHDRPanorama:
             beginHDRPanoramaMerge()
+        case .removeDust:
+            // Wave 2: the Remove Dust sheet over the selection (DustRemovalJob
+            // on the selection job queue), or Find Spots in memory in Develop.
+            break
         case .slideshow:
             SlideshowController.start(model: model, library: library)
         case .editExternally:
@@ -1108,6 +1121,8 @@ struct ContentView: View {
             case .linear: model.addLocal(.linear)
             case .radial: model.addLocal(.radial)
             case .brush: model.addLocal(.brush)
+            // Wave 2: a local with the default subject or prompted model.
+            case .subject, .prompt: break
             }
         case .toggleMaskOverlay:
             model.showMaskOverlay.toggle()
@@ -1190,6 +1205,10 @@ struct ContentView: View {
         state.hasSelectedHeal = model.selectedHeal != nil
         state.redEyeToolActive = model.redEyeToolActive
         state.hasSelectedRedEye = model.selectedRedEye != nil
+        state.dustToolActive = model.dustToolActive
+        state.hasSelectedDust = model.selectedDustIndex.map { $0 < model.parameters.dust.count } ?? false
+        state.touchUpToolActive = model.touchUpToolActive
+        state.hasSelectedBlemish = model.selectedBlemishIndex.map { $0 < model.parameters.touchUp.blemishes.count } ?? false
         state.toolSizeAdjustable = model.toolSizeAdjustable
         state.canAddMask = model.hasImage && model.parameters.locals.count < LocalAdjustment.maximumCount
         state.hasSelectedMask = model.selectedLocal != nil

@@ -61,6 +61,12 @@ enum KeyCommand: Equatable {
     case rate(Int), pick, reject, unflag
     case beforeAfter, crop, heal, deleteHeal, disarmTools
     case redEye
+    /// Develop › Sensor Dust and Touch-up: the dust-spot and blemish tools,
+    /// whose rings are removed with Delete as a spot patch is.
+    case dust, touchUp
+    /// Photo › Remove Dust…: dust found or verified in every selected photo
+    /// (in memory on the open image in Develop).
+    case removeDust
     case makeSelect
     /// Survey (N), and taking its focused pane away.
     case survey, removeFromSurvey
@@ -93,7 +99,9 @@ enum KeyCommand: Equatable {
     /// Arrow keys on a zoomed-in image, when Settings has them pan.
     case panImage(PanDirection)
 
-    enum NewMask: Equatable { case linear, radial, brush }
+    /// Develop › Masks › New…: the gradients and the brush, and the two
+    /// model-made masks (the default subject and click-to-select models).
+    enum NewMask: Equatable { case linear, radial, brush, subject, prompt }
     enum PanDirection: Equatable { case left, right, up, down }
 
     static func command(for press: BareKeyPress) -> KeyCommand? {

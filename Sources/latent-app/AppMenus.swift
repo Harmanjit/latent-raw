@@ -39,6 +39,13 @@ struct CommandState: Equatable {
     var hasSelectedHeal = false
     var redEyeToolActive = false
     var hasSelectedRedEye = false
+    /// The dust-spot tool is armed and a ring is selected, so Delete
+    /// removes it, as for a spot patch.
+    var dustToolActive = false
+    var hasSelectedDust = false
+    /// The touch-up tool likewise, for a blemish.
+    var touchUpToolActive = false
+    var hasSelectedBlemish = false
     /// The mask brush or the spot tool is armed, so [ and ] have a size to change.
     var toolSizeAdjustable = false
     var canAddMask = false
@@ -79,8 +86,9 @@ struct CommandState: Equatable {
         case .toggleZoom, .zoomToFit, .zoomToActualSize: mode.showsImage && viewedImageIsOpen
         case .revealInFinder: hasSelection || hasVisibleImages
         case .beforeAfter: mode.showsImage && mode != .survey && hasImage
-        case .crop, .heal, .redEye, .autoAdjust: mode == .develop && hasImage
-        case .deleteHeal: mode == .develop && ((healToolActive && hasSelectedHeal) || (redEyeToolActive && hasSelectedRedEye))
+        case .crop, .heal, .redEye, .dust, .touchUp, .autoAdjust: mode == .develop && hasImage
+        case .deleteHeal: mode == .develop && ((healToolActive && hasSelectedHeal) || (redEyeToolActive && hasSelectedRedEye)
+            || (dustToolActive && hasSelectedDust) || (touchUpToolActive && hasSelectedBlemish))
         case .toolSize: mode == .develop && toolSizeAdjustable
         case .addMask: mode == .develop && canAddMask
         case .toggleMaskOverlay: mode == .develop && hasSelectedMask
@@ -99,6 +107,13 @@ struct CommandState: Equatable {
         case .photoMergeHDR, .photoMergeHDRWithoutDialog, .photoMergePanorama, .photoMergeHDRPanorama:
             editorReady && selectionCount >= 2 && !exportQueueRunning && !photoMergeRunning && !isEditingText
             && !fileOperationRunning
+        // The open image in Develop (in memory, undoable there); the
+        // selection elsewhere, run as a batch job that takes the GPU slot
+        // (`photoMergeRunning` covers any holder of it) and reads the files
+        // at their paths, so not during a move, copy or rename either.
+        case .removeDust:
+            editorReady && (mode == .develop ? hasImage : selectionCount >= 1) && !exportQueueRunning
+            && !photoMergeRunning && !fileOperationRunning && !isEditingText
         // Survey's panes aren't the editor's image, which may be one from before.
         case .exportOpenImage: hasImage && !exportingOpenImage && mode != .survey
         // Library prints the selection, and so does Survey, whose selection
@@ -316,6 +331,7 @@ struct LatentCommands: Commands {
                 item("Panorama…", .photoMergePanorama)
                 item("HDR Panorama… (Experimental)", .photoMergeHDRPanorama)
             }
+            item("Remove Dust…", .removeDust)
         }
 
         CommandMenu("Develop") {
@@ -324,10 +340,14 @@ struct LatentCommands: Commands {
             toolToggle("Crop & Straighten", .crop, isOn: state.cropToolActive)
             toolToggle("Spot Removal", .heal, isOn: state.healToolActive)
             toolToggle("Red-Eye Removal", .redEye, isOn: state.redEyeToolActive)
+            toolToggle("Sensor Dust", .dust, isOn: state.dustToolActive)
+            toolToggle("Touch-up", .touchUp, isOn: state.touchUpToolActive)
             Menu("Masks") {
                 item("New Linear Gradient", .addMask(.linear))
                 item("New Radial Gradient", .addMask(.radial))
                 item("New Brush", .addMask(.brush))
+                item("New Subject Mask", .addMask(.subject))
+                item("New Click to Select", .addMask(.prompt))
                 Divider()
                 toolToggle("Show Mask Overlay", .toggleMaskOverlay, isOn: state.showMaskOverlay)
             }

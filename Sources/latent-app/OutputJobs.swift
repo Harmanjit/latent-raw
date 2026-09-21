@@ -11,9 +11,13 @@ import Observation
 /// - Rename, Move to Folder and Copy to Folder are unavailable, since a
 ///   file moved meanwhile prints or lays out as an empty cell, or is
 ///   missing from a merge;
-/// - quitting asks first, stops a contact sheet (its file isn't written)
-///   and a merge (neither its DNG nor its sidecar is left), and waits for a
+/// - quitting asks first, stops a contact sheet (its file isn't written),
+///   a merge (neither its DNG nor its sidecar is left) and a dust removal
+///   or face search (the photos already done are kept), and waits for a
 ///   print to reach the printing system.
+///
+/// Dust removal and Find Faces (SelectionJobQueue) are jobs too: they read
+/// every selected photo from its file.
 ///
 /// Observable, so the menus follow it.
 @MainActor @Observable
@@ -30,6 +34,12 @@ final class OutputJobs {
         case panoramaMerge
         /// An HDR panorama: brackets merged, then stitched (experimental).
         case hdrPanoramaMerge
+        /// Photo › Remove Dust… over the selection (SelectionJobQueue).
+        /// Stopping it keeps the photos already done.
+        case dustRemoval
+        /// Find Faces over the selection, for touch-up (SelectionJobQueue).
+        /// Stopping it keeps the photos already done too.
+        case findFaces
     }
 
     struct Job: Identifiable {
@@ -57,6 +67,8 @@ final class OutputJobs {
         case .photoMerge: "Merging photos with \(name)"
         case .panoramaMerge: "Stitching a panorama from \(name)"
         case .hdrPanoramaMerge: "Merging an HDR panorama from \(name)"
+        case .dustRemoval: "Removing dust from \(name)"
+        case .findFaces: "Finding faces in \(name)"
         }
         let job = Job(kind: kind, name: name, cancel: cancel, activity: ExportActivity(reason: reason))
         running.append(job)
@@ -72,7 +84,8 @@ final class OutputJobs {
         for waiter in waiting { waiter.resume() }
     }
 
-    /// Stops what can be stopped (contact sheets, merges); prints carry on.
+    /// Stops what can be stopped (contact sheets, merges, dust removal,
+    /// face searches); prints carry on.
     func cancelAll() {
         for job in running { job.cancel?() }
     }
@@ -90,6 +103,8 @@ final class OutputJobs {
         let sheets = jobs.filter { $0.kind == .contactSheet }
         let merges = jobs.filter { $0.kind == .photoMerge || $0.kind == .panoramaMerge
             || $0.kind == .hdrPanoramaMerge }
+        let dust = jobs.filter { $0.kind == .dustRemoval }
+        let faces = jobs.filter { $0.kind == .findFaces }
         // One merge runs at a time, so "merge" below is one kind's word
         // unless a future queue runs two.
         let mergeWord = merges.allSatisfy { $0.kind == .panoramaMerge } ? "panorama merge"
@@ -104,6 +119,9 @@ final class OutputJobs {
             underWay.append(merges.count == 1 ? "making \(mergeWord.hasPrefix("HDR") ? "an" : "a") \(mergeWord)"
                                               : "making \(mergeWord)s")
         }
+        // One selection job runs at a time, so each of these is one job.
+        if !dust.isEmpty { underWay.append("removing sensor dust from photos") }
+        if !faces.isEmpty { underWay.append("finding faces for touch-up") }
         // What quitting stops, then what it waits for.
         var stopped: [String] = []
         if !sheets.isEmpty {
@@ -114,6 +132,8 @@ final class OutputJobs {
             stopped.append(merges.count == 1 ? "the \(mergeWord), which leaves no photo"
                                              : "the \(mergeWord)s, which leave no photos")
         }
+        if !dust.isEmpty { stopped.append("the dust removal, which keeps the photos already done") }
+        if !faces.isEmpty { stopped.append("the face search, which keeps the photos already done") }
         var information = stopped.isEmpty ? "" : "Quitting now stops " + stopped.joined(separator: ", and ")
         if !prints.isEmpty {
             information += (information.isEmpty ? "Quitting now " : ", and ")

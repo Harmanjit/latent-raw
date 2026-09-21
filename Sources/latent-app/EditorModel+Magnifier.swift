@@ -102,13 +102,15 @@ extension EditorModel {
         defer { magnifierState.lastRender = ContinuousClock().now }
         let parameters = renderParameters
         // As the view's tile: keystone reads from elsewhere in the frame,
-        // and a heal patch in view reads its source and surroundings.
+        // and a heal patch in view (dust and blemishes included) reads its
+        // source and surroundings.
         var view = loupeSensorRect(loupe, clampedToSensor: false)
         if !parameters.perspective.isIdentity {
             view = parameters.perspective.sourceRect(forSensorRect: view, sensorSize: sensorSize)
                 .insetBy(dx: -4, dy: -4)
         }
-        let withSources = HealPatch.regionIncludingSources(view, patches: parameters.heals, sensorSize: sensorSize)
+        let withSources = HealPatch.regionIncludingSources(view, patches: parameters.allHealPatches,
+                                                           sensorSize: sensorSize)
         let region = ViewerInteraction.Magnifier.tileRegion(covering: withSources, margin: Self.magnifierMargin,
                                                             sensorSize: sensorSize)
         guard region.width > 0, region.height > 0 else { return }
@@ -132,7 +134,8 @@ extension EditorModel {
             magnifierTile = PresentLayer(texture: rendered, coverage: info.sensorRect,
                                          inset: Self.magnifierInset, headroom: displayOutput.headroom)
             let viewed = view.insetBy(dx: -Self.magnifierMargin, dy: -Self.magnifierMargin)
-            magnifierState.healedCoverage = HealPatch.isSelfContained(info.sensorRect, patches: parameters.heals,
+            magnifierState.healedCoverage = HealPatch.isSelfContained(info.sensorRect,
+                                                                      patches: parameters.allHealPatches,
                                                                       sensorSize: sensorSize)
                 ? info.sensorRect : info.sensorRect.intersection(viewed)
             magnifierState.session = session

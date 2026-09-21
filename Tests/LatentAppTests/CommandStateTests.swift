@@ -56,6 +56,67 @@ final class CommandStateTests: XCTestCase {
         XCTAssertTrue(develop { $0.healToolActive = true; $0.hasSelectedHeal = true }.isEnabled(.deleteHeal))
     }
 
+    /// The dust and touch-up tools arm in Develop with an image, like the
+    /// spot tool; Delete removes a selected ring of either.
+    func testDustAndTouchUpToolsFollowTheSpotTool() {
+        XCTAssertTrue(develop().isEnabled(.dust))
+        XCTAssertTrue(develop().isEnabled(.touchUp))
+        XCTAssertFalse(develop { $0.hasImage = false }.isEnabled(.dust))
+        XCTAssertFalse(develop { $0.hasImage = false }.isEnabled(.touchUp))
+        for mode in [AppMode.library, .loupe, .compare, .survey] {
+            XCTAssertFalse(develop { $0.mode = mode }.isEnabled(.dust), "\(mode)")
+            XCTAssertFalse(develop { $0.mode = mode }.isEnabled(.touchUp), "\(mode)")
+        }
+        XCTAssertFalse(develop { $0.dustToolActive = true }.isEnabled(.deleteHeal))
+        XCTAssertTrue(develop { $0.dustToolActive = true; $0.hasSelectedDust = true }.isEnabled(.deleteHeal))
+        XCTAssertFalse(develop { $0.hasSelectedDust = true }.isEnabled(.deleteHeal), "the tool must be armed")
+        XCTAssertFalse(develop { $0.touchUpToolActive = true }.isEnabled(.deleteHeal))
+        XCTAssertTrue(develop { $0.touchUpToolActive = true; $0.hasSelectedBlemish = true }.isEnabled(.deleteHeal))
+        XCTAssertFalse(develop { $0.hasSelectedBlemish = true }.isEnabled(.deleteHeal), "the tool must be armed")
+        XCTAssertFalse(develop { $0.mode = .loupe; $0.dustToolActive = true; $0.hasSelectedDust = true }
+            .isEnabled(.deleteHeal))
+        XCTAssertTrue(CommandState.passesThroughWhenUnavailable(.deleteHeal), "Delete still reaches the grid")
+    }
+
+    /// Remove Dust works on the open image in Develop and on the selection
+    /// elsewhere; it is a GPU job, so it takes turns with exports and
+    /// merges, and it reads the files, so it waits for a move or rename.
+    func testRemoveDustNeedsAnImageOrASelectionAndAFreeGPU() {
+        XCTAssertTrue(develop().isEnabled(.removeDust))
+        XCTAssertFalse(develop { $0.hasImage = false }.isEnabled(.removeDust), "Develop works on the open image")
+        XCTAssertFalse(develop { $0.hasImage = false; $0.selectionCount = 3 }.isEnabled(.removeDust),
+                       "in Develop the grid's selection doesn't count")
+        for mode in [AppMode.library, .loupe, .compare, .survey] {
+            XCTAssertTrue(develop { $0.mode = mode; $0.hasImage = false }.isEnabled(.removeDust), "\(mode)")
+            XCTAssertTrue(develop { $0.mode = mode; $0.selectionCount = 12 }.isEnabled(.removeDust), "\(mode)")
+            XCTAssertFalse(develop { $0.mode = mode; $0.selectionCount = 0; $0.hasSelection = false }
+                .isEnabled(.removeDust), "\(mode) needs a selection")
+        }
+        XCTAssertFalse(develop { $0.editorReady = false }.isEnabled(.removeDust), "no GPU to analyse with")
+        XCTAssertFalse(develop { $0.exportQueueRunning = true }.isEnabled(.removeDust))
+        XCTAssertFalse(develop { $0.photoMergeRunning = true }.isEnabled(.removeDust), "any holder of the GPU slot")
+        XCTAssertFalse(develop { $0.fileOperationRunning = true }.isEnabled(.removeDust))
+        XCTAssertFalse(develop { $0.isEditingText = true }.isEnabled(.removeDust))
+        XCTAssertFalse(CommandState.passesThroughWhenUnavailable(.removeDust))
+    }
+
+    /// The model-made masks are added like the gradients and the brush.
+    func testModelMasksAreAddedLikeTheOthers() {
+        XCTAssertFalse(develop().isEnabled(.addMask(.subject)))
+        XCTAssertTrue(develop { $0.canAddMask = true }.isEnabled(.addMask(.subject)))
+        XCTAssertTrue(develop { $0.canAddMask = true }.isEnabled(.addMask(.prompt)))
+        XCTAssertFalse(develop { $0.canAddMask = true; $0.mode = .loupe }.isEnabled(.addMask(.subject)))
+        XCTAssertFalse(develop { $0.canAddMask = true; $0.mode = .library }.isEnabled(.addMask(.prompt)))
+    }
+
+    /// None of the new commands has a key: the shortcuts page stays as it is.
+    func testTheNewCommandsHaveNoKeys() {
+        for command in [KeyCommand.dust, .touchUp, .removeDust, .addMask(.subject), .addMask(.prompt)] {
+            XCTAssertNil(Shortcuts.shortcut(for: command), "\(command)")
+            XCTAssertEqual(Shortcuts.menuTitle("Item", for: command), "Item")
+        }
+    }
+
     func testCompareCommands() {
         let compare = develop { $0.mode = .compare }
         XCTAssertTrue(compare.isEnabled(.makeSelect))
