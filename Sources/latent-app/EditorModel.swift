@@ -64,12 +64,6 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    // Optional high-quality model: download state.
-    @Published var modelDownloadProgress: Double?   // 0…1 while downloading
-    @Published var modelDownloadStatus = ""
-    @Published var highQualityModelInstalled = OptionalModel.nafnetWidth64.isInstalled
-    var modelDownloadTask: Task<Void, Never>?
-
     // MARK: - Spot removal tool
 
     /// Click a spot to heal it (the source is picked beside it); drag from

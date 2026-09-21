@@ -90,10 +90,8 @@ extension EditorModel {
                 status = "\(file.summary.cameraMake) \(file.summary.cameraModel) · " +
                          "\(file.summary.rawWidth)×\(file.summary.rawHeight)"
             }
-            sam2Session = nil
-            sam2Encoding?.cancel()
-            sam2Encoding = nil
-            sam2Status = ""
+            // The last image's encodings, per model, answer nothing here.
+            resetPromptSessions()
             history = EditHistory(initial: EditStack(parameters: parameters))
             snapshots = []
             stopAIDenoise()
