@@ -359,6 +359,9 @@ struct ContentView: View {
             library.willReplaceCatalog = {
                 FolderNavigator.shared.remember(library)
                 closeEditorForFolderChange()
+                // Its results belong to the folder being left; the queue
+                // refuses the commit anyway, this stops the work sooner.
+                selectionJobs.cancel()
             }
             mode = .library
             await attachEditedThumbnailRenderer()
@@ -742,6 +745,14 @@ struct ContentView: View {
             library.perform("Saving history") { try await library.setHistory(steps, forImageID: imageID, in: catalog) }
         }
         library.didRestoreImages = { ids, aspect in editorFollowUndo(ids, aspect) }
+        // Before a batch job writes its results: the open image's pending
+        // edit is saved and on record, so the commit leaves that photo
+        // alone rather than overwrite the edit, and the reload that
+        // follows has nothing pending to save over the job's result.
+        selectionJobs.beforeCommit = {
+            model.flushPendingSave()
+            await library.waitForPendingWork()
+        }
         model.onSnapshotsChanged = { imageID, snapshots in
             guard let catalog = library.catalog else { return }
             library.perform("Saving snapshots") {
