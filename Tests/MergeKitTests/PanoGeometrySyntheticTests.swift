@@ -253,17 +253,19 @@ final class PanoGeometrySyntheticTests: XCTestCase {
     // MARK: - The two halves
 
     /// `solve` is `solveCameras` then `project`, and the two together give
-    /// exactly what the one gave: the split is a seam, not a change.
+    /// what the one gave: the split is a seam, not a change. The report's
+    /// numbers are compared to a billionth: two solves of the same sweep
+    /// once differed in the last bit of the RMS error on CI's runner.
     func testSolvingInTwoStepsGivesTheSameLayout() throws {
         let (inputs, whole) = try Self.solvedSweep()
         let solver = PanoramaLayoutSolver()
         let split = try solver.project(solver.solveCameras(inputs))
         XCTAssertEqual(split.layout, whole.layout)
         XCTAssertEqual(split.report.leftOut, whole.report.leftOut)
-        XCTAssertEqual(split.report.focalLengthPixels, whole.report.focalLengthPixels)
-        XCTAssertEqual(split.report.rmsErrorPixels, whole.report.rmsErrorPixels)
+        XCTAssertEqual(split.report.focalLengthPixels, whole.report.focalLengthPixels, accuracy: 1e-9)
+        XCTAssertEqual(split.report.rmsErrorPixels, whole.report.rmsErrorPixels, accuracy: 1e-9)
         XCTAssertEqual(split.report.frames, whole.report.frames)
-        XCTAssertEqual(split.report.widthDegrees, whole.report.widthDegrees)
+        XCTAssertEqual(split.report.widthDegrees, whole.report.widthDegrees, accuracy: 1e-9)
     }
 
     /// The point of the split: the projection reaches the canvas and the
