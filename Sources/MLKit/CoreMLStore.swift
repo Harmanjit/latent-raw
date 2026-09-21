@@ -5,8 +5,10 @@ import CoreML
 ///
 /// A `.mlpackage` is source form; Core ML runs `.mlmodelc`, the compiled
 /// form. Compiling the 80 MB SAM encoder takes a second or two, so it's
-/// done once and cached in Application Support, keyed by the package's
-/// size and modification date so a replaced model recompiles.
+/// done once and cached in Application Support. A package loaded through
+/// its manifest is keyed by its content hash; the name-only loader the
+/// denoiser still uses keys by the weights file's size and modification
+/// date. Either way a replaced model recompiles.
 public enum CoreMLStore {
     public enum StoreError: Error, CustomStringConvertible {
         case modelMissing(String)
@@ -29,21 +31,30 @@ public enum CoreMLStore {
     /// package (docs/Retouch.md §5); nil when the bundle has no Models folder.
     public static var catalogueURL: URL? { modelsDirectory?.appendingPathComponent("ModelCatalog.json") }
 
-    /// Where optional, downloaded models live (see `OptionalModel`). Kept
-    /// out of the app bundle so the app itself stays small and a model can
-    /// be added or removed without reinstalling.
+    /// Where imported models live, one folder per model id with the
+    /// manifest and its packages inside (`ModelImporter`; docs/Retouch.md
+    /// §2 A). Kept out of the app bundle so the app itself stays small
+    /// and a model can be added or removed without reinstalling.
     public static var externalModelsDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return base.appendingPathComponent("latent/models", isDirectory: true)
     }
 
-    /// The package for `name`: bundled first, then downloaded.
+    /// The one package still looked for flat in `externalModelsDirectory`
+    /// (`<name>.mlpackage` with no folder or manifest): the width-64
+    /// denoiser the dormant download path once put there. Everything else
+    /// in that directory is a model folder the registry lists.
+    static let legacyFlatPackages: Set<String> = ["NAFNet_SIDD_width64"]
+
+    /// The package for `name`: bundled first, then the flat legacy layout
+    /// for the one name that may use it.
     static func packageURL(_ name: String) -> URL? {
         let file = name + ".mlpackage"
         if let dir = modelsDirectory {
             let bundled = dir.appendingPathComponent(file)
             if FileManager.default.fileExists(atPath: bundled.path) { return bundled }
         }
+        guard legacyFlatPackages.contains(name) else { return nil }
         let external = externalModelsDirectory.appendingPathComponent(file)
         return FileManager.default.fileExists(atPath: external.path) ? external : nil
     }

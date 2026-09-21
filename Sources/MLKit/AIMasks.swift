@@ -26,14 +26,29 @@ public enum AIMaskKind: String, CaseIterable, Sendable {
         }
     }
 
-    /// Recorded in the edit so a change of model is visible later.
+    /// What a NEW mask of this kind records, so a change of model is
+    /// visible later: the registry's default subject model, or the
+    /// installed class model (the sky heuristic when there is none;
+    /// docs/Retouch.md §2 A).
     public var modelVersion: String {
+        modelVersion(registry: .shared)
+    }
+
+    func modelVersion(registry: ModelRegistry) -> String {
         switch self {
-        case .subject: return "vision.foregroundInstance.1"
-        case .sky where !SegmentationModel.isAvailable: return "latent.skyHeuristic.1"
-        default: return SegmentationModel.modelVersion
+        case .subject:
+            return registry.defaultSubject().modelVersion
+        default:
+            if let installed = registry.installed(ModelRef(id: SegmentationModel.modelID, version: 1)) {
+                return installed.modelVersion
+            }
+            return self == .sky ? Self.skyHeuristicVersion : SegmentationModel.modelVersion
         }
     }
+
+    /// The sky mask made without a model (`SkyEstimator`).
+    static let skyHeuristicID = "latent.skyHeuristic"
+    static let skyHeuristicVersion = "latent.skyHeuristic@1"
 
     /// Legacy names from earlier sidecars.
     public init?(storedName: String) {
@@ -64,6 +79,9 @@ public enum AIMaskError: Error, CustomStringConvertible {
 /// the cost, which is reported with each result: on an M-series Mac a
 /// subject lift is a few hundred milliseconds.
 ///
+/// **Subject** masks made with a model from the registry (BiRefNet-lite
+/// is bundled) go through `SubjectSegmenter`; the edit names which.
+///
 /// **Sky, people** and the other semantic classes use the bundled
 /// SegFormer-B2 model (ADE20K). If it is missing, sky falls back to
 /// `SkyEstimator`, a classic heuristic that says so in its model version
@@ -76,9 +94,11 @@ public enum AIMaskGenerator {
     public struct Result: Sendable {
         public let mask: MaskBitmap
         public let seconds: TimeInterval
-        /// The display name of the model that ran instead of the stored
-        /// one, or nil (docs/Retouch.md §2 A: a mask whose model is not
-        /// installed is made with the kind's default and says so).
+        /// The display name of the model the mask names but this Mac
+        /// lacks (or the stored string itself when it names nothing), so
+        /// the stand-in that ran can be reported: "made with Apple Vision
+        /// because BiRefNet General is not installed" (docs/Retouch.md
+        /// §2 A, §5). Nil when the mask was made with its own model.
         public let substitutedModel: String?
 
         public init(mask: MaskBitmap, seconds: TimeInterval, substitutedModel: String? = nil) {
@@ -88,39 +108,79 @@ public enum AIMaskGenerator {
         }
     }
 
-    /// `.subject`: ModelRef(stored:) → registry.installed → SubjectSegmenter
-    /// / built-in Vision / missing → Vision + substitutedModel. Wave 1
-    /// (W1-A) wires the registry in; until then the stored version is
-    /// read but not acted on, and every subject mask is Vision's, as the
-    /// 0.9.0 beta renders it, with nothing reported as substituted.
+    /// A mask as the edit names it.
+    ///
+    /// `.subject`: `ModelRef(stored:)` → `registry.installed` → the
+    /// SubjectSegmenter for that id, or built-in Vision when the edit
+    /// names it; a version that is missing, cannot be parsed, or fails to
+    /// load runs Vision and says so in `substitutedModel`. The classes
+    /// run the installed class model whichever one the edit names (the
+    /// 0.9.0 beta did the same), with the heuristic and Vision fallbacks
+    /// below; only a real, missing class model is reported.
+    ///
+    /// `rotation` is the turn that makes `image` upright: the subject
+    /// models need it (`SubjectSegmenter`), the rest ignore it.
     public static func generate(_ kind: AIMaskKind, modelVersion: String, from image: CGImage,
+                                rotation: ImageRotation = .none,
                                 registry: ModelRegistry = .shared) async throws -> Result {
-        _ = ModelRef(stored: modelVersion)
-        return try await generate(kind, from: image)
-    }
-
-    /// Semantic classes go through SegFormer when it's bundled. Without
-    /// it, sky falls back to the heuristic and people to Vision; the other
-    /// classes have no fallback and throw.
-    public static func generate(_ kind: AIMaskKind, from image: CGImage) async throws -> Result {
         let start = Date()
-        let mask: MaskBitmap
+        let ref = ModelRef(stored: modelVersion)
         switch kind {
         case .subject:
-            mask = try subjectMask(image)
-        default:
-            if let model = await SegmentationModel.shared.value, let cls = kind.segmentClass {
-                let map = try model.classify(image)
-                mask = map.mask(classIndices: model.indices(forLabels: cls.labels))
-            } else if kind == .sky {
-                mask = SkyEstimator.estimate(image)
-            } else if kind == .people {
-                mask = try personMask(image)
-            } else {
-                throw AIMaskError.modelUnavailable(SegmentationModel.packageName)
+            if let entry = registry.installed(ref), entry.manifest.kind == .subjectSegmentation {
+                if entry.status == .builtIn {
+                    return Result(mask: try subjectMask(image), seconds: Date().timeIntervalSince(start))
+                }
+                if let model = await registry.subject(id: entry.id) {
+                    let mask = try model.segment(image, rotation: rotation)
+                    return Result(mask: mask, seconds: Date().timeIntervalSince(start))
+                }
             }
+            return Result(mask: try subjectMask(image), seconds: Date().timeIntervalSince(start),
+                          substitutedModel: displayName(forMissing: modelVersion, registry: registry))
+        default:
+            guard let cls = kind.segmentClass else { throw AIMaskError.noResult }
+            // The class model named, else the bundled one.
+            var chosen = registry.installed(ref).flatMap { $0.manifest.kind == .semanticSegmentation ? $0 : nil }
+            var substituted: String?
+            if chosen == nil {
+                chosen = registry.installed(ModelRef(id: SegmentationModel.modelID, version: 1))
+                if let ref, ref.id != AIMaskKind.skyHeuristicID, ref.id != SegmentationModel.modelID {
+                    substituted = displayName(forMissing: modelVersion, registry: registry)
+                }
+            }
+            if let chosen, let model = await registry.semantic(id: chosen.id) {
+                let map = try model.classify(image)
+                return Result(mask: map.mask(classIndices: model.indices(forLabels: cls.labels)),
+                              seconds: Date().timeIntervalSince(start), substitutedModel: substituted)
+            }
+            return Result(mask: try fallbackMask(kind, image), seconds: Date().timeIntervalSince(start),
+                          substitutedModel: substituted)
         }
-        return Result(mask: mask, seconds: Date().timeIntervalSince(start))
+    }
+
+    /// The mask a NEW local of this kind gets: `kind.modelVersion`'s
+    /// model. The editor's path until W2-M passes the stored version.
+    public static func generate(_ kind: AIMaskKind, from image: CGImage) async throws -> Result {
+        try await generate(kind, modelVersion: kind.modelVersion, from: image)
+    }
+
+    /// Without a class model, sky falls back to the heuristic and people
+    /// to Vision; the other classes have no fallback and throw.
+    static func fallbackMask(_ kind: AIMaskKind, _ image: CGImage) throws -> MaskBitmap {
+        switch kind {
+        case .sky: return SkyEstimator.estimate(image)
+        case .people: return try personMask(image)
+        default: throw AIMaskError.modelUnavailable(SegmentationModel.packageName)
+        }
+    }
+
+    /// What to call a stored version this Mac cannot run: the catalogue's
+    /// display name when it lists the id, else the id, else the string
+    /// as stored (one that does not parse names nothing).
+    static func displayName(forMissing stored: String, registry: ModelRegistry) -> String {
+        guard let ref = ModelRef(stored: stored) else { return stored }
+        return registry.entry(id: ref.id)?.manifest.displayName ?? ref.id
     }
 
     // MARK: - Vision

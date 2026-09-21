@@ -39,14 +39,15 @@ extension ExportWorker {
         try Task.checkCancellation()
         // A slide has nowhere to say a mask was made with another model;
         // the log keeps the fact.
-        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu)
+        let summary = file.summary
+        let rotation = ExportPlan.rotation(for: summary, userRotation: userRotation)
+        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
+                                              rotation: rotation)
         if !masks.substituted.isEmpty {
-            slideLogger.notice("\(sourceURL.lastPathComponent, privacy: .private): masks made with \(masks.substituted.joined(separator: ", "), privacy: .public) instead of the models the edit names")
+            slideLogger.notice("\(sourceURL.lastPathComponent, privacy: .private): masks made without \(masks.substituted.joined(separator: ", "), privacy: .public), which the edit names but this Mac lacks")
         }
         try Task.checkCancellation()
 
-        let summary = file.summary
-        let rotation = ExportPlan.rotation(for: summary, userRotation: userRotation)
         let sensor = CGSize(width: summary.rawWidth, height: summary.rawHeight)
         let canvas = CropFrame(sensorSize: sensor, crop: parameters.crop, rotation: rotation).canvasSize
         let plan = SlideshowGeometry.renderPlan(sensor: sensor, canvas: canvas, screen: screen)

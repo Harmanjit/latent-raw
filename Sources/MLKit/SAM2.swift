@@ -24,40 +24,60 @@ public struct PromptPoint: Equatable, Sendable, Codable {
 /// milliseconds each, which is why clicking feels instant after the first
 /// encode.
 public final class SAM2Models: @unchecked Sendable {
-    public static let modelVersion = "sam2.1-small.1"
+    /// What a new click-to-select mask stores for the bundled model; the
+    /// 0.9.0 literal "sam2.1-small.1" is still read (`ModelRef.legacy`).
+    public static let modelVersion = "sam2.1-small@1"
     static let encoderName = "SAM2_1SmallImageEncoderFLOAT16"
     static let promptName = "SAM2_1SmallPromptEncoderFLOAT16"
     static let decoderName = "SAM2_1SmallMaskDecoderFLOAT16"
+    /// The roles a promptedSegmentation manifest gives its three packages.
+    static let encoderRole = "imageEncoder", promptRole = "promptEncoder", decoderRole = "maskDecoder"
 
     let encoder: MLModel
     let promptEncoder: MLModel
     let decoder: MLModel
     public let inputSize: Int
 
+    /// Whether the bundled SAM 2.1 Small is there to load.
     public static var isAvailable: Bool {
-        CoreMLStore.isAvailable(encoderName) && CoreMLStore.isAvailable(promptName) && CoreMLStore.isAvailable(decoderName)
+        ModelRegistry.shared.installed(ModelRef(id: ModelRegistry.defaultPromptedID, version: 1)) != nil
     }
 
-    /// Loaded on first use and shared; nil when the packages aren't
-    /// bundled. Released under memory pressure (see `SharedModel`).
-    public static let shared = SharedModel<SAM2Models> { try? await SAM2Models.load() }
+    /// The bundled model as the registry holds it, loaded on first use;
+    /// nil when the packages aren't bundled. `release()` releases the
+    /// registry's copy (see `RegistryModel`).
+    public static let shared = RegistryModel<SAM2Models>(id: ModelRegistry.defaultPromptedID) {
+        if case .prompted(let model) = $0 { return model }
+        return nil
+    }
 
+    /// The bundled SAM 2.1 Small; nil compute units means the registry's
+    /// effective choice for it.
     public static func load(computeUnits: MLComputeUnits? = nil) async throws -> SAM2Models {
-        async let e = CoreMLStore.load(encoderName, computeUnits: computeUnits)
-        async let p = CoreMLStore.load(promptName, computeUnits: computeUnits)
-        async let d = CoreMLStore.load(decoderName, computeUnits: computeUnits)
-        return SAM2Models(encoder: try await e, promptEncoder: try await p, decoder: try await d)
+        guard let entry = ModelRegistry.shared.installed(ModelRef(id: ModelRegistry.defaultPromptedID, version: 1)) else {
+            throw CoreMLStore.StoreError.modelMissing(encoderName)
+        }
+        return try await load(entry, computeUnits: computeUnits ?? ModelRegistry.shared.effectiveComputeUnits(for: entry))
     }
 
     /// The three packages of a promptedSegmentation manifest, by role
-    /// (docs/Retouch.md §5). Wave 1 (W1-A) reads the manifest's packages;
-    /// until then only the bundled SAM 2.1 Small loads, through the
-    /// loader above, and any other entry throws.
+    /// (docs/Retouch.md §5), loaded together from the model's folder.
     public static func load(_ entry: ModelEntry, computeUnits: MLComputeUnits) async throws -> SAM2Models {
-        guard entry.id == ModelRegistry.defaultPromptedID else {
-            throw NotYetImplemented("Loading \(entry.manifest.displayName)")
+        guard entry.manifest.kind == .promptedSegmentation else { throw SAM2Error.wrongKind(entry.id) }
+        guard let location = entry.location else { throw SAM2Error.missingRole(entry.id, encoderRole) }
+        func package(_ role: String) throws -> ModelManifest.Package {
+            guard let package = entry.manifest.packages.first(where: { $0.role == role }) else {
+                throw SAM2Error.missingRole(entry.id, role)
+            }
+            return package
         }
-        return try await load(computeUnits: computeUnits)
+        let encoderPackage = try package(encoderRole)
+        let promptPackage = try package(promptRole)
+        let decoderPackage = try package(decoderRole)
+        async let e = CoreMLStore.load(encoderPackage, of: entry.manifest, at: location, computeUnits: computeUnits)
+        async let p = CoreMLStore.load(promptPackage, of: entry.manifest, at: location, computeUnits: computeUnits)
+        async let d = CoreMLStore.load(decoderPackage, of: entry.manifest, at: location, computeUnits: computeUnits)
+        return SAM2Models(encoder: try await e, promptEncoder: try await p, decoder: try await d)
     }
 
     init(encoder: MLModel, promptEncoder: MLModel, decoder: MLModel) {
@@ -66,6 +86,18 @@ public final class SAM2Models: @unchecked Sendable {
         self.decoder = decoder
         let input = encoder.modelDescription.inputDescriptionsByName.values.first
         inputSize = Int(input?.imageConstraint?.pixelsWide ?? 1024)
+    }
+}
+
+public enum SAM2Error: Error, Equatable, CustomStringConvertible {
+    case wrongKind(String)
+    /// A prompted manifest without one of imageEncoder, promptEncoder, maskDecoder.
+    case missingRole(String, String)
+    public var description: String {
+        switch self {
+        case .wrongKind(let id): return "'\(id)' is not a click-to-select model"
+        case .missingRole(let id, let role): return "'\(id)' names no package with the role \(role)"
+        }
     }
 }
 

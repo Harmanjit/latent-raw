@@ -196,6 +196,84 @@ final class ExportWorkerTests: XCTestCase {
         XCTAssertEqual(iptc[kCGImagePropertyIPTCStarRating] as? Int, 3)
     }
 
+    /// Each local runs the model its stored version names: the legacy
+    /// literals run what they always did with nothing to report, a
+    /// catalogue model that is not installed is named once however many
+    /// masks ask for it, a version that names nothing is reported as
+    /// stored, and the bundled models run as themselves.
+    func testMasksDispatchOnTheStoredModelVersion() async throws {
+        let path = try TestAssets.d750Path()
+        let gpu = try GPUContext()
+        let file = try RawFile(path: path)
+        let session = try ImageSession(file: file, gpu: gpu)
+        let pipeline = RenderPipeline(gpu: gpu)
+        let rotation = ExportPlan.rotation(for: file.summary, userRotation: 0)
+        func regenerate(_ locals: [LocalAdjustment]) async throws -> (count: Int, substituted: [String]) {
+            try await ExportWorker.regenerateMasks(locals, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation)
+        }
+        func subject(_ version: String) -> LocalAdjustment {
+            LocalAdjustment(name: "s", shape: .ai(kind: "subject", modelVersion: version), exposureEV: 1)
+        }
+        func prompted(_ version: String) -> LocalAdjustment {
+            LocalAdjustment(name: "p", shape: .prompted(points: [MaskPromptPoint(x: 0.5, y: 0.5, foreground: true)],
+                                                        modelVersion: version), exposureEV: 1)
+        }
+
+        var r = try await regenerate([subject("vision.foregroundInstance.1")])
+        XCTAssertEqual(r.count, 1)
+        XCTAssertEqual(r.substituted, [])
+        r = try await regenerate([subject("birefnet-general@1"), subject("birefnet-general@1"), subject("test")])
+        XCTAssertEqual(r.count, 3)
+        XCTAssertEqual(r.substituted, ["BiRefNet General", "test"])
+        r = try await regenerate([prompted("test"), LocalAdjustment(name: "empty", shape: .prompted(points: [], modelVersion: "test"))])
+        XCTAssertEqual(r.count, SAM2Models.isAvailable ? 1 : 0, "no points, no mask")
+        XCTAssertEqual(r.substituted, ["test"], "reported whether or not the bundled model stands in")
+
+        if SAM2Models.isAvailable {
+            r = try await regenerate([prompted("sam2.1-small.1"), prompted("sam2.1-small@1")])
+            XCTAssertEqual(r.count, 2)
+            XCTAssertEqual(r.substituted, [])
+            r = try await regenerate([prompted("sam2.1-large@1")])
+            XCTAssertEqual(r.count, 1, "SAM 2.1 Small stood in")
+            XCTAssertEqual(r.substituted, ["SAM 2.1 Large"])
+        }
+        if ModelRegistry.shared.entry(id: "birefnet-lite")?.status == .bundled {
+            let local = subject("birefnet-lite@1")
+            r = try await regenerate([local])
+            XCTAssertEqual(r.count, 1)
+            XCTAssertEqual(r.substituted, [])
+            XCTAssertTrue(session.hasAIMask(forLocal: local.id))
+        }
+        ModelRegistry.shared.releaseAll()
+    }
+
+    /// A substitution rides through `render`, `finished`, `export` and
+    /// `renderImage` to where the queue and the pages report it.
+    func testSubstitutionsReachTheOutcome() async throws {
+        let path = try TestAssets.d750Path()
+        let gpu = try GPUContext()
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("latent-export-\(UUID().uuidString).jpg")
+        defer { try? FileManager.default.removeItem(at: out) }
+        var p = EditParameters()
+        p.locals = [LocalAdjustment(name: "subject", shape: .ai(kind: "subject", modelVersion: "birefnet-general@1"), exposureEV: 1)]
+        let json = try EditStack(parameters: p).encodeJSON()
+        let request = ExportWorker.Request(
+            sourceURL: URL(fileURLWithPath: path), destinationURL: out, editStackJSON: json, userRotation: 0,
+            settings: ExportSettings(format: .jpeg), colorSpace: .sRGB, maxLongEdge: 600)
+        let rendered = try await ExportWorker.render(request, gpu: gpu)
+        XCTAssertEqual(rendered.masksGenerated, 1)
+        XCTAssertEqual(rendered.maskSubstitutions, ["BiRefNet General"])
+        let finished = try rendered.finished(watermark: nil, includeMetadata: false, includeLocation: false)
+        XCTAssertEqual(finished.maskSubstitutions, ["BiRefNet General"])
+        let outcome = try await ExportWorker.export(request, gpu: gpu)
+        XCTAssertEqual(outcome.maskSubstitutions, ["BiRefNet General"])
+        let image = try await ExportWorker.renderImage(
+            ExportWorker.ImageRequest(sourceURL: URL(fileURLWithPath: path), editStackJSON: json, userRotation: 0,
+                                      colorSpace: .sRGB, maxLongEdge: 600, bitsPerComponent: 8, runsAIDenoise: false),
+            gpu: gpu)
+        XCTAssertEqual(image.maskSubstitutions, ["BiRefNet General"])
+    }
+
     /// The stored samples of an image file, as decoded, with their layout.
     static func decodedPixels(_ url: URL) throws -> (width: Int, height: Int, bitsPerComponent: Int, bytes: Data) {
         let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))

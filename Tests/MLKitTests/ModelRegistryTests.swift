@@ -257,18 +257,47 @@ final class ModelRegistryTests: XCTestCase {
         }
     }
 
-    /// Nothing loads through the registry yet (Wave 1); asking is safe,
-    /// and releasing what isn't there is too.
-    func testLoadingIsNotWiredYet() async throws {
+    /// Loading answers nil, without throwing, for everything that cannot
+    /// load: a manifest whose package is not there, a model asked for as
+    /// the wrong kind, a catalogue row, built-in Vision (nothing to load)
+    /// and an unknown id; releasing what isn't there is safe.
+    func testLoadingAnswersNilForWhatCannotLoad() async throws {
         try addBundled("birefnet-lite", kind: "subjectSegmentation")
+        try writeCatalogue([("u2net", "subjectSegmentation")])
         let r = registry()
-        let subject = await r.subject(id: "birefnet-lite")
-        XCTAssertNil(subject)
-        let prompted = await r.prompted(id: "sam2.1-small")
-        XCTAssertNil(prompted)
-        let semantic = await r.semantic(id: "segformer-b2-ade20k-512")
-        XCTAssertNil(semantic)
+        let noPackage = await r.subject(id: "birefnet-lite")
+        XCTAssertNil(noPackage, "the fake manifest names a package that is not there")
+        let wrongKind = await r.prompted(id: "birefnet-lite")
+        XCTAssertNil(wrongKind)
+        let row = await r.subject(id: "u2net")
+        XCTAssertNil(row)
+        let vision = await r.subject(id: ModelRegistry.builtInSubjectID)
+        XCTAssertNil(vision)
+        let unknown = await r.semantic(id: "segformer-b2-ade20k-512")
+        XCTAssertNil(unknown)
         r.release(id: "birefnet-lite")
+        r.releaseAll()
+        XCTAssertNil(r.loaded(id: "birefnet-lite"))
+    }
+
+    /// The bundled BiRefNet loads once through the shared registry (two
+    /// asks at once share one load), is kept until released, and loads
+    /// afresh after.
+    func testBundledSubjectModelLoadsOnceAndReleases() async throws {
+        let r = ModelRegistry.shared
+        try XCTSkipUnless(r.entry(id: "birefnet-lite")?.status == .bundled, "BiRefNet-lite not bundled")
+        async let first = r.subject(id: "birefnet-lite")
+        async let second = r.subject(id: "birefnet-lite")
+        let (a, b) = await (first, second)
+        XCTAssertNotNil(a)
+        XCTAssertTrue(a === b, "one load, shared")
+        XCTAssertNotNil(r.loaded(id: "birefnet-lite"))
+        XCTAssertEqual(a?.entry.status, .bundled)
+        r.release(id: "birefnet-lite")
+        XCTAssertNil(r.loaded(id: "birefnet-lite"))
+        let c = await r.subject(id: "birefnet-lite")
+        XCTAssertNotNil(c)
+        XCTAssertFalse(a === c, "a fresh load after release")
         r.releaseAll()
         XCTAssertNil(r.loaded(id: "birefnet-lite"))
     }

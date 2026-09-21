@@ -97,6 +97,62 @@ final class AIMaskTests: XCTestCase {
         XCTAssertLessThan(coverage(p3.mask, x: 0.3...0.7, y: 0.05...0.2), 0.05)
     }
 
+    /// The subject mask runs the model the edit names: the legacy Vision
+    /// literal is Vision with nothing substituted; a catalogue model that
+    /// is not installed, or a version that names nothing, runs Vision and
+    /// says which model is missing; the bundled model runs as itself.
+    func testSubjectMaskRunsTheStoredModelAndReportsAMissingOne() async throws {
+        let image = try PortraitAsset.image(longEdge: 1024)
+        let vision = try await AIMaskGenerator.generate(.subject, modelVersion: "vision.foregroundInstance.1", from: image)
+        XCTAssertNil(vision.substitutedModel)
+        XCTAssertGreaterThan(vision.mask.coverage, 0.05)
+
+        let missing = try await AIMaskGenerator.generate(.subject, modelVersion: "birefnet-general@1", from: image)
+        XCTAssertEqual(missing.substitutedModel, "BiRefNet General")
+        XCTAssertGreaterThan(missing.mask.coverage, 0.05, "Vision stood in")
+
+        let junk = try await AIMaskGenerator.generate(.subject, modelVersion: "test", from: image)
+        XCTAssertEqual(junk.substitutedModel, "test")
+
+        let unknownID = try await AIMaskGenerator.generate(.subject, modelVersion: "nobody-knows@3", from: image)
+        XCTAssertEqual(unknownID.substitutedModel, "nobody-knows")
+
+        guard ModelRegistry.shared.entry(id: "birefnet-lite")?.status == .bundled else { return }
+        let a = try await AIMaskGenerator.generate(.subject, modelVersion: "birefnet-lite@1", from: image)
+        XCTAssertNil(a.substitutedModel)
+        XCTAssertTrue((0.3...0.8).contains(a.mask.coverage), "coverage \(a.mask.coverage)")
+        XCTAssertGreaterThan(a.mask.mean(in: PortraitAsset.faceBox), 0.5)
+        let b = try await AIMaskGenerator.generate(.subject, modelVersion: "birefnet-lite@1", from: image)
+        XCTAssertGreaterThanOrEqual(a.mask.iou(b.mask), 0.99)
+        print(String(format: "BIREFNET via generator: %.0f ms, coverage %.1f%%", b.seconds * 1000, b.mask.coverage * 100))
+        // A different installed version of the same id runs (resolution is by id).
+        let v2 = try await AIMaskGenerator.generate(.subject, modelVersion: "birefnet-lite@2", from: image)
+        XCTAssertNil(v2.substitutedModel)
+    }
+
+    /// What a new mask records comes from the registry: the default
+    /// subject model, and the installed class model or the heuristic.
+    func testModelVersionsComeFromTheRegistry() throws {
+        let shared = ModelRegistry.shared
+        XCTAssertEqual(AIMaskKind.subject.modelVersion, shared.defaultSubject().modelVersion)
+        XCTAssertNotNil(ModelRef(stored: AIMaskKind.subject.modelVersion))
+        let segformer = shared.installed(ModelRef(id: SegmentationModel.modelID, version: 1))
+        XCTAssertEqual(AIMaskKind.sky.modelVersion, segformer?.modelVersion ?? "latent.skyHeuristic@1")
+        XCTAssertEqual(AIMaskKind.people.modelVersion, segformer?.modelVersion ?? "segformer-b2-ade20k-512@1")
+
+        // With nothing bundled: Vision and the heuristic.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("latent-versions-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "latent-versions-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let bare = ModelRegistry(bundled: nil, external: root, catalogue: nil, defaults: defaults)
+        XCTAssertEqual(AIMaskKind.subject.modelVersion(registry: bare), "vision.foregroundInstance@1")
+        XCTAssertEqual(AIMaskKind.sky.modelVersion(registry: bare), "latent.skyHeuristic@1")
+        XCTAssertEqual(AIMaskKind.water.modelVersion(registry: bare), "segformer-b2-ade20k-512@1")
+    }
+
     func testVisionSubjectStillWorks() throws {
         let image = try smallImage("HSB_2639.NEF")
         let mask = try AIMaskGenerator.subjectMask(image)
