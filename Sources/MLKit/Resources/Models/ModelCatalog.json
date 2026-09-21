@@ -1,0 +1,277 @@
+[
+  {
+    "id": "sam2.1-tiny",
+    "displayName": "SAM 2.1 Tiny",
+    "purpose": "Click to select: the smallest SAM, quickest to encode",
+    "version": 1,
+    "kind": "promptedSegmentation",
+    "licence": {
+      "name": "Apache-2.0",
+      "url": "https://github.com/facebookresearch/sam2/blob/main/LICENSE",
+      "commercialUse": true
+    },
+    "sourceURL": "https://huggingface.co/apple/coreml-sam2.1-tiny",
+    "sizeMB": 80,
+    "inputSize": 1024,
+    "packages": [
+      {
+        "name": "SAM2_1TinyImageEncoderFLOAT16.mlpackage",
+        "role": "imageEncoder",
+        "sha256": null,
+        "inputNames": ["image"],
+        "outputNames": ["image_embedding", "feats_s0", "feats_s1"]
+      },
+      {
+        "name": "SAM2_1TinyPromptEncoderFLOAT16.mlpackage",
+        "role": "promptEncoder",
+        "sha256": null,
+        "inputNames": ["points", "labels"],
+        "outputNames": ["sparse_embeddings", "dense_embeddings"]
+      },
+      {
+        "name": "SAM2_1TinyMaskDecoderFLOAT16.mlpackage",
+        "role": "maskDecoder",
+        "sha256": null,
+        "inputNames": ["image_embedding", "sparse_embedding", "dense_embedding", "feats_s0", "feats_s1"],
+        "outputNames": ["low_res_masks", "scores"]
+      }
+    ],
+    "converter": { "script": "scripts/convert_sam2.py --size tiny" }
+  },
+  {
+    "id": "sam2.1-base-plus",
+    "displayName": "SAM 2.1 Base+",
+    "purpose": "Click to select: better edges than Small at twice the size",
+    "version": 1,
+    "kind": "promptedSegmentation",
+    "licence": {
+      "name": "Apache-2.0",
+      "url": "https://github.com/facebookresearch/sam2/blob/main/LICENSE",
+      "commercialUse": true
+    },
+    "sourceURL": "https://huggingface.co/apple/coreml-sam2.1-baseplus",
+    "sizeMB": 166,
+    "inputSize": 1024,
+    "packages": [
+      {
+        "name": "SAM2_1BasePlusImageEncoderFLOAT16.mlpackage",
+        "role": "imageEncoder",
+        "sha256": null,
+        "inputNames": ["image"],
+        "outputNames": ["image_embedding", "feats_s0", "feats_s1"]
+      },
+      {
+        "name": "SAM2_1BasePlusPromptEncoderFLOAT16.mlpackage",
+        "role": "promptEncoder",
+        "sha256": null,
+        "inputNames": ["points", "labels"],
+        "outputNames": ["sparse_embeddings", "dense_embeddings"]
+      },
+      {
+        "name": "SAM2_1BasePlusMaskDecoderFLOAT16.mlpackage",
+        "role": "maskDecoder",
+        "sha256": null,
+        "inputNames": ["image_embedding", "sparse_embedding", "dense_embedding", "feats_s0", "feats_s1"],
+        "outputNames": ["low_res_masks", "scores"]
+      }
+    ],
+    "converter": { "script": "scripts/convert_sam2.py --size baseplus" }
+  },
+  {
+    "id": "sam2.1-large",
+    "displayName": "SAM 2.1 Large",
+    "purpose": "Click to select: the best hair and fine edges, needs memory",
+    "version": 1,
+    "kind": "promptedSegmentation",
+    "licence": {
+      "name": "Apache-2.0",
+      "url": "https://github.com/facebookresearch/sam2/blob/main/LICENSE",
+      "commercialUse": true
+    },
+    "sourceURL": "https://huggingface.co/apple/coreml-sam2.1-large",
+    "sizeMB": 457,
+    "inputSize": 1024,
+    "packages": [
+      {
+        "name": "SAM2_1LargeImageEncoderFLOAT16.mlpackage",
+        "role": "imageEncoder",
+        "sha256": null,
+        "inputNames": ["image"],
+        "outputNames": ["image_embedding", "feats_s0", "feats_s1"]
+      },
+      {
+        "name": "SAM2_1LargePromptEncoderFLOAT16.mlpackage",
+        "role": "promptEncoder",
+        "sha256": null,
+        "inputNames": ["points", "labels"],
+        "outputNames": ["sparse_embeddings", "dense_embeddings"]
+      },
+      {
+        "name": "SAM2_1LargeMaskDecoderFLOAT16.mlpackage",
+        "role": "maskDecoder",
+        "sha256": null,
+        "inputNames": ["image_embedding", "sparse_embedding", "dense_embedding", "feats_s0", "feats_s1"],
+        "outputNames": ["low_res_masks", "scores"]
+      }
+    ],
+    "converter": { "script": "scripts/convert_sam2.py --size large" }
+  },
+  {
+    "id": "birefnet-general",
+    "displayName": "BiRefNet General",
+    "purpose": "Subject masks: the full model, finest hair and structure",
+    "version": 1,
+    "kind": "subjectSegmentation",
+    "licence": {
+      "name": "MIT",
+      "url": "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE",
+      "commercialUse": true
+    },
+    "sourceURL": "https://huggingface.co/ZhengPeng7/BiRefNet",
+    "sizeMB": 446,
+    "inputSize": 1024,
+    "packages": [
+      {
+        "name": "BiRefNet_general.mlpackage",
+        "sha256": null,
+        "inputNames": ["image"],
+        "outputNames": ["mask"]
+      }
+    ],
+    "outputActivation": "probabilities",
+    "refine": "none",
+    "computeUnits": "cpuAndGPU",
+    "converter": { "script": "scripts/convert_birefnet.py --variant general" }
+  },
+  {
+    "id": "birefnet-portrait",
+    "displayName": "BiRefNet Portrait",
+    "purpose": "Subject masks tuned for people",
+    "version": 1,
+    "kind": "subjectSegmentation",
+    "licence": {
+      "name": "MIT",
+      "url": "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE",
+      "commercialUse": true
+    },
+    "sourceURL": "https://huggingface.co/ZhengPeng7/BiRefNet-portrait",
+    "sizeMB": 446,
+    "inputSize": 1024,
+    "packages": [
+      {
+        "name": "BiRefNet_portrait.mlpackage",
+        "sha256": null,
+        "inputNames": ["image"],
+        "outputNames": ["mask"]
+      }
+    ],
+    "outputActivation": "probabilities",
+    "refine": "none",
+    "computeUnits": "cpuAndGPU",
+    "converter": { "script": "scripts/convert_birefnet.py --variant portrait" }
+  },
+  {
+    "id": "u2net",
+    "displayName": "U²-Net",
+    "purpose": "Subject masks: the classic salient-object model, softer edges",
+    "version": 1,
+    "kind": "subjectSegmentation",
+    "licence": {
+      "name": "Apache-2.0",
+      "url": "https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE",
+      "commercialUse": true
+    },
+    "sourceURL": "https://github.com/xuebinqin/U-2-Net",
+    "sizeMB": 88,
+    "inputSize": 320,
+    "packages": [
+      {
+        "name": "U2Net.mlpackage",
+        "sha256": null,
+        "inputNames": ["image"],
+        "outputNames": ["mask"]
+      }
+    ],
+    "outputActivation": "probabilities",
+    "refine": "guided",
+    "converter": { "script": "scripts/convert_u2net.py" }
+  },
+  {
+    "id": "u2net-small",
+    "displayName": "U²-Net Small",
+    "purpose": "Subject masks in an instant, for previews; the roughest edges",
+    "version": 1,
+    "kind": "subjectSegmentation",
+    "licence": {
+      "name": "Apache-2.0",
+      "url": "https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE",
+      "commercialUse": true
+    },
+    "sourceURL": "https://github.com/xuebinqin/U-2-Net",
+    "sizeMB": 3,
+    "inputSize": 320,
+    "packages": [
+      {
+        "name": "U2NetP.mlpackage",
+        "sha256": null,
+        "inputNames": ["image"],
+        "outputNames": ["mask"]
+      }
+    ],
+    "outputActivation": "probabilities",
+    "refine": "guided",
+    "converter": { "script": "scripts/convert_u2net.py --small" }
+  },
+  {
+    "id": "modnet",
+    "displayName": "MODNet",
+    "purpose": "Subject masks for portraits: a soft matte with hair, people only",
+    "version": 1,
+    "kind": "subjectSegmentation",
+    "licence": {
+      "name": "Apache-2.0",
+      "url": "https://github.com/ZHKKKe/MODNet/blob/master/LICENSE",
+      "commercialUse": true
+    },
+    "sourceURL": "https://github.com/ZHKKKe/MODNet",
+    "sizeMB": 13,
+    "inputSize": 512,
+    "packages": [
+      {
+        "name": "MODNet.mlpackage",
+        "sha256": null,
+        "inputNames": ["image"],
+        "outputNames": ["mask"]
+      }
+    ],
+    "outputActivation": "probabilities",
+    "refine": "guided",
+    "converter": { "script": "scripts/convert_modnet.py" }
+  },
+  {
+    "id": "isnet",
+    "displayName": "IS-Net",
+    "purpose": "Subject masks with fine wiry detail (DIS); research use only",
+    "version": 1,
+    "kind": "subjectSegmentation",
+    "licence": {
+      "name": "Apache-2.0 code, DIS5K training data research-only",
+      "url": "https://github.com/xuebinqin/DIS/blob/main/LICENSE.md",
+      "commercialUse": false
+    },
+    "sourceURL": "https://github.com/xuebinqin/DIS",
+    "sizeMB": 88,
+    "inputSize": 1024,
+    "packages": [
+      {
+        "name": "ISNet_general_use.mlpackage",
+        "sha256": null,
+        "inputNames": ["image"],
+        "outputNames": ["mask"]
+      }
+    ],
+    "outputActivation": "probabilities",
+    "refine": "none",
+    "converter": { "script": "scripts/convert_isnet.py" }
+  }
+]

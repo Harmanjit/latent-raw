@@ -1,0 +1,59 @@
+{
+  "id": "sam2.1-small",
+  "displayName": "SAM 2.1 Small",
+  "purpose": "Click to select: masks from points you place",
+  "version": 1,
+  "kind": "promptedSegmentation",
+  "licence": {
+    "name": "Apache-2.0",
+    "url": "https://github.com/facebookresearch/sam2/blob/main/LICENSE",
+    "commercialUse": true
+  },
+  "sourceURL": "https://huggingface.co/apple/coreml-sam2.1-small",
+  "sizeMB": 94,
+  "inputSize": 1024,
+  "packages": [
+    {
+      "name": "SAM2_1SmallImageEncoderFLOAT16.mlpackage",
+      "role": "imageEncoder",
+      "sha256": "2ce10b3ae7e6d665ed9aed629eadbd535a2600b870b19d2bcea3d961d118876c",
+      "inputNames": [
+        "image"
+      ],
+      "outputNames": [
+        "image_embedding",
+        "feats_s0",
+        "feats_s1"
+      ]
+    },
+    {
+      "name": "SAM2_1SmallPromptEncoderFLOAT16.mlpackage",
+      "role": "promptEncoder",
+      "sha256": "e34aac12bbcc19845783f9dd38aeb2b8b3c3dc2e8c2722dfc8162b2f34c8eef7",
+      "inputNames": [
+        "points",
+        "labels"
+      ],
+      "outputNames": [
+        "sparse_embeddings",
+        "dense_embeddings"
+      ]
+    },
+    {
+      "name": "SAM2_1SmallMaskDecoderFLOAT16.mlpackage",
+      "role": "maskDecoder",
+      "sha256": "087b64a386ffaed9d1447b90dd009c3b9937414bca31663ebe93e8c1c3c675a7",
+      "inputNames": [
+        "image_embedding",
+        "sparse_embedding",
+        "dense_embedding",
+        "feats_s0",
+        "feats_s1"
+      ],
+      "outputNames": [
+        "low_res_masks",
+        "scores"
+      ]
+    }
+  ]
+}

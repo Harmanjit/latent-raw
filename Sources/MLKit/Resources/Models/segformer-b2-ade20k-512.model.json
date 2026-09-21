@@ -1,0 +1,32 @@
+{
+  "id": "segformer-b2-ade20k-512",
+  "displayName": "SegFormer B2",
+  "purpose": "Select by class: sky, person, tree, water and 146 more",
+  "version": 1,
+  "kind": "semanticSegmentation",
+  "licence": {
+    "name": "NVIDIA Source Code License",
+    "url": "https://github.com/NVlabs/SegFormer/blob/master/LICENSE",
+    "commercialUse": false
+  },
+  "sourceURL": "https://huggingface.co/nvidia/segformer-b2-finetuned-ade-512-512",
+  "sizeMB": 55,
+  "inputSize": 512,
+  "packages": [
+    {
+      "name": "SegFormer_segformer_b2_finetuned_ade_512_512.mlpackage",
+      "sha256": "8521e6d4d09d8c5fae44f5204b9836cf409c52bc0ae0acea204c528c4e666058",
+      "inputNames": [
+        "image"
+      ],
+      "outputNames": [
+        "probabilities"
+      ]
+    }
+  ],
+  "labelsFile": "SegFormer_segformer_b2_finetuned_ade_512_512.labels.json",
+  "converter": {
+    "script": "scripts/convert_segformer.py",
+    "sourceRevision": "de01bae28967510f9ddd496c60a969357195400c"
+  }
+}
