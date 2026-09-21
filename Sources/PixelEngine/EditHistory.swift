@@ -91,6 +91,8 @@ public struct EditHistory: Equatable, Sendable, Codable {
         if a.modules.locals != b.modules.locals { names.append("Local Adjustments") }
         if a.modules.heal != b.modules.heal { names.append("Spot Removal") }
         if a.modules.redeye != b.modules.redeye { names.append("Red-Eye") }
+        if a.modules.dust != b.modules.dust { names.append("Sensor Dust") }
+        if a.modules.touchup != b.modules.touchup { names.append("Touch-up") }
         return names.isEmpty ? "Edit" : names.joined(separator: ", ")
     }
 

@@ -170,3 +170,6 @@ enum RedEyeStage {
                                      threadsPerThreadgroup: MTLSize(width: tw, height: th, depth: 1))
     }
 }
+
+/// Hashable over every stored property, for the heal cache's key.
+extension RedEyeSpot: Hashable {}

@@ -5,7 +5,7 @@ import Foundation
 /// (DESIGN.md §5.6), so choosing "Tone" carries exposure, the curve's
 /// inputs and highlight recovery together, the way a person thinks of it.
 public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
-    case whiteBalance, tone, presence, toneCurve, colour, splitToning, detail, lens, locals, crop, heal
+    case whiteBalance, tone, presence, toneCurve, colour, splitToning, detail, lens, locals, crop, heal, dust, touchUp
 
     public var id: String { rawValue }
 
@@ -22,6 +22,8 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .locals:       return "Local Adjustments"
         case .crop:         return "Crop, Straighten & Perspective"
         case .heal:         return "Spot Removal & Red-Eye"
+        case .dust:         return "Sensor Dust"
+        case .touchUp:      return "Touch-up (skin, teeth, eyes, blemishes)"
         }
     }
 
@@ -72,6 +74,17 @@ extension EditStack {
             case .heal:
                 result.modules.heal = other.modules.heal
                 result.modules.redeye = other.modules.redeye
+            case .dust:
+                result.modules.dust = other.modules.dust
+            case .touchUp:
+                // The sliders travel; the faces and blemishes are this
+                // image's own (found on its picture), so they stay, and a
+                // preset or the clipboard (built on an empty stack) carries
+                // none. Pasting "no touch-up" still clears the module.
+                var t = other.modules.touchup
+                t?.faces = modules.touchup?.faces ?? []
+                t?.blemishes = modules.touchup?.blemishes ?? []
+                result.modules.touchup = t
             }
         }
         // The result's geometry keeps the frame it was written in. When it
@@ -80,9 +93,11 @@ extension EditStack {
         // pasted into without being opened) this stack's frame wins: its
         // own heals and masks then stay right, and at worst the pasted
         // geometry lands off by the camera's masked border.
-        let chosen = groups.intersection([.locals, .crop, .heal])
+        // Measured on the result, not on `other`: a touch-up copied
+        // without its faces brings no geometry along.
+        let chosen = groups.intersection([.locals, .crop, .heal, .dust, .touchUp])
         let keepsOwnGeometry = !geometryGroups.subtracting(chosen).isEmpty
-        let takesOtherGeometry = !other.geometryGroups.intersection(chosen).isEmpty
+        let takesOtherGeometry = !result.geometryGroups.intersection(chosen).isEmpty
         result.frame = keepsOwnGeometry ? frame : (takesOtherGeometry ? other.frame : nil)
         return result
     }
@@ -109,6 +124,8 @@ extension EditStack {
         if m.locals != nil { g.insert(.locals) }
         if m.crop != nil || m.perspective != nil { g.insert(.crop) }
         if m.heal != nil || m.redeye != nil { g.insert(.heal) }
+        if m.dust != nil { g.insert(.dust) }
+        if m.touchup != nil { g.insert(.touchUp) }
         return g
     }
 }
@@ -127,6 +144,20 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
         self.groups = groups
         self.stack = stack.restricted(to: groups)
         self.isBuiltIn = isBuiltIn
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, groups, stack, isBuiltIn }
+
+    /// `groups` decodes leniently: a group this build doesn't know (a
+    /// preset saved by a later one) is dropped rather than losing the
+    /// whole preset, since presets are shared by every catalog.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        let raw = try c.decodeIfPresent([String].self, forKey: .groups) ?? []
+        groups = Set(raw.compactMap(EditGroup.init(rawValue:)))
+        stack = try c.decode(EditStack.self, forKey: .stack)
+        isBuiltIn = try c.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
     }
 
     /// A few starting points. Deliberately mild: a preset that a user

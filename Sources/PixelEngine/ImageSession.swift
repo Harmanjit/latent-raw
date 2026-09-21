@@ -110,6 +110,8 @@ public final class ImageSession {
         case rcdScratch     // ping-pong partner for the RGB passes
         case denoised       // camera RGB after noise reduction
         case healed         // camera RGB after spot removal
+        case healedPreview  // same, for the binned preview (its own role so the
+                            // heal cache's preview entry survives a same-size tile)
         case lensCorrected  // camera RGB after lens corrections
         case blurA          // sharpening: horizontal blur of luminance
         case blurB          // sharpening: full blur of luminance
@@ -119,6 +121,9 @@ public final class ImageSession {
         case presenceDownA, presenceDownB, presenceDownC
         case presence, presencePreview   // output of the presence stage
         case aiDenoised, aiDenoisedPreview // camera RGB after the neural denoiser is blended in
+        case visualised, visualisedPreview // the viewport's Visualise Spots pass
+        case touchUpPair, touchUpScratch, touchUpFine, touchUpMid, touchUpDownA, touchUpDownB
+        case touchUp, touchUpPreview       // output of the touch-up stage
     }
 
     /// Which set of pooled textures a render draws from. Pools never share
@@ -170,6 +175,57 @@ public final class ImageSession {
     public func setAIDenoised(_ texture: MTLTexture?, model: String?) {
         aiDenoisedCameraRGB = texture
         aiDenoiseModel = texture == nil ? nil : model
+        // A healed texture blended from the old result is stale; the key
+        // names the model but not the pixels.
+        healCache.removeAll()
+    }
+
+    // MARK: - Touch-up masks
+
+    /// The touch-up region masks MLKit built for this image, or nil until
+    /// it has (or after critical memory pressure dropped them).
+    public private(set) var touchUpMasks: TouchUpMaskSet?
+    /// The composited mask texture and the enabled set it was built for.
+    private var touchUpMaskTexture: (enabled: Set<UUID>, texture: MTLTexture)?
+    /// True once `releaseMemory(.critical)` dropped a mask set; cleared by
+    /// `setTouchUpMasks`. The editor reads it when pressure lifts to know
+    /// the masks need building again.
+    public private(set) var droppedTouchUpMasks = false
+
+    public func setTouchUpMasks(_ set: TouchUpMaskSet?) {
+        touchUpMasks = set
+        touchUpMaskTexture = nil
+        droppedTouchUpMasks = false
+    }
+
+    public var hasTouchUpMasks: Bool { touchUpMasks != nil }
+
+    /// The enabled faces' masks as one r8Unorm 2D-array texture of three
+    /// slices (skin, teeth, eyes) at the set's size, shared storage since
+    /// the CPU writes it. Rebuilt only when `enabled` changes; nil without
+    /// a mask set, which is what tells the pipeline to skip the stage.
+    func touchUpMaskTexture(enabled: Set<UUID>) -> MTLTexture? {
+        guard let set = touchUpMasks else { return nil }
+        if let built = touchUpMaskTexture, built.enabled == enabled { return built.texture }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type2DArray
+        d.pixelFormat = .r8Unorm
+        d.width = max(1, set.width)
+        d.height = max(1, set.height)
+        d.arrayLength = 3
+        d.storageMode = .shared
+        d.usage = [.shaderRead]
+        guard set.width > 0, set.height > 0, let texture = gpu.device.makeTexture(descriptor: d) else { return nil }
+        let planes = set.composite(enabled: enabled)
+        let region = MTLRegionMake2D(0, 0, set.width, set.height)
+        for (slice, plane) in [planes.skin, planes.teeth, planes.eyes].enumerated() {
+            plane.withUnsafeBytes { bytes in
+                texture.replace(region: region, mipmapLevel: 0, slice: slice, withBytes: bytes.baseAddress!,
+                                bytesPerRow: set.width, bytesPerImage: set.width * set.height)
+            }
+        }
+        touchUpMaskTexture = (enabled, texture)
+        return texture
     }
 
     public func setAIMask(_ bitmap: MaskBitmap?, forLocal id: UUID) {
@@ -235,6 +291,42 @@ public final class ImageSession {
     func storeCameraRGB(_ texture: MTLTexture, for key: StageKey) {
         stageCache = stageCache.filter { $0.value !== texture }
         stageCache[key] = texture
+    }
+
+    // MARK: - Heal cache
+
+    /// Everything stages 3 to 5 read: the demosaic's key, the neural and
+    /// classic denoise settings, and every list the heal stage applies.
+    /// Two renders with equal keys produce identical healed textures, so
+    /// the second skips the three stages (docs/Retouch.md §6): a slider
+    /// tick with 200 dust spots then costs no heal dispatches at all.
+    struct HealKey: Hashable {
+        let stageKey: StageKey
+        let aiDenoise: Float
+        let aiDenoiseModel: String?
+        let denoiseLuminance: Float
+        let denoiseColor: Float
+        let dust: [HealPatch]
+        let blemishes: [HealPatch]
+        let heals: [HealPatch]
+        let redEyes: [RedEyeSpot]
+    }
+
+    /// Like `stageCache`: pooled textures, trustworthy until something
+    /// else renders into them, which `storeHealed` guards against.
+    private var healCache: [HealKey: MTLTexture] = [:]
+
+    func cachedHealed(for key: HealKey) -> MTLTexture? {
+        healCache[key]
+    }
+
+    /// Records the healed texture for `key`, evicting entries pointing at
+    /// the same texture first. Cleared by `releasePooledTextures()` (all),
+    /// `releasePooledTextures(in:)` (entries whose texture was released)
+    /// and `setAIDenoised(_:model:)` (the blend's input changed).
+    func storeHealed(_ texture: MTLTexture, for key: HealKey) {
+        healCache = healCache.filter { $0.value !== texture }
+        healCache[key] = texture
     }
 
     public init(file: RawFile, gpu: GPUContext) throws {
@@ -349,6 +441,7 @@ public final class ImageSession {
         }
         total += brushMasks?.texture.allocatedSize ?? 0
         total += aiDenoisedCameraRGB?.allocatedSize ?? 0
+        total += touchUpMaskTexture?.texture.allocatedSize ?? 0
         return total
     }
 
@@ -357,6 +450,7 @@ public final class ImageSession {
     public func releasePooledTextures() {
         texturePool.removeAll()
         stageCache.removeAll()
+        healCache.removeAll()
     }
 
     /// Runs `body` (normally one or more `RenderPipeline.render` calls) with
@@ -375,6 +469,7 @@ public final class ImageSession {
         guard !released.isEmpty else { return }
         texturePool = texturePool.filter { $0.key.pool != pool }
         stageCache = stageCache.filter { entry in !released.contains { $0 === entry.value } }
+        healCache = healCache.filter { entry in !released.contains { $0 === entry.value } }
     }
 
     /// Gives memory back when macOS runs short, keeping the session usable:
@@ -384,10 +479,11 @@ public final class ImageSession {
     /// cost one render to rebuild. Textures the caller still holds (the
     /// layers on screen) stay alive through their own references, so the
     /// picture doesn't change. Critical also drops the brush mask
-    /// rasters and the neural denoise result. The latter costs about 11 s
-    /// to recompute, which is why nothing short of critical touches it;
-    /// the caller decides when to run it again. Returns whether the
-    /// denoise result was dropped.
+    /// rasters, the touch-up masks (`droppedTouchUpMasks` says so until
+    /// they are set again) and the neural denoise result. The latter
+    /// costs about 11 s to recompute, which is why nothing short of
+    /// critical touches it; the caller decides when to run it again.
+    /// Returns whether the denoise result was dropped.
     @discardableResult
     public func releaseMemory(for level: MemoryPressureLevel) -> Bool {
         guard level >= .warning else { return false }
@@ -395,6 +491,11 @@ public final class ImageSession {
         guard level == .critical else { return false }
         brushMasks = nil
         placeholderMasks = nil
+        if touchUpMasks != nil {
+            touchUpMasks = nil
+            touchUpMaskTexture = nil
+            droppedTouchUpMasks = true
+        }
         let hadDenoise = aiDenoisedCameraRGB != nil
         setAIDenoised(nil, model: nil)
         return hadDenoise

@@ -51,6 +51,11 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
 
     /// Patches per image; a stroke counts as one, however long.
     public static let maximumCount = 32
+    /// Automatic sensor-dust patches per image (`EditParameters.dust`):
+    /// a dirty sensor at f/16 can show a couple of hundred spots.
+    public static let maximumDustCount = 200
+    /// Automatic blemish patches per image (`TouchUp.blemishes`).
+    public static let maximumBlemishCount = 64
     /// Points per stroke once simplified (`simplifiedStroke`). A straight
     /// wire needs two; the limit only bites on a long scribble, which is
     /// simplified harder to fit.
@@ -235,3 +240,7 @@ struct HealPatchGPU {
         params = SIMD4(p.radius, p.feather, p.mode == .clone ? 1 : 0, 0)
     }
 }
+
+/// Hashable over every stored property, so a list of patches can key the
+/// heal cache (`ImageSession.HealKey`).
+extension HealPatch: Hashable {}

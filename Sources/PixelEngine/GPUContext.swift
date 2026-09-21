@@ -117,6 +117,10 @@ public final class GPUContext: @unchecked Sendable {
         case mergeDeghostPatch
         case mergeDeghostOwnership
         case mergeDeghostCombine
+        // Visualise Spots (Dust.metal), viewport only.
+        case dustVisualise
+        // Touch-up (TouchUp.metal, TouchUpStage.swift).
+        case touchUpApply
     }
 
     /// Built pipelines, by kernel. A Mutex because renders run on several
@@ -273,7 +277,8 @@ public final class GPUContext: @unchecked Sendable {
         // won't exist in the runtime-compiled library.
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
                             "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye", "Slideshow",
-                            "LinearSource", "MergeHDR", "MergeWarp", "MergeDeghost", "MergePanoPrep", "MergePanoBlend"]
+                            "LinearSource", "MergeHDR", "MergeWarp", "MergeDeghost", "MergePanoPrep", "MergePanoBlend",
+                            "Dust", "TouchUp"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound
