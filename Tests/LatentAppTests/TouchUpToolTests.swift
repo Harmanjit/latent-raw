@@ -80,6 +80,31 @@ final class TouchUpToolTests: XCTestCase {
 
     static let boxes: [SIMD4<Float>] = [SIMD4(0.2, 0.2, 0.2, 0.3), SIMD4(0.55, 0.25, 0.2, 0.3)]
 
+    /// Holds a fake pass until the test lets it go; each `open` lets one
+    /// waiter through.
+    private final class Gate: @unchecked Sendable {
+        private let semaphore = DispatchSemaphore(value: 0)
+        func wait() { semaphore.wait() }
+        func open() { semaphore.signal() }
+    }
+
+    /// The fake's passes with one of them held at `gate` until opened.
+    private func gated(_ fake: FakePasses, build: Gate? = nil, blemishes: Gate? = nil) -> EditorModel.TouchUpPasses {
+        var passes = fake.passes
+        if let build {
+            let inner = passes.build
+            passes.build = { touchUp, render, image in build.wait(); return inner(touchUp, render, image) }
+        }
+        if let blemishes {
+            let inner = passes.blemishes
+            passes.blemishes = { render, masks, touchUp, existing, image in
+                blemishes.wait()
+                return inner(render, masks, touchUp, existing, image)
+            }
+        }
+        return passes
+    }
+
     override func tearDown() async throws {
         EditorModel.touchUpPasses = .live
     }
@@ -153,6 +178,85 @@ final class TouchUpToolTests: XCTestCase {
         XCTAssertEqual(model.parameters.touchUp.faces.count, 2)
         XCTAssertNotEqual(model.parameters.touchUp.faces.map(\.id), firstIDs)
         XCTAssertEqual(model.history.steps.count, steps + 3)
+    }
+
+    /// Undo after a second Find Faces brings the first list back, whose
+    /// ids the session's masks (built for the second) know nothing of:
+    /// the set is dropped and built again for the faces shown, with a
+    /// thumbnail per face, rather than smoothing nothing.
+    func testUndoToOtherFacesBuildsTheirMasks() async throws {
+        let fake = FakePasses(boxes: Self.boxes)
+        EditorModel.touchUpPasses = fake.passes
+        let model = try await openModel()
+        let session = try XCTUnwrap(model.session)
+        await findFaces(model)
+        let firstIDs = model.parameters.touchUp.faces.map(\.id)
+        model.parameters.touchUp.skinSmoothing = 60
+        await findFaces(model)
+        XCTAssertNotEqual(model.parameters.touchUp.faces.map(\.id), firstIDs)
+        XCTAssertEqual(fake.builds, 0)
+
+        model.undo()
+        XCTAssertEqual(model.parameters.touchUp.faces.map(\.id), firstIDs)
+        XCTAssertEqual(model.parameters.touchUp.skinSmoothing, 60)
+        XCTAssertNotNil(model.touchUpMaskTask, "the masks are being built for the faces shown")
+        await waitUntil("the masks", seconds: 20) { model.touchUpMaskTask == nil }
+        XCTAssertEqual(fake.builds, 1)
+        XCTAssertEqual(session.touchUpMasks?.faces.map(\.id), firstIDs)
+        XCTAssertEqual(Set(model.faceThumbnails.keys), Set(firstIDs))
+
+        // Redo the second list: its masks are built the same way.
+        model.redo()
+        await waitUntil("the masks again", seconds: 20) { model.touchUpMaskTask == nil }
+        XCTAssertEqual(fake.builds, 2)
+        XCTAssertEqual(session.touchUpMasks?.faces.map(\.id), model.parameters.touchUp.faces.map(\.id))
+    }
+
+    /// A lens or keystone change while a build runs finds a build under
+    /// way and schedules nothing; the build that lands is for the grid
+    /// before the change, so it is not kept and one for the current grid
+    /// follows.
+    func testGeometryChangeDuringABuildRebuildsForTheNewGrid() async throws {
+        let fake = FakePasses(boxes: Self.boxes)
+        let gate = Gate()
+        EditorModel.touchUpPasses = gated(fake, build: gate)
+        let model = try await openModel(editStackJSON: try storedFaces(skinSmoothing: 40))
+        let session = try XCTUnwrap(model.session)
+        XCTAssertNotNil(model.touchUpMaskTask, "the on-open build")
+        let staleKey = EditorModel.touchUpGeometryKey(of: model.parameters)
+
+        model.parameters.perspective.vertical = 0.2
+        let key = EditorModel.touchUpGeometryKey(of: model.parameters)
+        XCTAssertNotEqual(key, staleKey)
+        gate.open()
+        gate.open()   // the second build too
+        await waitUntil("both builds", seconds: 20) { fake.builds == 2 && model.touchUpMaskTask == nil }
+        XCTAssertTrue(session.hasTouchUpMasks)
+        XCTAssertEqual(model.touchUpGeometryKey, key, "the masks are the current grid's")
+        XCTAssertEqual(model.faceThumbnails.count, 2)
+    }
+
+    /// The same during Find Faces: its masks are recorded for the grid
+    /// they were built on, and with the sliders at zero they are dropped
+    /// so the first slider to leave zero builds them for the current one.
+    func testGeometryChangeDuringFindFacesLeavesNoStaleMasks() async throws {
+        let fake = FakePasses(boxes: Self.boxes)
+        EditorModel.touchUpPasses = fake.passes
+        let model = try await openModel()
+        let session = try XCTUnwrap(model.session)
+        model.findFaces()
+        XCTAssertTrue(model.findingFaces)
+        model.parameters.manualDistortion = 0.2   // while Vision looks
+        await waitUntil("Find Faces", seconds: 20) { !model.findingFaces }
+        XCTAssertEqual(model.parameters.touchUp.faces.count, 2)
+        XCTAssertFalse(session.hasTouchUpMasks, "built for the old grid, and no slider wants them")
+        XCTAssertEqual(model.faceThumbnails.count, 2)
+
+        model.parameters.touchUp.skinSmoothing = 30
+        XCTAssertNotNil(model.touchUpMaskTask)
+        await waitUntil("the masks", seconds: 20) { model.touchUpMaskTask == nil }
+        XCTAssertTrue(session.hasTouchUpMasks)
+        XCTAssertEqual(model.touchUpGeometryKey, EditorModel.touchUpGeometryKey(of: model.parameters))
     }
 
     /// A face switched off is a parameter change like any other: the
@@ -333,6 +437,36 @@ final class TouchUpToolTests: XCTestCase {
         XCTAssertEqual(model.parameters.touchUp.blemishes.count, 1)
     }
 
+    /// With a lens correction on, the viewport shows the corrected image
+    /// while a patch heals the raw grid before the lens stage: a click
+    /// goes through the lens map to the raw pixel under the cursor, and
+    /// its ring (drawn back through the map) takes the next click.
+    func testClicksGoThroughTheLensMapToTheRawGrid() async throws {
+        EditorModel.touchUpPasses = FakePasses(boxes: Self.boxes).passes
+        let model = try await openModel()
+        await findFaces(model)
+        model.parameters.manualDistortion = 0.3
+        model.touchUpToolActive = true
+        let size = SIMD2(Float(model.sensorSize.width), Float(model.sensorSize.height))
+        let raw = SIMD2<Float>(0.3, 0.35)   // inside the first box, off centre
+        let out = model.outputNormalized(raw)
+        XCTAssertGreaterThan(simd_length((out - raw) * size), 2, "the distortion moves the point by pixels")
+        XCTAssertEqual(simd_length((model.rawNormalized(out) - raw) * size), 0, accuracy: 0.05)
+
+        model.imageToolBegan(at: screen(out, in: model), exclude: false)
+        model.imageToolEnded()
+        let patch = try XCTUnwrap(model.parameters.touchUp.blemishes.first)
+        XCTAssertEqual(simd_length((patch.target - raw) * size), 0, accuracy: 0.5, "the raw pixel under the cursor")
+        XCTAssertNotEqual(patch.source, patch.target)
+        let b = Self.boxes[0]
+        XCTAssertTrue(patch.source.x >= b.x && patch.source.x <= b.x + b.z && patch.source.y >= b.y && patch.source.y <= b.y + b.w,
+                      "the source stays on the face: \(patch.source)")
+
+        // The ring is drawn where the click was; the same click removes it.
+        model.imageToolBegan(at: screen(out, in: model), exclude: false)
+        XCTAssertTrue(model.parameters.touchUp.blemishes.isEmpty)
+    }
+
     /// Find Blemishes replaces the list each time, as one history step,
     /// and says what it found.
     func testFindBlemishesReplacesTheList() async throws {
@@ -345,8 +479,21 @@ final class TouchUpToolTests: XCTestCase {
         let model = try await openModel()
         model.findBlemishes()
         XCTAssertFalse(model.findingBlemishes, "no face to look on")
+        XCTAssertEqual(model.status, "Find Faces first: there is no face to look for blemishes on")
         XCTAssertEqual(fake.blemishRuns, 0)
         await findFaces(model)
+
+        // Faces found but every one switched off: a tick is what's needed,
+        // not another Find Faces (which would replace the list).
+        model.parameters.touchUp.faces[0].enabled = false
+        model.parameters.touchUp.faces[1].enabled = false
+        model.findBlemishes()
+        XCTAssertFalse(model.findingBlemishes)
+        XCTAssertEqual(model.status, "Turn on a face to look for blemishes on it")
+        XCTAssertEqual(fake.blemishRuns, 0)
+        model.parameters.touchUp.faces[0].enabled = true
+        model.parameters.touchUp.faces[1].enabled = true
+        model.flushPendingSave()
         let steps = model.history.steps.count
 
         model.findBlemishes()
@@ -365,6 +512,42 @@ final class TouchUpToolTests: XCTestCase {
         XCTAssertEqual(model.status, "Found 1 blemish")
         XCTAssertEqual(model.history.steps.count, steps + 2)
         XCTAssertEqual(fake.blemishRuns, 2)
+    }
+
+    /// While Find Blemishes runs its list is about to replace the edit's:
+    /// a click on skin waits rather than adding a ring the result takes
+    /// away, and a slider moved meanwhile is a history step of its own
+    /// before the blemishes' step, not folded into it.
+    func testEditsWhileFindBlemishesRunsAreKept() async throws {
+        let found = [HealPatch(target: SIMD2(0.25, 0.3), source: SIMD2(0.26, 0.3), radius: 0.002, feather: 0.5)]
+        let fake = FakePasses(boxes: Self.boxes, blemishLists: [found])
+        let gate = Gate()
+        EditorModel.touchUpPasses = gated(fake, blemishes: gate)
+        let model = try await openModel()
+        await findFaces(model)
+        model.touchUpToolActive = true
+        let steps = model.history.steps.count
+
+        model.findBlemishes()
+        XCTAssertTrue(model.findingBlemishes)
+        model.imageToolBegan(at: screen(SIMD2(0.3, 0.35), in: model), exclude: false)
+        model.imageToolEnded()
+        XCTAssertTrue(model.parameters.touchUp.blemishes.isEmpty, "the click waits for the search")
+        model.parameters.touchUp.skinSmoothing = 40
+        XCTAssertNotNil(model.pendingSave)
+
+        gate.open()
+        await waitUntil("Find Blemishes", seconds: 20) { !model.findingBlemishes }
+        XCTAssertEqual(model.parameters.touchUp.blemishes, found)
+        XCTAssertEqual(model.parameters.touchUp.skinSmoothing, 40)
+        XCTAssertEqual(model.history.steps.count, steps + 2, "the slider, then the blemishes")
+        XCTAssertEqual(model.history.steps.last?.label, "Touch-up")
+        model.undo()
+        XCTAssertTrue(model.parameters.touchUp.blemishes.isEmpty)
+        XCTAssertEqual(model.parameters.touchUp.skinSmoothing, 40, "the slider's step is its own")
+
+        model.imageToolBegan(at: screen(SIMD2(0.3, 0.35), in: model), exclude: false)
+        XCTAssertEqual(model.parameters.touchUp.blemishes.count, 1, "clicks work again")
     }
 
     // MARK: - Memory pressure

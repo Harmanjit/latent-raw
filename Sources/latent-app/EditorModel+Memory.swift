@@ -44,11 +44,18 @@ extension EditorModel {
         } else {
             resetPromptSessions(keeping: selectedPromptModelID)
         }
+        // The Sensitivity and Spot Size controls re-detect from the
+        // analysis; with it gone they say so (`redetectDustIfArmed`), and
+        // this says why.
+        if dustToolActive, dustAnalysis != nil {
+            status = "Memory is low: click Find Spots again to change Sensitivity or Spot Size"
+        }
         dustAnalysis = nil
         // The denoise worker renders from this session off the main thread
-        // when it starts, as Find Spots does, so its pool is left alone
-        // until the run is done.
-        guard let session, !aiDenoiseRunning, !findingDust else { return }
+        // when it starts, so its pool is left alone until the run is done.
+        // A dust detection under way needs nothing of the session: its
+        // analysis was made on the main actor and is a value of its own.
+        guard let session, !aiDenoiseRunning else { return }
         if session.releaseMemory(for: level) {
             aiDenoiseReleasedUnderPressure = true
             if parameters.aiDenoise > 0 {

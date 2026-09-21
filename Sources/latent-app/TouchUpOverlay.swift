@@ -6,10 +6,10 @@ import PixelEngine
 /// visual, like HealOverlay: the Metal view owns the mouse and the model
 /// hit tests, so a click on a ring is the model's `touchUpToolBegan`.
 ///
-/// The boxes are stored on the raw sensor grid and drawn as sensor
-/// positions, as the spot tools take their clicks: with a lens profile
-/// on, a box sits a few pixels from the corrected face, which a faint
-/// outline is for.
+/// The boxes and the patches are stored on the raw sensor grid, while
+/// the view shows the corrected image, so each goes through the lens
+/// map (`outputNormalized`) before it is placed: a ring sits on the
+/// blemish it heals, and the box round the face it was found on.
 struct TouchUpOverlay: View {
     @ObservedObject var model: EditorModel
     @Environment(\.colorSchemeContrast) private var contrast
@@ -20,17 +20,24 @@ struct TouchUpOverlay: View {
             Canvas { context, _ in
                 let short = min(model.sensorSize.width, model.sensorSize.height)
                 for face in model.parameters.touchUp.faces where face.enabled {
+                    // The corrected box is the bounds of the four mapped
+                    // corners, as the thumbnails take it.
                     let b = face.boundingBox
-                    let corner = point(SIMD2(b.x, b.y), scale: scale)
-                    let far = point(SIMD2(b.x + b.z, b.y + b.w), scale: scale)
-                    let box = Path(CGRect(x: corner.x, y: corner.y, width: far.x - corner.x, height: far.y - corner.y))
+                    let corners = [SIMD2(b.x, b.y), SIMD2(b.x + b.z, b.y), SIMD2(b.x, b.y + b.w), SIMD2(b.x + b.z, b.y + b.w)]
+                        .map { point(model.outputNormalized($0), scale: scale) }
+                    var lo = corners[0], hi = corners[0]
+                    for c in corners.dropFirst() {
+                        lo = CGPoint(x: min(lo.x, c.x), y: min(lo.y, c.y))
+                        hi = CGPoint(x: max(hi.x, c.x), y: max(hi.y, c.y))
+                    }
+                    let box = Path(CGRect(x: lo.x, y: lo.y, width: hi.x - lo.x, height: hi.y - lo.y))
                     context.stroke(box, with: .color(.black.opacity(0.25)), lineWidth: 3)
                     context.stroke(box, with: .color(.white.opacity(0.45)), lineWidth: 1)
                 }
                 for (i, patch) in model.parameters.touchUp.blemishes.enumerated() {
                     let selected = i == model.selectedBlemishIndex
                     let r = max(CGFloat(patch.radius) * short * model.viewport.zoom / scale, 3)
-                    let c = point(patch.target, scale: scale)
+                    let c = point(model.outputNormalized(patch.target), scale: scale)
                     let ring = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
                     context.stroke(ring, with: .color(.black.opacity(0.5)), lineWidth: 3)
                     context.stroke(ring, with: .color(selected ? .accentColor : .white), lineWidth: selected ? 2 : 1)

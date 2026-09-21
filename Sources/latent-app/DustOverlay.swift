@@ -6,7 +6,9 @@ import PixelEngine
 /// accent colour on the selected one. Purely visual, like HealOverlay:
 /// the Metal view owns the mouse and the model hit tests (a ring removes
 /// its spot, the image adds one). The rings follow the render, so Before
-/// shows none.
+/// shows none. A spot is stored on the raw grid and the view shows the
+/// corrected image, so its ring is placed through the lens map
+/// (`outputNormalized`), on the shadow it heals.
 struct DustOverlay: View {
     @ObservedObject var model: EditorModel
     @Environment(\.colorSchemeContrast) private var contrast
@@ -20,7 +22,7 @@ struct DustOverlay: View {
                     let selected = i == model.selectedDustIndex
                     // Never thinner than the halo, however far out the view is.
                     let r = max(CGFloat(spot.radius) * short * model.viewport.zoom / scale, 2)
-                    let c = point(spot.target, scale: scale)
+                    let c = point(model.outputNormalized(spot.target), scale: scale)
                     let ring = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
                     context.stroke(ring, with: .color(.black.opacity(0.6)), lineWidth: 2)
                     context.stroke(ring, with: .color(selected ? .accentColor : .white), lineWidth: selected ? 1.5 : 1)

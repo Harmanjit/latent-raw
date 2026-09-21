@@ -102,8 +102,11 @@ extension EditorModel {
         restoringState = true
         var next = stack.parameters(defaults: defaultParameters)
         if next.whiteBalance.isAsShot { next.whiteBalance = defaultParameters.whiteBalance }
+        let before = parameters
         parameters = next
         restoringState = false
+        // The session's model-made mask pixels follow the stored shapes.
+        syncModelMasks(from: before)
         // The stored edit must follow the cursor, so save without waiting.
         pendingSave?.cancel(); pendingSave = nil
         if let id = catalogImageID {
@@ -137,8 +140,10 @@ extension EditorModel {
         restoringState = true
         var next = snapshot.stack.parameters(defaults: defaultParameters)
         if next.whiteBalance.isAsShot { next.whiteBalance = defaultParameters.whiteBalance }
+        let before = parameters
         parameters = next
         restoringState = false
+        syncModelMasks(from: before)
         recordHistoryStep()   // restoring a snapshot is itself a history step
         scheduleSave()
     }

@@ -71,51 +71,56 @@ extension EditorModel {
 
     // MARK: - Find Spots
 
+    /// The analysis of the open image, made on the main actor as red-eye's
+    /// and touch-up's renders are: the session is not Sendable and the
+    /// editor renders it on the main actor whenever a slider moves or the
+    /// view scrolls, so a render from another thread would share its
+    /// texture pool and caches with those. One binned render, a readback
+    /// and the map; nil with the failure in the status bar.
+    private func dustAnalysisNow(_ what: String) -> DustDetector.Analysis? {
+        guard let session, let pipeline, let gpu = gpuContext else { return nil }
+        do {
+            return try DustDetector.analyse(session: session, pipeline: pipeline, gpu: gpu, parameters: parameters)
+        } catch {
+            status = "\(what) failed: \(error)"
+            return nil
+        }
+    }
+
     /// Looks for sensor dust in the photo on this Mac and heals each spot,
     /// replacing the spots found last time as one history step. The
-    /// analysis render and the detection run off the main thread; the
-    /// result is dropped if another image opened meanwhile.
+    /// analysis is made on the main actor; only the detection runs off
+    /// it, and its result is dropped if another image opened meanwhile.
     func findDustSpots() {
-        guard let session, let pipeline, let gpu = gpuContext, !findingDust else { return }
+        guard let session, !findingDust else { return }
         // A slider moved a moment ago is saved as its own step first, so
         // Find Spots is a step of its own that Undo takes back alone.
         flushPendingSave()
+        guard let analysis = dustAnalysisNow("Finding dust spots") else { return }
         findingDust = true
         status = "Looking for dust spots…"
-        let request = DustAnalysisRequest(session: session, pipeline: pipeline, gpu: gpu, parameters: parameters)
         let options = dustOptions
         let expected = expectedDustRadius
         // The old list is replaced, so only the user's own patches and the
         // blemishes keep a blob from being healed twice.
         let existing = parameters.touchUp.activeBlemishes + parameters.heals
         Task { @MainActor [weak self] in
-            let outcome: Result<DustDetection, any Error> = await Task.detached(priority: .userInitiated) {
-                do {
-                    let analysis = try DustDetector.analyse(session: request.session, pipeline: request.pipeline,
-                                                            gpu: request.gpu, parameters: request.parameters)
-                    let found = DustDetector.detect(analysis, options: options, expectedRadius: expected, existing: existing)
-                    // Only when nothing is left does it matter whether the
-                    // photo has no dust or its dust is already patched.
-                    let detected = found.isEmpty
-                        ? DustDetector.detect(analysis, options: options, expectedRadius: expected, existing: []).count
-                        : found.count
-                    return .success(DustDetection(analysis: analysis, patches: found, detected: detected))
-                } catch {
-                    return .failure(error)
-                }
+            let result = await Task.detached(priority: .userInitiated) {
+                let found = DustDetector.detect(analysis, options: options, expectedRadius: expected, existing: existing)
+                // Only when nothing is left does it matter whether the
+                // photo has no dust or its dust is already patched.
+                let detected = found.isEmpty
+                    ? DustDetector.detect(analysis, options: options, expectedRadius: expected, existing: []).count
+                    : found.count
+                return DustDetection(analysis: analysis, patches: found, detected: detected)
             }.value
             guard let self else { return }
             self.findingDust = false
             // The user may have moved to another image meanwhile.
             guard self.session === session else { return }
-            switch outcome {
-            case .failure(let error):
-                self.status = "Finding dust spots failed: \(error)"
-            case .success(let result):
-                self.dustAnalysis = result.analysis
-                self.dustToolActive = true
-                self.replaceDust(with: result.patches, detected: result.detected)
-            }
+            self.dustAnalysis = result.analysis
+            self.dustToolActive = true
+            self.replaceDust(with: result.patches, detected: result.detected)
         }
     }
 
@@ -125,7 +130,14 @@ extension EditorModel {
     /// at again once it ends, so a drag costs a couple of detections, not
     /// one per tick.
     func redetectDustIfArmed() {
-        guard dustToolActive, dustAnalysis != nil, hasImage, !findingDust else { return }
+        guard dustToolActive, hasImage, !findingDust else { return }
+        // A memory warning drops the analysis (docs/Retouch.md §10) and
+        // nothing rebuilds it in the middle of a shortage; the controls
+        // say so rather than moving with no effect.
+        guard dustAnalysis != nil else {
+            status = "Click Find Spots to use the new Sensitivity or Spot Size"
+            return
+        }
         redetectDust()
     }
 
@@ -185,10 +197,18 @@ extension EditorModel {
     }
 
     /// A click with the dust tool armed: a ring removes that spot (a false
-    /// one), the image adds a spot of the band's middle radius there.
+    /// one), the image adds a spot of the band's middle radius there. The
+    /// click lands on the corrected image; the spot, like every heal
+    /// patch, is on the raw grid, so it goes through the lens map. While
+    /// a detection runs its list is about to replace this one, so the
+    /// click waits rather than vanishing when the detection lands.
     func dustToolBegan(at screen: CGPoint) {
         guard hasImage else { return }
-        let p = sensorNormalized(screen)
+        guard !findingDust else {
+            status = "Wait for the dust analysis to finish"
+            return
+        }
+        let p = rawNormalized(sensorNormalized(screen))
         if let i = hitDustRing(p) {
             removeDust(at: i)
             return
@@ -227,6 +247,10 @@ extension EditorModel {
 
     func deleteSelectedDust() {
         guard let i = selectedDustIndex else { return }
+        guard !findingDust else {
+            status = "Wait for the dust analysis to finish"
+            return
+        }
         removeDust(at: i)
     }
 
@@ -302,37 +326,30 @@ extension EditorModel {
     }
 
     /// Runs `work` on the analysis off the main thread, analysing the
-    /// photo first when none is kept, then `finish` on the main actor with
-    /// the result, unless another image opened meanwhile. The analysis is
-    /// kept afterwards only while the tool is armed.
+    /// photo first (on the main actor, as Find Spots does) when none is
+    /// kept, then `finish` on the main actor with the result, unless
+    /// another image opened meanwhile. The analysis is kept afterwards
+    /// only while the tool is armed.
     private func withDustAnalysis<T: Sendable>(status: String,
                                                work: @escaping @Sendable (DustDetector.Analysis) -> T,
                                                finish: @escaping @MainActor (T) -> Void) {
-        guard let session, let pipeline, let gpu = gpuContext, !findingDust else { return }
-        let kept = dustAnalysis
-        let request = DustAnalysisRequest(session: session, pipeline: pipeline, gpu: gpu, parameters: parameters)
+        guard let session, !findingDust else { return }
+        let analysis: DustDetector.Analysis
+        if let kept = dustAnalysis {
+            analysis = kept
+        } else {
+            self.status = status
+            guard let made = dustAnalysisNow("Analysing the photo for dust") else { return }
+            analysis = made
+        }
         findingDust = true
-        if kept == nil { self.status = status }
         Task { @MainActor [weak self] in
-            let outcome: Result<(DustDetector.Analysis, T), any Error> = await Task.detached(priority: .userInitiated) {
-                do {
-                    let analysis = try kept ?? DustDetector.analyse(session: request.session, pipeline: request.pipeline,
-                                                                    gpu: request.gpu, parameters: request.parameters)
-                    return .success((analysis, work(analysis)))
-                } catch {
-                    return .failure(error)
-                }
-            }.value
+            let result = await Task.detached(priority: .userInitiated) { work(analysis) }.value
             guard let self else { return }
             self.findingDust = false
             guard self.session === session else { return }
-            switch outcome {
-            case .failure(let error):
-                self.status = "Analysing the photo for dust failed: \(error)"
-            case .success((let analysis, let result)):
-                finish(result)
-                if self.dustToolActive { self.dustAnalysis = analysis }
-            }
+            finish(result)
+            if self.dustToolActive { self.dustAnalysis = analysis }
         }
     }
 }
@@ -343,17 +360,6 @@ private struct DustDetection: Sendable {
     let analysis: DustDetector.Analysis
     let patches: [HealPatch]
     let detected: Int
-}
-
-/// The session and pipeline, carried to the detached task that renders
-/// the analysis. Neither is Sendable; the editor keeps its hands off the
-/// analysis pool while the task runs (as it does for the denoise worker),
-/// and the task hands back values only.
-private struct DustAnalysisRequest: @unchecked Sendable {
-    let session: ImageSession
-    let pipeline: RenderPipeline
-    let gpu: GPUContext
-    let parameters: EditParameters
 }
 
 /// What the editor and the Remove Dust job read off a photo for dust.

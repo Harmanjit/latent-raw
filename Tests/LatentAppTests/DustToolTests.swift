@@ -232,6 +232,55 @@ final class DustToolTests: XCTestCase {
         XCTAssertEqual(model.status, "At most 200 dust spots per image")
     }
 
+    /// With a lens correction on, the viewport shows the corrected image
+    /// while a spot heals the raw grid: a click goes through the lens map
+    /// to the pixel under the cursor, and its ring (drawn back through
+    /// the map) takes the next click.
+    func testClicksGoThroughTheLensMapToTheRawGrid() throws {
+        let model = try openModel()
+        model.parameters.manualDistortion = 0.3
+        model.dustToolActive = true
+        let size = SIMD2(Float(model.sensorSize.width), Float(model.sensorSize.height))
+        let raw = SIMD2<Float>(0.25, 0.5)
+        let out = model.outputNormalized(raw)
+        XCTAssertGreaterThan(simd_length((out - raw) * size), 1, "the distortion moves the point")
+        XCTAssertEqual(simd_length((model.rawNormalized(out) - raw) * size), 0, accuracy: 0.05)
+
+        model.imageToolBegan(at: screenPoint(out, in: model), exclude: false)
+        model.imageToolEnded()
+        let added = try XCTUnwrap(model.parameters.dust.first)
+        XCTAssertEqual(simd_length((added.target - raw) * size), 0, accuracy: 0.5, "the raw pixel under the cursor")
+
+        model.imageToolBegan(at: screenPoint(out, in: model), exclude: false)
+        XCTAssertTrue(model.parameters.dust.isEmpty, "the ring's spot is gone")
+    }
+
+    /// While a detection runs its list is about to replace the edit's: a
+    /// click or ⌫ waits, and says so, rather than making a change the
+    /// result takes away with no step to undo to.
+    func testClicksWaitWhileADetectionRuns() async throws {
+        let model = try openModel()
+        model.findDustSpots()
+        await waitForDust(model)
+        let spots = model.parameters.dust
+        XCTAssertEqual(spots.count, DustDNG.spots.count)
+
+        model.dustSensitivity = 100
+        model.redetectDustIfArmed()
+        XCTAssertTrue(model.findingDust)
+        model.imageToolBegan(at: screenPoint([0.5, 0.75], in: model), exclude: false)
+        model.imageToolEnded()
+        XCTAssertEqual(model.parameters.dust, spots, "the click waits")
+        XCTAssertEqual(model.status, "Wait for the dust analysis to finish")
+        model.selectedDustIndex = 0
+        model.deleteSelectedDust()
+        XCTAssertEqual(model.parameters.dust, spots)
+        await waitForDust(model)
+
+        model.imageToolBegan(at: screenPoint([0.5, 0.75], in: model), exclude: false)
+        XCTAssertEqual(model.parameters.dust.count, DustDNG.spots.count + 1, "clicks work again")
+    }
+
     func testDeleteClearAndTheSpokenWords() throws {
         let model = try openModel()
         model.dustToolActive = true
