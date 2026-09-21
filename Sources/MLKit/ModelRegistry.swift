@@ -232,7 +232,10 @@ public final class ModelRegistry: @unchecked Sendable {
     public func effectiveComputeUnits(for entry: ModelEntry,
                                       preference: MLComputeUnits = CoreMLStore.defaultComputeUnits) -> MLComputeUnits {
         let cap: ModelManifest.ComputeUnits = entry.status == .bundled ? .all : .cpuAndGPU
-        let candidates = [entry.manifest.computeUnits ?? .all, ModelManifest.ComputeUnits(preference), cap]
+        // The lowest rank wins; on a tie the earlier candidate does, so a
+        // manifest's own choice beats the cap, and the cap (never the
+        // Neural Engine for an imported model) beats the preference.
+        let candidates = [entry.manifest.computeUnits ?? .all, cap, ModelManifest.ComputeUnits(preference)]
         var best = candidates[0]
         for candidate in candidates.dropFirst() where candidate.rank < best.rank { best = candidate }
         return best.mlComputeUnits
