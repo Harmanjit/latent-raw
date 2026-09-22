@@ -8,6 +8,9 @@ import PixelEngine
 /// outline until the mouse is let go. Purely visual; the
 /// Metal view underneath owns the mouse and the model does the hit
 /// testing, so this can never disagree with what a drag actually grabs.
+/// A patch is healed before the lens stage and so is stored on the raw
+/// grid, while the view shows the corrected image: every point is placed
+/// through the lens map (`outputNormalized`), as DustOverlay does.
 struct HealOverlay: View {
     @ObservedObject var model: EditorModel
     @Environment(\.colorSchemeContrast) private var contrast
@@ -139,7 +142,11 @@ struct HealOverlay: View {
     }
 
     /// Normalized sensor -> view points, through the crop frame and viewport.
-    private func point(_ n: SIMD2<Float>, scale: CGFloat) -> CGPoint {
+    /// A stored patch point (raw grid) -> view points, through the lens
+    /// map, the crop frame and the viewport. Every point drawn here is a
+    /// stored one, so the map belongs in the one place they all pass.
+    private func point(_ raw: SIMD2<Float>, scale: CGFloat) -> CGPoint {
+        let n = model.outputNormalized(raw)
         let sensor = CGPoint(x: CGFloat(n.x) * model.sensorSize.width, y: CGFloat(n.y) * model.sensorSize.height)
         let canvas = model.frame.canvasPoint(fromSensorPoint: sensor)
         let px = model.viewport.screenPoint(forSensorPoint: canvas, drawableSize: model.drawableSize)

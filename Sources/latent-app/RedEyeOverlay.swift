@@ -3,7 +3,9 @@ import PixelEngine
 
 /// Shows the red-eye spots: a circle around each pupil, with a dot at the
 /// centre. Purely visual, like HealOverlay: the Metal view owns the mouse
-/// and the model hit tests (inside moves a spot, the rim resizes it).
+/// and the model hit tests (inside moves a spot, the rim resizes it). A
+/// spot is stored on the raw grid and the view shows the corrected image,
+/// so its circle is placed through the lens map (`outputNormalized`).
 struct RedEyeOverlay: View {
     @ObservedObject var model: EditorModel
     @Environment(\.colorSchemeContrast) private var contrast
@@ -49,8 +51,10 @@ struct RedEyeOverlay: View {
         }
     }
 
-    /// Normalized sensor -> view points, through the crop frame and viewport.
-    private func point(_ n: SIMD2<Float>, scale: CGFloat) -> CGPoint {
+    /// A stored spot centre (raw grid) -> view points, through the lens
+    /// map, the crop frame and the viewport.
+    private func point(_ raw: SIMD2<Float>, scale: CGFloat) -> CGPoint {
+        let n = model.outputNormalized(raw)
         let sensor = CGPoint(x: CGFloat(n.x) * model.sensorSize.width, y: CGFloat(n.y) * model.sensorSize.height)
         let canvas = model.frame.canvasPoint(fromSensorPoint: sensor)
         let px = model.viewport.screenPoint(forSensorPoint: canvas, drawableSize: model.drawableSize)

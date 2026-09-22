@@ -19,6 +19,14 @@ final class RetouchToolTests: XCTestCase {
         return model
     }
 
+    /// The screen point that shows a normalised OUTPUT-grid point: what
+    /// the viewport draws, the lens map already applied.
+    private func screenPoint(_ n: SIMD2<Float>, in model: EditorModel) -> CGPoint {
+        let sensor = CGPoint(x: CGFloat(n.x) * model.sensorSize.width, y: CGFloat(n.y) * model.sensorSize.height)
+        return model.viewport.screenPoint(forSensorPoint: model.frame.canvasPoint(fromSensorPoint: sensor),
+                                          drawableSize: model.drawableSize)
+    }
+
     func testYArmsRedEyeInDevelopAndDeleteReachesItsSpot() {
         let press = BareKeyPress(charactersIgnoringModifiers: "y", shift: false, command: false, option: false, control: false)
         XCTAssertEqual(press.flatMap(KeyCommand.command(for:)), .redEye)
@@ -149,4 +157,72 @@ final class RetouchToolTests: XCTestCase {
         XCTAssertEqual(model.parameters.heals.count, 2)
         XCTAssertFalse(model.parameters.heals[1].isStroke)
     }
+
+    /// With a lens correction on, the viewport shows the corrected image
+    /// while a patch and a red-eye spot are applied before the lens stage,
+    /// on the raw grid. A click must go through the lens map to the pixel
+    /// under the cursor, and the ring the overlay draws (the map run the
+    /// other way) must take the next click — the same contract the dust
+    /// and touch-up tools keep.
+    func testHealAndRedEyeClicksGoThroughTheLensMapToTheRawGrid() async throws {
+        let model = try await openModel()
+        model.parameters.manualDistortion = 0.3
+        let size = SIMD2(Float(model.sensorSize.width), Float(model.sensorSize.height))
+        let raw = SIMD2<Float>(0.3, 0.4)
+        let out = model.outputNormalized(raw)
+        XCTAssertGreaterThan(simd_length((out - raw) * size), 1, "the distortion moves the point")
+        XCTAssertEqual(simd_length((model.rawNormalized(out) - raw) * size), 0, accuracy: 0.05,
+                       "the two maps are each other's inverse")
+
+        // A spot patch lands on the raw pixel under the cursor.
+        model.healToolActive = true
+        model.healShape = .spot
+        model.healRadius = 0.01
+        model.imageToolBegan(at: screenPoint(out, in: model), exclude: false)
+        model.imageToolEnded()
+        let patch = try XCTUnwrap(model.parameters.heals.first)
+        XCTAssertEqual(simd_length((patch.target - raw) * size), 0, accuracy: 0.5, "the raw pixel under the cursor")
+
+        // Clicking where the overlay draws that patch grabs it, rather
+        // than adding a second one beside it.
+        model.selectedHealIndex = nil
+        model.imageToolBegan(at: screenPoint(model.outputNormalized(patch.target), in: model), exclude: false)
+        model.imageToolEnded()
+        XCTAssertEqual(model.parameters.heals.count, 1, "the ring took the click")
+        XCTAssertEqual(model.selectedHealIndex, 0)
+        XCTAssertEqual(model.parameters.heals[0].target, patch.target, "grabbing it moved nothing")
+
+        // The same for a red-eye spot.
+        model.healToolActive = false
+        model.redEyeToolActive = true
+        let rawEye = SIMD2<Float>(0.7, 0.35)
+        let outEye = model.outputNormalized(rawEye)
+        XCTAssertGreaterThan(simd_length((outEye - rawEye) * size), 1)
+        model.imageToolBegan(at: screenPoint(outEye, in: model), exclude: false)
+        model.imageToolEnded()
+        let spot = try XCTUnwrap(model.parameters.redEyes.first)
+        XCTAssertEqual(simd_length((spot.centre - rawEye) * size), 0, accuracy: 0.5)
+
+        model.selectedRedEyeIndex = nil
+        model.imageToolBegan(at: screenPoint(model.outputNormalized(spot.centre), in: model), exclude: false)
+        model.imageToolEnded()
+        XCTAssertEqual(model.parameters.redEyes.count, 1, "the circle took the click")
+        XCTAssertEqual(model.selectedRedEyeIndex, 0)
+
+        // The profile alone moves the point: this raw carries a lens
+        // profile, so the two grids differ even with the manual slider at
+        // zero, which is why the bug showed on ordinary photographs.
+        model.parameters.manualDistortion = 0
+        XCTAssertGreaterThan(simd_length((model.outputNormalized(raw) - raw) * size), 0.25,
+                             "the D750 profile's own distortion")
+
+        // With every lens correction off the two maps are the identity,
+        // so an edit without one behaves exactly as it did before.
+        model.parameters.lensDistortion = false
+        model.parameters.lensTCA = false
+        model.parameters.lensVignetting = false
+        XCTAssertEqual(model.outputNormalized(raw), raw)
+        XCTAssertEqual(model.rawNormalized(raw), raw)
+    }
+
 }

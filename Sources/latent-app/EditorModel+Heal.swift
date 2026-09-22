@@ -48,7 +48,8 @@ extension EditorModel {
     }
 
     /// Which patch and which of its circles (or strokes) is under `p`
-    /// (normalized sensor).
+    /// (normalised sensor, on the RAW grid: patches are stored there and
+    /// the click has already been through `rawNormalized`).
     private func hitHeal(_ p: SIMD2<Float>) -> (index: Int, isSource: Bool, offset: SIMD2<Float>)? {
         let size = SIMD2(Float(sensorSize.width), Float(sensorSize.height))
         let short = min(size.x, size.y)
@@ -71,9 +72,13 @@ extension EditorModel {
         return nil
     }
 
+    /// A click with the spot tool armed. The click lands on the corrected
+    /// image; a patch is healed before the lens stage (RenderPipeline
+    /// stage 5), so it is stored on the raw grid and the click goes
+    /// through the lens map first, exactly as dust and touch-up do.
     func healToolBegan(at screen: CGPoint) {
         guard hasImage else { return }
-        let p = sensorNormalized(screen)
+        let p = rawNormalized(sensorNormalized(screen))
         if let hit = hitHeal(p) {
             selectedHealIndex = hit.index
             healDrag = hit.isSource ? .movingSource(hit.index, hit.offset) : .movingTarget(hit.index, hit.offset)
@@ -104,7 +109,7 @@ extension EditorModel {
 
     func healToolMoved(to screen: CGPoint) {
         guard let healDrag else { return }
-        let p = simd_clamp(sensorNormalized(screen), SIMD2(0, 0), SIMD2(1, 1))
+        let p = simd_clamp(rawNormalized(sensorNormalized(screen)), SIMD2(0, 0), SIMD2(1, 1))
         switch healDrag {
         case .placing(let i) where i < parameters.heals.count:
             parameters.heals[i].source = p

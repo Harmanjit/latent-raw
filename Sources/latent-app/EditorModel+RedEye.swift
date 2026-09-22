@@ -105,8 +105,9 @@ extension EditorModel {
         selectedRedEyeIndex = nil
     }
 
-    /// The spot under `p` (normalized sensor), and whether `p` is on its
-    /// rim, which resizes, rather than inside, which moves.
+    /// The spot under `p` (normalised sensor, on the RAW grid, as the
+    /// stored spots are), and whether `p` is on its rim, which resizes,
+    /// rather than inside, which moves.
     private func hitRedEye(_ p: SIMD2<Float>) -> (index: Int, onRim: Bool)? {
         let size = SIMD2(Float(sensorSize.width), Float(sensorSize.height))
         let short = min(size.x, size.y)
@@ -124,9 +125,14 @@ extension EditorModel {
         return nil
     }
 
+    /// A click with the red-eye tool armed. Red eyes are darkened before
+    /// the lens stage (RenderPipeline stage 6) and stored on the raw grid,
+    /// as `autoDetectRedEyes` finds them on a render with the lens
+    /// geometry off, so a click on the corrected image goes through the
+    /// lens map first.
     func redEyeToolBegan(at screen: CGPoint) {
         guard hasImage else { return }
-        let p = simd_clamp(sensorNormalized(screen), SIMD2(0, 0), SIMD2(1, 1))
+        let p = simd_clamp(rawNormalized(sensorNormalized(screen)), SIMD2(0, 0), SIMD2(1, 1))
         if let hit = hitRedEye(p) {
             selectedRedEyeIndex = hit.index
             redEyeDrag = hit.onRim ? .resizing(hit.index) : .moving(hit.index, p - parameters.redEyes[hit.index].centre)
@@ -143,7 +149,7 @@ extension EditorModel {
 
     func redEyeToolMoved(to screen: CGPoint) {
         guard let redEyeDrag else { return }
-        let p = simd_clamp(sensorNormalized(screen), SIMD2(0, 0), SIMD2(1, 1))
+        let p = simd_clamp(rawNormalized(sensorNormalized(screen)), SIMD2(0, 0), SIMD2(1, 1))
         let size = SIMD2(Float(sensorSize.width), Float(sensorSize.height))
         switch redEyeDrag {
         case .moving(let i, let off) where i < parameters.redEyes.count:
