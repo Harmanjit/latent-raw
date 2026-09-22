@@ -18,7 +18,7 @@ BiRefNet Lite is the default for new subject masks; it takes about half a second
 The list shows every model Latent knows about: the built-in one, the bundled ones, any you have added, and a catalogue of models you can add. Each row gives the model's name, what it makes (For: Subject, Click to select or Classes), its licence, its size, and its status: **Built in**, **Bundled**, **Installed** or **Not installed**. A row whose licence allows research use only says so. **Source** opens the model's page in your browser. The default of each kind, the one a new mask is made with, is marked **Default**.
 
 - **Use** makes an installed subject or click-to-select model the default for new masks. Existing masks keep the model they were made with.
-- **Get…** appears on a model that is not installed. It opens the model's page in your browser; Latent downloads nothing. Convert the model with the script named in the catalogue (see [Adding a model](Models#adding-a-model)), then choose Add Model….
+- **Get…** appears on a model that is not installed. It opens the model's page in your browser; Latent downloads nothing. Convert the model with the script named in the catalogue (see [Converting Models](Converting-Models)), then choose Add Model….
 - **Remove** appears on a model you added. It asks first, then deletes the model's folder. Masks made with it are shown with a built-in or bundled model until it is added again, and if it was the default, new masks fall back to the bundled one; the note under the list says which.
 - **Add Model…** imports a model from a folder, an `.mlpackage` or a `.zip` on this Mac. A lone `.mlpackage` works when the manifest sits beside it, or when the package carries the manifest at its own root (`scripts/latent_manifest.py --inside` writes one that way). A sheet shows the checks as they run ("Checking BiRefNet General…"); it can't be cancelled, but a failed import leaves nothing behind. The result appears under the list: "Added BiRefNet General (446 MB)", or one plain sentence saying why the model was refused.
 - **Reveal in Finder** shows the folder added models live in.
@@ -39,7 +39,14 @@ Exports say the same: the export queue's notes count the photos "with substitute
 
 ## Adding a model
 
-The models in the catalogue are converted to Core ML by the scripts in the repository's `scripts/` folder, each pinned to one upstream revision and checksum:
+The models in the catalogue are converted to Core ML by the scripts in the repository's `scripts/` folder, each pinned to one upstream revision and checksum. [Converting Models](Converting-Models) is the step-by-step version, with SAM 2.1 Large as the worked example; the short form is two commands:
+
+```
+python scripts/pin_model.py sam2.1-large --out ~/Models/sam2.1-large        # what it would do
+python scripts/pin_model.py sam2.1-large --out ~/Models/sam2.1-large --yes  # do it
+```
+
+The models and the scripts behind them:
 
 | Model | For | Licence | Size | Script |
 |---|---|---|---|---|
@@ -49,7 +56,7 @@ The models in the catalogue are converted to Core ML by the scripts in the repos
 | MODNet | Subject; portraits only | Apache-2.0 | 13 MB | `convert_modnet.py` |
 | IS-Net | Subject; fine wiry detail | Research use only | 88 MB | `convert_isnet.py` |
 
-Each script writes a folder holding the Core ML package (three of them for a SAM model) and a `<id>.model.json` manifest that names the packages and their checksums. That folder, or a zip of it, is what Add Model… takes. `Sources/MLKit/Resources/Models/README.md` in the repository describes the manifest and the scripts' requirements.
+Each script writes a folder holding the Core ML package (three of them for a SAM model) and a `<id>.model.json` manifest that names the packages and their checksums. That folder, or a zip of it, is what Add Model… takes. `scripts/pin_model.py` runs the script for you, after recording the upstream revision and checksums it fetched; `Sources/MLKit/Resources/Models/README.md` describes the manifest and the scripts' requirements.
 
 Add Model… checks the folder before it keeps anything: exactly one manifest, a well-formed id, a kind this build knows, every package the manifest names and no other files, the packages' checksums, and, for a class model, its labels file. A package chosen on its own with the manifest inside is held to the same checks, and its manifest must name that one package. A symbolic link anywhere in a folder, a package or a zip is refused rather than followed, and a zip is unpacked only up to a bounded number of entries and total size. It then compiles each package once with Core ML and checks the inputs and outputs are the ones the manifest names. A model that fails any check is not added, and the sentence under the list says which check. Added models live in `models/<id>/` under the app's Application Support folder (inside the container for the sandboxed app); Reveal in Finder opens it. A model you added runs on the GPU even when the compute setting says Neural Engine, because an untried model can hang the Neural Engine's compiler.
 

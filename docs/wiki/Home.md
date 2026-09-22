@@ -20,6 +20,7 @@ These pages are also in the app: **Help > Latent Help** (⌘?) shows them with s
 | [Library](Library) | The sidebar, the catalog, the grid, sorting and filtering, Finder tags, Loupe, Compare and Survey, full screen, moving and renaming, undo, the slideshow |
 | [Develop](Develop) | Every editing module, typed values, masks, spot and red-eye removal, sensor dust, touch-up, presets, history |
 | [Models](Models) | The models behind the masks: what is bundled, choosing one per mask, adding a converted model from disk, what happens when one is missing |
+| [Converting Models](Converting-Models) | Fetching a model from its source, converting it to Core ML and checking it, so Add Model… will take it |
 | [Export](Export) | Formats, HDR gain maps, watermark, naming templates, metadata, batch export, printing, contact sheets, external editors |
 | [Photo Merge](Photo-Merge) | HDR brackets, single-row panoramas and experimental HDR panoramas: merging photos into one DNG, how to shoot for each, and what to do when one goes wrong |
 | [Keyboard Shortcuts](Keyboard-Shortcuts) | The full list |

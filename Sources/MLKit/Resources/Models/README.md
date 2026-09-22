@@ -104,6 +104,20 @@ link. Each script writes the folder to add (packages plus manifest) and
 verifies the package against PyTorch before the manifest is written;
 `--verify-only` re-runs that check on a folder already there.
 
+`scripts/pin_model.py` is the way in. It reads a row of `ModelCatalog.json`,
+prints what fetching that model would take and reaches nothing until `--yes`;
+then it resolves the upstream revision, downloads at it, hashes what
+arrived, records the revision and hashes in the conversion script, runs that
+script, and compares the manifest it wrote with the catalogue row. The pins
+are found in each script's syntax tree rather than by matching text, and any
+shape it does not recognise is refused; `scripts/test_pin_model.py` exercises
+that on copies of these scripts and needs no ML packages. A model whose
+weights are linked from a README rather than hosted (U²-Net, MODNet, IS-Net)
+takes `--from-file` and `--code-revision` instead of a download.
+
+    python scripts/pin_model.py --list
+    python scripts/pin_model.py sam2.1-large --out ~/Models/sam2.1-large --yes
+
 ## AI noise reduction
 
 NAFNet runs once per image on the demosaiced camera RGB at as-shot white

@@ -10,6 +10,10 @@ vendor/*-src/
 # No trailing slash: worktrees link the framework in as a symlink.
 vendor/*.xcframework
 
+# The conversion scripts import each other (scripts/pin_model.py reads the
+# pins out of them), so running one leaves bytecode behind.
+scripts/__pycache__/
+
 # Editor / tool state
 .claude/
 .idea/
