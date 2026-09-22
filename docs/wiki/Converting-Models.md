@@ -19,10 +19,27 @@ else.
 git clone https://github.com/Harmanjit/latent-raw.git latent && cd latent
 ```
 
-- Python 3.12 (`brew install python@3.12`) and the pinned tooling:
+- Python 3.12 (`brew install python@3.12`), in a virtual environment. Not
+  the `python3` macOS ships, which is 3.9 and too old for the pinned
+  versions:
 
 ```bash
-python3.12 -m venv ~/latent-ml && source ~/latent-ml/bin/activate && pip install -r scripts/requirements.txt
+python3.12 -m venv ~/latent-ml && source ~/latent-ml/bin/activate
+```
+
+- The tooling. For the SAM 2.1 models, the small half is enough — Apple
+  publishes those already converted, so nothing is traced and PyTorch is
+  never loaded:
+
+```bash
+pip install -r scripts/requirements-coreml.txt
+```
+
+  Every other model is traced from PyTorch and wants the rest as well
+  (about 2.5 GB, and several minutes):
+
+```bash
+pip install -r scripts/requirements.txt
 ```
 
 - One photo for the verify step. Any JPEG will do, passed as
@@ -31,12 +48,9 @@ python3.12 -m venv ~/latent-ml && source ~/latent-ml/bin/activate && pip install
 - Disk: roughly twice the model's size while it runs, because the download
   is cached and then copied. SAM 2.1 Large needs about a gigabyte free.
 
-`torch` and `coremltools` are large, so the first `pip install` takes a
-while. The SAM models are the exception that does not need torch at all —
-Apple publishes them already converted, so nothing is traced — but the
-requirements file pins one set of versions for every script, and installing
-all of it is the simpler path. The environment is only needed for
-converting, never for running Latent.
+`source ~/latent-ml/bin/activate` is what makes plain `python` and `pip`
+mean 3.12; every command below assumes it has been run, in that shell. The
+environment is only needed for converting, never for running Latent.
 
 ## SAM 2.1 Large, start to finish
 
@@ -250,8 +264,25 @@ instead, or write the manifest inside the package with `--inside`.
 ~/Pictures/something.jpg`, or fetch the bundled one with
 `scripts/fetch_test_assets.sh --portrait`.
 
-**`huggingface_hub` is not installed.** The virtual environment is not
-active: `source ~/latent-ml/bin/activate`.
+**`zsh: command not found: python`.** The virtual environment is not
+active in this shell. `source ~/latent-ml/bin/activate`, and the prompt
+gains a `(latent-ml)` in front. Plain `python3` would be macOS's 3.9,
+which is not what the tooling is pinned for.
+
+**`Could not find a version that satisfies the requirement torch==2.14.0
+(from versions: … 2.8.0)`**, usually with `Defaulting to user installation`
+above it. That is `/usr/bin/pip3`, macOS's Python 3.9, where torch stops at
+2.8. Make the environment first and install inside it; and for a SAM model
+you do not need torch at all — `pip install -r
+scripts/requirements-coreml.txt` is the whole dependency.
+
+**`error: externally-managed-environment`.** Installing into Homebrew's
+Python rather than a virtual environment. Same fix: make the environment
+and activate it.
+
+**`huggingface_hub` is not installed.** The environment is active but only
+some of the tooling is in it, or it is a different environment from the one
+you installed into.
 
 **The conversion failed after the pin was written.** That is expected and
 fine — the pin is what was downloaded and hashed, which has not changed.

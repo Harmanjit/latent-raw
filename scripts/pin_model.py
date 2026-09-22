@@ -3,7 +3,8 @@
 Vet an upstream model, record its pin, and run the conversion script that
 writes the folder Settings › AI › Models › Add Model… takes.
 
-    source ~/latent-ml/bin/activate
+    python3.12 -m venv ~/latent-ml && source ~/latent-ml/bin/activate
+    pip install -r scripts/requirements-coreml.txt          # all the SAM sizes need
     python scripts/pin_model.py --list                      # the catalogue, and what is pinned
     python scripts/pin_model.py sam2.1-large --out ~/Models/sam2.1-large         # the plan; no network
     python scripts/pin_model.py sam2.1-large --out ~/Models/sam2.1-large --yes   # do it
@@ -395,7 +396,9 @@ def resolve(repo, revision=None):
     try:
         from huggingface_hub import HfApi
     except ImportError:
-        sys.exit("huggingface_hub is not installed: pip install -r scripts/requirements.txt")
+        sys.exit("huggingface_hub is not installed. In a Python 3.12 virtual environment:\n"
+                 "  pip install -r scripts/requirements-coreml.txt   (enough for the SAM sizes)\n"
+                 "  pip install -r scripts/requirements.txt          (everything, including torch)")
     try:
         return HfApi().repo_info(repo_id=repo, repo_type="model", revision=revision, files_metadata=True)
     except Exception as e:                                   # network, auth, a repo that moved
@@ -428,7 +431,9 @@ def download(repo, revision, patterns):
     try:
         from huggingface_hub import snapshot_download
     except ImportError:
-        sys.exit("huggingface_hub is not installed: pip install -r scripts/requirements.txt")
+        sys.exit("huggingface_hub is not installed. In a Python 3.12 virtual environment:\n"
+                 "  pip install -r scripts/requirements-coreml.txt   (enough for the SAM sizes)\n"
+                 "  pip install -r scripts/requirements.txt          (everything, including torch)")
     print(f"Downloading {repo} @ {revision[:12]} …")
     return snapshot_download(repo, revision=revision, allow_patterns=patterns)
 

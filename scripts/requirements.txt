@@ -5,22 +5,23 @@
 #   python3.12 -m venv ~/latent-ml && source ~/latent-ml/bin/activate
 #   pip install -r scripts/requirements.txt
 #
-# Every script: torch (tracing), coremltools (conversion, package specs
-# for latent_manifest.py's feature names) and numpy (the verify steps).
+# Python 3.12, not the python3 macOS ships: that is 3.9, and torch is not
+# published for it past 2.8. `pip3` outside a virtual environment is the
+# system one, which is the usual cause of "Could not find a version that
+# satisfies the requirement torch==2.14.0".
+#
+# The Core ML half, which the SAM 2.1 sizes need on their own (Apple
+# publishes those already converted, so nothing is traced): install
+# scripts/requirements-coreml.txt alone for those and skip the rest.
+-r requirements-coreml.txt
+# Everything below traces a PyTorch model. torch is the tracer itself.
 torch==2.14.0
-coremltools==9.0
-numpy==2.5.3
 # convert_birefnet.py and convert_segformer.py load their models through
-# transformers; convert_birefnet.py, convert_segformer.py, convert_nafnet.py
-# and convert_sam2.py download from Hugging Face through huggingface_hub.
+# transformers.
 transformers==5.17.0
-huggingface_hub==1.31.0
 # convert_birefnet.py's weights are a safetensors file, which transformers
 # reads through this.
 safetensors==0.8.0
-# Every verify step feeds the package a test photo as a PIL image; the
-# packages above require Pillow only through optional extras.
-pillow==12.3.0
 # convert_birefnet.py: the model code BiRefNet ships (birefnet.py, loaded
 # through trust_remote_code) imports all of these; kornia only on its
 # training path, and torchvision for the deform_conv2d the PyTorch

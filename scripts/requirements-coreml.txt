@@ -1,0 +1,26 @@
+# The part of the tooling that needs no PyTorch, pinned to the versions the
+# bundled models were built with.
+#
+#   python3.12 -m venv ~/latent-ml && source ~/latent-ml/bin/activate
+#   pip install -r scripts/requirements-coreml.txt
+#
+# This is enough for the SAM 2.1 sizes, because Apple publishes those
+# already converted: scripts/convert_sam2.py downloads packages, checks and
+# runs them, and traces nothing. scripts/pin_model.py and
+# scripts/latent_manifest.py need no more than this either. Every other
+# conversion traces a PyTorch model, so it wants the full
+# scripts/requirements.txt, which includes this file.
+#
+# Python 3.12, not the python3 macOS ships: that is 3.9, and the versions
+# below are not published for it.
+#
+# coremltools converts, and reads the package specs latent_manifest.py takes
+# its feature names from; numpy is the verify steps' arithmetic.
+coremltools==9.0
+numpy==2.5.3
+# convert_sam2.py, convert_birefnet.py, convert_segformer.py and
+# convert_nafnet.py download from Hugging Face through this.
+huggingface_hub==1.31.0
+# Every verify step feeds the package a test photo as a PIL image; the
+# packages above require Pillow only through optional extras.
+pillow==12.3.0
