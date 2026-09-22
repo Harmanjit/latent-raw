@@ -20,7 +20,7 @@ The list shows every model Latent knows about: the built-in one, the bundled one
 - **Use** makes an installed subject or click-to-select model the default for new masks. Existing masks keep the model they were made with.
 - **Get…** appears on a model that is not installed. It opens the model's page in your browser; Latent downloads nothing. Convert the model with the script named in the catalogue (see [Adding a model](Models#adding-a-model)), then choose Add Model….
 - **Remove** appears on a model you added. It asks first, then deletes the model's folder. Masks made with it are shown with a built-in or bundled model until it is added again, and if it was the default, new masks fall back to the bundled one; the note under the list says which.
-- **Add Model…** imports a model from a folder, an `.mlpackage` or a `.zip` on this Mac. A sheet shows the checks as they run ("Checking BiRefNet General…"); it can't be cancelled, but a failed import leaves nothing behind. The result appears under the list: "Added BiRefNet General (446 MB)", or one plain sentence saying why the model was refused.
+- **Add Model…** imports a model from a folder, an `.mlpackage` or a `.zip` on this Mac. A lone `.mlpackage` works when the manifest sits beside it, or when the package carries the manifest at its own root (`scripts/latent_manifest.py --inside` writes one that way). A sheet shows the checks as they run ("Checking BiRefNet General…"); it can't be cancelled, but a failed import leaves nothing behind. The result appears under the list: "Added BiRefNet General (446 MB)", or one plain sentence saying why the model was refused.
 - **Reveal in Finder** shows the folder added models live in.
 
 ## Choosing a model for a mask
@@ -35,7 +35,7 @@ Every mask records the model it was made with (its id and version) in the edit, 
 
 A photo whose mask names a model this Mac doesn't have still renders: a subject mask is made with Apple Vision, a click-to-select mask with the bundled SAM 2.1 Small, and a class mask with the bundled SegFormer. The mask's row says so in orange, for example "BiRefNet General is not installed — shown with Apple Vision instead.", with **Get…** and **Add Model…** beside it. If no click-to-select model is installed at all, that mask is empty and the row says so.
 
-Exports say the same: the export queue's notes count the photos "with substituted masks", and Print and Contact Sheet add a sentence such as "2 photos used Apple Vision because BiRefNet General is not installed".
+Exports say the same: the export queue's notes count the photos "with substituted masks", and Print and Contact Sheet add a sentence such as "2 photos used Apple Vision because BiRefNet General is not installed". When nothing could stand in — a click-to-select model that will not load, with no other installed — the note says so rather than naming a model: "2 photos have empty click-to-select masks because SAM 2.1 Small could not be loaded".
 
 ## Adding a model
 
@@ -51,7 +51,7 @@ The models in the catalogue are converted to Core ML by the scripts in the repos
 
 Each script writes a folder holding the Core ML package (three of them for a SAM model) and a `<id>.model.json` manifest that names the packages and their checksums. That folder, or a zip of it, is what Add Model… takes. `Sources/MLKit/Resources/Models/README.md` in the repository describes the manifest and the scripts' requirements.
 
-Add Model… checks the folder before it keeps anything: exactly one manifest, a well-formed id, a kind this build knows, every package the manifest names and no other files, the packages' checksums, and, for a class model, its labels file. It then compiles each package once with Core ML and checks the inputs and outputs are the ones the manifest names. A model that fails any check is not added, and the sentence under the list says which check. Added models live in `models/<id>/` under the app's Application Support folder (inside the container for the sandboxed app); Reveal in Finder opens it. A model you added runs on the GPU even when the compute setting says Neural Engine, because an untried model can hang the Neural Engine's compiler.
+Add Model… checks the folder before it keeps anything: exactly one manifest, a well-formed id, a kind this build knows, every package the manifest names and no other files, the packages' checksums, and, for a class model, its labels file. A package chosen on its own with the manifest inside is held to the same checks, and its manifest must name that one package. A symbolic link anywhere in a folder, a package or a zip is refused rather than followed, and a zip is unpacked only up to a bounded number of entries and total size. It then compiles each package once with Core ML and checks the inputs and outputs are the ones the manifest names. A model that fails any check is not added, and the sentence under the list says which check. Added models live in `models/<id>/` under the app's Application Support folder (inside the container for the sandboxed app); Reveal in Finder opens it. A model you added runs on the GPU even when the compute setting says Neural Engine, because an untried model can hang the Neural Engine's compiler.
 
 ## Memory
 

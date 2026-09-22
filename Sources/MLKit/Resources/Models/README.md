@@ -67,6 +67,16 @@ bundled package is converted once and kept.
 python scripts/latent_manifest.py --check Sources/MLKit/Resources/Models/*.model.json
 ```
 
+A one-package model can carry its manifest *inside* the package instead of
+beside it, so the `.mlpackage` can be handed round and added on its own:
+`--inside` writes `<id>.model.json` (and the labels file, for a class
+model) at the package's root rather than next to it. The hash then leaves
+those root files out, and the manifest must name that one package and no
+other. Add Model… reads a lone `.mlpackage` this way when no manifest sits
+beside it; the app still installs it as manifest-beside-package under
+`models/<id>/`. Use it for a single package only — a prompted model's
+three packages need a folder.
+
 ## Catalogue: models the user can add
 
 `ModelCatalog.json` is an array of the same rows with `sha256: null`. The app
