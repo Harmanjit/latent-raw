@@ -653,7 +653,15 @@ def main(argv=None):
               "  Sources/MLKit/Resources/Models/ModelCatalog.json wants updating to match.")
     else:
         print("\nMatches the catalogue row.")
+    packages = len(row.get("packages", []))
     print(f"\n{out_dir} is ready for Settings › AI › Models › Add Model….")
+    if packages > 1:
+        # The open panel shows an .mlpackage as one item, so picking one is
+        # the easy mistake; a model of several packages can only go in as
+        # the folder, and the sandbox leaves the app unable to read the
+        # folder around a package it was not given.
+        print(f"  Choose the folder itself — {os.path.basename(out_dir)} — not one of the "
+              f"{packages} packages\n  inside it. This model is all {packages} together.")
     return 0
 
 

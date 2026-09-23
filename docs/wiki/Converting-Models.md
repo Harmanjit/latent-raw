@@ -91,8 +91,12 @@ catalogue row the app ships. It ends with:
 /Users/you/Models/sam2.1-large is ready for Settings › AI › Models › Add Model….
 ```
 
-Open Latent, go to **Settings › AI › Models**, press **Add Model…**, choose
-that folder, and SAM 2.1 Large appears in the list as **Installed**. Press
+Open Latent, go to **Settings › AI › Models**, press **Add Model…**, and
+choose the **folder** — `sam2.1-large` itself, not one of the three
+`.mlpackage` items inside it. The open panel shows a package as a single
+item, so picking one is easy to do and never works for a click-to-select
+model: it is all three packages together, and the manifest sits beside
+them. SAM 2.1 Large then appears in the list as **Installed**. Press
 **Use** to make it the default for Click to Select. The app copies the
 model into its own Application Support folder, so `~/Models/sam2.1-large`
 can be deleted afterwards.
@@ -256,9 +260,18 @@ again:
 find ~/Models/sam2.1-large -name .DS_Store -delete
 ```
 
-**"No .model.json manifest was found beside … or inside it."** A lone
-`.mlpackage` was chosen with nothing beside it. Either choose the folder
-instead, or write the manifest inside the package with `--inside`.
+**"No .model.json manifest was found inside … , and the folder around it
+could not be read (only what was chosen is open to Latent)."** A package
+was chosen rather than the folder holding it. Latent is sandboxed: it can
+read what you handed it and nothing else, so it cannot see the manifest
+lying next to the package. Press **Add Model…** again and choose the folder.
+
+A click-to-select model has three packages and can only go in as a folder.
+A one-package model can go in on its own, but only if its manifest is
+inside the package (`latent_manifest.py --inside`); otherwise it too needs
+its folder. Choosing one package of a model whose manifest names several
+gives a different sentence — "names more packages than … alone" — with the
+same remedy.
 
 **The verify step cannot find a photo.** Pass `--test-image
 ~/Pictures/something.jpg`, or fetch the bundled one with
