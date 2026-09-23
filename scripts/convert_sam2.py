@@ -88,8 +88,8 @@ SIZES = {
     ),
     "large": dict(
         repo="apple/coreml-sam2.1-large", prefix="SAM2_1Large",
-        revision=PLACEHOLDER,
-        package_sha256={"imageEncoder": PLACEHOLDER, "promptEncoder": PLACEHOLDER, "maskDecoder": PLACEHOLDER},
+        revision="e830c0874326be7ada2bdc9dff23b7073f884a83",
+        package_sha256={"imageEncoder": "74e9fc4ab5a99c3352a38a869840c984d8a7d92b80607db99c205c992e161968", "promptEncoder": "30bff6bec4a99b8fddab20e9f5bc70ef49818c4511b8ad387c740b66a5f44117", "maskDecoder": "8e7289117c6555061fd25b303465e6daafd101462511e9e0efae30d73dc019a1"},
         id="sam2.1-large", display_name="SAM 2.1 Large",
         purpose="Click to select: the best hair and fine edges, needs memory",
     ),
