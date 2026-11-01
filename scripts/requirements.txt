@@ -18,7 +18,7 @@
 torch==2.14.0
 # convert_birefnet.py and convert_segformer.py load their models through
 # transformers.
-transformers==5.17.0
+transformers==5.21.0
 # convert_birefnet.py's weights are a safetensors file, which transformers
 # reads through this.
 safetensors==0.8.0
