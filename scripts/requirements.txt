@@ -8,14 +8,14 @@
 # Python 3.12, not the python3 macOS ships: that is 3.9, and torch is not
 # published for it past 2.8. `pip3` outside a virtual environment is the
 # system one, which is the usual cause of "Could not find a version that
-# satisfies the requirement torch==2.14.0".
+# satisfies the requirement torch==2.15.0".
 #
 # The Core ML half, which the SAM 2.1 sizes need on their own (Apple
 # publishes those already converted, so nothing is traced): install
 # scripts/requirements-coreml.txt alone for those and skip the rest.
 -r requirements-coreml.txt
 # Everything below traces a PyTorch model. torch is the tracer itself.
-torch==2.14.0
+torch==2.15.0
 # convert_birefnet.py and convert_segformer.py load their models through
 # transformers.
 transformers==5.17.0
