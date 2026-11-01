@@ -20,7 +20,7 @@ coremltools==9.0
 numpy==2.5.3
 # convert_sam2.py, convert_birefnet.py, convert_segformer.py and
 # convert_nafnet.py download from Hugging Face through this.
-huggingface_hub==1.31.0
+huggingface_hub==2.3.0
 # Every verify step feeds the package a test photo as a PIL image; the
 # packages above require Pillow only through optional extras.
 pillow==12.3.0
