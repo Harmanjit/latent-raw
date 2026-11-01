@@ -17,7 +17,7 @@
 # coremltools converts, and reads the package specs latent_manifest.py takes
 # its feature names from; numpy is the verify steps' arithmetic.
 coremltools==9.0
-numpy==2.5.3
+numpy==2.5.4
 # convert_sam2.py, convert_birefnet.py, convert_segformer.py and
 # convert_nafnet.py download from Hugging Face through this.
 huggingface_hub==1.31.0
