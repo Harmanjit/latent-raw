@@ -101,9 +101,12 @@ final class EditModulesTests: XCTestCase {
         XCTAssertTrue(back.isBuiltIn)
     }
 
-    func testBuiltInBlackAndWhiteDesaturates() {
+    /// The treatment switch, not every HSL band at -100, so the B&W Mix
+    /// panel works on the result.
+    func testBuiltInBlackAndWhiteSwitchesTreatment() {
         let bw = try! XCTUnwrap(Preset.builtIns.first { $0.name == "Black & White" })
         let p = EditStack().merged(with: bw.stack, groups: bw.groups).parameters()
-        XCTAssertEqual(p.hsl.saturation, Array(repeating: -1, count: 8))
+        XCTAssertTrue(p.colour.blackAndWhite.enabled)
+        XCTAssertTrue(p.hsl.isNeutral)
     }
 }

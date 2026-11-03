@@ -84,6 +84,7 @@ public struct EditHistory: Equatable, Sendable, Codable {
         if a.modules.curve != b.modules.curve { names.append("Curve") }
         if a.modules.hsl != b.modules.hsl { names.append("HSL") }
         if a.modules.splittoning != b.modules.splittoning { names.append("Split Toning") }
+        names += colourChanges(from: a.modules, to: b.modules)
         if a.modules.sharpen != b.modules.sharpen { names.append("Sharpening") }
         if a.modules.denoise != b.modules.denoise { names.append("Noise Reduction") }
         if a.modules.demosaic != b.modules.demosaic { names.append("Demosaic") }

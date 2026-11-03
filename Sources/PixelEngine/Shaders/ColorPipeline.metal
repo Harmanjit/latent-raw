@@ -192,6 +192,128 @@ inline float3 applySplitToning(float3 p, float4 tint, float balance) {
     return max(p + shift * 0.25, 0.0);
 }
 
+// ---------------------------------------------------------------------
+// Colour controls beyond split toning (ColourControls.swift): Saturation,
+// Black & White with its grey mix, Point Colour, three-way Colour Grading
+// and Calibration's shadow tint. One block of uniforms, and a flag word
+// that is 0 unless one of them is in use, in which case the kernel skips
+// all of it and renders exactly as it did before they existed.
+// ---------------------------------------------------------------------
+constant uint kExtraSaturation    = 1;
+constant uint kExtraBlackAndWhite = 2;
+constant uint kExtraColourGrading = 4;
+constant uint kExtraPointColour   = 8;
+constant uint kExtraShadowTint    = 16;
+constant int  kMaxPointColours    = 8;
+
+/// Mirror of `ColourExtrasGPU` in RenderPipeline+ColourControls.swift.
+struct ColourExtras {
+    uint4  info;          // flags, point colour count, -, -
+    float4 basics;        // saturation, blending, balance, shadow tint
+    float4 bwMix[2];      // the eight band mixes, -1...1
+    float4 shadows;       // hue (degrees), saturation, luminance, -
+    float4 midtones;
+    float4 highlights;
+    float4 global;
+    float4 pointTarget[kMaxPointColours];  // hue, saturation, value, range
+    float4 pointShift[kMaxPointColours];   // hue, saturation, luminance, variance
+};
+
+/// Rec.2020 luminance of a working-space colour: the grey a black and
+/// white conversion starts from, and what Saturation pulls towards.
+inline float workingLuma(float3 p) { return dot(p, float3(0.2627, 0.6780, 0.0593)); }
+
+/// Saturation: every colour moved the same proportion towards or away from
+/// its own grey. -1 is black and white, +1 doubles the colour.
+inline float3 applySaturation(float3 p, float amount) {
+    float y = workingLuma(p);
+    return max(mix(float3(y), p, 1.0 + amount), 0.0);
+}
+
+/// Black & White: the pixel's luminance, made lighter or darker by the mix
+/// of the hue band it falls in. Weighted by how colourful the pixel is, so
+/// a grey stays exactly the grey it was whatever the mix; at ±1 a fully
+/// saturated colour's grey moves by about a stop and a half each way.
+inline float3 applyBlackAndWhite(float3 p, constant ColourExtras &e) {
+    float y = workingLuma(p);
+    float3 hsv = rgbToHSV(p);
+    float w[8];
+    hslBandWeights(hsv.x, w);
+    float adj = 0.0;
+    for (int i = 0; i < 8; i++) adj += w[i] * e.bwMix[i / 4][i % 4];
+    return float3(max(y * exp2(adj * hsv.y * 1.5), 0.0));
+}
+
+/// Point Colour: colours near a picked one (by hue, saturation and value,
+/// within a reach set by Range) shifted in hue, saturation and luminance.
+/// Variance pulls the colours in range together towards the picked one
+/// (below zero) or spreads them apart (above). Swatches apply in turn.
+inline float3 applyPointColours(float3 p, constant ColourExtras &e) {
+    int count = min(int(e.info.y), kMaxPointColours);
+    for (int i = 0; i < count; i++) {
+        float4 t = e.pointTarget[i], s = e.pointShift[i];
+        if (all(s == float4(0.0))) continue;
+        float3 hsv = rgbToHSV(p);
+        float r = clamp(t.w, 0.0, 1.0);
+        float hueReach = mix(12.0, 70.0, r);
+        float satReach = mix(0.12, 0.6, r);
+        float valReach = mix(0.15, 0.7, r);
+        float dh = fmod(hsv.x - t.x + 540.0, 360.0) - 180.0;   // signed, -180...180
+        // A picked grey has no hue to match, and a grey pixel none to
+        // compare: hue only counts where both are coloured.
+        float hueMatters = smoothstep(0.03, 0.12, t.y) * smoothstep(0.03, 0.12, hsv.y);
+        float hueW = mix(1.0, 1.0 - smoothstep(0.5 * hueReach, hueReach, abs(dh)), hueMatters);
+        float satW = 1.0 - smoothstep(0.5 * satReach, satReach, abs(hsv.y - t.y));
+        float valW = 1.0 - smoothstep(0.5 * valReach, valReach, abs(hsv.z - t.z));
+        float m = hueW * satW * valW;
+        if (m <= 0.0) continue;
+        // Variance first, about the picked colour, then the shifts.
+        float spread = max(1.0 + s.w * m, 0.0);
+        float h = t.x + dh * mix(1.0, spread, hueMatters);
+        float sat = t.y + (hsv.y - t.y) * spread;
+        h += s.x * 60.0 * m;
+        sat *= 1.0 + s.y * m;
+        float v = hsv.z * (1.0 + s.z * 0.5 * m);
+        p = hsvToRGB(float3(h, clamp(sat, 0.0, 1.0), max(v, 0.0)));
+    }
+    return p;
+}
+
+/// The chroma of a fully saturated hue, mean removed, so adding it tints
+/// without brightening (as split toning does).
+inline float3 tintChroma(float hue) {
+    float3 c = hsvToRGB(float3(hue, 1.0, 1.0));
+    return c - dot(c, float3(1.0 / 3.0));
+}
+
+/// Three-way Colour Grading. Shadows and highlights are split toning's,
+/// with the same Balance and, at Blending 0.5, exactly its weights;
+/// Blending narrows (towards 0) or widens (towards 1) where one range
+/// hands over to the next. Midtones peak at mid-grey; Global covers all.
+/// Each wheel adds its tint and moves brightness by its luminance.
+inline float3 applyColourGrading(float3 p, float4 splitTint, float balance, constant ColourExtras &e) {
+    float l = dot(p, float3(0.2126, 0.7152, 0.0722));
+    float lb = pow(clamp(l, 0.0, 1.0), exp(-balance));
+    float b = clamp(e.basics.y, 0.0, 1.0);
+    float half_ = max(b, 0.02);
+    float wH = smoothstep(0.5 - half_, 0.5 + half_, lb), wS = 1.0 - wH;
+    float wM = 1.0 - smoothstep(0.0, 0.5 + b, abs(lb - 0.5) * 2.0);
+    float3 shift = tintChroma(splitTint.x) * (splitTint.y * wS)
+                 + tintChroma(splitTint.z) * (splitTint.w * wH)
+                 + tintChroma(e.midtones.x) * (e.midtones.y * wM)
+                 + tintChroma(e.global.x) * e.global.y;
+    float lift = e.shadows.z * wS + e.midtones.z * wM + e.highlights.z * wH + e.global.z;
+    return max(p + shift * 0.25 + lift * 0.2, 0.0);
+}
+
+/// Calibration's shadow tint: green (below zero) or magenta (above) in the
+/// darker tones, fading out by mid-grey.
+inline float3 applyShadowTint(float3 p, float tint) {
+    float l = dot(p, float3(0.2126, 0.7152, 0.0722));
+    float w = 1.0 - smoothstep(0.0, 0.5, l);
+    return max(p + float3(0.5, -1.0, 0.5) * (tint * w * 0.1), 0.0);
+}
+
 inline float3 applyCurve(float3 p, constant float *lut) {
     float3 idx = clamp(p, 0.0, 1.0) * 255.0;
     float3 out;
@@ -363,6 +485,7 @@ kernel void colorAndTone(
     constant float *toneRangeLUT                 [[buffer(24)]],  // 256 shifts in t
     constant float *channelCurveLUT              [[buffer(25)]],  // 3 x 256: red, green, blue
     constant uint  &toneRangesOn                 [[buffer(26)]],
+    constant ColourExtras &extras                [[buffer(30)]],
     texture2d_array<float, access::sample> brushMasks [[texture(2)]],
     texture3d<float, access::sample> proofLUT    [[texture(3)]],
     uint2 gid                                    [[thread_position_in_grid]])
@@ -419,13 +542,29 @@ kernel void colorAndTone(
     // analysis renders: the curve clamps to [0,1] and the rest shift hues
     // and saturation, so scene-linear numbers (what Auto measures) would
     // otherwise depend on the look and lose everything above 1.0.
-    if (applyToneMap != 0 && (any(gradingFlags != uint3(0)) || vibrance != 0.0)) {
+    // The colour controls in `extras` (flags in info.x) slot in around
+    // these: with none in use every one of their branches is skipped.
+    uint extraFlags = extras.info.x;
+    bool blackAndWhite = (extraFlags & kExtraBlackAndWhite) != 0;
+    if (applyToneMap != 0 && (any(gradingFlags != uint3(0)) || vibrance != 0.0 || extraFlags != 0)) {
         float3 p = pow(max(display / headroom, 0.0), 1.0 / 2.2);
+        if ((extraFlags & kExtraShadowTint) != 0) p = applyShadowTint(p, extras.basics.w);
         if ((gradingFlags.x & 1) != 0) p = applyCurve(p, curveLUT);
         if ((gradingFlags.x & 2) != 0) p = applyChannelCurves(p, channelCurveLUT);
-        if (gradingFlags.y != 0) p = applyHSL(p, hsl);
-        if (vibrance != 0.0) p = applyVibrance(p, vibrance);
-        if (gradingFlags.z != 0) p = applySplitToning(p, splitTint, splitBalance);
+        if (blackAndWhite) {
+            // The grey mix takes the place of the colour controls.
+            p = applyBlackAndWhite(p, extras);
+        } else {
+            if (gradingFlags.y != 0) p = applyHSL(p, hsl);
+            if ((extraFlags & kExtraPointColour) != 0) p = applyPointColours(p, extras);
+            if ((extraFlags & kExtraSaturation) != 0) p = applySaturation(p, extras.basics.x);
+            if (vibrance != 0.0) p = applyVibrance(p, vibrance);
+        }
+        if ((extraFlags & kExtraColourGrading) != 0) {
+            p = applyColourGrading(p, splitTint, splitBalance, extras);
+        } else if (gradingFlags.z != 0) {
+            p = applySplitToning(p, splitTint, splitBalance);
+        }
         display = pow(max(p, 0.0), 2.2) * headroom;
     }
 

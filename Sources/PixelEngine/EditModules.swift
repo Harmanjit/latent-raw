@@ -5,7 +5,7 @@ import Foundation
 /// (DESIGN.md §5.6), so choosing "Tone" carries exposure, the curve's
 /// inputs and highlight recovery together, the way a person thinks of it.
 public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
-    case whiteBalance, tone, presence, toneCurve, colour, splitToning, detail, lens, locals, crop, heal, dust, touchUp
+    case whiteBalance, tone, presence, toneCurve, colour, splitToning, calibration, detail, lens, locals, crop, heal, dust, touchUp
 
     public var id: String { rawValue }
 
@@ -15,8 +15,9 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .tone:         return "Tone (exposure, contrast, highlights & shadows, recovery)"
         case .presence:     return "Presence (texture, clarity, dehaze)"
         case .toneCurve:    return "Tone Curve (master and RGB)"
-        case .colour:       return "HSL / Colour / Vibrance"
-        case .splitToning:  return "Split Toning"
+        case .colour:       return "Colour (HSL, saturation, vibrance, black & white, point colour)"
+        case .splitToning:  return "Colour Grading & Split Toning"
+        case .calibration:  return "Calibration"
         case .detail:       return "Detail (sharpening, noise, AI denoise)"
         case .lens:         return "Lens Corrections & Defringe"
         case .locals:       return "Local Adjustments"
@@ -30,7 +31,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     /// What copy/paste and presets take by default: the look, not the
     /// masks (drawn for another frame) and not the lens correction
     /// switches (a property of the lens, already right per image).
-    public static let lookGroups: Set<EditGroup> = [.whiteBalance, .tone, .presence, .toneCurve, .colour, .splitToning, .detail]
+    public static let lookGroups: Set<EditGroup> = [.whiteBalance, .tone, .presence, .toneCurve, .colour, .splitToning, .calibration, .detail]
 }
 
 extension EditStack {
@@ -56,8 +57,14 @@ extension EditStack {
             case .colour:
                 result.modules.hsl = other.modules.hsl
                 result.modules.vibrance = other.modules.vibrance
+                result.modules.saturation = other.modules.saturation
+                result.modules.blackwhite = other.modules.blackwhite
+                result.modules.pointcolor = other.modules.pointcolor
             case .splitToning:
                 result.modules.splittoning = other.modules.splittoning
+                result.modules.colorgrading = other.modules.colorgrading
+            case .calibration:
+                result.modules.calibration = other.modules.calibration
             case .detail:
                 result.modules.denoise = other.modules.denoise
                 result.modules.aidenoise = other.modules.aidenoise
@@ -117,8 +124,11 @@ extension EditStack {
         if m.exposure != nil || m.tone != nil || m.highlights != nil || m.toneranges != nil { g.insert(.tone) }
         if m.presence != nil { g.insert(.presence) }
         if m.curve != nil { g.insert(.toneCurve) }
-        if m.hsl != nil || m.vibrance != nil { g.insert(.colour) }
-        if m.splittoning != nil { g.insert(.splitToning) }
+        if m.hsl != nil || m.vibrance != nil || m.saturation != nil || m.blackwhite != nil || m.pointcolor != nil {
+            g.insert(.colour)
+        }
+        if m.splittoning != nil || m.colorgrading != nil { g.insert(.splitToning) }
+        if m.calibration != nil { g.insert(.calibration) }
         if m.denoise != nil || m.sharpen != nil || m.demosaic != nil || m.aidenoise != nil { g.insert(.detail) }
         if m.lens != nil || m.defringe != nil { g.insert(.lens) }
         if m.locals != nil { g.insert(.locals) }
@@ -168,8 +178,10 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
             return Preset(name: name, groups: groups, stack: EditStack(parameters: p), isBuiltIn: true)
         }
         return [
+            // The treatment switch rather than every HSL band at -100, so
+            // the B&W Mix panel works on it.
             make("Black & White", [.colour, .splitToning]) { p in
-                p.hsl.saturation = Array(repeating: -1, count: 8)
+                p.colour.blackAndWhite = BlackAndWhite(enabled: true)
             },
             make("Punchy", [.tone, .toneCurve, .colour]) { p in
                 p.contrast = 1.8
