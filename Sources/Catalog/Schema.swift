@@ -129,6 +129,9 @@ enum Schema {
             }
         }
 
+        // Collections and smart collections (Collections.swift).
+        CollectionsSchema.register(in: &migrator)
+
         return migrator
     }
 }

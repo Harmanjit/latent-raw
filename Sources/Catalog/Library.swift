@@ -60,7 +60,15 @@ public final class Library: ObservableObject {
     /// image id → keywords, for filtering; refreshed with the image list
     /// and whenever keywords are edited.
     var keywordIndex: [Int64: Set<String>] = [:] {
-        didSet { if filter.keyword != nil, !isPatchingRecords { recomputeVisible() } }
+        didSet {
+            if filter.keyword != nil || collections.activeScope?.readsKeywords == true, !isPatchingRecords {
+                recomputeVisible()
+            }
+            collections.contentDidChange()
+            // Not published itself, but the Keyword List and the keyword
+            // chips are drawn from it.
+            objectWillChange.send()
+        }
     }
     @Published public private(set) var isBusy = false
     /// Opens and refreshes still running. They can overlap (a second folder
@@ -80,7 +88,9 @@ public final class Library: ObservableObject {
     @Published public var lastError: String?
     /// Images that have a stored edit, so the grid can badge them.
     @Published public internal(set) var editedImageIDs: Set<Int64> = [] {
-        didSet { if filter.editedOnly, !isPatchingRecords { recomputeVisible() } }
+        didSet {
+            if filter.editedOnly || collections.activeScope?.readsEdits == true, !isPatchingRecords { recomputeVisible() }
+        }
     }
 
     /// The primary selection: what the editor opens and the panel edits.
@@ -191,14 +201,19 @@ public final class Library: ObservableObject {
 
     // MARK: - Filtering and sorting
 
-    private func recomputeVisible() {
+    func recomputeVisible() {
         let edited = editedImageIDs
         let filter = filter
         let index = keywordIndex
-        let passing = filter.isActive
+        // The collection shown in the grid, if any (LibraryCollections).
+        let scope = collections.activeScope
+        let now = Date()
+        let passing = filter.isActive || scope != nil
             ? images.filter { record in
-                filter.matches(record, isEdited: record.id.map(edited.contains) ?? false,
-                               keywords: record.id.flatMap { index[$0] } ?? [])
+                let isEdited = record.id.map(edited.contains) ?? false
+                let keywords = record.id.flatMap { index[$0] } ?? []
+                return (scope?.includes(record, isEdited: isEdited, keywords: keywords, now: now) ?? true)
+                    && (!filter.isActive || filter.matches(record, isEdited: isEdited, keywords: keywords))
             }
             : images
         let next = passing.sorted(by: sort, customPositions: customPositions)
@@ -233,7 +248,8 @@ public final class Library: ObservableObject {
         for index in updated.indices {
             guard let id = updated[index].id, let record = fresh[id], record != updated[index] else { continue }
             if filter.dependsOnChange(from: updated[index], to: record)
-                || sort.dependsOnChange(from: updated[index], to: record) {
+                || sort.dependsOnChange(from: updated[index], to: record)
+                || collections.activeScope?.dependsOnChange(from: updated[index], to: record) == true {
                 reorder = true
             }
             updated[index] = record
@@ -313,6 +329,8 @@ public final class Library: ObservableObject {
 
     /// Move to Folder, Copy to Folder and Rename (LibraryFileOperations).
     public private(set) lazy var fileOperations = LibraryFileOperations(library: self)
+    /// The open catalog's collections and the one the grid shows.
+    public private(set) lazy var collections = LibraryCollections(library: self)
     /// Called when an undo or redo has put back rotations or stored edits
     /// of images in the open catalog, so an editor holding one catches up.
     public var didRestoreImages: (@MainActor (Set<Int64>, RestoredAspect) -> Void)?
@@ -390,6 +408,7 @@ public final class Library: ObservableObject {
         var editedImageIDs: Set<Int64>
         var keywordIndex: [Int64: Set<String>]
         var customOrder: [String]
+        var collections: CollectionsState
     }
 
     /// Reconciles `catalog` and reads its list, touching nothing shown:
@@ -402,7 +421,8 @@ public final class Library: ObservableObject {
                               images: try await catalog.allImages(),
                               editedImageIDs: try await catalog.editedImageIDs(),
                               keywordIndex: try await catalog.allImageKeywords(),
-                              customOrder: await catalog.customOrder())
+                              customOrder: await catalog.customOrder(),
+                              collections: try await catalog.loadCollections())
         try await willPublishList?(catalog)
         return list
     }
@@ -437,6 +457,7 @@ public final class Library: ObservableObject {
         keywordIndex = list.keywordIndex
         customOrder = list.customOrder
         isPatchingRecords = false
+        collections.catalogDidLoad(list.collections, isNewCatalog: isNewCatalog)
         recomputeVisible()
         if let selected = selectedImageID, !images.contains(where: { $0.id == selected }) {
             selectedImageID = nil
