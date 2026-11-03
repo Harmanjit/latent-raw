@@ -34,13 +34,50 @@ The right panel holds the modules in pipeline order. All controls are live at fu
 
 **Split Toning.** Shadow and highlight tints with a balance.
 
-**Lens Corrections.** Distortion, chromatic aberration and vignetting from a bundled Lensfun profile matched to the camera and lens, each switchable, plus manual distortion and vignetting and a purple/green defringe.
+**Lens Corrections.** Distortion, chromatic aberration and vignetting from a bundled Lensfun profile matched to the camera and lens, each switchable, plus manual distortion and vignetting and a purple/green defringe. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
 
-**Detail.** Demosaic algorithm (RCD or bilinear), sharpening (amount, radius, threshold on perceptual luminance), and bilateral noise reduction in camera space.
+**Detail.** Demosaic algorithm (RCD or bilinear), sharpening with Amount, Radius, Threshold, Detail and Masking, and noise reduction with Luminance, Detail and Contrast, and Colour, Detail and Smoothness. See [Sharpening and noise reduction](Develop#sharpening-and-noise-reduction).
+
+**Effects.** Post-crop vignetting and film grain, applied last, after sharpening. See [Effects](Develop#effects).
 
 **AI Noise Reduction.** NAFNet, trained on real sensor noise, run once per image on the GPU (about 11 s for 24 MP) and then blended at any strength instantly. It runs in camera space before colour, so white balance and every later module see clean data. Exports run it again; thumbnails skip it. If macOS runs critically short of memory the result is let go, and it runs again once memory recovers.
 
 **Soft Proof.** Preview the image as sRGB or Display P3, or through an ICC profile, with a gamut warning that paints out-of-range colours grey.
+
+## Sharpening and noise reduction
+
+The Detail panel's sliders, top to bottom. Judge them at 100% zoom (⌘1): the fitted view is scaled to predict the result but hides fine texture.
+
+**Sharpening.** **Amount** is how strongly edges are sharpened, 0 is off. **Radius** is the size of the detail sharpened, in sensor pixels. **Threshold** leaves detail fainter than it alone, so noise and grain aren't sharpened. **Detail** (0–100, 100 to start) controls halos: sharpening makes a bright rim on the light side of an edge and a dark one on the other. At 100 you get plain unsharp masking, as Latent always had; lower values pull the sharpened pixels back towards their neighbours' range, so edges still get crisper but without the rims. Try 25–50 for portraits and anything with bright edges against sky. **Masking** (0–100, 0 to start) limits sharpening to edges: at 0 everything is sharpened; as it rises, smooth areas such as sky, skin and out-of-focus backgrounds are left alone and only real edges sharpen. **Hold Option (⌥) while dragging the Masking slider** to see the mask itself in place of the photo: white is sharpened, black is left alone. Let go and the photo comes back. The preview is on screen only, never part of the edit.
+
+**Noise reduction.** **Luminance** smooths brightness noise, the grainy speckle; **Colour** removes coloured speckles. Each has finer controls, greyed out while its slider is at 0:
+
+- **Detail** under Luminance (0–100, 50 to start) sets what counts as noise. Higher keeps more fine texture (hair, fabric, foliage) at the cost of leaving some noise; lower smooths harder.
+- **Contrast** under Luminance (0–100, 0 to start) puts back local contrast and texture the smoothing flattened, without bringing the speckle back with it. Push it on faces and fabrics that look waxy after noise reduction; too much can leave a blotchy look in very noisy shots.
+- **Detail** under Colour (0–100, 50 to start) keeps thin coloured edges, such as a red jumper against a green hedge, from bleeding; lower values clean colour noise harder.
+- **Smoothness** under Colour (0–100, 0 to start) evens out larger blotches of colour (mottling) in plain areas such as sky and shadows, which the Colour slider is too fine to reach.
+
+At their starting values these sliders give exactly the noise reduction Latent always had, so an older edit looks the same.
+
+## Lens corrections in detail
+
+**Profile.** Under the description of the matched profile, a menu shows **Automatic profile**, or the lens picked by hand. Open it to choose any lens in the bundled Lensfun database: lenses that fit the camera's mount come first, under **Fits this camera**, then the rest, each grouped by maker. Use it when the automatic match is wrong, or when it found nothing because the camera didn't record enough about the lens (manual lenses and adapted lenses often don't). The choice belongs to this photo and is part of its edit, so ⌘Z takes it back; **Automatic** goes back to the match.
+
+**Use for All Photos From This Lens** remembers the choice in the catalog for this camera and this lens, so every other photo taken with them uses it too, in the editor, in thumbnails and in exports. The photo's own choice then goes back to automatic, which now means the remembered profile. While a lens has a remembered profile and the photo is on automatic, the button reads **Forget Profile for This Lens** and goes back to the database's own match. Remembering is a catalog change: undo it with Edit › Undo in the Library. The choices are kept per catalog (each folder has its own), and `latent-cli` doesn't read them.
+
+**Remove chromatic aberration (automatic).** Lateral chromatic aberration shows as red-cyan or blue-yellow fringes along edges towards the corners, because the lens enlarges each colour slightly differently. This switch measures it on the photo itself, without a profile: it looks at small patches across the frame, finds how far the red and blue edges sit from the green ones, and fits one correction for the whole lens. It takes a moment, then the panel says what it found ("Red +0.031%, blue −0.024% against green"). The measurement is stored in the edit, so the correction never changes afterwards, and exports match. While it is on it replaces the profile's chromatic aberration correction. A photo with few sharp edges (fog, a soft portrait background) may not have enough to measure: the panel says so and nothing changes.
+
+**Manual.** **Distortion** corrects barrel or pincushion distortion by hand. **Vignetting** brightens (positive) or darkens (negative) the corners of the whole frame, the way the lens darkened them. **Midpoint** (0–100, 50 to start) sets how far in from the corners the manual vignetting reaches: lower spreads it towards the centre, higher keeps it in the corners. Manual vignetting is measured on the whole frame, before the crop; for a vignette that follows the crop, use [Effects](Develop#effects).
+
+**Defringe.** **Purple** and **Green** remove purple-magenta and green-cyan fringes that sit along high-contrast edges, such as branches against a bright sky. Each has a hue range, shown as a strip of the colours it covers with two sliders for its ends, so you can widen it to catch bluer or pinker fringes, or narrow it to spare a purple flower. **Pick Fringe Colour** arms an eyedropper: click a fringe on the image (zoom in first) and the matching range, purple or green, moves to centre on its colour, and its amount comes on if it was off. Escape cancels the eyedropper. Defringe only touches colour on strong edges, so flat purple or green areas are left alone.
+
+## Effects
+
+**Post-Crop Vignetting** darkens or lightens the edges of the picture as cropped, following the crop's centre, size and angle, so it always frames what you export. **Amount** darkens (negative) or lightens (positive); 0 is off. **Midpoint** sets how far in it reaches; **Roundness** goes from following the crop's rectangle (−100) through an oval fitting the crop (0) to a circle (+100); **Feather** softens its edge, 0 being a hard edge. **Highlights**, for darkening, lets bright areas such as lamps and sky keep their brightness. **Style**: *Highlight Priority* works like exposure, keeps highlights bright when darkening and rolls them gently into white when lightening, at the cost of slight colour shifts in bright areas; *Colour Priority* changes only brightness, keeping every pixel's hue and saturation, and never lightens a colour past white.
+
+**Grain** adds film-like grain. **Amount** is its strength, 0 is off; **Size** the size of each grain relative to the picture, so a setting looks the same on a 12 and a 60 megapixel file; **Roughness** goes from smooth, even grain to clumpier, irregular grain. Grain is strongest in the midtones and gentler in deep shadows and bright highlights, as on film. The pattern is fixed to the photo: the same grains in the same places on screen, at every zoom, and in the export, and a different pattern for every photo. Zoomed out, the preview shows the grain softened, as a smaller print would; look at 100% to judge it.
+
+Effects travel with copy, paste and presets as their own group, **Effects (post-crop vignetting, grain)**, on by default like the other look groups.
 
 ## Presets and clipboard
 

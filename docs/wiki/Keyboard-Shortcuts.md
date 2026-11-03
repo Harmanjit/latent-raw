@@ -57,6 +57,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | ⇧⌘C, ⇧⌘V | Copy / paste settings (to the whole selection in the Library) |
 | Double-click a slider | Reset it |
 | Click a slider's value | Type a value: Return or Tab applies it, Esc cancels, ↑ and ↓ step it (with ⇧, ten steps) |
+| ⌥-drag the sharpening Masking slider | Show the sharpening mask while dragging: white is sharpened |
 
 ## Export
 
