@@ -25,6 +25,9 @@ extension Library {
         case rotation([Int64], quarterTurns: Int)
         case keywords([Int64: [String]])
         case edits([Int64: StoredEdit?])
+        /// Labels and descriptive fields, "" for none (Library+Descriptive).
+        case label([Int64: String])
+        case descriptive(DescriptiveField, [Int64: String])
 
         var ids: [Int64] {
             switch self {
@@ -32,6 +35,7 @@ extension Library {
             case .rotation(let ids, _): ids
             case .keywords(let values): Array(values.keys)
             case .edits(let values): Array(values.keys)
+            case .label(let values), .descriptive(_, let values): Array(values.keys)
             }
         }
     }
@@ -163,6 +167,14 @@ extension Library {
                 try await change(records) { catalog, id, _ in
                     if let edit = values[id] { try await catalog.setStoredEdit(edit, forImageID: id) }
                 }
+            case .label(let values):
+                try await change(records) { catalog, id, _ in
+                    if let value = values[id] { try await catalog.exchangeLabel(value, forImageID: id) }
+                }
+            case .descriptive(let field, let values):
+                try await change(records) { catalog, id, _ in
+                    if let value = values[id] { try await catalog.exchangeDescriptive(field, value, forImageID: id) }
+                }
             }
         } catch {
             failure = error
@@ -172,7 +184,7 @@ extension Library {
         if catalog === self.catalog {
             let ids = Set(records.compactMap(\.id))
             switch undoable {
-            case .rating, .flag:
+            case .rating, .flag, .label, .descriptive:
                 break
             case .rotation:
                 didRestoreImages?(ids, .rotation)
