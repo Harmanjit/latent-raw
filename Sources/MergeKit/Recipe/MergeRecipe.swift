@@ -16,6 +16,11 @@ public struct MergeRecipe: Codable, Sendable, Equatable {
         case hdr
         case panorama
         case hdrPanorama
+        /// Not a merge: one photo exported to DNG with its scene-referred
+        /// edit baked in (Render to DNG). Written for the same reasons a
+        /// merge's recipe is: where it came from, and that its lens
+        /// corrections are already in the pixels.
+        case rendered
     }
 
     /// One photo the merge used.
