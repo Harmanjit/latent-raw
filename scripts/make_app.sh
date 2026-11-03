@@ -14,6 +14,9 @@
 #     Contents/Resources/Help/*.md      <- docs/wiki, shown by Help > Latent Help
 #     Contents/Resources/AppIcon.icns   <- Assets/AppIcon.icns, made from Assets/Latent.pdf
 #                                        by scripts/make_icon.swift
+#     Contents/Resources/LICENSE        <- Latent's own licence, GPLv3
+#     Contents/Resources/Licences/*.txt <- licences/, third-party licence texts
+#                                        (listed in docs/wiki/Licences.md)
 #     Contents/XPCServices/LatentRawDecoder.xpc  <- the sandboxed raw decoder
 #                                        (scripts/LatentRawDecoder.entitlements)
 #
@@ -115,6 +118,13 @@ rm -f "$APP/Contents/Resources/Help/README.md"
 # changing Assets/Latent.pdf, run `swift scripts/make_icon.swift`.
 cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+# Licence texts. LibRaw (LGPL), GRDB and the bundled models (MIT, Apache)
+# require their notices to travel with every copy, and so does Latent's
+# own GPLv3; Help > Latent Help > Licences lists what each one covers.
+cp LICENSE "$APP/Contents/Resources/LICENSE"
+mkdir -p "$APP/Contents/Resources/Licences"
+cp licences/*.txt "$APP/Contents/Resources/Licences/"
+
 # The raw decoder XPC service: its own bundle, its own (tighter) sandbox.
 XPC="$APP/Contents/XPCServices/LatentRawDecoder.xpc"
 mkdir -p "$XPC/Contents/MacOS"
@@ -139,6 +149,11 @@ cat > "$XPC/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# No CFBundleDocumentTypes: declaring raw images and folders would put
+# Latent in Finder's Open With menu and let them be dropped on its Dock
+# icon, but the app handles no open-documents event, so the chosen item
+# was silently ignored. Add the declaration back together with that
+# handling (application(_:open:) in AppDelegate), not before.
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -154,16 +169,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key>        <string>APPL</string>
   <key>LSMinimumSystemVersion</key>     <string>15.0</string>
   <key>NSHighResolutionCapable</key>    <true/>
-  <key>NSHumanReadableCopyright</key>   <string>GPLv3</string>
-  <key>CFBundleDocumentTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleTypeName</key> <string>Raw image</string>
-      <key>CFBundleTypeRole</key> <string>Viewer</string>
-      <key>LSItemContentTypes</key>
-      <array><string>public.camera-raw-image</string><string>public.folder</string></array>
-    </dict>
-  </array>
+  <key>NSHumanReadableCopyright</key>   <string>GPLv3. Third-party licences: Help › Latent Help › Licences</string>
 </dict>
 </plist>
 PLIST

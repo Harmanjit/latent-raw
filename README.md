@@ -12,7 +12,11 @@ Repository: `Harmanjit/latent-raw`.
   Metal toolchain is optional: without it (a separate download on Xcode 26,
   `xcodebuild -downloadComponent MetalToolchain`) the shaders compile at first
   launch.
-- **License:** GPLv3. See `LICENSE`.
+- **License:** GPLv3. See `LICENSE`. Third-party code, data and models
+  (LibRaw, GRDB, the Lensfun database and the bundled Core ML models) keep
+  their own licences, listed in [`docs/wiki/Licences.md`](docs/wiki/Licences.md)
+  with the full texts in `licences/`; `make_app.sh` copies both `LICENSE`
+  and `licences/` into the app.
 - **Status:** version 0.9, a beta review build. Editing (with red-eye and brush healing), sensor dust removal (found per photo or from a saved dust map, on one image or a whole selection), portrait touch-up (skin, teeth, eyes and blemishes, per face), a catalog with a folder sidebar, Custom sort, Finder tags, moving and renaming images with their edits, undo in the Library, AI masks (subject, click to select and by class, with a choice of subject-selection models and more addable from disk), Loupe, Compare and Survey, full-screen and second-display viewing, export (with optional HDR gain maps and a watermark), soft-proofing, printing, contact sheets, a slideshow, hand-off to an external editor and Photo Merge — HDR of handheld or tripod brackets (Photo › Photo Merge › HDR…, ⌃H), single-row Panoramas (Panorama…, ⌃M) and, marked experimental, HDR Panorama (⌃⇧M), all writing a DNG — work; DNG export does not exist. HDR Panorama has never been checked on a real bracketed sweep, because nobody has shot one for Latent yet, and the dust detector has been tested on synthetic dust and only a few real photos. Expect rough edges.
 - **Name:** the project was called *rawhead* until September 2026. Folders
   catalogued by those builds have a `_rawhead/` container; opening them in
@@ -175,8 +179,11 @@ open build/Latent.app
 `make_app.sh` precompiles the shaders into `default.metallib` when the Metal
 toolchain is installed (otherwise the app compiles them at first launch),
 strips local symbols from the binaries before signing, copies
-`docs/wiki` into `Contents/Resources/Help` for the Help window, and adds the
-app icon, `Assets/AppIcon.icns`. That file is committed; after changing the
+`docs/wiki` into `Contents/Resources/Help` for the Help window, copies
+`LICENSE` and the third-party licence texts in `licences/` into
+`Contents/Resources`, and adds the app icon, `Assets/AppIcon.icns`.
+`scripts/check_app_bundle.sh` checks the bundle it leaves; CI runs both on
+every push, so the release configuration is built there too. That file is committed; after changing the
 logo, `Assets/Latent.pdf`, remake it (and the README's `AppIcon.png`) with
 `swift scripts/make_icon.swift`, which places the artwork on Apple's icon grid
 with the grid's shadow.
