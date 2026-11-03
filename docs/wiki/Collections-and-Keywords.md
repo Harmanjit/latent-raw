@@ -79,7 +79,7 @@ Places > France > Paris
 
 A photo tagged Paris counts as tagged France and Places too: clicking Places in the Keyword List, or filtering on it, shows every photo of every place inside it.
 
-In the sidecar, the keyword is written the way Lightroom Classic writes it: the whole path in `lr:hierarchicalSubject` ("Places|France|Paris"), and each level on its own in `dc:subject` (Places, France, Paris), which is what applications that know nothing of hierarchies read. Keywords in sidecars written by Lightroom come into Latent with their hierarchy, and a keyword added to `dc:subject` alone by another application is kept as a keyword of its own. Exported files get each level as an IPTC keyword.
+In the sidecar, the keyword is written the way Lightroom Classic writes it: the whole path in `lr:hierarchicalSubject` ("Places|France|Paris"), and each level on its own in `dc:subject` (Places, France, Paris), which is what applications that know nothing of hierarchies read. A Latent sidecar (in `_latent/xmp`) that carries `lr:hierarchicalSubject` is read back with its hierarchy; Lightroom's own sidecars beside the raws are not read, and a keyword added to `dc:subject` alone by another application is kept as a keyword of its own. Exported files get each level as an IPTC keyword.
 
 ### The Keyword List
 
