@@ -246,6 +246,9 @@ public enum ExportWorker {
             fileName: request.sourceURL.deletingPathExtension().lastPathComponent,
             captureDate: metadata.captureDate ?? Date())
         if settings.watermark?.isEmpty == true { settings.watermark = nil }
+        // A JPEG or TIFF holds nothing above SDR white for a gain map to
+        // describe; one rendered with headroom would invent highlights.
+        if session.isRenderedImage { settings.hdrGainMap = false }
 
         // Rotation, the final resize and the quantisation to 8 or 16 bits
         // all happen on the GPU inside the exporter; the CPU only reads the

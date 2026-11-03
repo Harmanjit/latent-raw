@@ -99,6 +99,9 @@ public final class PanoramaFramePrep {
             case .bayer, .linearRGB: break
             default: throw PanoramaError.unsupportedSource(fileName: url.lastPathComponent)
             }
+            // A JPEG or TIFF is a linear source too, but its values are
+            // display tones unrolled (`RenderedImageFormat`), not light.
+            if summary.renderedImage != nil { throw PanoramaError.unsupportedSource(fileName: url.lastPathComponent) }
             let orientation = MergePanoPrepKernels.Orientation(summary: summary)
             let crop = summary.lens.cropFactor > 0 ? summary.lens.cropFactor
                 : MergePanoPrepKernels.Lens.cameraCropFactor(make: summary.cameraMake, model: summary.cameraModel) ?? 0

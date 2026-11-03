@@ -61,6 +61,11 @@ public final class ImageSession {
     /// the highlights and leave a visible boundary where the fade ends.
     public var supportsAIDenoise: Bool { sourceKind == .bayer }
 
+    /// True for a JPEG, HEIC, TIFF, PNG, WebP or AVIF: a picture already
+    /// developed elsewhere, opened through ImageIO (`RenderedImageFormat`).
+    /// The editor hides what only means something for a raw.
+    public var isRenderedImage: Bool { file.summary.renderedImage != nil }
+
     /// The camera's as-shot multipliers, normalized against green.
     public let asShotMultipliers: SIMD4<Float>
 
@@ -345,8 +350,17 @@ public final class ImageSession {
         let isLinear = file.summary.sourceKind == .linearRGB
         let gain = isLinear ? powf(2, file.summary.baselineExposure) : 1
         self.sourceGain = gain
-        self.highlightClipScale = isLinear ? (file.summary.mergeInfo?.clipLevel ?? 1) * gain : 1
-        self.lensCorrectionAlreadyApplied = isLinear && file.summary.mergeInfo?.lensApplied == true
+        // A JPEG or TIFF has no clipped channels to rebuild: its white was
+        // unrolled far above 1.0 on purpose (`RenderedImageFormat`), and
+        // neutralising it would bleach the file's own bright colours. Its
+        // clip level is put out of reach instead.
+        let isRendered = file.summary.renderedImage != nil
+        self.highlightClipScale = isRendered ? LinearPlane.maximumValue
+            : isLinear ? (file.summary.mergeInfo?.clipLevel ?? 1) * gain : 1
+        // Lens profiles describe a raw's optics. A rendered picture was
+        // usually corrected by the camera or editor that made it, and its
+        // pixels may be cropped or resized, so no profile is looked up.
+        self.lensCorrectionAlreadyApplied = isRendered || (isLinear && file.summary.mergeInfo?.lensApplied == true)
 
         let asShot = ColorKit.normalizedWhiteBalance(file.summary.cameraMultipliers)
         self.asShotMultipliers = asShot

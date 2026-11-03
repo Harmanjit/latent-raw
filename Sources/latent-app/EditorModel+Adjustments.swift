@@ -9,6 +9,9 @@ extension EditorModel {
     /// What the lens panel says about the open image.
     var lensProfileDescription: String {
         guard hasImage else { return "" }
+        if session?.isRenderedImage == true {
+            return "Lens profiles are for raw files; a JPEG or TIFF is usually corrected by the camera or app that made it. Manual sliders still work."
+        }
         if session?.lensCorrectionAlreadyApplied == true {
             return "Lens corrections are already applied in this merged image, so no profile is used. Manual sliders still work."
         }

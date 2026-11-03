@@ -106,6 +106,8 @@ extension EditorModel {
 
             if newSession.profile == nil {
                 status = "No colour profile for \(file.summary.cameraModel) — cannot render"
+            } else if let rendered = file.summary.renderedImage {
+                status = Self.renderedImageStatus(rendered, summary: file.summary)
             } else {
                 status = "\(file.summary.cameraMake) \(file.summary.cameraModel) · " +
                          "\(file.summary.rawWidth)×\(file.summary.rawHeight)"
