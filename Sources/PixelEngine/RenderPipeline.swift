@@ -145,6 +145,22 @@ public struct EditParameters: Sendable, Equatable {
     /// Neural noise reduction strength, 0 (off) … 1. The model's output
     /// is computed once per image (MLKit) and blended in at this weight.
     public var aiDenoise: Float
+    /// The finer detail, lens and effects controls (DetailEffects.swift).
+    /// Each defaults to off, or to exactly the behaviour from before it
+    /// existed, so an older edit renders unchanged.
+    public var sharpenDetail: Float = SharpenRefinement.neutralDetail
+    public var sharpenMasking: Float = SharpenRefinement.neutralMasking
+    public var noiseDetail: NoiseReductionDetail = .neutral
+    public var defringeHues: DefringeHueRanges = .standard
+    public var manualVignettingMidpoint: Float = ManualVignettingShape.neutralMidpoint
+    /// Measured lateral chromatic aberration, nil when Remove Chromatic
+    /// Aberration is off. Replaces the profile's TCA while set.
+    public var autoCA: AutoChromaticAberration? = nil
+    /// A Lensfun lens model picked by hand for this photo, nil for the
+    /// automatic (or remembered per-lens) profile.
+    public var lensProfile: String? = nil
+    public var postCropVignette: PostCropVignette = .off
+    public var grain: Grain = .off
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -261,6 +277,11 @@ public struct EditParameters: Sendable, Equatable {
             && a.vibrance == b.vibrance
             && a.defringePurple == b.defringePurple && a.defringeGreen == b.defringeGreen
             && a.perspective == b.perspective && a.aiDenoise == b.aiDenoise
+            && a.sharpenDetail == b.sharpenDetail && a.sharpenMasking == b.sharpenMasking
+            && a.noiseDetail == b.noiseDetail && a.defringeHues == b.defringeHues
+            && a.manualVignettingMidpoint == b.manualVignettingMidpoint && a.autoCA == b.autoCA
+            && a.postCropVignette == b.postCropVignette && a.grain == b.grain
+            && a.lensProfile == b.lensProfile
     }
 }
 
@@ -311,6 +332,9 @@ public struct RenderOutput: Sendable, Equatable {
     public var spotVisualisation: SpotVisualisation? = nil
     /// Tint the touch-up skin mask red on the viewport (Show Skin Mask).
     public var touchUpOverlay = false
+    /// Show sharpening's edge mask instead of the picture (Option-drag on
+    /// the Masking slider). Viewport only.
+    public var sharpenMaskPreview = false
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -342,6 +366,7 @@ public struct RenderOutput: Sendable, Equatable {
             && a.toneMapped == b.toneMapped && a.maskOverlay == b.maskOverlay
             && a.proof?.id == b.proof?.id && a.gamutWarning == b.gamutWarning
             && a.spotVisualisation == b.spotVisualisation && a.touchUpOverlay == b.touchUpOverlay
+            && a.sharpenMaskPreview == b.sharpenMaskPreview
     }
 }
 
@@ -609,7 +634,7 @@ public final class RenderPipeline {
         let healKey = ImageSession.HealKey(
             stageKey: stageKey, aiDenoise: parameters.aiDenoise, aiDenoiseModel: session.aiDenoiseModel,
             denoiseLuminance: parameters.denoiseLuminance, denoiseColor: parameters.denoiseColor,
-            dust: parameters.dust, blemishes: parameters.touchUp.activeBlemishes, heals: parameters.heals,
+            noiseDetail: parameters.noiseDetail, dust: parameters.dust, blemishes: parameters.touchUp.activeBlemishes, heals: parameters.heals,
             redEyes: parameters.redEyes)
         let cachedHealed = session.cachedHealed(for: healKey)
 
@@ -697,11 +722,21 @@ public final class RenderPipeline {
                                            renderInfo: renderInfo, binSpan: binSpan)
         }
 
-        // Stage 18: sharpening, on the display-referred result.
-        if parameters.sharpenAmount > 0 {
+        // Stage 18: sharpening, on the display-referred result. Also for
+        // the Masking preview, which shows the mask whatever the amount.
+        if parameters.sharpenAmount > 0 || output.sharpenMaskPreview {
             final = try applySharpen(session: session, cmdBuffer: cmdBuffer, input: final,
                                      outputRole: displayRole == .display ? .sharpened : .sharpenedPreview,
                                      parameters: parameters, output: output, binSpan: binSpan)
+        }
+
+        // Stage 19: post-crop vignetting and grain, last, so the grain
+        // sits on top of everything (RenderPipeline+DetailEffects.swift).
+        if parameters.postCropVignette.isActive || parameters.grain.isActive, !output.sharpenMaskPreview {
+            final = try applyEffects(session: session, cmdBuffer: cmdBuffer, input: final,
+                                     outputRole: displayRole == .display ? .effects : .effectsPreview,
+                                     parameters: parameters, output: output,
+                                     renderInfo: renderInfo, binSpan: binSpan)
         }
 
         // Display pass: Visualise Spots, for the viewport only (a file
@@ -740,7 +775,8 @@ public final class RenderPipeline {
 
     static func wantsLensCorrection(session: ImageSession, parameters p: EditParameters) -> Bool {
         if p.manualDistortion != 0 || p.manualVignetting != 0 || !p.perspective.isIdentity { return true }
-        guard let c = session.lensCorrection else { return false }
+        if p.autoCA != nil { return true }
+        guard let c = session.lensCorrection(for: p) else { return false }
         return (p.lensDistortion && c.distortion != nil)
             || (p.lensTCA && c.tca != nil)
             || (p.lensVignetting && c.vignetting != nil)
@@ -760,6 +796,8 @@ public final class RenderPipeline {
         var vignetting: VignettingModel?
         var manualVignetting: Float
         var perspectiveInverse: simd_float3x3
+        /// Manual vignetting's falloff power (its Midpoint); 2 is r².
+        var manualVignettingPower: Float = 2
 
         init(sensorSize: SIMD2<Float>, cropRatio: Float = 1, autoScale: Float = 1,
              distortion: DistortionModel? = nil, manualDistortion: Float = 0, tca: TCAModel? = nil,
@@ -777,7 +815,7 @@ public final class RenderPipeline {
         }
 
         init(session: ImageSession, parameters p: EditParameters) {
-            let c = session.lensCorrection
+            let c = session.lensCorrection(for: p)
             let summary = session.file.summary
             sensorSize = SIMD2(Float(summary.rawWidth), Float(summary.rawHeight))
             cropRatio = c?.cropRatio ?? 1
@@ -785,8 +823,12 @@ public final class RenderPipeline {
             autoScale = distortion != nil ? (c?.autoScale ?? 1) : 1
             manualDistortion = p.manualDistortion
             tca = p.lensTCA ? c?.tca : nil
+            // A measured correction replaces the profile's: it was fitted
+            // to this photo, uncorrected.
+            if let auto = p.autoCA { tca = auto.tcaModel }
             vignetting = p.lensVignetting ? c?.vignetting : nil
             manualVignetting = p.manualVignetting
+            manualVignettingPower = ManualVignettingShape.exponent(midpoint: p.manualVignettingMidpoint)
             perspectiveInverse = p.perspective.inverseMatrix
         }
 
@@ -953,6 +995,8 @@ public final class RenderPipeline {
         var perspective = sampling.perspectiveInverse
         encoder.setBytes(&perspective, length: MemoryLayout<simd_float3x3>.size, index: 14)
         encoder.setBytes(&sourceOrigin, length: 8, index: 15)
+        var vignettePower = sampling.manualVignettingPower
+        encoder.setBytes(&vignettePower, length: 4, index: 16)
         dispatch(encoder, pso: gpu.lensCorrectPSO, width: outputWidth, height: outputHeight)
         encoder.endEncoding()
         return output
@@ -1049,6 +1093,8 @@ public final class RenderPipeline {
             e.setBytes(&green, length: 4, index: 4)
             e.setBytes(&isLinear, length: 4, index: 5)
             e.setBytes(&headroom, length: 4, index: 6)
+            var hues = p.defringeHues.turns
+            e.setBytes(&hues, length: 16, index: 7)
         }
         return result
     }
@@ -1188,8 +1234,17 @@ public final class RenderPipeline {
         encoder.setBytes(&luma, length: 4, index: 0)
         encoder.setBytes(&chroma, length: 4, index: 1)
         encoder.setBytes(&noiseScale, length: 4, index: 2)
+        var lumaScale = parameters.noiseDetail.luminanceToleranceScale
+        var chromaScale = parameters.noiseDetail.colourToleranceScale
+        encoder.setBytes(&lumaScale, length: 4, index: 3)
+        encoder.setBytes(&chromaScale, length: 4, index: 4)
         dispatch(encoder, pso: gpu.denoisePSO, width: input.width, height: input.height)
         encoder.endEncoding()
+        // Contrast and Smoothness, a second pass only when either is on.
+        if parameters.noiseDetail.wantsRefinePass {
+            return try refineDenoise(session: session, cmdBuffer: cmdBuffer, original: input, denoised: output,
+                                     parameters: parameters, binSpan: binSpan)
+        }
         return output
     }
 
@@ -1238,6 +1293,13 @@ public final class RenderPipeline {
         try pass(gpu.sharpenBlurVPSO, [blurA, blurB]) { e in
             e.setBytes(&weights, length: weights.count * 4, index: 0)
             e.setBytes(&taps, length: 4, index: 1)
+        }
+        if parameters.sharpenDetail != SharpenRefinement.neutralDetail
+            || parameters.sharpenMasking != SharpenRefinement.neutralMasking || output.sharpenMaskPreview {
+            // Detail, Masking or the mask preview (RenderPipeline+DetailEffects.swift).
+            try encodeRefinedSharpen(cmdBuffer: cmdBuffer, input: input, blurred: blurB, output: result,
+                                     parameters: parameters, renderOutput: output, binSpan: binSpan)
+            return result
         }
         try pass(gpu.sharpenApplyPSO, [input, blurB, result]) { e in
             e.setBytes(&amount, length: 4, index: 0)

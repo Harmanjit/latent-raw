@@ -219,7 +219,7 @@ public enum ExportWorker {
         var metadata = ExportMetadata()
         metadata.cameraMake = s.cameraMake.isEmpty ? nil : s.cameraMake
         metadata.cameraModel = s.cameraModel.isEmpty ? nil : s.cameraModel
-        metadata.lensModel = session.lensCorrection?.profileName ?? (s.lensModel.isEmpty ? nil : s.lensModel)
+        metadata.lensModel = session.lensCorrection(for: parameters)?.profileName ?? (s.lensModel.isEmpty ? nil : s.lensModel)
         metadata.iso = s.iso > 0 ? Int(s.iso) : nil
         metadata.shutter = s.shutter > 0 ? s.shutter : nil
         metadata.aperture = s.aperture > 0 ? s.aperture : nil

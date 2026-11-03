@@ -30,6 +30,10 @@ kernel void denoiseBilateral(
     constant float &lumaStrength            [[buffer(0)]],
     constant float &chromaStrength          [[buffer(1)]],
     constant float &noiseScale              [[buffer(2)]],
+    // Noise reduction's Detail sliders (DetailEffects.swift): multipliers
+    // on the two tolerances, exactly 1 at their defaults.
+    constant float &lumaToleranceScale      [[buffer(3)]],
+    constant float &chromaToleranceScale    [[buffer(4)]],
     uint2 gid                               [[thread_position_in_grid]])
 {
     int w = int(input.get_width()), h = int(input.get_height());
@@ -43,6 +47,8 @@ kernel void denoiseBilateral(
     // means: at mid grey on a 14-bit sensor, roughly ISO 6400 noise.
     float sigmaL = max(lumaStrength * 0.06 * noise, 1e-6);
     float sigmaC = max(chromaStrength * 0.25 * noise, 1e-6);
+    if (lumaToleranceScale != 1.0) sigmaL *= lumaToleranceScale;
+    if (chromaToleranceScale != 1.0) sigmaC *= chromaToleranceScale;
     float invL = 1.0 / (2.0 * sigmaL * sigmaL);
     float invC = 1.0 / (2.0 * sigmaC * sigmaC);
     // Spatial falloff: sigma ~ radius/2.

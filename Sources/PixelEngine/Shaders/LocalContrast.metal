@@ -139,6 +139,8 @@ kernel void lcApply(
     constant float &defringeGreen            [[buffer(4)]],
     constant uint  &inputIsLinear            [[buffer(5)]],
     constant float &headroom                 [[buffer(6)]],
+    // Defringe's hue ranges in turns: purple low, high, green low, high.
+    constant float4 &fringeHues              [[buffer(7)]],
     uint2 gid                                [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
@@ -187,8 +189,8 @@ kernel void lcApply(
     if (defringePurple > 0.0 || defringeGreen > 0.0) {
         float edge = smoothstep(0.04, 0.18, abs(base.r - bM.r));
         float2 hs = lcHueSat(lin);
-        float purple = lcHueBand(hs.x, 0.70, 0.92, 0.04) * defringePurple;
-        float green  = lcHueBand(hs.x, 0.22, 0.44, 0.04) * defringeGreen;
+        float purple = lcHueBand(hs.x, fringeHues.x, fringeHues.y, 0.04) * defringePurple;
+        float green  = lcHueBand(hs.x, fringeHues.z, fringeHues.w, 0.04) * defringeGreen;
         float strength = clamp((purple + green) * edge * smoothstep(0.08, 0.3, hs.y), 0.0, 1.0);
         float yl = dot(lin, float3(0.2126, 0.7152, 0.0722));
         lin = mix(lin, float3(yl), strength);
