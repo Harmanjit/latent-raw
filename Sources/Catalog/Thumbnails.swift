@@ -139,12 +139,6 @@ extension Catalog {
                     }
                 }
             }
-            func record() async throws {
-                guard !unrecorded.isEmpty else { return }
-                let keys = unrecorded.map { ($0.relPath, $0.key) }
-                unrecorded = []
-                try await recordThumbnailKeys(keys)
-            }
 
             for _ in 0..<min(concurrency, jobs.count) { enqueue() }
             while let (relPath, error) = try await group.next() {
@@ -158,10 +152,18 @@ extension Catalog {
                     if job.replaces { report.replacedRelPaths.append(relPath) }
                 }
                 progress?(done, total)
-                if unrecorded.count >= batchSize { try await record() }
+                // Written inline, not through a local function: Swift 6.1
+                // treats a local function that captures `unrecorded` as
+                // nonisolated and refuses to send the array to it.
+                if unrecorded.count >= batchSize {
+                    try recordThumbnailKeys(unrecorded.map { ($0.relPath, $0.key) })
+                    unrecorded = []
+                }
                 enqueue()
             }
-            try await record()
+            if !unrecorded.isEmpty {
+                try recordThumbnailKeys(unrecorded.map { ($0.relPath, $0.key) })
+            }
         }
         report.duration = Date().timeIntervalSince(start)
         return report
