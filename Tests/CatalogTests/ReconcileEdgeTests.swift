@@ -396,6 +396,84 @@ final class ReconcileEdgeTests: XCTestCase {
         XCTAssertEqual(report.notDownloaded, [])
     }
 
+    /// A file evicted to iCloud and renamed in Finder can't be hashed, so
+    /// its old row can't be matched to it yet. The row must wait for it
+    /// rather than be removed with its edits.
+    func testRenamedDatalessFileKeepsItsRowUntilDownloaded() async throws {
+        try add("A.NEF")
+        try add("Gone.NEF", variant: 1)   // a different size: really deleted
+        let catalog = try Catalog.open(at: folder)
+        _ = try await catalog.reconcile()
+        try await writeSidecar(catalog, "A.NEF", rating: 4, keywords: ["kept"], edit: #"{"exposure":1}"#)
+        _ = try await catalog.reconcile()
+        let before = try await row(catalog, "A.NEF")
+
+        try move("A.NEF", "B.NEF")
+        try fm.removeItem(at: url("Gone.NEF"))
+        Catalog.datalessOverrideForTesting = { $0.lastPathComponent == "B.NEF" }
+        var report = try await catalog.reconcile()
+        XCTAssertEqual(report.notDownloaded, ["B.NEF"])
+        XCTAssertEqual(report.removed, 1, "only the deleted file of another size goes: \(report)")
+        XCTAssertEqual(report.added + report.renamed, 0, "\(report)")
+        var a = try await row(catalog, "A.NEF")
+        XCTAssertEqual(a.id, before.id)
+        XCTAssertEqual(a.rating, 4)
+        let keywords = try await catalog.keywords(forImageID: before.id!)
+        XCTAssertEqual(keywords, ["kept"])
+        let sidecarKept = fm.fileExists(atPath: await catalog.sidecarURL(forRelPath: "A.NEF").path)
+        XCTAssertTrue(sidecarKept)
+
+        // Downloaded, the rename is followed and the edits come along.
+        Catalog.datalessOverrideForTesting = nil
+        report = try await catalog.reconcile()
+        XCTAssertEqual(report.renamed, 1, "\(report)")
+        XCTAssertEqual(report.added + report.removed, 0, "\(report)")
+        a = try await row(catalog, "B.NEF")
+        XCTAssertEqual(a.id, before.id)
+        XCTAssertEqual(a.rating, 4)
+        let rating = try await sidecarRating(catalog, "B.NEF")
+        XCTAssertEqual(rating, 4)
+        let count = try await catalog.imageCount()
+        XCTAssertEqual(count, 1)
+    }
+
+    /// A rename chain whose first step left an evicted file: B.NEF to
+    /// C.NEF (in iCloud), then A.NEF to B.NEF. B's row can't stay on B.NEF
+    /// if A's row takes it, so the file at B.NEF waits too.
+    func testRenameChainThroughDatalessFileLosesNoRow() async throws {
+        try add("A.NEF")
+        try add("B.NEF", variant: 1)
+        let catalog = try Catalog.open(at: folder)
+        _ = try await catalog.reconcile()
+        try await writeSidecar(catalog, "A.NEF", rating: 5)
+        try await writeSidecar(catalog, "B.NEF", rating: 1)
+        _ = try await catalog.reconcile()
+        let a = try await row(catalog, "A.NEF")
+        let b = try await row(catalog, "B.NEF")
+
+        try move("B.NEF", "C.NEF")
+        try move("A.NEF", "B.NEF")
+        Catalog.datalessOverrideForTesting = { $0.lastPathComponent == "C.NEF" }
+        var report = try await catalog.reconcile()
+        XCTAssertEqual(report.notDownloaded, ["C.NEF"])
+        XCTAssertEqual(report.added + report.removed + report.renamed + report.modified, 0, "\(report)")
+        var count = try await catalog.imageCount()
+        XCTAssertEqual(count, 2)
+
+        Catalog.datalessOverrideForTesting = nil
+        report = try await catalog.reconcile()
+        XCTAssertEqual(report.renamed, 2, "\(report)")
+        XCTAssertEqual(report.added + report.removed, 0, "\(report)")
+        let atB = try await row(catalog, "B.NEF")
+        let atC = try await row(catalog, "C.NEF")
+        XCTAssertEqual(atB.id, a.id)
+        XCTAssertEqual(atB.rating, 5)
+        XCTAssertEqual(atC.id, b.id)
+        XCTAssertEqual(atC.rating, 1)
+        count = try await catalog.imageCount()
+        XCTAssertEqual(count, 2)
+    }
+
     // MARK: - Finding 44: other branches
 
     func testSidecarDeletedOutsideLatentResetsTheRow() async throws {

@@ -84,6 +84,8 @@ extension Catalog {
         var modifiedFiles: [(DiskFile, ImageRecord)] = []
         var tagChanges: [(id: Int64, tags: String?)] = []
         var unchangedPaths: [String] = []
+        // Sizes of the files left in iCloud this pass (step 5).
+        var pendingSizes = Set<Int64>()
         for file in onDisk {
             if let record = knownByPath.removeValue(forKey: file.relPath) {
                 if record.size == file.size && record.mtime == file.mtime {
@@ -98,12 +100,14 @@ extension Catalog {
                     // Changed, but hashing it would download it. The row
                     // stays as it is until the file is on this Mac.
                     report.notDownloaded.append(file.relPath)
+                    pendingSizes.insert(file.size)
                     unchangedPaths.append(file.relPath)
                 } else {
                     modifiedFiles.append((file, record))
                 }
             } else if file.isDataless {
                 report.notDownloaded.append(file.relPath)
+                pendingSizes.insert(file.size)
             } else {
                 newFiles.append(file)
             }
@@ -136,61 +140,97 @@ extension Catalog {
         //    (a rename chain or a swap: B.NEF to C.NEF, then A.NEF to
         //    B.NEF). Rows are queued per hash, so byte-identical copies
         //    renamed together each find a row.
-        var claimable: [Data: [ImageRecord]] = [:]
-        for record in knownByPath.values.sorted(by: { $0.relPath < $1.relPath }) {
-            claimable[record.xxhash, default: []].append(record)
-        }
-        for entry in hashedModified where entry.hash != entry.previous.xxhash {
-            claimable[entry.previous.xxhash, default: []].append(entry.previous)
-        }
-        func claim(_ hash: Data, for relPath: String) -> ImageRecord? {
-            guard var candidates = claimable[hash], !candidates.isEmpty else { return nil }
-            // Of identical copies, the one with the same name (moved to
-            // another subfolder) is the likeliest.
-            let name = (relPath as NSString).lastPathComponent
-            let index = candidates.firstIndex { ($0.relPath as NSString).lastPathComponent == name } ?? 0
-            let record = candidates.remove(at: index)
-            claimable[hash] = candidates.isEmpty ? nil : candidates
-            return record
-        }
-
+        //
+        //    A file left in iCloud can't be hashed, so it can't claim the
+        //    row it was renamed from. A row that would go and has the size
+        //    of such a file is kept for a later pass instead (a rename never
+        //    changes the size). When a kept row's path holds another file
+        //    now, that file is held too, along with the row it would have
+        //    taken, so the plan is redone until nothing more needs holding.
+        var heldModified = Set<String>()
+        var keptIDs = Set<Int64>()
         var renames: [(from: ImageRecord, to: DiskFile)] = []
-        var renamedTo = Set<String>()
-        for entry in hashedModified where entry.hash != entry.previous.xxhash {
-            if let record = claim(entry.hash, for: entry.file.relPath) {
-                renames.append((record, entry.file))
-                renamedTo.insert(entry.file.relPath)
-            }
-        }
         var toInsert: [(file: DiskFile, hash: Data)] = []
-        for entry in hashedNew {
-            if let record = claim(entry.hash, for: entry.file.relPath) {
-                renames.append((record, entry.file))
-                renamedTo.insert(entry.file.relPath)
-            } else {
-                toInsert.append(entry)
-            }
-        }
-        let claimedIDs = Set(renames.compactMap { $0.from.id })
-
-        // A modified file that took no other row is either the same photo
-        // with new content (its row stays and keeps what the user did to
-        // it) or, when its row was claimed by a file elsewhere, a new photo.
         var toUpdate: [(file: DiskFile, previous: ImageRecord, hash: Data)] = []
-        for entry in hashedModified where !renamedTo.contains(entry.file.relPath) {
-            if let id = entry.previous.id, claimedIDs.contains(id) {
-                toInsert.append((entry.file, entry.hash))
-            } else {
-                toUpdate.append(entry)
-                if var queue = claimable[entry.previous.xxhash],
-                   let index = queue.firstIndex(where: { $0.id == entry.previous.id }) {
-                    queue.remove(at: index)
-                    claimable[entry.previous.xxhash] = queue.isEmpty ? nil : queue
+        var removals: [ImageRecord] = []
+        while true {
+            let modified = hashedModified.filter { !heldModified.contains($0.file.relPath) }
+            var claimable: [Data: [ImageRecord]] = [:]
+            for record in knownByPath.values.sorted(by: { $0.relPath < $1.relPath }) {
+                claimable[record.xxhash, default: []].append(record)
+            }
+            for entry in modified where entry.hash != entry.previous.xxhash {
+                claimable[entry.previous.xxhash, default: []].append(entry.previous)
+            }
+            func claim(_ hash: Data, for relPath: String) -> ImageRecord? {
+                guard var candidates = claimable[hash], !candidates.isEmpty else { return nil }
+                // Of identical copies, the one with the same name (moved to
+                // another subfolder) is the likeliest.
+                let name = (relPath as NSString).lastPathComponent
+                let index = candidates.firstIndex { ($0.relPath as NSString).lastPathComponent == name } ?? 0
+                let record = candidates.remove(at: index)
+                claimable[hash] = candidates.isEmpty ? nil : candidates
+                return record
+            }
+
+            renames = []
+            toInsert = []
+            toUpdate = []
+            var renamedTo = Set<String>()
+            for entry in modified where entry.hash != entry.previous.xxhash {
+                if let record = claim(entry.hash, for: entry.file.relPath) {
+                    renames.append((record, entry.file))
+                    renamedTo.insert(entry.file.relPath)
                 }
             }
+            for entry in hashedNew {
+                if let record = claim(entry.hash, for: entry.file.relPath) {
+                    renames.append((record, entry.file))
+                    renamedTo.insert(entry.file.relPath)
+                } else {
+                    toInsert.append(entry)
+                }
+            }
+            let claimedIDs = Set(renames.compactMap { $0.from.id })
+
+            // A modified file that took no other row is either the same photo
+            // with new content (its row stays and keeps what the user did to
+            // it) or, when its row was claimed by a file elsewhere, a new photo.
+            for entry in modified where !renamedTo.contains(entry.file.relPath) {
+                if let id = entry.previous.id, claimedIDs.contains(id) {
+                    toInsert.append((entry.file, entry.hash))
+                } else {
+                    toUpdate.append(entry)
+                    if var queue = claimable[entry.previous.xxhash],
+                       let index = queue.firstIndex(where: { $0.id == entry.previous.id }) {
+                        queue.remove(at: index)
+                        claimable[entry.previous.xxhash] = queue.isEmpty ? nil : queue
+                    }
+                }
+            }
+
+            // Whatever no file claimed has gone, unless it may be in iCloud
+            // under another name.
+            removals = []
+            var replan = false
+            for record in claimable.values.flatMap({ $0 }) {
+                let keep = pendingSizes.contains(record.size) || record.id.map(keptIDs.contains) == true
+                guard keep else {
+                    removals.append(record)
+                    continue
+                }
+                if renamedTo.contains(record.relPath) {
+                    heldModified.insert(record.relPath)
+                    if let taken = renames.first(where: { $0.to.relPath == record.relPath })?.from.id {
+                        keptIDs.insert(taken)
+                    }
+                    replan = true
+                }
+            }
+            if !replan { break }
         }
-        // Whatever no file claimed has gone.
-        let removals = claimable.values.flatMap { $0 }
+        // A held file's row stays as it is, like one that couldn't be read.
+        heldPaths.append(contentsOf: heldModified)
 
         // 6. Move sidecars and thumbnails for renames before touching the
         //    database. A rename whose sidecar can't be moved is left for
