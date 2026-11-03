@@ -10,7 +10,7 @@ struct CropGeometrySection: View {
     @ObservedObject var model: EditorModel
     @AppStorage(CropToolPreferences.guideKey) private var guide: CropGuide = .thirds
     @AppStorage(CropToolPreferences.maskOpacityKey) private var maskOpacity = CropToolPreferences.defaultMaskOpacity
-    @State private var transformExpanded = true
+    @State private var transformExpanded = false
     @State private var customAspectShown = false
     @State private var customWidth = 5.0
     @State private var customHeight = 7.0
