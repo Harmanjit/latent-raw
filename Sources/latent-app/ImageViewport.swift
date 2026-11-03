@@ -90,6 +90,9 @@ struct ImageViewport: View {
                 if allowsTools && model.defringePickerActive && !model.imageToolActive && !model.cropToolActive {
                     DefringePickerOverlay(model: model)
                 }
+                if allowsTools && model.showsMaskShapeOverlay {
+                    MaskShapeOverlay(model: model)
+                }
             } else {
                 VStack(spacing: 12) {
                     Text(model.isReady ? "No image open" : model.setupError == nil ? "Starting…" : "Metal unavailable")

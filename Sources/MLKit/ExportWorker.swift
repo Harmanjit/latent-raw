@@ -300,7 +300,8 @@ public enum ExportWorker {
                                 pipeline: RenderPipeline, gpu: GPUContext, rotation: ImageRotation = .none,
                                 geometry: EditParameters? = nil,
                                 registry: ModelRegistry = .shared) async throws -> (count: Int, substituted: [String]) {
-        let needed = locals.filter { $0.shape.isModelGenerated }
+        // Every model mask: a local's own shape and its shape components.
+        let needed = locals.flatMap(\.modelElements)
         guard !needed.isEmpty else { return (0, []) }
         var defaults = EditParameters()
         defaults.whiteBalance = session.asShotWhiteBalance
@@ -317,6 +318,7 @@ public enum ExportWorker {
         var substituted: [String] = []
         func note(_ name: String) { if !substituted.contains(name) { substituted.append(name) } }
         for local in needed {
+            // `local` is a mask element: its id keys the pixels.
             switch local.shape {
             case .ai(let kindName, let modelVersion):
                 guard let kind = AIMaskKind(storedName: kindName) else { continue }
@@ -342,7 +344,7 @@ public enum ExportWorker {
                     }
                 }
                 guard let chosen, let models else {
-                    exportLogger.error("no click-to-select model for \(local.name, privacy: .private): the mask is empty")
+                    exportLogger.error("no click-to-select model for a mask: it is empty")
                     continue
                 }
                 let sam: SAM2Session
@@ -352,7 +354,7 @@ public enum ExportWorker {
                     sam = try SAM2Session(models: models, image: image)
                     sessions[chosen.id] = sam
                 }
-                let prediction = try sam.predict(points: points.map { PromptPoint(x: $0.x, y: $0.y, foreground: $0.foreground) })
+                let prediction = try sam.predict(points: points.map(PromptPoint.init))
                 session.setAIMask(prediction.mask, forLocal: local.id)
                 count += 1
             default:

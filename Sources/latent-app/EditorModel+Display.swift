@@ -33,6 +33,7 @@ extension EditorModel {
         var output = RenderOutput.edrDisplay(headroom: sdrOnly ? 1 : effectiveHeadroom)
         if showMaskOverlay || isDraggingMask, let i = selectedLocalIndex, i < parameters.locals.count {
             output.maskOverlay = i
+            output.maskOverlayStyle = MaskOverlaySettings.shared.style
         }
         output.proof = proofLUT
         output.gamutWarning = gamutWarning

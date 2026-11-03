@@ -164,6 +164,12 @@ public final class ImageSession {
         case touchUp, touchUpPreview       // output of the touch-up stage
         case denoiseRefined                // camera RGB after noise reduction's second pass
         case effects, effectsPreview       // post-crop vignetting and grain
+        // Local detail (LocalDetailStage.swift): masks written by the
+        // colour kernel, presence-style blurs, and the stage's output.
+        case localMaskA, localMaskB
+        case localDetailPair, localDetailScratch, localDetailSmall, localDetailMedium, localDetailLarge
+        case localDetailDownA, localDetailDownB, localDetailDownC
+        case localDetail, localDetailPreview
     }
 
     /// Which set of pooled textures a render draws from. Pools never share
@@ -274,10 +280,15 @@ public final class ImageSession {
 
     public func hasAIMask(forLocal id: UUID) -> Bool { aiMasks[id] != nil }
 
+    /// The pixels stored for a model mask element, so a duplicated mask
+    /// can start with them instead of running the model again.
+    public func aiMask(forLocal id: UUID) -> MaskBitmap? { aiMasks[id] }
+
     /// Keeps brush and AI mask slices in step with `locals`; returns the
-    /// texture to bind and each such local's slice.
+    /// texture to bind and each such element's slice (by local id for a
+    /// local's own shape, by component id for a component).
     func brushMaskTexture(for locals: [LocalAdjustment]) -> (MTLTexture?, [UUID: Int32]) {
-        let needsSlices = locals.contains { $0.shape.usesMaskSlice }
+        let needsSlices = locals.contains { $0.usesMaskSlices }
         if needsSlices {
             if brushMasks == nil {
                 brushMasks = BrushMaskSet(device: gpu.device, sensorWidth: file.summary.rawWidth,

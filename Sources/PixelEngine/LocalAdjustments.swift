@@ -26,6 +26,43 @@ public struct LocalAdjustment: Equatable, Sendable, Codable, Identifiable {
     public var luminanceRange: LuminanceRange?
     public var hueRange: HueRange?
 
+    // Added with mask components and the wider slider set
+    // (MaskComponents.swift). Every one defaults to "nothing" and is
+    // written to the edit only when set (LocalAdjustment+Codable.swift),
+    // so an edit made before them loads, saves and renders as it did.
+
+    /// More shapes combined with `shape` in order: added, subtracted or
+    /// intersected. `shape` with `invert` is always the first component.
+    public var components: [MaskComponent] = []
+    /// Inverts the combined mask (shape and components) before the
+    /// luminance and hue ranges narrow it. Duplicate and Invert sets it
+    /// on a mask with components; with none, `invert` does the same job.
+    public var invertMask = false
+    /// 0…1: how strongly the mask applies its sliders. 1 is full.
+    public var amount: Float = 1
+    /// Feather (0…1) and Edge (−1 contract … 1 expand) for a model mask
+    /// in `shape`; components carry their own.
+    public var modelFeather: Float = 0
+    public var modelEdge: Float = 0
+    /// Hidden masks keep their settings but change nothing.
+    public var hidden = false
+    /// Light: the global Highlights, Shadows, Whites and Blacks, inside the mask. −1…1.
+    public var highlights: Float = 0
+    public var shadows: Float = 0
+    public var whites: Float = 0
+    public var blacks: Float = 0
+    /// Colour: green (−1) … magenta (1), and a hue rotation in degrees (−180…180).
+    public var tint: Float = 0
+    public var hue: Float = 0
+    /// Effects and detail, −1…1 (noise and defringe 0…1): the presence and
+    /// sharpening kernels inside the mask (LocalDetailStage.swift).
+    public var texture: Float = 0
+    public var clarity: Float = 0
+    public var dehaze: Float = 0
+    public var sharpness: Float = 0
+    public var noise: Float = 0
+    public var defringe: Float = 0
+
     public init(id: UUID = UUID(), name: String, shape: MaskShape, invert: Bool = false,
                 exposureEV: Float = 0, contrast: Float = 0, saturation: Float = 0, warmth: Float = 0,
                 luminanceRange: LuminanceRange? = nil, hueRange: HueRange? = nil) {
@@ -38,6 +75,19 @@ public struct LocalAdjustment: Equatable, Sendable, Codable, Identifiable {
     /// True when the adjustment changes nothing (all sliders at zero).
     public var isNeutral: Bool {
         exposureEV == 0 && contrast == 0 && saturation == 0 && warmth == 0
+            && pointSlidersNeutral && !wantsDetailStage
+    }
+
+    /// The sliders the colour kernel applies beyond the original four.
+    var pointSlidersNeutral: Bool {
+        highlights == 0 && shadows == 0 && whites == 0 && blacks == 0 && tint == 0 && hue == 0
+    }
+
+    /// Whether any slider needs the neighbourhood (a blur), so the local
+    /// detail stage runs after the colour kernel for this mask.
+    public var wantsDetailStage: Bool {
+        !hidden && amount > 0 && (texture != 0 || clarity != 0 || dehaze != 0 || sharpness != 0
+            || noise > 0 || defringe > 0)
     }
 
     /// Limited by the GPU-side array; more would need a different layout.
@@ -95,7 +145,13 @@ public struct MaskPromptPoint: Equatable, Sendable, Codable {
     public var x: Float
     public var y: Float
     public var foreground: Bool
+    /// Set for the two corners of a Select Objects box: 1 top-left,
+    /// 2 bottom-right. nil for a click, so older edits read as before.
+    public var corner: Int?
     public init(x: Float, y: Float, foreground: Bool) { self.x = x; self.y = y; self.foreground = foreground }
+    public init(x: Float, y: Float, corner: Int) {
+        self.x = x; self.y = y; self.foreground = true; self.corner = corner
+    }
 }
 
 /// A greyscale mask as pixels, 0...255, row-major.
@@ -147,10 +203,15 @@ public struct BrushStroke: Equatable, Sendable, Codable {
     /// Opacity each dab adds, 0...1.
     public var flow: Float
     public var erase: Bool
+    /// The most coverage the stroke can build up, 0…1 (Lightroom's
+    /// Density): painting over it again never goes past. nil is full, as
+    /// every stroke was before.
+    public var density: Float?
 
-    public init(points: [SIMD2<Float>], radius: Float, feather: Float, flow: Float, erase: Bool) {
+    public init(points: [SIMD2<Float>], radius: Float, feather: Float, flow: Float, erase: Bool,
+                density: Float? = nil) {
         self.points = points; self.radius = radius; self.feather = feather
-        self.flow = flow; self.erase = erase
+        self.flow = flow; self.erase = erase; self.density = density
     }
 }
 
@@ -178,7 +239,10 @@ public struct HueRange: Equatable, Sendable, Codable {
 
 // MARK: - GPU packing
 
-/// Mirrors `LocalAdjust` in ColorPipeline.metal: six 16-byte fields.
+/// Mirrors `LocalAdjust` in ColorPipeline.metal: nine 16-byte fields.
+/// The first six are the original layout; the last three carry the
+/// components, the wider slider set and the detail-stage slot, and are
+/// all neutral for an edit that uses none of them.
 struct LocalAdjustGPU {
     var geometry0 = SIMD4<Float>(repeating: 0)  // linear: start.xy end.xy | radial: centre.xy radii.xy
     var geometry1 = SIMD4<Float>(repeating: 0)  // radial: feather
@@ -186,21 +250,109 @@ struct LocalAdjustGPU {
     var lumRange = SIMD4<Float>(repeating: 0)   // low, high, feather, enabled
     var hueRange = SIMD4<Float>(repeating: 0)   // centre, width, minSat, enabled
     var info = SIMD4<Int32>(repeating: 0)       // type, brushSlice, invert, 0
+    var adjust2 = SIMD4<Float>(repeating: 0)    // tint, highlights, shadows, whites
+    var adjust3 = SIMD4<Float>(1, 0, 1, 0)      // amount, blacks, (unused), hue (degrees)
+    var info2 = SIMD4<Int32>(0, 0, -1, 0)       // componentStart, componentCount, detailSlot, invertMask
 
     init(_ local: LocalAdjustment, brushSlice: Int32) {
-        switch local.shape {
-        case .linear(let s, let e):
-            geometry0 = SIMD4(s.x, s.y, e.x, e.y)
-        case .radial(let c, let r, let feather):
-            geometry0 = SIMD4(c.x, c.y, r.x, r.y)
-            geometry1 = SIMD4(feather, 0, 0, 0)
-        case .brush, .whole, .ai, .prompted:
-            break
-        }
+        geometry0 = MaskComponentGPU.geometry0(local.shape)
+        geometry1 = MaskComponentGPU.geometry1(local.shape)
         adjust = SIMD4(local.exposureEV, local.contrast, local.saturation, local.warmth)
         if let l = local.luminanceRange { lumRange = SIMD4(l.low, l.high, l.feather, 1) }
         if let h = local.hueRange { hueRange = SIMD4(h.centre, h.width, h.minimumSaturation, 1) }
         info = SIMD4(local.shape.typeCode, brushSlice, local.invert ? 1 : 0, 0)
+        adjust2 = SIMD4(local.tint, local.highlights, local.shadows, local.whites)
+        // A hidden mask applies nothing; its shape still shows as an overlay.
+        adjust3 = SIMD4(local.hidden ? 0 : min(max(local.amount, 0), 1), local.blacks, 0, local.hue)
+        info2 = SIMD4(0, 0, -1, local.invertMask ? 1 : 0)
+    }
+}
+
+/// Mirrors `MaskComponentGPU` in ColorPipeline.metal: four 16-byte fields.
+struct MaskComponentGPU {
+    var geometry0 = SIMD4<Float>(repeating: 0)  // shape geometry | lum: low, high, feather | colour: h,s,h,s
+    var geometry1 = SIMD4<Float>(repeating: 0)  // radial feather | colour: h,s,h,s
+    var extra = SIMD4<Float>(repeating: 0)      // colour: h, s, radius, sample count
+    var info = SIMD4<Int32>(repeating: 0)       // type, slice, invert, mode (0 add, 1 subtract, 2 intersect)
+
+    /// Every mask's components, flattened, fit one `setBytes` (4 KB).
+    static let maximumTotal = LocalAdjustment.maximumCount * MaskComponent.maximumPerMask
+
+    /// What is bound when no mask has components: Metal wants the buffer.
+    init() {}
+
+    init(_ component: MaskComponent, slice: Int32) {
+        var type: Int32
+        switch component.source {
+        case .shape(let shape):
+            type = shape.typeCode
+            geometry0 = Self.geometry0(shape)
+            geometry1 = Self.geometry1(shape)
+        case .luminance(let l):
+            type = 5
+            geometry0 = SIMD4(l.low, l.high, l.feather, 0)
+        case .colour(let r):
+            type = 6
+            var hs = [Float](repeating: 0, count: 10)
+            for (k, sample) in r.samples.prefix(ColourRange.maximumSamples).enumerated() {
+                hs[2 * k] = sample.hue; hs[2 * k + 1] = sample.saturation
+            }
+            geometry0 = SIMD4(hs[0], hs[1], hs[2], hs[3])
+            geometry1 = SIMD4(hs[4], hs[5], hs[6], hs[7])
+            extra = SIMD4(hs[8], hs[9], r.radius, Float(min(r.samples.count, ColourRange.maximumSamples)))
+        }
+        let mode: Int32
+        switch component.mode {
+        case .add: mode = 0
+        case .subtract: mode = 1
+        case .intersect: mode = 2
+        }
+        info = SIMD4(type, slice, component.invert ? 1 : 0, mode)
+    }
+
+    static func geometry0(_ shape: MaskShape) -> SIMD4<Float> {
+        switch shape {
+        case .linear(let s, let e): return SIMD4(s.x, s.y, e.x, e.y)
+        case .radial(let c, let r, _): return SIMD4(c.x, c.y, r.x, r.y)
+        default: return SIMD4(repeating: 0)
+        }
+    }
+
+    static func geometry1(_ shape: MaskShape) -> SIMD4<Float> {
+        if case .radial(_, _, let feather) = shape { return SIMD4(feather, 0, 0, 0) }
+        return SIMD4(repeating: 0)
+    }
+}
+
+/// Everything the colour kernel needs about the locals, packed: one entry
+/// per local, their components flattened after one another, and how many
+/// locals write a mask for the detail stage.
+struct LocalsGPUPlan {
+    var locals: [LocalAdjustGPU]
+    var components: [MaskComponentGPU]
+    /// Local index -> slot (0…7) in the detail stage's mask textures.
+    var detailSlots: [Int: Int]
+
+    init(locals: [LocalAdjustment], slices: [UUID: Int32]) {
+        self.locals = []
+        components = []
+        detailSlots = [:]
+        for (index, local) in locals.enumerated() {
+            var packed = LocalAdjustGPU(local, brushSlice: slices[local.id] ?? -1)
+            let room = MaskComponentGPU.maximumTotal - components.count
+            let own = local.components.prefix(min(MaskComponent.maximumPerMask, max(room, 0)))
+            if !own.isEmpty {
+                packed.info2.x = Int32(components.count)
+                packed.info2.y = Int32(own.count)
+                components += own.map { MaskComponentGPU($0, slice: slices[$0.id] ?? -1) }
+            }
+            if local.wantsDetailStage {
+                let slot = detailSlots.count
+                detailSlots[index] = slot
+                packed.info2.z = Int32(slot)
+            }
+            self.locals.append(packed)
+        }
     }
 }
 
@@ -222,10 +374,10 @@ final class BrushMaskRasterizer {
     private var drawnPointsInLast = 0
 
     struct StrokeFingerprint: Equatable {
-        let radius: Float, feather: Float, flow: Float, erase: Bool
+        let radius: Float, feather: Float, flow: Float, erase: Bool, density: Float?
         let first: SIMD2<Float>
         init(_ s: BrushStroke) {
-            radius = s.radius; feather = s.feather; flow = s.flow; erase = s.erase
+            radius = s.radius; feather = s.feather; flow = s.flow; erase = s.erase; density = s.density
             first = s.points.first ?? SIMD2(-1, -1)
         }
     }
@@ -296,7 +448,9 @@ final class BrushMaskRasterizer {
         let inner = CGFloat(1 - min(max(stroke.feather, 0), 1))
         let flow = CGFloat(min(max(stroke.flow, 0), 1))
         let space = CGColorSpaceCreateDeviceGray()
-        let level: CGFloat = stroke.erase ? 0 : 1
+        // Density caps the grey a paint dab reaches; `lighten` then never
+        // takes the mask past it, however often the stroke passes.
+        let level: CGFloat = stroke.erase ? 0 : CGFloat(min(max(stroke.density ?? 1, 0), 1))
         let colors = [CGColor(gray: level, alpha: flow), CGColor(gray: level, alpha: flow),
                       CGColor(gray: level, alpha: 0)] as CFArray
         let locations: [CGFloat] = [0, inner, 1]
@@ -318,30 +472,43 @@ final class BrushMaskRasterizer {
     }
 }
 
-/// Owns the brush-mask texture array for one image and keeps its slices
-/// in step with the brush locals in the current parameters.
+/// Owns the mask texture array for one image and keeps its slices in
+/// step with the brush and model-mask elements of the current locals: a
+/// local's own shape and each shape component get a slice of their own.
+/// The array starts with room for one slice per local and grows (rarely,
+/// once components are used) up to one per possible element.
 final class BrushMaskSet {
-    let texture: MTLTexture
+    private(set) var texture: MTLTexture
+    private let device: MTLDevice
     private var rasterizers: [UUID: (slice: Int, raster: BrushMaskRasterizer)] = [:]
     private let sensorWidth: Int, sensorHeight: Int
 
-    init?(device: MTLDevice, sensorWidth: Int, sensorHeight: Int) {
+    /// Model masks already uploaded: element id -> (slice, the bitmap as
+    /// made, the feather and edge it was refined with).
+    private var uploadedAI: [UUID: (slice: Int, bitmap: MaskBitmap, feather: Float, edge: Float)] = [:]
+
+    static let maximumSlices = LocalAdjustment.maximumCount * (1 + MaskComponent.maximumPerMask)
+
+    init?(device: MTLDevice, sensorWidth: Int, sensorHeight: Int, slices: Int = LocalAdjustment.maximumCount) {
+        self.device = device
         self.sensorWidth = sensorWidth
         self.sensorHeight = sensorHeight
+        guard let t = Self.makeTexture(device: device, sensorWidth: sensorWidth, sensorHeight: sensorHeight,
+                                       slices: slices) else { return nil }
+        texture = t
+    }
+
+    private static func makeTexture(device: MTLDevice, sensorWidth: Int, sensorHeight: Int, slices: Int) -> MTLTexture? {
         let d = MTLTextureDescriptor()
         d.textureType = .type2DArray
         d.pixelFormat = .r8Unorm
         d.width = max(1, sensorWidth / BrushMaskRasterizer.downscale)
         d.height = max(1, sensorHeight / BrushMaskRasterizer.downscale)
-        d.arrayLength = LocalAdjustment.maximumCount
+        d.arrayLength = slices
         d.storageMode = .shared
         d.usage = [.shaderRead]
-        guard let t = device.makeTexture(descriptor: d) else { return nil }
-        texture = t
+        return device.makeTexture(descriptor: d)
     }
-
-    /// AI masks already uploaded: local id -> (slice, identity of the bitmap).
-    private var uploadedAI: [UUID: (slice: Int, bitmap: MaskBitmap)] = [:]
 
     private var usedSlices: Set<Int> {
         Set(rasterizers.values.map(\.slice)).union(uploadedAI.values.map(\.slice))
@@ -349,55 +516,74 @@ final class BrushMaskSet {
 
     private func freeSlice() -> Int? {
         let used = usedSlices
-        return (0..<LocalAdjustment.maximumCount).first { !used.contains($0) }
+        return (0..<texture.arrayLength).first { !used.contains($0) }
     }
 
-    /// Updates slices for every brush and AI local and returns
-    /// local id -> slice. `aiMasks` supplies the pixels for AI locals; an
-    /// AI local without pixels yet gets no slice (and masks nothing).
+    /// Updates slices for every brush and model element and returns
+    /// element id -> slice. `aiMasks` supplies the pixels for model
+    /// elements, by element id; one without pixels yet gets no slice
+    /// (and masks nothing).
     func sync(locals: [LocalAdjustment], aiMasks: [UUID: MaskBitmap]) -> [UUID: Int32] {
+        let elements = locals.flatMap(\.maskElements).filter { $0.shape.usesMaskSlice }
+        // Room for every element: grow the array, starting the slices
+        // over (the rasterizers redraw and the model masks upload again).
+        let needed = elements.count
+        if needed > texture.arrayLength {
+            let slices = min(Self.maximumSlices, (needed + 7) / 8 * 8)
+            if let bigger = Self.makeTexture(device: device, sensorWidth: sensorWidth,
+                                             sensorHeight: sensorHeight, slices: slices) {
+                texture = bigger
+                rasterizers.removeAll()
+                uploadedAI.removeAll()
+            }
+        }
+
         var assignment: [UUID: Int32] = [:]
-        // Drop entries for locals that no longer exist.
-        let live = Set(locals.map(\.id))
+        // Drop entries for elements that no longer exist.
+        let live = Set(elements.map(\.id))
         for id in rasterizers.keys where !live.contains(id) { rasterizers[id] = nil }
         for id in uploadedAI.keys where !live.contains(id) { uploadedAI[id] = nil }
 
-        for local in locals {
-            switch local.shape {
+        for element in elements {
+            switch element.shape {
             case .brush(let strokes):
                 let entry: (slice: Int, raster: BrushMaskRasterizer)
-                if let existing = rasterizers[local.id] {
+                if let existing = rasterizers[element.id] {
                     entry = existing
                 } else {
                     guard let slice = freeSlice(),
                           let raster = BrushMaskRasterizer(sensorWidth: sensorWidth, sensorHeight: sensorHeight)
                     else { continue }
                     entry = (slice, raster)
-                    rasterizers[local.id] = entry
+                    rasterizers[element.id] = entry
                 }
                 if entry.raster.update(strokes: strokes), let bytes = entry.raster.data {
                     texture.replace(region: MTLRegionMake2D(0, 0, entry.raster.width, entry.raster.height),
                                     mipmapLevel: 0, slice: entry.slice, withBytes: bytes,
                                     bytesPerRow: entry.raster.bytesPerRow, bytesPerImage: 0)
                 }
-                assignment[local.id] = Int32(entry.slice)
+                assignment[element.id] = Int32(entry.slice)
 
             case .ai, .prompted:
-                guard let bitmap = aiMasks[local.id] else { continue }
-                if let existing = uploadedAI[local.id], existing.bitmap == bitmap {
-                    assignment[local.id] = Int32(existing.slice)
+                guard let bitmap = aiMasks[element.id] else { continue }
+                if let existing = uploadedAI[element.id], existing.bitmap == bitmap,
+                   existing.feather == element.feather, existing.edge == element.edge {
+                    assignment[element.id] = Int32(existing.slice)
                     continue
                 }
-                let slice = uploadedAI[local.id]?.slice ?? freeSlice()
+                let slice = uploadedAI[element.id]?.slice ?? freeSlice()
                 guard let slice else { continue }
+                // Refined at the slice's size, where the frame's aspect
+                // is true, so Edge and Feather are round.
                 let fitted = bitmap.resampled(width: texture.width, height: texture.height)
+                    .refined(feather: element.feather, edge: element.edge)
                 fitted.data.withUnsafeBytes { bytes in
                     texture.replace(region: MTLRegionMake2D(0, 0, fitted.width, fitted.height),
                                     mipmapLevel: 0, slice: slice, withBytes: bytes.baseAddress!,
                                     bytesPerRow: fitted.width, bytesPerImage: 0)
                 }
-                uploadedAI[local.id] = (slice, bitmap)
-                assignment[local.id] = Int32(slice)
+                uploadedAI[element.id] = (slice, bitmap, element.feather, element.edge)
+                assignment[element.id] = Int32(slice)
 
             default:
                 continue

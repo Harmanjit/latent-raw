@@ -28,6 +28,12 @@ extension EditorModel {
         case .prompt:
             addPromptedMask()
             return
+        case .colourSample:
+            addColourRangeMask()
+            return
+        case .box:
+            if let entry = ModelRegistry.shared.defaultPrompted() { addObjectsMask(model: entry) }
+            return
         case .none:
             local = LocalAdjustment(name: "Whole image \(n)", shape: .whole)
         }
@@ -59,7 +65,7 @@ extension EditorModel {
         parameters.locals.append(local)
         selectedLocalIndex = parameters.locals.count - 1
         showMaskOverlay = true
-        generateAIMask(for: local)
+        generateAIMask(for: local.maskElements[0])
     }
 
     /// Makes the mask at `index` again with another model: an ordinary
@@ -68,19 +74,23 @@ extension EditorModel {
     /// the restore paths run `syncModelMasks`, which does the same for a
     /// shape they bring back. A click-to-select mask keeps its points
     /// and answers them against the new model's encoding.
-    func rerunMask(at index: Int, with entry: ModelEntry) {
+    /// `element` names a component's model mask; nil is the local's own.
+    func rerunMask(at index: Int, element: UUID? = nil, with entry: ModelEntry) {
         guard index < parameters.locals.count, let session else { return }
-        let local = parameters.locals[index]
-        switch local.shape {
+        let elementID = element ?? parameters.locals[index].id
+        guard let shape = parameters.locals[index].shape(ofElement: elementID) else { return }
+        let rerun: MaskShape
+        switch shape {
         case .ai(let kind, _):
-            parameters.locals[index].shape = .ai(kind: kind, modelVersion: entry.modelVersion)
+            rerun = .ai(kind: kind, modelVersion: entry.modelVersion)
         case .prompted(let points, _):
-            parameters.locals[index].shape = .prompted(points: points, modelVersion: entry.modelVersion)
+            rerun = .prompted(points: points, modelVersion: entry.modelVersion)
         default:
             return
         }
-        session.setAIMask(nil, forLocal: local.id)
-        generateAIMask(for: parameters.locals[index])
+        parameters.locals[index].setShape(rerun, ofElement: elementID)
+        session.setAIMask(nil, forLocal: elementID)
+        if let made = parameters.maskElement(id: elementID) { generateAIMask(for: made) }
         rerender()
     }
 
@@ -89,7 +99,7 @@ extension EditorModel {
     /// distinct click-to-select model the edit names.
     func regenerateMissingAIMasks() {
         guard let session else { return }
-        for local in parameters.locals where local.shape.isModelGenerated {
+        for local in parameters.modelMaskElements {
             if !session.hasAIMask(forLocal: local.id), !generatingMasks.contains(local.id) {
                 generateAIMask(for: local)
             }
@@ -109,8 +119,9 @@ extension EditorModel {
     /// reuses its id with another shape.
     func syncModelMasks(from old: EditParameters) {
         guard let session else { return }
-        let before = Dictionary(old.locals.map { ($0.id, $0.shape) }, uniquingKeysWith: { a, _ in a })
-        for local in parameters.locals where local.shape.isModelGenerated {
+        let before = Dictionary(old.locals.flatMap(\.maskElements).map { ($0.id, $0.shape) },
+                                uniquingKeysWith: { a, _ in a })
+        for local in parameters.modelMaskElements {
             if let previous = modelMaskShapes[local.id] ?? before[local.id], previous != local.shape {
                 session.setAIMask(nil, forLocal: local.id)
                 generateAIMask(for: local)
@@ -152,7 +163,7 @@ extension EditorModel {
         guard hasImage else { return }
         let key = Self.touchUpGeometryKey(of: parameters)
         guard key != Self.touchUpGeometryKey(of: old),
-              parameters.locals.contains(where: { $0.shape.isModelGenerated }) else { return }
+              !parameters.modelMaskElements.isEmpty else { return }
         modelMaskGeometryTask?.cancel()
         modelMaskGeometryTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: Self.touchUpGeometryDebounce)
@@ -168,7 +179,7 @@ extension EditorModel {
         guard let session else { return }
         let key = Self.touchUpGeometryKey(of: parameters)
         var dropped = false
-        for local in parameters.locals where local.shape.isModelGenerated {
+        for local in parameters.modelMaskElements {
             // Made, or being made, on another grid. One under way is
             // thrown away when it lands (its completion checks the key).
             guard let made = modelMaskGeometry[local.id], made != key else { continue }
@@ -180,7 +191,9 @@ extension EditorModel {
         if dropped { rerender() }
     }
 
-    private func generateAIMask(for local: LocalAdjustment) {
+    /// Makes the pixels for one model mask element: a local's own shape
+    /// (keyed by the local's id) or a component's (by the component's).
+    func generateAIMask(for local: MaskElement) {
         guard let session else { return }
         if case .prompted = local.shape { updatePromptedMask(for: local); return }
         guard case .ai(let kindName, let modelVersion) = local.shape,
@@ -228,7 +241,7 @@ extension EditorModel {
                 // A lens or keystone change meanwhile moved the grid; the
                 // rebuild it queued makes the mask again on the new one.
                 guard self.session === session,
-                      let now = self.parameters.locals.first(where: { $0.id == localID }),
+                      let now = self.parameters.maskElement(id: localID),
                       case .ai(_, let current) = now.shape, current == modelVersion,
                       Self.touchUpGeometryKey(of: self.parameters) == geometry else { return }
                 session.setAIMask(result.mask, forLocal: localID)
@@ -280,7 +293,7 @@ extension EditorModel {
 
     /// Encodes the open image for one click-to-select model, unless it
     /// is encoded or being encoded already.
-    private func ensurePromptSession(for id: String) {
+    func ensurePromptSession(for id: String) {
         // An encoding made, or being made, on another lens or keystone
         // setting answers clicks on a grid the view no longer shows.
         if let made = promptSessionGeometry[id], made != Self.touchUpGeometryKey(of: parameters) {
@@ -314,7 +327,7 @@ extension EditorModel {
             self.promptStatus[id] = result.map { String(format: "Image encoded in %.0f ms — click the subject; option-click to exclude", $0.encodeSeconds * 1000) }
                 ?? "Click-to-select unavailable (the model could not be loaded)"
             // Any prompted locals of this model that were waiting for the encoding.
-            for local in self.parameters.locals {
+            for local in self.parameters.modelMaskElements {
                 if case .prompted(let pts, let version) = local.shape, !pts.isEmpty,
                    self.promptModelID(for: version) == id {
                     self.updatePromptedMask(for: local)
@@ -335,30 +348,29 @@ extension EditorModel {
         promptStatus = promptStatus.filter { $0.key == kept }
     }
 
-    /// A click on the image while the prompt tool is armed.
+    /// A click on the image while the prompt tool is armed: a point for
+    /// the selected element (the local's own selection or a component).
     func promptClick(at screen: CGPoint, foreground: Bool) {
-        guard let i = selectedLocalIndex, i < parameters.locals.count,
-              case .prompted(var points, let version) = parameters.locals[i].shape else { return }
+        guard let element = activeMaskElement, case .prompted(var points, let version) = element.shape else { return }
         let p = sensorNormalized(screen)
         points.append(MaskPromptPoint(x: p.x, y: p.y, foreground: foreground))
-        parameters.locals[i].shape = .prompted(points: points, modelVersion: version)
-        updatePromptedMask(for: parameters.locals[i])
+        setActiveMaskShape(.prompted(points: points, modelVersion: version))
+        if let updated = activeMaskElement { updatePromptedMask(for: updated) }
     }
 
     func clearPromptPoints() {
-        guard let i = selectedLocalIndex, i < parameters.locals.count,
-              case .prompted(_, let version) = parameters.locals[i].shape else { return }
-        parameters.locals[i].shape = .prompted(points: [], modelVersion: version)
-        session?.setAIMask(nil, forLocal: parameters.locals[i].id)
+        guard let element = activeMaskElement, case .prompted(_, let version) = element.shape else { return }
+        setActiveMaskShape(.prompted(points: [], modelVersion: version))
+        session?.setAIMask(nil, forLocal: element.id)
         rerender()
     }
 
-    private func updatePromptedMask(for local: LocalAdjustment) {
+    func updatePromptedMask(for local: MaskElement) {
         guard case .prompted(let points, let version) = local.shape, let session else { return }
         guard !points.isEmpty, let id = promptModelID(for: version) else { return }
         guard let sam = promptSessions[id], let geometry = promptSessionGeometry[id],
               geometry == Self.touchUpGeometryKey(of: parameters) else { ensurePromptSession(for: id); return }
-        let prompts = points.map { PromptPoint(x: $0.x, y: $0.y, foreground: $0.foreground) }
+        let prompts = points.map(PromptPoint.init)
         let localID = local.id
         let shape = local.shape
         generatingMasks.insert(localID)
@@ -374,7 +386,7 @@ extension EditorModel {
             case .success(let prediction):
                 // Another click or Undo changed the points meanwhile: the
                 // answer to the old ones would land on the new mask.
-                guard self.parameters.locals.first(where: { $0.id == localID })?.shape == shape,
+                guard self.parameters.maskElement(id: localID)?.shape == shape,
                       Self.touchUpGeometryKey(of: self.parameters) == geometry else { return }
                 session.setAIMask(prediction.mask, forLocal: localID)
                 self.modelMaskShapes[localID] = shape
@@ -432,43 +444,79 @@ extension EditorModel {
     }
 
     func maskToolBegan(at screen: CGPoint) {
-        guard let i = selectedLocalIndex, i < parameters.locals.count else { return }
+        guard let element = activeMaskElement else { return }
         if maskTool == .prompt {
             promptClick(at: screen, foreground: !promptModifierExclude)
             return
         }
         let p = sensorNormalized(screen)
+        if maskTool == .colourSample {
+            sampleColour(at: p)
+            return
+        }
+        if maskTool == .box {
+            guard case .prompted = element.shape else { return }
+            isDraggingMask = true
+            lastDab = p
+            maskDragBox = CGRect(x: CGFloat(p.x), y: CGFloat(p.y), width: 0, height: 0)
+            return
+        }
         isDraggingMask = true
-        // A tool only reshapes a local of its own kind: one left armed over
-        // another local must never turn its strokes or model mask into a
+        radialMoveOffset = nil
+        // A tool only reshapes an element of its own kind: one left armed
+        // over another must never turn its strokes or model mask into a
         // gradient.
-        switch (maskTool, parameters.locals[i].shape) {
+        switch (maskTool, element.shape) {
         case (.linear, .linear):
-            parameters.locals[i].shape = .linear(start: p, end: p)
-        case (.radial, .radial):
-            parameters.locals[i].shape = .radial(centre: p, radii: SIMD2(0.001, 0.001), feather: currentFeather(i))
+            setActiveMaskShape(.linear(start: p, end: p))
+        case (.radial, .radial(let centre, let radii, let feather)):
+            // A press inside a placed ellipse moves it; outside, draws anew.
+            if isInside(p, centre: centre, radii: radii), max(radii.x, radii.y) > 0.006 {
+                radialMoveOffset = p - centre
+            } else {
+                setActiveMaskShape(.radial(centre: p, radii: SIMD2(0.001, 0.001), feather: feather))
+            }
         case (.brush, .brush(var strokes)), (.erase, .brush(var strokes)):
             strokes.append(BrushStroke(points: [p], radius: brushRadius, feather: brushFeather,
-                                       flow: brushFlow, erase: maskTool == .erase))
-            parameters.locals[i].shape = .brush(strokes: strokes)
+                                       flow: brushFlow, erase: maskTool == .erase,
+                                       density: maskTool == .erase || brushDensity >= 1 ? nil : brushDensity))
+            setActiveMaskShape(.brush(strokes: strokes))
             lastDab = p
         default:
             isDraggingMask = false
         }
     }
 
+    /// Whether a normalised point is inside an ellipse whose radii are
+    /// fractions of the short side.
+    private func isInside(_ p: SIMD2<Float>, centre: SIMD2<Float>, radii: SIMD2<Float>) -> Bool {
+        let short = Float(min(sensorSize.width, sensorSize.height))
+        guard short > 0 else { return false }
+        let d = (p - centre) * SIMD2(Float(sensorSize.width), Float(sensorSize.height)) / (radii * short)
+        return d.x * d.x + d.y * d.y <= 1
+    }
+
     func maskToolMoved(to screen: CGPoint) {
-        guard isDraggingMask, let i = selectedLocalIndex, i < parameters.locals.count else { return }
+        guard isDraggingMask, let element = activeMaskElement else { return }
         let p = sensorNormalized(screen)
-        switch (maskTool, parameters.locals[i].shape) {
+        switch (maskTool, element.shape) {
+        case (.box, _):
+            guard let start = lastDab else { return }
+            maskDragBox = CGRect(x: CGFloat(min(start.x, p.x)), y: CGFloat(min(start.y, p.y)),
+                                 width: CGFloat(abs(p.x - start.x)), height: CGFloat(abs(p.y - start.y)))
         case (.linear, .linear(let start, _)):
-            parameters.locals[i].shape = .linear(start: start, end: p)
-        case (.radial, .radial(let centre, _, let feather)):
+            setActiveMaskShape(.linear(start: start, end: p))
+        case (.radial, .radial(let centre, let radii, let feather)):
+            if let offset = radialMoveOffset {
+                setActiveMaskShape(.radial(centre: p - offset, radii: radii, feather: feather))
+                return
+            }
             // Distance in sensor pixels as a fraction of the short side, so
-            // the circle is round whatever the aspect ratio.
+            // the circle is round whatever the aspect ratio; Width and
+            // Height in the panel make it an ellipse.
             let d = (p - centre) * SIMD2(Float(sensorSize.width), Float(sensorSize.height))
             let r = max((d.x * d.x + d.y * d.y).squareRoot() / Float(min(sensorSize.width, sensorSize.height)), 0.005)
-            parameters.locals[i].shape = .radial(centre: centre, radii: SIMD2(r, r), feather: feather)
+            setActiveMaskShape(.radial(centre: centre, radii: SIMD2(r, r), feather: feather))
         case (.brush, .brush(var strokes)), (.erase, .brush(var strokes)):
             // Space dabs at a quarter radius so the stroke reads as continuous.
             guard var last = strokes.popLast() else { return }
@@ -486,22 +534,20 @@ extension EditorModel {
                 lastDab = p
             }
             strokes.append(last)
-            parameters.locals[i].shape = .brush(strokes: strokes)
+            setActiveMaskShape(.brush(strokes: strokes))
         default:
             break
         }
     }
 
     func maskToolEnded() {
+        if maskTool == .box, let box = maskDragBox { finishObjectBox(box) }
+        maskDragBox = nil
         isDraggingMask = false
         lastDab = nil
+        radialMoveOffset = nil
         // A gradient or radial is placed once; further drags would move it
         // again, which is rarely what's wanted. Brushes keep painting.
         if maskTool == .linear || maskTool == .radial { maskTool = .none }
-    }
-
-    private func currentFeather(_ i: Int) -> Float {
-        if case .radial(_, _, let f) = parameters.locals[i].shape { return f }
-        return 0.5
     }
 }

@@ -341,11 +341,33 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Local adjustments
 
-    enum MaskTool: String, CaseIterable { case none, linear, radial, brush, erase, prompt }
+    /// `colourSample` is the Colour Range eyedropper; `box` drags a
+    /// Select Objects rectangle (EditorModel+MaskComponents.swift).
+    enum MaskTool: String, CaseIterable { case none, linear, radial, brush, erase, prompt, colourSample, box }
 
     @Published var selectedLocalIndex: Int? {
-        didSet { if selectedLocalIndex != oldValue { maskTool = .none; rerender() } }
+        didSet {
+            if selectedLocalIndex != oldValue {
+                maskTool = .none
+                selectedMaskComponentID = nil
+                rerender()
+            }
+        }
     }
+    /// The component of the selected local the mask tools work on; nil
+    /// for the local's own shape (EditorModel+MaskComponents.swift).
+    @Published var selectedMaskComponentID: UUID? {
+        didSet { if selectedMaskComponentID != oldValue { maskTool = .none } }
+    }
+    /// A Select Objects rectangle being dragged, in normalised output
+    /// coordinates, for the overlay; nil otherwise.
+    @Published var maskDragBox: CGRect?
+    /// A radial drag that began inside the ellipse moves it rather than
+    /// drawing a new one: the offset from the centre to the press.
+    var radialMoveOffset: SIMD2<Float>?
+    /// The last scene-linear analysis render the Colour Range eyedropper
+    /// read, kept while the edit outside the masks stays the same.
+    var colourSampleCache: ColourSampleCache?
     @Published var maskTool: MaskTool = .none {
         didSet {
             guard maskTool != .none, maskTool != oldValue else { return }
@@ -367,6 +389,8 @@ final class EditorModel: ObservableObject {
     @Published var brushRadius: Float = 0.04    // fraction of the short side
     @Published var brushFeather: Float = 0.5
     @Published var brushFlow: Float = 1.0
+    /// The most a brush stroke builds up to, 0.1…1 (Density).
+    @Published var brushDensity: Float = 1.0
     var isDraggingMask = false {
         didSet { if isDraggingMask != oldValue { rerender() } }
     }
