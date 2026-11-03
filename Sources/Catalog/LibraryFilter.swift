@@ -108,7 +108,9 @@ public extension Array where Element == ImageRecord {
             case .modified:
                 return orderOptional(a.mtime, b.mtime, a, b, ascending: sort.ascending)
             case .fileName:
-                let c = a.fileName.localizedStandardCompare(b.fileName)
+                // By the file's own name, so a virtual copy (its path is the
+                // master's with a suffix) falls just after its master.
+                let c = a.sourceFileName.localizedStandardCompare(b.sourceFileName)
                 if c == .orderedSame { return a.relPath < b.relPath }
                 return sort.ascending ? c == .orderedAscending : c == .orderedDescending
             case .custom:

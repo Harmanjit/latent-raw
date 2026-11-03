@@ -320,7 +320,7 @@ struct LibraryPanel: View {
         }
         let options = OpenImageExportOptions.load()
         guard let id = model.catalogImageID, let catalog = library.catalog,
-              let record = library.images.first(where: { $0.id == id && $0.fileName == model.imageTitle }) else {
+              let record = library.images.first(where: { $0.id == id && $0.sourceFileName == model.imageTitle }) else {
             model.export(to: destination, options: options, rating: 0, readKeywords: nil)
             return
         }
@@ -338,6 +338,14 @@ struct LibraryPanel: View {
                 .font(.caption)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if image.isVirtualCopy {
+                Label("Virtual copy of \(image.sourceFileName)", systemImage: "square.on.square")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help("Another version of this photo with its own edit, rating and keywords. It shares the raw file, so it takes no disk space.")
+            }
 
             HStack(spacing: 2) {
                 HStack(spacing: 2) {

@@ -60,6 +60,10 @@ struct CommandState: Equatable {
     var canGoForward = false
     /// Images are being moved, copied or renamed.
     var fileOperationRunning = false
+    /// The primary selection is a virtual copy (VirtualCopy).
+    var primaryIsVirtualCopy = false
+    /// The selection holds at least one virtual copy.
+    var selectionHasVirtualCopy = false
     /// Survey's focused pane has its image open.
     var surveyHasImage = false
     var fullScreenImage = false
@@ -153,8 +157,21 @@ struct CommandState: Equatable {
         // Develop have them open. Not while exporting, printing or a
         // contact sheet reads them.
         // Several selected rename from a template (Rename with Template…).
-        case .rename, .renameWithTemplate: mode == .library && hasSelection && !fileOperationRunning && !exportQueueRunning
+        // A virtual copy has no file of its own to rename.
+        case .rename: mode == .library && hasSelection && !fileOperationRunning && !exportQueueRunning
+            && !outputJobRunning && !primaryIsVirtualCopy
+        case .renameWithTemplate: mode == .library && hasSelection && !fileOperationRunning && !exportQueueRunning
             && !outputJobRunning
+        case .duplicatePhoto: mode == .library && selectionCount > 0 && !fileOperationRunning && !exportQueueRunning
+            && !outputJobRunning
+        // The selection in the grid, the image shown elsewhere (Survey's
+        // panes stay the images they opened with). Not while files move:
+        // the list is refreshed when a copy is made or removed.
+        case .createVirtualCopy: hasSelection && mode != .survey && !fileOperationRunning
+        case .setCopyAsMaster: primaryIsVirtualCopy && mode != .survey && !fileOperationRunning && !exportQueueRunning
+            && !outputJobRunning
+        case .removeVirtualCopy: (mode == .library ? selectionHasVirtualCopy : primaryIsVirtualCopy) && mode != .survey
+            && !fileOperationRunning && !exportQueueRunning && !outputJobRunning
         case .moveToFolder, .copyToFolder: mode == .library && selectionCount > 0 && !fileOperationRunning && !exportQueueRunning
             && !outputJobRunning
         case .back: canGoBack
@@ -296,6 +313,7 @@ struct LatentCommands: Commands {
             item("New Smart Collection…", .newSmartCollection)
             item("New Collection Set…", .newCollectionSet)
             item("Save Filter as Smart Collection…", .saveFilterAsSmartCollection)
+            item("Duplicate", .duplicatePhoto)
         }
 
         CommandGroup(replacing: .undoRedo) {
@@ -362,6 +380,10 @@ struct LatentCommands: Commands {
             Divider()
             item("Rotate Left", .rotate(-1))
             item("Rotate Right", .rotate(1))
+            Divider()
+            item("Create Virtual Copy", .createVirtualCopy)
+            item("Set Copy as Master", .setCopyAsMaster)
+            item("Remove Virtual Copy", .removeVirtualCopy)
             Divider()
             Menu("Photo Merge") {
                 item("HDR…", .photoMergeHDR)

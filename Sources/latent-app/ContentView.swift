@@ -493,6 +493,8 @@ struct ContentView: View {
             compareModel = nil
             compareRecord = nil
         }
+        // A virtual copy leaving the catalog closes as a moved image does.
+        library.willRemoveImages = library.fileOperations.willMoveImages
     }
 
     /// F2: the rename sheet for the selected image, or the template sheet
@@ -595,7 +597,8 @@ struct ContentView: View {
             label: { label in
                 library.perform("Labelling") { try await library.setLabel(label, onlyPrimary: mode != .library) }
             },
-            renameWithTemplate: beginTemplateRename)
+            renameWithTemplate: beginTemplateRename,
+            command: { _ = perform($0) }, canRun: { commandState.isEnabled($0) })
     }
 
     /// Loads `record` (with its stored edit, history and snapshots) into
@@ -941,7 +944,7 @@ struct ContentView: View {
                                        engine: PhotoMergeEngine.hdr(gpu: gpu, forDialog: true)) { reference in
             // The name as it would be now; the job plans it again on Merge.
             guard let catalog,
-                  let relPath = try? await catalog.planMergeResult(forReference: reference.relPath, suffix: "HDR")
+                  let relPath = try? await catalog.planMergeResult(forReference: reference.fileRelPath, suffix: "HDR")
             else { return nil }
             return (relPath as NSString).lastPathComponent
         }
@@ -991,7 +994,7 @@ struct ContentView: View {
                                             engine: PhotoMergeEngine.panorama(gpu: gpu)) { reference in
             // The name as it would be now; the job plans it again on Merge.
             guard let catalog,
-                  let relPath = try? await catalog.planMergeResult(forReference: reference.relPath,
+                  let relPath = try? await catalog.planMergeResult(forReference: reference.fileRelPath,
                                                                    suffix: PhotoMergeKind.panorama.suffix)
             else { return nil }
             return (relPath as NSString).lastPathComponent
@@ -1027,7 +1030,7 @@ struct ContentView: View {
                                                engine: PhotoMergeEngine.hdrPanorama(gpu: gpu)) { reference in
             // The name as it would be now; the job plans it again on Merge.
             guard let catalog,
-                  let relPath = try? await catalog.planMergeResult(forReference: reference.relPath,
+                  let relPath = try? await catalog.planMergeResult(forReference: reference.fileRelPath,
                                                                    suffix: PhotoMergeKind.hdrPanorama.suffix)
             else { return nil }
             return (relPath as NSString).lastPathComponent
@@ -1117,7 +1120,7 @@ struct ContentView: View {
     /// and only then does the name decide.
     static func editorHolds(_ record: ImageRecord, catalogImageID: Int64?, imageTitle: String?) -> Bool {
         if let catalogImageID { return catalogImageID == record.id }
-        return imageTitle == record.fileName
+        return imageTitle == record.sourceFileName
     }
 
     /// Left/right arrows step through the catalog; in Develop that also
@@ -1304,6 +1307,8 @@ struct ContentView: View {
             fileCommands.transferSelection(.copy, to: nil)
         case .refreshFolder:
             library.refreshFromDisk()
+        case .createVirtualCopy, .setCopyAsMaster, .removeVirtualCopy, .duplicatePhoto:
+            VirtualCopyCommands(library: library, model: model, inGrid: mode == .library, open: { load($0) }).perform(command)
         case .back:
             stepFolderHistory(-1)
         case .forward:
@@ -1395,6 +1400,8 @@ struct ContentView: View {
         state.canGoBack = navigator.history.canGoBack
         state.canGoForward = navigator.history.canGoForward
         state.fileOperationRunning = fileOperations.isBusy
+        state.primaryIsVirtualCopy = selected?.isVirtualCopy ?? false
+        state.selectionHasVirtualCopy = mode == .library && library.selectedImages.contains(where: \.isVirtualCopy)
         state.surveyHasImage = survey.focusedModel?.hasImage ?? false
         state.fullScreenImage = fullScreen.isActive
         state.hasSecondDisplay = secondDisplay.hasSecondScreen

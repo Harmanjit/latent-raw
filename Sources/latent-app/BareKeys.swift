@@ -104,6 +104,9 @@ enum KeyCommand: Equatable {
     /// File › Refresh Folder: scan the open folder again for files added,
     /// removed or renamed outside Latent.
     case refreshFolder
+    /// Photo › Create Virtual Copy, Set Copy as Master, Remove Virtual Copy,
+    /// and File › Duplicate (a true copy of the file beside it).
+    case createVirtualCopy, setCopyAsMaster, removeVirtualCopy, duplicatePhoto
     /// F: the image alone, full screen. The second display's Loupe is menu only.
     case fullScreenImage, secondaryDisplay
     /// Arrow keys on a zoomed-in image, when Settings has them pan.

@@ -205,7 +205,7 @@ final class ExternalEditorHandOff: ObservableObject {
         guard !model.isExporting, model.gpu != nil else { return }
         let lead = library.selectedImage
         let openIsLead = model.hasImage && lead != nil && model.catalogImageID == lead?.id
-            && model.imageTitle == lead?.fileName
+            && model.imageTitle == lead?.sourceFileName
         if model.hasImage && (preferOpenImage || lead == nil || openIsLead) {
             startWithOpenImage(model: model, library: library)
         } else if let lead {
@@ -227,7 +227,7 @@ final class ExternalEditorHandOff: ObservableObject {
         var source = Source(url: url, editStackJSON: json, userRotation: model.userRotation, rating: 0)
         // Keywords and rating from the catalog, as Export Open Image has them.
         if let id = model.catalogImageID, let catalog = library.catalog,
-           let record = library.images.first(where: { $0.id == id && $0.fileName == model.imageTitle }) {
+           let record = library.images.first(where: { $0.id == id && $0.sourceFileName == model.imageTitle }) {
             source.rating = record.rating
             source.descriptive = record.exportDescription
             source.readKeywords = { try await catalog.keywords(forImageID: id) }

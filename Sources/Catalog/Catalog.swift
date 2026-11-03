@@ -152,19 +152,35 @@ public actor Catalog {
     public var xmpDirectory: URL { containerPath.appendingPathComponent("xmp", isDirectory: true) }
     public var thumbnailDirectory: URL { containerPath.appendingPathComponent("thumbnails", isDirectory: true) }
 
-    /// Absolute path of an image from its catalog-relative path.
+    /// Absolute path of an image from its catalog-relative path. A
+    /// virtual copy's path gives its master's file (VirtualCopy).
     public func fileURL(forRelPath relPath: String) -> URL {
-        rootPath.appendingPathComponent(relPath)
+        rootPath.appendingPathComponent(VirtualCopy.fileRelPath(relPath))
     }
 
     /// Sidecars mirror the image's subpath and keep the full filename
     /// (DESIGN.md §5.1): `xmp/Day 2/DSC_0107.NEF.xmp`.
+    /// A virtual copy's sidecar is named by its key, not its path, so it
+    /// stays put when the master moves (VirtualCopy).
     public func sidecarURL(forRelPath relPath: String) -> URL {
-        xmpDirectory.appendingPathComponent(relPath + ".xmp")
+        if let copy = VirtualCopy.parse(relPath) {
+            return xmpDirectory.appendingPathComponent(VirtualCopy.companionFolder, isDirectory: true)
+                .appendingPathComponent(copy.key.stem + ".xmp")
+        }
+        return xmpDirectory.appendingPathComponent(relPath + ".xmp")
     }
 
     public func thumbnailURL(forRelPath relPath: String) -> URL {
-        thumbnailDirectory.appendingPathComponent(relPath + ".heic")
+        Self.thumbnailURL(forRelPath: relPath, in: thumbnailDirectory)
+    }
+
+    /// The same layout without the actor, for the Library's thumbnail reads.
+    public nonisolated static func thumbnailURL(forRelPath relPath: String, in thumbnailDirectory: URL) -> URL {
+        if let copy = VirtualCopy.parse(relPath) {
+            return thumbnailDirectory.appendingPathComponent(VirtualCopy.companionFolder, isDirectory: true)
+                .appendingPathComponent(copy.key.stem + ".heic")
+        }
+        return thumbnailDirectory.appendingPathComponent(relPath + ".heic")
     }
 
     // MARK: - Queries

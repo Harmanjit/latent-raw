@@ -75,7 +75,15 @@ public struct ImageRecord: Codable, FetchableRecord, MutablePersistableRecord,
         FileHash.prefix + ":" + xxhash.map { String(format: "%02x", $0) }.joined()
     }
 
-    public var fileName: String { (relPath as NSString).lastPathComponent }
+    /// The name shown for the image: the file's, or for a virtual copy the
+    /// file's with its copy number, "DSC_0107 (Copy 2).NEF" (VirtualCopy).
+    public var fileName: String {
+        if let copy = VirtualCopy.parse(relPath) {
+            return VirtualCopy.displayName(fileName: (copy.masterRelPath as NSString).lastPathComponent,
+                                           number: copy.key.number)
+        }
+        return (relPath as NSString).lastPathComponent
+    }
 
     static func hashData(_ hash: UInt64) -> Data {
         var big = hash.bigEndian

@@ -78,7 +78,12 @@ extension Catalog {
         let onDisk = try scanFiles(report: &report)
 
         // 2. What the database thinks.
-        let known = try dbQueue.read { db in try ImageRecord.fetchAll(db) }
+        //    Virtual copies have no file of their own: they follow their
+        //    master's row (VirtualCopySchema), so only masters are matched
+        //    against the disk.
+        let everything = try dbQueue.read { db in try ImageRecord.fetchAll(db) }
+        let known = everything.filter { !$0.isVirtualCopy }
+        let copies = everything.filter(\.isVirtualCopy)
         var knownByPath = Dictionary(uniqueKeysWithValues: known.map { ($0.relPath, $0) })
 
         // 3. Sort into buckets.
@@ -331,6 +336,13 @@ extension Catalog {
         for record in removals where !livePaths.contains(record.relPath.lowercased()) {
             try? FileManager.default.removeItem(at: thumbnailURL(forRelPath: record.relPath))
         }
+        // Their virtual copies went with them (the rows by cascade). Their
+        // thumbnails go; their sidecars stay, like the masters', so a file
+        // that comes back brings its copies back.
+        let removedPaths = Set(removals.map(\.relPath))
+        for copy in copies where VirtualCopy.parse(copy.relPath).map({ removedPaths.contains($0.masterRelPath) }) == true {
+            try? FileManager.default.removeItem(at: thumbnailURL(forRelPath: copy.relPath))
+        }
 
         // A file renamed outside Latent keeps its place in the custom order.
         if !renames.isEmpty {
@@ -341,7 +353,10 @@ extension Catalog {
             }
         }
 
-        // 9. Sidecars: re-read only those whose mtime moved.
+        // 9. Sidecars: re-read only those whose mtime moved. Copies whose
+        //    sidecar is here but whose row is not (a rebuilt database) get a
+        //    row first, for this pass to fill.
+        _ = restoreVirtualCopiesFromSidecars(report: &report)
         report.sidecarsRead = try syncSidecars(report: &report, leaving: moved.sidecarsMissing)
 
         report.duration = Date().timeIntervalSince(start)

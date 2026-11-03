@@ -29,6 +29,11 @@ struct GridActions {
     /// Sets the selection's colour label; nil removes it.
     var label: (String?) -> Void = { _ in }
     var renameWithTemplate: () -> Void = {}
+    /// Runs a menu command as the menu bar does, and says whether it can
+    /// run now (virtual copies and Duplicate, whose rules live in
+    /// CommandState).
+    var command: (KeyCommand) -> Void = { _ in }
+    var canRun: (KeyCommand) -> Bool = { _ in false }
 }
 
 /// The grid's context menus, built fresh each time they open so every
@@ -57,6 +62,11 @@ enum GridContextMenu {
         menu.addItem(ClosureMenuItem("Rotate Left", enabled: hasLead) { actions.rotate(-1) })
         menu.addItem(ClosureMenuItem("Rotate Right", enabled: hasLead) { actions.rotate(1) })
         menu.addItem(.separator())
+        for (title, command) in [("Create Virtual Copy", KeyCommand.createVirtualCopy),
+                                 ("Set Copy as Master", .setCopyAsMaster), ("Remove Virtual Copy", .removeVirtualCopy)] {
+            menu.addItem(ClosureMenuItem(title, enabled: actions.canRun(command)) { actions.command(command) })
+        }
+        menu.addItem(.separator())
 
         menu.addItem(ClosureMenuItem("Copy Settings", enabled: hasLead, actions.copySettings))
         menu.addItem(ClosureMenuItem("Paste Settings", enabled: count > 0 && actions.canPasteSettings(),
@@ -77,10 +87,14 @@ enum GridContextMenu {
         menu.addItem(.separator())
         let canChange = hasLead && actions.canChangeFiles()
         menu.addItem(ClosureMenuItem(Shortcuts.menuTitle(count > 1 ? "Rename \(count) Images…" : "Rename…", for: .rename),
-                                     enabled: canChange, actions.rename))
+                                     enabled: canChange && library.selectedImage?.isVirtualCopy != true,
+                                     actions.rename))
         menu.addItem(ClosureMenuItem("Rename with Template…", enabled: canChange, actions.renameWithTemplate))
         menu.addItem(destinationMenu("Move to Folder", mode: .move, enabled: canChange, actions: actions))
         menu.addItem(destinationMenu("Copy to Folder", mode: .copy, enabled: canChange, actions: actions))
+        menu.addItem(ClosureMenuItem("Duplicate", enabled: canChange && actions.canRun(.duplicatePhoto)) {
+            actions.command(.duplicatePhoto)
+        })
         CollectionCommands.addItems(to: menu, library: library)
         return menu
     }

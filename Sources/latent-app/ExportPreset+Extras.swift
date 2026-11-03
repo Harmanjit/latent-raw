@@ -14,7 +14,7 @@ extension ExportPreset {
     func workerRequest(for record: ImageRecord, root: URL, destination: URL, editStackJSON: String?,
                        keywords: [String]) -> ExportWorker.Request {
         var request = ExportWorker.Request(
-            sourceURL: root.appendingPathComponent(record.relPath),
+            sourceURL: root.appendingPathComponent(record.fileRelPath),
             destinationURL: destination,
             editStackJSON: editStackJSON, userRotation: record.userRotation,
             settings: settings, colorSpace: colorSpace,

@@ -61,10 +61,32 @@ public final class LibraryFileOperations: ObservableObject {
     @discardableResult
     public func transfer(_ records: [ImageRecord], to folder: URL, mode: TransferMode) async -> TransferReport {
         guard let library else { return TransferReport() }
-        let requests = records.compactMap { library.fileURL(for: $0) }.map { TransferRequest(source: $0, folder: folder) }
+        let requests = Self.uniqueFiles(records, in: library).map { TransferRequest(source: $0, folder: folder) }
         let report = await execute(.transfer(requests, mode), title: mode == .move ? "Moving" : "Copying")
         registerUndo(report.completed, actionName: Self.actionName(mode == .move ? "Move" : "Copy", report.completed))
         return report
+    }
+
+    /// Duplicate: a true copy of each of `records`' files in its own folder,
+    /// numbered ("DSC_0107 2.NEF"), with its ratings, keywords, edit,
+    /// history, snapshots and sidecar, as Copy to Folder into that folder
+    /// makes. One undo puts the duplicates in the Trash.
+    @discardableResult
+    public func duplicate(_ records: [ImageRecord]) async -> TransferReport {
+        guard let library else { return TransferReport() }
+        let requests = Self.uniqueFiles(records, in: library)
+            .map { TransferRequest(source: $0, folder: $0.deletingLastPathComponent()) }
+        let report = await execute(.transfer(requests, .copy), title: "Duplicating")
+        registerUndo(report.completed, actionName: Self.actionName("Duplicate", report.completed))
+        return report
+    }
+
+    /// The files `records` show, each once: a virtual copy shows its
+    /// master's file, and a file moved or copied twice in one batch would
+    /// fail or be copied twice.
+    static func uniqueFiles(_ records: [ImageRecord], in library: Library) -> [URL] {
+        var seen = Set<String>()
+        return records.compactMap { library.fileURL(for: $0) }.filter { seen.insert($0.standardizedFileURL.path).inserted }
     }
 
     /// Renames `record`'s file (sidecar, thumbnail and row with it) to
