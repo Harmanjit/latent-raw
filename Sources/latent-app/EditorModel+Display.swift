@@ -26,7 +26,11 @@ extension EditorModel {
     var displayOutput: RenderOutput {
         // Proofing simulates an SDR file, so the display headroom is
         // dropped to 1 while it's on: an EDR highlight can't be in a JPEG.
-        var output = RenderOutput.edrDisplay(headroom: proofLUT == nil ? effectiveHeadroom : 1)
+        // So does a JPEG or other rendered picture: it was made for SDR
+        // white, and stretching its highlights into the EDR range would
+        // show something the file doesn't hold.
+        let sdrOnly = proofLUT != nil || session?.isRenderedImage == true
+        var output = RenderOutput.edrDisplay(headroom: sdrOnly ? 1 : effectiveHeadroom)
         if showMaskOverlay || isDraggingMask, let i = selectedLocalIndex, i < parameters.locals.count {
             output.maskOverlay = i
         }

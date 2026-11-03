@@ -7,6 +7,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Bayer sensors only.** Fujifilm X-Trans, Sigma Foveon, monochrome and four-colour sensors are read for metadata but do not render.
 - **Colour checked on one camera.** The golden-image tests, which compare renders with reference images, use a Nikon D750 NEF. The Photo Merge tests also read raws from a Canon EOS 5D Mark II and a Nikon D200, but don't check their colour. LibRaw supports hundreds of cameras and the pipeline is generic, but colour and exposure on other cameras have not been checked against a reference.
 - **Camera matrix colour only.** Colour comes from the camera's characterisation matrix. There are no camera-matching profiles, so the default rendering will not match the in-camera JPEG look.
+- **JPEG, HEIC, TIFF and other pictures are SDR and flattened.** An HDR gain map in a phone's HEIC or JPEG is ignored and the SDR picture opens; a floating-point or HDR TIFF is clipped at white. Layers, PSD and PSB files, multi-page TIFFs beyond the first page, and JPEG XL aren't read. A picture's edits are Latent's own and live in its sidecar; they are not written into the file, and other applications won't see them.
 - **Lens profiles** cover the bundled Lensfun subset; a lens the matcher cannot identify gets manual sliders only.
 - **No DNG export.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is fixed at two stops. PNG and TIFF are SDR only.
 - **Optional interop XMP beside the image is not implemented.** Latent's sidecars live in `_latent/xmp/`, where Lightroom and darktable do not look.
@@ -47,7 +48,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Renaming files on import** isn't possible, since there is no import step; Rename with Template renames photos already in the folder.
 <!-- /RECONCILE -->
 - **Rename, Move and Copy work only in the Library grid,** and not while an export, print, contact sheet or Photo Merge is running.
-- **A move takes only the raw file.** A JPEG shot alongside it (RAW+JPEG) and an `.xmp` sidecar another application put beside the raw stay where they were.
+- **A move takes the raw and its paired JPEG only.** An `.xmp` sidecar another application put beside the raw stays where it was.
 - **A move to another disk copies, then deletes the original.** If Latent crashes or is force-quit during a long copy, a hidden `.latent-transfer-…` file can be left in the destination. The original is still in place, and the hidden file can be deleted.
 - **Arranging the Custom order needs dragging.** There are no keys for it.
 - **Typed values aren't on every slider.** Temperature, Highlights, Shadows, Whites and Blacks, HSL, Split Toning and export quality show their value but can't be typed into.
@@ -55,7 +56,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Compare's and Survey's Sync aren't remembered;** they are on again at every launch.
 - **Survey shows at most four images** and has no before/after view. It is for looking; to edit, open an image in Develop.
 - **The Loupe on a second display is for looking only.** It shows one image at fit; zoom, pan and tools stay in the main window.
-- **Edit in External Editor is a one-way hand-off.** It writes a 16-bit Display P3 TIFF (no Adobe RGB or ProPhoto), and the TIFF the other application saves doesn't come back into the Library, since Latent catalogs raw files only.
+- **Edit in External Editor is a one-way hand-off.** It writes a 16-bit Display P3 TIFF (no Adobe RGB or ProPhoto), and the TIFF the other application saves doesn't come back by itself. Saved into a catalogued folder, it appears in the Library, as a picture of its own, once that folder is read again.
 - **Slideshows are SDR,** even on an HDR screen, and leave out AI noise reduction so each slide is ready in time. The edit's other noise reduction still applies.
 - **The watermark is for exports.** Prints, contact sheets and the TIFF for an external editor don't carry it, and it is one line of text; there is no logo or image watermark.
 - **A JPEG or PNG contact sheet is one picture,** at most 8192 px a side, holding every photo, so a large selection gets small cells. A PDF can have as many pages as it needs.

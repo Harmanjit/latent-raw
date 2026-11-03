@@ -346,6 +346,7 @@ struct LibraryPanel: View {
                     .truncationMode(.middle)
                     .help("Another version of this photo with its own edit, rating and keywords. It shares the raw file, so it takes no disk space.")
             }
+            PairedCompanionLabel(companions: library.companionsTravelling(with: image))
 
             HStack(spacing: 2) {
                 HStack(spacing: 2) {

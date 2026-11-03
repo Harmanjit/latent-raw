@@ -51,7 +51,21 @@ _latent/
 
 ## Supported files
 
-Extensions indexed: NEF, NRW, ARW, SRF, SR2, CR2, CR3, CRW, DNG, RAF, ORF, RW2, PEF, SRW, 3FR, FFF, IIQ, MOS, MRW, X3F. Decoding is by LibRaw. Only Bayer-pattern sensors render; see [Limitations](Limitations).
+**Raw files:** NEF, NRW, ARW, SRF, SR2, CR2, CR3, CRW, DNG, RAF, ORF, RW2, PEF, SRW, 3FR, FFF, IIQ, MOS, MRW, X3F. Decoding is by LibRaw. Only Bayer-pattern sensors render; see [Limitations](Limitations).
+
+**Pictures:** JPEG, HEIC and HEIF, TIFF and PNG, and WebP and AVIF where this Mac's macOS can read them. They are catalogued, rated, keyworded, filtered and exported like raws, with their camera, lens, exposure and capture time read from their EXIF; a scan or screenshot with no capture time is dated by the file's modification date. Their thumbnails are made from the pictures themselves, turned upright by their orientation tag. They open in Develop too: see [Develop](Develop#jpeg-tiff-and-other-pictures).
+
+### RAW+JPEG pairs
+
+A camera set to RAW+JPEG (or RAW+HEIF) writes two files with one name, such as `DSC_0107.NEF` and `DSC_0107.JPG`. Latent treats the JPEG as part of the raw, as Lightroom does:
+
+- The grid shows the raw only. The JPEG is catalogued but hidden, and the Library panel names it under the raw's file name ("+ DSC_0107.JPG").
+- Moving or copying the raw takes the JPEG with it, and renaming the raw renames the JPEG to match ("Sunset.NEF" and "Sunset.JPG"). If the raw gets a number because its name is taken where it goes, the JPEG gets the same one. One ⌘Z puts both back.
+- Ratings, keywords and edits belong to the raw. Exports, prints and slideshows use the raw.
+
+A pair is a raw and a JPEG, HEIC or HEIF in the same folder whose names match apart from the extension, ignoring capital letters. A TIFF or PNG beside a raw is never part of a pair: that is usually an edit or an export, a picture of its own. Rename or move one file of a pair in Finder and it simply stops being a pair.
+
+To work with the JPEGs as photos of their own, turn on **Settings › Library › Show JPEGs of RAW+JPEG pairs as separate photos**. They then appear in the grid, and each file moves, copies and renames only when it is chosen itself.
 
 ## The grid
 
@@ -218,6 +232,7 @@ Progress shows in the status bar with a stop button. Stopping, or quitting, fini
 **Rename…** (F2, the File menu or the right-click menu) renames one image, keeping its extension; its sidecar and thumbnail follow. A name that differs only in letter case works.
 
 <!-- RECONCILE: two branches edited this; merge into one text -->
+<!-- RECONCILE: two branches edited this; merge into one text -->
 **Rename with Template…** (File menu or right-click; F2 opens it when several photos are selected) names the selection from a filename template, as Lightroom's Rename Photos does. It works for a single photo too. Type the template, or click the token buttons to add tokens to its end:
 
 | Token | Becomes |
@@ -236,6 +251,9 @@ Anything else in the template is used as typed, and the extension is always kept
 The sheet lists every photo with its new name before anything happens. Photos whose name wouldn't change are left alone. A photo isn't renamed, and the list says why, when two photos would get the same name (add `{seq}`), when the name belongs to another file, or when two photos would swap names. A photo may take a name another photo of the batch is giving up: they are renamed in an order that frees each name first. The whole rename is one step of ⌘Z, and every photo's original name is kept in its sidecar.
 
 **Duplicate** (File menu or right-click) makes a true copy of each selected file in its own folder, numbered as Copy to Folder numbers it ("DSC_0107 2.NEF"), with its ratings, keywords, edit, history, snapshots and sidecar. It is a second raw file on disk, unlike a [virtual copy](Library#virtual-copies). ⌘Z puts the duplicates in the Trash.
+<!-- /RECONCILE -->
+
+The JPEG of a RAW+JPEG pair goes with its raw in all of these (see [RAW+JPEG pairs](#rawjpeg-pairs)). If the JPEG can't take the raw's new name because a file already has it, the raw is renamed and the JPEG keeps its old name; the status bar says so.
 <!-- /RECONCILE -->
 
 These commands work in the Library grid, and not while an export, print, contact sheet or Photo Merge is running.

@@ -120,6 +120,10 @@ public struct RawSummary: Sendable {
     public let orientation: Int
     /// Lens identity for profile lookup (LensKit).
     public let lens: LensIdentity
+    /// Set when the file is an ordinary picture (JPEG, HEIC, TIFF, PNG…)
+    /// rather than a raw, decoded by ImageIO into a linear source (see
+    /// `RawFile+RenderedImage.swift`). nil for every raw and DNG.
+    public var renderedImage: RenderedImageInfo? = nil
 }
 
 /// What the file says about the lens, beyond its (often empty) name.
@@ -249,6 +253,12 @@ public final class RawFile {
     public convenience init(path: String, metadataOnly: Bool = false) throws {
         guard FileManager.default.fileExists(atPath: path) else {
             throw RawFileError.fileNotFound(path: path)
+        }
+        // JPEG, HEIC, TIFF, PNG and the like aren't raws: ImageIO reads
+        // them, and they join the pipeline as a linear source.
+        if RenderedImageFormat.handles(path: path) {
+            try self.init(renderedImageAtPath: path, metadataOnly: metadataOnly)
+            return
         }
         let fd = open(path, O_RDONLY)
         guard fd >= 0 else { throw RawFileError.mmapFailed(errno: errno) }
@@ -416,6 +426,21 @@ public final class RawFile {
         preview = nil
         lastThumbnailError = 0
         isMetadataOnly = false
+        decodedInService = false
+    }
+
+    /// A file decoded outside LibRaw: an ordinary picture read by ImageIO
+    /// (`RawFile+RenderedImage.swift`). No plane means a metadata-only open.
+    init(decodedSummary summary: RawSummary, cameraToXYZ: [Float]?, linearPlane: LinearPlane?) {
+        precondition(linearPlane == nil || (summary.sourceKind == .linearRGB
+                        && linearPlane!.width == summary.rawWidth && linearPlane!.height == summary.rawHeight))
+        self.summary = summary
+        cameraToXYZMatrixRaw = cameraToXYZ
+        self.linearPlane = linearPlane
+        sensorPlane = nil
+        preview = nil
+        lastThumbnailError = 0
+        isMetadataOnly = linearPlane == nil
         decodedInService = false
     }
 

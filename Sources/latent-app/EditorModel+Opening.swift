@@ -13,7 +13,7 @@ extension EditorModel {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.message = "Choose a raw file"
+        panel.message = "Choose a raw file or a JPEG, HEIC, TIFF or PNG"
         // Raw formats mostly lack registered UTTypes, so filter loosely and
         // let RawFile reject anything LibRaw can't read.
         panel.allowedContentTypes = [UTType.image]
@@ -106,6 +106,8 @@ extension EditorModel {
 
             if newSession.profile == nil {
                 status = "No colour profile for \(file.summary.cameraModel) — cannot render"
+            } else if let rendered = file.summary.renderedImage {
+                status = Self.renderedImageStatus(rendered, summary: file.summary)
             } else {
                 status = "\(file.summary.cameraMake) \(file.summary.cameraModel) · " +
                          "\(file.summary.rawWidth)×\(file.summary.rawHeight)"

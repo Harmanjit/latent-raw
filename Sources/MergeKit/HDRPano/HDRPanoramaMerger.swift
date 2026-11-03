@@ -147,6 +147,9 @@ public final class HDRPanoramaMerger: HDRPanoramaMerging {
             case .bayer, .linearRGB: break
             default: throw HDRPanoramaError.unsupportedSource(fileName: url.lastPathComponent)
             }
+            // A JPEG or TIFF is a linear source too, but its values are
+            // display tones unrolled (`RenderedImageFormat`), not light.
+            if summary.renderedImage != nil { throw HDRPanoramaError.unsupportedSource(fileName: url.lastPathComponent) }
             summaries.append((url, summary))
         }
         // The same check the panorama's own prep makes, said in this

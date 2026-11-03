@@ -55,6 +55,11 @@ public enum Thumbnailer {
     /// Extracts, downscales, orients and writes. Pure: a file in, a file
     /// out, no database. Safe to call from any thread.
     public static func makeFromEmbeddedPreview(rawFileAt source: URL, to destination: URL) throws {
+        // A JPEG, TIFF and the like is its own preview.
+        if RenderedImageFormat.handles(path: source.path) {
+            try writeHEIC(try decodeDownscaled(imageAt: source), to: destination)
+            return
+        }
         let raw = try RawFile(path: source.path, metadataOnly: true)
         guard let jpeg = raw.embeddedJPEGPreview() else { throw ThumbnailError.noEmbeddedPreview }
         let image = try decodeDownscaled(jpeg, orientation: raw.summary.orientation)
@@ -90,6 +95,27 @@ public enum Thumbnailer {
         case 6: return rotated(image, quarterTurns: 1)
         default: return image
         }
+    }
+
+    /// Decodes a picture file at no more than `size` px on the long edge,
+    /// turned (and mirrored) upright by its own orientation tag, as an
+    /// embedded preview is.
+    static func decodeDownscaled(imageAt url: URL) throws -> CGImage {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) > 0 else {
+            throw ThumbnailError.decodeFailed
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: size,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCache: false,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, CGImageSourceGetPrimaryImageIndex(source),
+                                                              options as CFDictionary) else {
+            throw ThumbnailError.decodeFailed
+        }
+        return image
     }
 
     /// Rotates clockwise by `quarterTurns` × 90°.

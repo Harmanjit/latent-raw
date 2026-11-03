@@ -1702,18 +1702,22 @@ struct ContentView: View {
                 .id(Self.touchUpGroup)
 
                 EmptyView()
-                DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 10) {
-                        sliderRow(title: "Recovery",
-                                   value: $model.parameters.highlightRecovery,
-                                   range: 0...1, format: "%.2f", defaultValue: 1.0)
-                        sliderRow(title: "Threshold",
-                                   value: $model.parameters.highlightThreshold,
-                                   range: 0.5...1.0, format: "%.2f", defaultValue: 0.85)
+                // Rebuilding clipped sensor channels means nothing for a
+                // JPEG or TIFF, whose clipping was settled when it was made.
+                if !model.isRenderedImage {
+                    DisclosureGroup {
+                        VStack(alignment: .leading, spacing: 10) {
+                            sliderRow(title: "Recovery",
+                                       value: $model.parameters.highlightRecovery,
+                                       range: 0...1, format: "%.2f", defaultValue: 1.0)
+                            sliderRow(title: "Threshold",
+                                       value: $model.parameters.highlightThreshold,
+                                       range: 0.5...1.0, format: "%.2f", defaultValue: 0.85)
+                        }
+                        .padding(.top, 8)
+                    } label: {
+                        disclosureLabel("Highlight Reconstruction")
                     }
-                    .padding(.top, 8)
-                } label: {
-                    disclosureLabel("Highlight Reconstruction")
                 }
 
                 DisclosureGroup {
@@ -1761,9 +1765,11 @@ struct ContentView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Toggle("Distortion", isOn: $model.parameters.lensDistortion)
-                        Toggle("Chromatic aberration", isOn: $model.parameters.lensTCA)
-                        Toggle("Vignetting", isOn: $model.parameters.lensVignetting)
+                        if !model.isRenderedImage {
+                            Toggle("Distortion", isOn: $model.parameters.lensDistortion)
+                            Toggle("Chromatic aberration", isOn: $model.parameters.lensTCA)
+                            Toggle("Vignetting", isOn: $model.parameters.lensVignetting)
+                        }
                         disclosureLabel("Manual")
                         sliderRow(title: "Distortion", value: $model.parameters.manualDistortion,
                                   range: -0.1...0.1, format: "%+.3f")
@@ -1785,17 +1791,20 @@ struct ContentView: View {
 
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 10) {
-                        Picker("Demosaic", selection: $model.parameters.demosaic) {
-                            ForEach(DemosaicMethod.allCases, id: \.self) { method in
-                                Text(method.displayName).tag(method)
+                        // Demosaicing only exists for a raw's mosaic.
+                        if !model.isRenderedImage {
+                            Picker("Demosaic", selection: $model.parameters.demosaic) {
+                                ForEach(DemosaicMethod.allCases, id: \.self) { method in
+                                    Text(method.displayName).tag(method)
+                                }
                             }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
+                            .pickerStyle(.menu)
+                            .labelsHidden()
 
-                        Text("Only affects full-resolution renders — export and 100% zoom. The fit-to-window preview bins Bayer quads and never interpolates.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            Text("Only affects full-resolution renders — export and 100% zoom. The fit-to-window preview bins Bayer quads and never interpolates.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
 
                         disclosureLabel("Sharpening")
                         sliderRow(title: "Amount", value: $model.parameters.sharpenAmount,
@@ -1997,7 +2006,11 @@ struct ContentView: View {
     /// controls give way to a line saying why they aren't there.
     @ViewBuilder
     private var aiDenoiseSection: some View {
-        if !model.aiDenoiseSupported {
+        if model.isRenderedImage {
+            Text("Not available for JPEG, HEIC, TIFF and other non-raw files: the model is trained on raw sensor noise, which the camera or app that made the file has already processed. Detail › Noise Reduction still works.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if !model.aiDenoiseSupported {
             Text("Not available for merged images and other linear DNGs: the model only handles brightness up to white, and these files go well beyond it. Detail › Noise Reduction still works.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

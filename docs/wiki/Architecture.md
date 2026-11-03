@@ -6,7 +6,7 @@ Swift 6 with strict concurrency, built with SwiftPM. No Xcode project.
 
 | Target | Role |
 |---|---|
-| `RawCore` | LibRaw behind a small C shim; the isolated decoder client; the reader for the metadata exports carry |
+| `RawCore` | LibRaw behind a small C shim; the isolated decoder client; the reader for the metadata exports carry; the ImageIO reader that brings JPEG, HEIC, TIFF, PNG, WebP and AVIF in as linear sources (`RenderedImageFormat`) |
 | `latent-rawdecoder` | The XPC service that runs LibRaw in its own sandbox |
 | `PixelEngine` | The Metal render pipeline, edit stack, crop, healing and red-eye, tone ranges, presence, presenter and magnifier, what mouse and trackpad input means, exporter, resampler, watermark, HDR gain maps, page layout for prints and contact sheets, slideshow transitions, safe file writes, memory-pressure monitor. It also owns Photo Merge's GPU kernels, which MergeKit drives: `MergeHDR`, `MergeWarp`, `MergeDeghost`, `MergePanoPrep` and `MergePanoBlend` |
 | `ColorKit` | Colour science: camera matrices, white balance, working space (Rec.2020 linear), output transforms |
@@ -22,7 +22,7 @@ Swift 6 with strict concurrency, built with SwiftPM. No Xcode project.
 
 One Metal command buffer per render, stages back to back:
 
-1. Black level and white balance on the raw plane.
+1. Black level and white balance on the raw plane. A linear source (a merged DNG, or a JPEG or TIFF converted to linear Rec.2020 and unrolled through the default tone curve so its default render is the file itself) starts here already demosaiced, with only the white balance to apply.
 2. Demosaic: RCD or bilinear at full resolution for tiles, or binning for previews. The result is cached per white balance and region, so tone edits skip it.
 3. Neural denoise blend (if run), classic denoise, spot removal (dust spots, then touch-up blemishes, then the user's patches, in order, heal by a ratio field; a brush stroke heals piece by piece along its path), red-eye (flash-red pixels inside each circle turned a dark neutral), lens corrections, all in camera space. The healed result is cached per session, keyed by everything these stages read, so a slider move after a Find Spots with 200 patches skips them.
 4. Colour and tone: highlight reconstruction, camera matrix, exposure, tone ranges (Highlights, Shadows, Whites, Blacks), local adjustments in scene-linear light, sigmoid tone mapping with display headroom, then grading (curve, master and RGB; HSL, vibrance, split toning) in a perceptual domain, soft proof.
