@@ -331,6 +331,7 @@ struct LibraryPanel: View {
                 .font(.caption)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            PairedCompanionLabel(companions: library.companionsTravelling(with: image))
 
             HStack(spacing: 2) {
                 HStack(spacing: 2) {
