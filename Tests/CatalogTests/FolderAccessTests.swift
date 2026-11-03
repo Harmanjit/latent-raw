@@ -114,6 +114,33 @@ final class FolderAccessTests: XCTestCase {
                        "Day 2/Morning")
     }
 
+    /// Under the sandbox an enclosing catalog's database is readable only
+    /// while that folder's own access is active. Failing to read it must
+    /// not be taken for "doesn't include it", or opening the subfolder
+    /// alone gives it a container and splits the enclosing catalog.
+    /// Simulated here with file permissions.
+    func testUnreadableEnclosingCatalogIsNotTakenForIndependent() async throws {
+        try makeFolders(["Day 2"])
+        do {
+            let catalog = try Catalog.open(at: root)
+            try await catalog.setSubfolderMode(.included, forRelPath: "Day 2")
+        }
+        let day2 = root.appendingPathComponent("Day 2")
+        XCTAssertEqual(FolderAccess.ownership(of: day2), .owned(.init(root: root.standardizedFileURL, relPath: "Day 2")))
+
+        let database = root.appendingPathComponent("_latent/catalog.sqlite").path
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: database)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: database) }
+
+        guard case .unreadable(let owner) = FolderAccess.ownership(of: day2) else {
+            return XCTFail("an unreadable enclosing catalog was taken for one that doesn't include Day 2")
+        }
+        XCTAssertTrue(FolderAccess.samePath(owner, root))
+        XCTAssertNil(FolderAccess.owningCatalog(of: day2))
+        XCTAssertFalse(FolderAccess.unreadableOwnerMessage(folder: day2, root: owner).isEmpty)
+        XCTAssertFalse(FolderAccess.hasCatalog(day2), "nothing was created in the subfolder")
+    }
+
     func testChainAndBestRoot() {
         let a = URL(fileURLWithPath: "/P/Trips")
         let b = URL(fileURLWithPath: "/P/Trips/2026")

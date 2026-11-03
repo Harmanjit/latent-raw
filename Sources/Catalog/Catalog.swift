@@ -15,6 +15,11 @@ public actor Catalog {
     /// again from the sidecars on the next reconcile; the subfolder
     /// choices, which live only in the database, are gone.
     public nonisolated let damagedDatabaseSetAside: URL?
+    /// Whether a thumbnail pass is running, and the passes waiting for it to
+    /// end (see `generateMissingThumbnails`). One runs at a time, so a pass
+    /// started while another runs lists only what that one left undone.
+    var thumbnailPassRunning = false
+    var thumbnailPassWaiters: [CheckedContinuation<Void, Never>] = []
 
     public static let containerName = "_latent"
     /// The container name before the app was renamed (September 2026).
@@ -86,9 +91,21 @@ public actor Catalog {
 
     /// A function of its own so a queue that fails to migrate is closed (by
     /// going out of scope) before its files are moved.
+    ///
+    /// Migrating reads only the header and the schema, so a file damaged
+    /// further in would open and then fail at its first real query, on
+    /// every attempt, without ever being set aside. `quick_check` reads
+    /// every page (it skips only the index-content checks, which is what
+    /// makes it quick), and damage it finds is reported as SQLITE_CORRUPT
+    /// so it takes the same route as damage found while opening.
     private static func openMigrated(path: String, configuration: Configuration) throws -> DatabaseQueue {
         let dbQueue = try DatabaseQueue(path: path, configuration: configuration)
         try Schema.migrator().migrate(dbQueue)
+        let problems = try dbQueue.read { db in try String.fetchAll(db, sql: "PRAGMA quick_check") }
+        if problems != ["ok"] {
+            throw DatabaseError(resultCode: .SQLITE_CORRUPT,
+                                message: "quick_check: " + problems.prefix(5).joined(separator: "; "))
+        }
         return dbQueue
     }
 

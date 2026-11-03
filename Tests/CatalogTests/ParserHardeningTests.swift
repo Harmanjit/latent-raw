@@ -30,4 +30,34 @@ final class ParserHardeningTests: XCTestCase {
             XCTAssertTrue("\(error)".contains("limit"), "\(error)")
         }
     }
+
+    /// The size cap is checked on what is read, not on a link: a symbolic
+    /// link dropped into `_latent/xmp` under a sidecar's name must not
+    /// make the parser read its target, however large, or at all.
+    func testSidecarThatIsASymbolicLinkIsRefused() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmp) }
+        let target = tmp.appendingPathComponent("real.xmp")
+        try XMPSidecar.write(XMPSidecar.Fields(rating: 5, label: nil, keywords: [], preservedFileName: nil,
+                                               sourceHash: "xxh64:0", editStackJSON: ""), to: target)
+        let link = tmp.appendingPathComponent("A.NEF.xmp")
+        try fm.createSymbolicLink(at: link, withDestinationURL: target)
+        XCTAssertThrowsError(try XMPSidecar.read(from: link), "a link was followed")
+        XCTAssertEqual(try XMPSidecar.read(from: target).rating, 5, "a plain file still reads")
+
+        // A large target behind a link is refused without being read.
+        let big = tmp.appendingPathComponent("big.mov")
+        XCTAssertTrue(fm.createFile(atPath: big.path, contents: nil))
+        let handle = try FileHandle(forWritingTo: big)
+        try handle.truncate(atOffset: UInt64(XMPSidecar.maximumSidecarBytes + 1))
+        try handle.close()
+        XCTAssertThrowsError(try XMPSidecar.read(from: big)) { error in
+            XCTAssertTrue("\(error)".contains("limit"), "\(error)")
+        }
+        let bigLink = tmp.appendingPathComponent("B.NEF.xmp")
+        try fm.createSymbolicLink(at: bigLink, withDestinationURL: big)
+        XCTAssertThrowsError(try XMPSidecar.read(from: bigLink))
+    }
 }

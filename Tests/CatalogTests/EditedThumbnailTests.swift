@@ -75,4 +75,57 @@ final class EditedThumbnailTests: XCTestCase {
         XCTAssertEqual(cleared?.thumbKey, Thumbnailer.embeddedPreviewKey)
         XCTAssertEqual(Thumbnailer.load(from: url)?.width, 512)
     }
+
+    /// Every settled edit starts a thumbnail pass, often while one runs.
+    /// The running pass, cancelled, must stop taking files and record what
+    /// it finished, and the new one must make only what is left: each file
+    /// made once. Before, both passes made every file whose key the first
+    /// hadn't recorded yet, and keys were recorded only when a pass ended.
+    func testOverlappingPassesMakeEachThumbnailOnce() async throws {
+        let fm = FileManager.default
+        for n in 2...12 {
+            try fm.copyItem(at: folder.appendingPathComponent("A.NEF"), to: folder.appendingPathComponent("A\(n).NEF"))
+        }
+        let catalog = try Catalog.open(at: folder)
+        _ = try await catalog.reconcile()
+        let json = #"{"schema":1,"modules":{"exposure":{"ev":1}}}"#
+        for image in try await catalog.allImages() {
+            try await catalog.setEditStack(json, forImageID: try XCTUnwrap(image.id))
+        }
+        let counter = CountingRenderer()
+        let gate = DispatchSemaphore(value: 0)
+        counter.gate = gate
+
+        let first = Task { try await catalog.generateMissingThumbnails(concurrency: 1, editedRenderer: counter) }
+        // Wait until the first pass is inside its first file.
+        for _ in 0..<500 where counter.calls == 0 { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertEqual(counter.calls, 1)
+        first.cancel()
+        let second = Task { try await catalog.generateMissingThumbnails(concurrency: 4, editedRenderer: counter) }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        gate.signal()
+
+        let firstReport = try await first.value
+        let secondReport = try await second.value
+        XCTAssertEqual(firstReport.generated, 1, "the cancelled pass finished its file and took no more")
+        XCTAssertEqual(secondReport.generated, 11, "\(secondReport.failures)")
+        XCTAssertEqual(counter.calls, 12, "each thumbnail made once")
+        let left = try await catalog.thumbnailJobs()
+        XCTAssertTrue(left.isEmpty, "every key recorded")
+    }
+}
+
+/// Counts renders; the first one waits on `gate` when one is set.
+final class CountingRenderer: EditedThumbnailRenderer, @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var gate: DispatchSemaphore?
+
+    var calls: Int { lock.withLock { count } }
+
+    func renderThumbnail(rawFileAt url: URL, editStackJSON: String) throws -> CGImage {
+        let isFirst = lock.withLock { count += 1; return count == 1 }
+        if isFirst { gate?.wait() }
+        return try SolidRenderer().renderThumbnail(rawFileAt: url, editStackJSON: editStackJSON)
+    }
 }

@@ -185,6 +185,19 @@ public enum FolderAccess {
         public let relPath: String
     }
 
+    /// Who owns a folder, as far as the disk can say.
+    public enum Ownership: Equatable, Sendable {
+        /// An included subfolder of the catalog in `Membership.root`.
+        case owned(Membership)
+        /// A catalog of its own, or none above it, or the nearest one above
+        /// doesn't include it.
+        case independent
+        /// The nearest enclosing folder has a catalog, but its database
+        /// can't be read: under the sandbox, a folder the user hasn't chosen
+        /// or added this session. Whether it includes `folder` is unknown.
+        case unreadable(root: URL)
+    }
+
     /// The catalog `folder` already belongs to, when an enclosing folder's
     /// catalog includes it (DESIGN.md §5.2).
     ///
@@ -194,22 +207,51 @@ public enum FolderAccess {
     /// already treats that one as independent. Reads that catalog's
     /// database read-only; a folder with a catalog of its own, or none
     /// above it, belongs to nobody.
+    ///
+    /// An enclosing catalog that can't be read counts as not owning it
+    /// here, so this is only for callers that never give `folder` a
+    /// container or write sidecars for it. Any caller that might (opening
+    /// the folder, moving or copying images into it) asks `ownership`
+    /// instead, which tells the two apart.
     public static func owningCatalog(of folder: URL) -> Membership? {
+        if case .owned(let membership) = ownership(of: folder) { return membership }
+        return nil
+    }
+
+    /// As `owningCatalog`, but says when the enclosing catalog's database
+    /// couldn't be read rather than guessing it doesn't include `folder`.
+    /// Guessing wrong splits that catalog: the folder gets a container of
+    /// its own, and the enclosing catalog then drops its images.
+    public static func ownership(of folder: URL) -> Ownership {
         let folder = folder.standardizedFileURL
-        guard !hasCatalog(folder) else { return nil }
+        guard !hasCatalog(folder) else { return .independent }
         var parts = [folder.lastPathComponent]
         var ancestor = folder.deletingLastPathComponent()
         while ancestor.path != "/" {
             if hasCatalog(ancestor) {
                 let relPath = parts.reversed().joined(separator: "/")
-                guard let modes = try? subfolderModes(ofCatalogIn: ancestor),
-                      isIncluded(relPath, defaultMode: modes.defaultMode, modes: modes.modes) else { return nil }
-                return Membership(root: ancestor, relPath: relPath)
+                let modes: (defaultMode: SubfolderMode, modes: [String: SubfolderMode])
+                do {
+                    guard let found = try subfolderModes(ofCatalogIn: ancestor) else { return .independent }
+                    modes = found
+                } catch {
+                    return .unreadable(root: ancestor)
+                }
+                guard isIncluded(relPath, defaultMode: modes.defaultMode, modes: modes.modes) else { return .independent }
+                return .owned(Membership(root: ancestor, relPath: relPath))
             }
             parts.append(ancestor.lastPathComponent)
             ancestor = ancestor.deletingLastPathComponent()
         }
-        return nil
+        return .independent
+    }
+
+    /// For the status bar when `ownership` says `.unreadable`.
+    public static func unreadableOwnerMessage(folder: URL, root: URL) -> String {
+        let name = "“\(FileManager.default.displayName(atPath: folder.path))”"
+        let rootName = "“\(FileManager.default.displayName(atPath: root.path))”"
+        return "\(name) is inside \(rootName), which has a catalog Latent can’t read now, so it can’t tell whether "
+            + "\(name) belongs to it. Open \(rootName) instead, or add it to the sidebar, so its photos stay in one catalog."
     }
 
     /// Whether reconciling would reach `relPath`: every folder on the way
@@ -224,11 +266,14 @@ public enum FolderAccess {
         return !prefix.isEmpty
     }
 
-    private static func subfolderModes(ofCatalogIn root: URL) throws -> (defaultMode: SubfolderMode, modes: [String: SubfolderMode]) {
+    /// Nil when the container holds no database yet: a catalog that has
+    /// recorded nothing, so it includes nothing. Throws when there is one
+    /// that can't be opened or read.
+    private static func subfolderModes(ofCatalogIn root: URL) throws -> (defaultMode: SubfolderMode, modes: [String: SubfolderMode])? {
         let container = [Catalog.containerName, Catalog.legacyContainerName]
             .map { root.appendingPathComponent($0) }
             .first { FileManager.default.fileExists(atPath: $0.appendingPathComponent("catalog.sqlite").path) }
-        guard let container else { throw CocoaError(.fileNoSuchFile) }
+        guard let container else { return nil }
         var config = Configuration()
         config.readonly = true
         let queue = try DatabaseQueue(path: container.appendingPathComponent("catalog.sqlite").path,

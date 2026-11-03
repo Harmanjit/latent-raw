@@ -1,4 +1,5 @@
 import XCTest
+import GRDB
 @testable import Catalog
 
 final class CatalogTests: XCTestCase {
@@ -74,6 +75,42 @@ final class CatalogTests: XCTestCase {
 
         // Opening again is ordinary: nothing more is set aside.
         XCTAssertNil(try Catalog.open(at: tmp).damagedDatabaseSetAside)
+    }
+
+    /// A database whose header and schema are fine but whose tables are
+    /// damaged opens without complaint when only the migrations are read,
+    /// then fails at the first query on every attempt. Opening must find
+    /// such damage and set the file aside as it does a file that isn't a
+    /// database at all.
+    func testDatabaseDamagedPastTheSchemaIsSetAside() async throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        _ = try Catalog.open(at: tmp)
+        let database = tmp.appendingPathComponent("\(Catalog.containerName)/catalog.sqlite")
+        // Fold the WAL into the file, so the page overwritten below isn't
+        // shadowed by a newer copy in the journal.
+        let (rootPage, pageSize): (Int, Int) = try {
+            let queue = try DatabaseQueue(path: database.path)
+            try queue.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA journal_mode = DELETE") }
+            return try queue.read { db in
+                (try Int.fetchOne(db, sql: "SELECT rootpage FROM sqlite_master WHERE name = 'images'") ?? 0,
+                 try Int.fetchOne(db, sql: "PRAGMA page_size") ?? 0)
+            }
+        }()
+        XCTAssertGreaterThan(rootPage, 1)
+        for suffix in ["-wal", "-shm"] { try? fm.removeItem(atPath: database.path + suffix) }
+        let handle = try FileHandle(forWritingTo: database)
+        try handle.seek(toOffset: UInt64((rootPage - 1) * pageSize))
+        try handle.write(contentsOf: Data(repeating: 0xA5, count: pageSize))
+        try handle.close()
+
+        let reopened = try Catalog.open(at: tmp)
+        XCTAssertNotNil(reopened.damagedDatabaseSetAside, "damage past the schema was not noticed")
+        let count = try await reopened.imageCount()
+        XCTAssertEqual(count, 0, "the fresh database answers queries")
     }
 
     /// The point of setting the database aside: ratings and edits come back

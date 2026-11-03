@@ -73,8 +73,7 @@ public enum XMPSidecar {
         let xml = render(fields)
         let directory = destination.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let tmp = directory
-            .appendingPathComponent(".\(destination.lastPathComponent).tmp-\(UUID().uuidString)")
+        let tmp = FileOperations.companionTemporaryURL(for: destination)
 
         try xml.write(to: tmp, atomically: false, encoding: .utf8)
         _ = try FileManager.default.replaceItemAt(destination, withItemAt: tmp)
@@ -148,12 +147,29 @@ public enum XMPSidecar {
     /// other files or fetch a URL.
     static let parseOptions: XMLNode.Options = [.nodePreserveWhitespace, .nodeLoadExternalEntitiesNever]
 
+    /// Opens the file itself without following a link, and checks the size
+    /// and type of what was opened: checking the path and then parsing it
+    /// let a symbolic link pass the cap with its own few bytes while the
+    /// parser read its target whole. Non-blocking, so a FIFO dropped in
+    /// under a sidecar's name is refused rather than waited on.
     public static func read(from url: URL) throws -> Fields {
-        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
-        if let size = attrs[.size] as? Int, size > maximumSidecarBytes {
-            throw SidecarError.tooLarge(size)
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else {
+            let code = errno
+            if code == ELOOP { throw SidecarError.notARegularFile }
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: url.path])
         }
-        let document = try XMLDocument(contentsOf: url, options: parseOptions)
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(fd, &info) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSFilePathErrorKey: url.path])
+        }
+        guard (info.st_mode & S_IFMT) == S_IFREG else { throw SidecarError.notARegularFile }
+        if info.st_size > maximumSidecarBytes { throw SidecarError.tooLarge(Int(info.st_size)) }
+        // Bounded even if the file grows after the check.
+        let data = try handle.read(upToCount: maximumSidecarBytes + 1) ?? Data()
+        if data.count > maximumSidecarBytes { throw SidecarError.tooLarge(data.count) }
+        let document = try XMLDocument(data: data, options: parseOptions)
         return try parse(document)
     }
 
@@ -165,8 +181,13 @@ public enum XMPSidecar {
 
     public enum SidecarError: Error, CustomStringConvertible {
         case tooLarge(Int)
+        /// A link, folder or device under a sidecar's name.
+        case notARegularFile
         public var description: String {
-            switch self { case .tooLarge(let n): "sidecar is \(n) bytes; the limit is \(maximumSidecarBytes)" }
+            switch self {
+            case .tooLarge(let n): "sidecar is \(n) bytes; the limit is \(maximumSidecarBytes)"
+            case .notARegularFile: "sidecar is not a regular file"
+            }
         }
     }
 

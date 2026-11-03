@@ -1,4 +1,5 @@
 import XCTest
+import CoreGraphics
 @testable import Catalog
 
 final class XMPSidecarTests: XCTestCase {
@@ -17,6 +18,37 @@ final class XMPSidecarTests: XCTestCase {
         try XMPSidecar.write(original, to: url)
         let back = try XMPSidecar.read(from: url)
         XCTAssertEqual(back, original)
+    }
+
+    /// The name rule allows names up to `maximumNameBytes`; the sidecar and
+    /// thumbnail for such an image, written through a temporary sibling,
+    /// must fit too. The temporary names used to add 46 bytes, so any
+    /// name past about 209 bytes could never save again.
+    func testLongestAllowedNameStillSavesSidecarAndThumbnail() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        let image = try XCTUnwrap(ctx.makeImage())
+        let fields = XMPSidecar.Fields(rating: 2, label: nil, keywords: [], preservedFileName: nil,
+                                       sourceHash: "xxh64:0", editStackJSON: "")
+        for stemBytes in [226, FileOperations.maximumNameBytes - 4] {
+            let name = String(repeating: "a", count: stemBytes) + ".NEF"
+            XCTAssertNil(FileOperations.problem(withName: name))
+            let sidecar = tmp.appendingPathComponent(name + ".xmp")
+            XCTAssertNoThrow(try XMPSidecar.write(fields, to: sidecar), "\(name.utf8.count)-byte name")
+            XCTAssertEqual(try XMPSidecar.read(from: sidecar).rating, 2)
+            let thumbnail = tmp.appendingPathComponent(name + ".heic")
+            XCTAssertNoThrow(try Thumbnailer.write(image, to: thumbnail), "\(name.utf8.count)-byte name")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: thumbnail.path))
+        }
+        // One byte more and the thumbnail's own name wouldn't fit.
+        XCTAssertEqual(FileOperations.problem(withName: String(repeating: "a", count: FileOperations.maximumNameBytes + 1)),
+                       .tooLong)
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: tmp.path).filter { $0.hasPrefix(".") }
+        XCTAssertEqual(leftovers, [], "no temporary file is left behind")
     }
 
     /// A Lightroom-style sidecar with no Latent fields still yields the
