@@ -13,6 +13,7 @@ public enum ModelImportError: Error, Equatable, CustomStringConvertible {
     case badFileName(String), missingLabels(String), linkedFile(String, String), unreadableFolder(String, String)
     case packageWithoutManifest(String, besideUnreadable: Bool), manifestNamesOtherPackages(String)
     case archiveTooLarge(Int64), archiveTooManyEntries(Int)
+    case unusableManifest(String), labelsMismatch(Int, Int)
 
     /// Plain sentences, each ending with what happened: the model was not
     /// added. Never a path: the file's name says which file, and the log
@@ -78,6 +79,10 @@ public enum ModelImportError: Error, Equatable, CustomStringConvertible {
             return "The archive unpacks to more than \(size), far more than a model needs, so it was refused."
         case .archiveTooManyEntries(let count):
             return "The archive holds \(count) entries, far more than a model needs, so it was refused."
+        case .unusableManifest(let why):
+            return "The manifest can't describe a working model (\(why)), so the model was not added."
+        case .labelsMismatch(let labels, let planes):
+            return "The labels file names \(labels) classes but the model puts out \(planes), so the model was not added."
         }
     }
 }
@@ -192,6 +197,17 @@ public enum ModelImporter {
             discardCopy()
             throw ModelImportError.copyFailed(reason(error))
         }
+        // The source was hashed before the copy; hash what was copied too,
+        // since the compiled cache entry is named after that hash and a
+        // source changed in between would otherwise install unchecked bytes.
+        do {
+            for package in manifest.packages {
+                try checkHash(of: package, at: copy.appendingPathComponent(package.name), ignoringRootFiles: [])
+            }
+        } catch {
+            discardCopy()
+            throw error
+        }
 
         // Compile check, one package at a time so a large model never
         // holds two compiles' memory; off the main actor because Core ML
@@ -200,12 +216,16 @@ public enum ModelImporter {
         for (index, package) in manifest.packages.enumerated() {
             let fraction = 0.3 + 0.65 * Double(index) / Double(max(manifest.packages.count, 1))
             progress?(Progress(stage: "Checking \(package.name)…", fraction: fraction))
-            let names: (inputs: Set<String>, outputs: Set<String>)
+            let names: (inputs: Set<String>, outputs: Set<String>, planes: Int?)
             do {
                 names = try await Task.detached(priority: .userInitiated) {
                     let model = try await CoreMLStore.load(package, of: manifest, at: copy, computeUnits: .cpuAndGPU)
+                    // A class model's output is (1, classes, H, W) when its shape is fixed.
+                    let shape = model.modelDescription.outputDescriptionsByName.values.first?
+                        .multiArrayConstraint?.shape.map(\.intValue) ?? []
                     return (Set(model.modelDescription.inputDescriptionsByName.keys),
-                            Set(model.modelDescription.outputDescriptionsByName.keys))
+                            Set(model.modelDescription.outputDescriptionsByName.keys),
+                            shape.count == 4 && shape[1] > 0 ? shape[1] : nil)
                 }.value
             } catch {
                 discardCopy()
@@ -214,6 +234,12 @@ public enum ModelImporter {
             guard featuresMatch(package.inputNames, names.inputs), featuresMatch(package.outputNames, names.outputs) else {
                 discardCopy()
                 throw ModelImportError.featureMismatch(package.name)
+            }
+            // The labels file is read as the index of the output's planes.
+            if manifest.kind == .semanticSegmentation, let planes = names.planes, let file = manifest.labelsFile,
+               let labels = CoreMLStore.json(file, in: copy, as: [String].self), labels.count != planes {
+                discardCopy()
+                throw ModelImportError.labelsMismatch(labels.count, planes)
             }
         }
 
@@ -317,6 +343,7 @@ public enum ModelImporter {
         guard let manifestFile = manifests.first else { throw ModelImportError.noManifest }
         guard manifests.count == 1 else { throw ModelImportError.severalManifests }
         let manifest = try readManifest(manifestFile, registry: registry)
+        try checkKindFields(of: manifest)
 
         // Every package present, nothing else in the folder.
         var expected: Set<String> = [manifestFile.lastPathComponent]
@@ -360,6 +387,7 @@ public enum ModelImporter {
         guard manifest.packages.count == 1, manifest.packages[0].name == name else {
             throw ModelImportError.manifestNamesOtherPackages(name)
         }
+        try checkKindFields(of: manifest)
         var sidecars: Set<String> = [manifestFile.lastPathComponent]
         if let labels = manifest.labelsFile { sidecars.insert(labels) }
         try checkHash(of: manifest.packages[0], at: url, ignoringRootFiles: sidecars)
@@ -405,6 +433,33 @@ public enum ModelImporter {
             throw ModelImportError.badFileName(labels)
         }
         return manifest
+    }
+
+    /// The square an imported model's input may be stretched to.
+    static let inputSizeRange = 32...4096
+
+    /// What each kind needs of the manifest beyond decoding. Without this a
+    /// click-to-select model with a misspelt role imported as Installed and
+    /// then failed at every mask.
+    static func checkKindFields(of manifest: ModelManifest) throws {
+        guard manifest.version >= 1 else { throw ModelImportError.unusableManifest("version \(manifest.version)") }
+        guard manifest.sizeMB > 0 else { throw ModelImportError.unusableManifest("size \(manifest.sizeMB) MB") }
+        guard inputSizeRange.contains(manifest.inputSize) else {
+            throw ModelImportError.unusableManifest("input size \(manifest.inputSize)")
+        }
+        switch manifest.kind {
+        case .promptedSegmentation:
+            let roles = manifest.packages.map { $0.role ?? "" }
+            let needed = [SAM2Models.encoderRole, SAM2Models.promptRole, SAM2Models.decoderRole]
+            guard roles.count == needed.count, Set(roles) == Set(needed) else {
+                throw ModelImportError.unusableManifest(
+                    "a click-to-select model needs one package each with the roles \(needed.joined(separator: ", "))")
+            }
+        case .subjectSegmentation, .semanticSegmentation, .denoise:
+            guard manifest.packages.count == 1 else {
+                throw ModelImportError.unusableManifest("this kind of model is one package, not \(manifest.packages.count)")
+            }
+        }
     }
 
     /// The package's content hash against the manifest's, with the hash

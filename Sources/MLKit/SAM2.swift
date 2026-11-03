@@ -177,7 +177,7 @@ public final class SAM2Session: @unchecked Sendable {
             // Logits; 0 is the decision boundary. A sigmoid gives a soft
             // edge a few pixels wide at 256², which upsamples cleanly.
             let logit = all[best * plane + i]
-            data[i] = UInt8(min(max(1 / (1 + exp(-logit)), 0), 1) * 255)
+            data[i] = MLImage.maskByte(1 / (1 + exp(-logit)))
         }
         return Prediction(mask: MaskBitmap(width: w, height: h, data: data),
                           score: scoreValues[best], seconds: Date().timeIntervalSince(start))

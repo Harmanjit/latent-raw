@@ -201,7 +201,9 @@ public enum ExportWorker {
         // Not for linear sources, which the denoiser refuses; the pipeline
         // doesn't blend a strength in for them either.
         if parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
-            let denoiser = try await AIDenoiser.load()
+            // Shared across the batch: loading the network per image cost
+            // seconds each.
+            let denoiser = try await AIDenoiser.shared()
             try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
             lap("denoise")
             try Task.checkCancellation()

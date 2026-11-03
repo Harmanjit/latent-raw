@@ -460,4 +460,81 @@ final class ModelImporterTests: XCTestCase {
         try "{}".write(to: unpacked.appendingPathComponent("x.model.json"), atomically: true, encoding: .utf8)
         XCTAssertEqual(ModelImporter.modelFolder(inStaged: unpacked), unpacked)
     }
+
+    // MARK: - Kind-specific manifest fields
+
+    /// Rewrites the folder's manifest through `change`; the hashes cover
+    /// the packages, not the manifest, so they still match.
+    func editManifest(_ folder: URL, _ change: (inout [String: Any]) -> Void) throws {
+        let file = folder.appendingPathComponent("\(Self.id).model.json")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        change(&object)
+        try JSONSerialization.data(withJSONObject: object).write(to: file)
+    }
+
+    /// A manifest whose kind needs fields it lacks is refused at import,
+    /// not accepted as Installed to fail at every mask: a click-to-select
+    /// model without its three roles, a one-package kind with two, and an
+    /// input size, version or size out of range.
+    func testKindSpecificFieldsAreChecked() async throws {
+        func refusedAsUnusable(_ e: ModelImportError) -> Bool {
+            if case .unusableManifest = e { return true }
+            return false
+        }
+        let prompted = try makeFolder()
+        try editManifest(prompted) { $0["kind"] = "promptedSegmentation" }
+        await assertRefused(prompted, refusedAsUnusable)
+
+        for (key, value) in [("inputSize", 0), ("inputSize", 5_000_000), ("version", 0), ("sizeMB", -1)] {
+            let folder = try makeFolder()
+            try editManifest(folder) { $0[key] = value }
+            await assertRefused(folder, refusedAsUnusable)
+        }
+
+        // The roles themselves: exactly the three, once each.
+        func manifest(roles: [String?], kind: ModelManifest.Kind = .promptedSegmentation) -> ModelManifest {
+            ModelManifest(id: "roles", displayName: "Roles", purpose: "Testing", version: 1, kind: kind,
+                          licence: .init(name: "MIT", url: URL(string: "https://example.org/L")!, commercialUse: true),
+                          sourceURL: URL(string: "https://example.org/roles")!, sizeMB: 1, inputSize: 1024,
+                          packages: roles.enumerated().map { .init(name: "P\($0.offset).mlpackage", role: $0.element, sha256: "0") })
+        }
+        XCTAssertNoThrow(try ModelImporter.checkKindFields(of: manifest(roles: ["imageEncoder", "promptEncoder", "maskDecoder"])))
+        for roles: [String?] in [["imageEncoder", "promptEncoder", "maskdecoder"], ["imageEncoder", "promptEncoder"],
+                                 ["imageEncoder", "promptEncoder", "promptEncoder"], ["imageEncoder", "promptEncoder", nil],
+                                 ["imageEncoder", "promptEncoder", "maskDecoder", "maskDecoder"]] {
+            XCTAssertThrowsError(try ModelImporter.checkKindFields(of: manifest(roles: roles)), "\(roles)")
+        }
+        XCTAssertNoThrow(try ModelImporter.checkKindFields(of: manifest(roles: [nil], kind: .subjectSegmentation)))
+        XCTAssertThrowsError(try ModelImporter.checkKindFields(of: manifest(roles: [nil, nil], kind: .subjectSegmentation)))
+    }
+
+    /// A class model whose labels file names more classes than its output
+    /// has planes is refused at the compile check; ClassMap would have
+    /// read past the end of the output. NAFNet's output has three planes.
+    func testLabelsCountMustMatchTheOutputPlanes() async throws {
+        let folder = try makeFolder(kind: "semanticSegmentation", labelsFile: "labels.json")
+        let labels = try JSONSerialization.data(withJSONObject: (0..<150).map { "class \($0)" })
+        try labels.write(to: folder.appendingPathComponent("labels.json"))
+        await assertRefused(folder) { $0 == .labelsMismatch(150, 3) }
+    }
+
+    /// The bytes installed are the bytes hashed: a source changed after
+    /// the checks and before the copy is caught by hashing the copy.
+    func testSourceChangedDuringTheCopyIsRefused() async throws {
+        let folder = try makeFolder()
+        let weights = folder.appendingPathComponent("\(Self.packageName)/Data/com.apple.CoreML/weights/weight.bin")
+        do {
+            _ = try await ModelImporter.importModel(from: folder, into: registry) { p in
+                guard p.stage.hasPrefix("Copying") else { return }
+                // What a sync client finishing a download would do.
+                guard let handle = try? FileHandle(forWritingTo: weights) else { return }
+                try? handle.write(contentsOf: Data([1, 2, 3, 4]))
+                try? handle.close()
+            }
+            XCTFail("the model was added")
+        } catch let error as ModelImportError {
+            XCTAssertEqual(error, .checksumMismatch(Self.packageName))
+        }
+        XCTAssertEqual(externalContents(), [], "nothing left behind")
+    }
 }

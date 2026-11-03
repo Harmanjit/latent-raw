@@ -1,5 +1,6 @@
 import Foundation
 import CoreML
+import os
 
 /// Finds, compiles and caches the Core ML packages bundled with MLKit.
 ///
@@ -8,7 +9,8 @@ import CoreML
 /// done once and cached in Application Support. A package loaded through
 /// its manifest is keyed by its content hash; the name-only loader the
 /// denoiser still uses keys by the weights file's size and modification
-/// date. Either way a replaced model recompiles.
+/// date. Either way a replaced model recompiles, and the older compiled
+/// copy is removed.
 public enum CoreMLStore {
     public enum StoreError: Error, CustomStringConvertible {
         case modelMissing(String)
@@ -63,7 +65,16 @@ public enum CoreMLStore {
         packageURL(name) != nil
     }
 
+    /// Set by tests to a temporary folder, so they neither fill nor prune
+    /// the installed app's compiled models.
+    private static let cacheDirectoryOverride = OSAllocatedUnfairLock<URL?>(initialState: nil)
+
+    static func overrideCacheDirectory(_ url: URL?) {
+        cacheDirectoryOverride.withLock { $0 = url }
+    }
+
     static var cacheDirectory: URL {
+        if let url = cacheDirectoryOverride.withLock({ $0 }) { return url }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = base.appendingPathComponent("latent/mlmodels", isDirectory: true)
         // Reuse the pre-rename app's compiled models rather than recompiling.
@@ -113,8 +124,41 @@ public enum CoreMLStore {
         let attrs = (try? FileManager.default.attributesOfItem(atPath: weights.path)) ?? [:]
         let size = (attrs[.size] as? Int) ?? 0
         let mtime = Int((attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)
-        return try await load(package: package, cacheKey: "\(name)-\(size)-\(mtime).mlmodelc",
-                              computeUnits: computeUnits)
+        let key = "\(name)-\(size)-\(mtime).mlmodelc"
+        pruneNameKeyed(keeping: key, name: name)
+        return try await load(package: package, cacheKey: key, computeUnits: computeUnits)
+    }
+
+    /// The packages still loaded by name rather than through a manifest.
+    static var nameKeyedPackages: Set<String> {
+        Set(AIDenoiser.Variant.allCases.map(\.packageName))
+    }
+
+    /// The package name of a name-keyed cache entry
+    /// ("<name>-<size>-<mtime>.mlmodelc"), nil for anything else (a
+    /// manifest entry's key ends "<package>.mlpackage-<hash>.mlmodelc").
+    static func nameKeyedName(of entry: String) -> String? {
+        guard entry.hasSuffix(".mlmodelc") else { return nil }
+        let parts = entry.dropLast(".mlmodelc".count).split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count >= 3,
+              parts.suffix(2).allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) else { return nil }
+        let name = parts.dropLast(2).joined(separator: "-")
+        return name.isEmpty || name.contains(".mlpackage") ? nil : name
+    }
+
+    /// The name-keyed key changes with the weights file's mtime, and every
+    /// build or reinstall copies the bundle afresh, so each one used to add
+    /// another compiled copy (tens of MB) that nothing ever removed. Keep
+    /// one per name: drop this name's other entries, and the entries of
+    /// names no longer loaded by name at all (SAM 2 and SegFormer before
+    /// they had manifests).
+    static func pruneNameKeyed(keeping key: String, name: String) {
+        let fm = FileManager.default
+        let keep = nameKeyedPackages
+        for entry in (try? fm.contentsOfDirectory(atPath: cacheDirectory.path)) ?? [] where entry != key {
+            guard let owner = nameKeyedName(of: entry), owner == name || !keep.contains(owner) else { continue }
+            try? fm.removeItem(at: cacheDirectory.appendingPathComponent(entry))
+        }
     }
 
     /// Compiles and loads one package of `manifest` from `directory`
@@ -172,6 +216,14 @@ public enum CoreMLStore {
 // MARK: - Image helpers shared by the models
 
 enum MLImage {
+    /// A model's mask value (0...1) as a mask byte. NaN becomes 0: Swift's
+    /// min and max pass NaN straight through, and UInt8(Float.nan) traps,
+    /// so one NaN in a model's output (an overflowing float16 softmax, say)
+    /// would otherwise end the app instead of leaving a hole in the mask.
+    static func maskByte(_ v: Float) -> UInt8 {
+        v.isNaN ? 0 : UInt8(min(max(v, 0), 1) * 255)
+    }
+
     /// Draws `image` stretched into a BGRA pixel buffer of `width x height`.
     /// Stretching (not letterboxing) is what these networks were trained
     /// and evaluated with; the mask is un-stretched on the way out simply

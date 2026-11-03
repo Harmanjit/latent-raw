@@ -233,7 +233,8 @@ public final class ModelRegistry: @unchecked Sendable {
     /// Engine, and an imported model never reaches it (a package Core ML's
     /// ANE compiler chokes on hangs the app; docs/Retouch.md §13). On a
     /// tie between cpuAndGPU and cpuAndNeuralEngine the manifest's choice
-    /// wins, then the preference's.
+    /// wins, then the preference's, except that an imported model never
+    /// gets the Neural Engine even from its own manifest.
     public func effectiveComputeUnits(for entry: ModelEntry,
                                       preference: MLComputeUnits = CoreMLStore.defaultComputeUnits) -> MLComputeUnits {
         let cap: ModelManifest.ComputeUnits = entry.status == .bundled ? .all : .cpuAndGPU
@@ -243,6 +244,11 @@ public final class ModelRegistry: @unchecked Sendable {
         let candidates = [entry.manifest.computeUnits ?? .all, cap, ModelManifest.ComputeUnits(preference)]
         var best = candidates[0]
         for candidate in candidates.dropFirst() where candidate.rank < best.rank { best = candidate }
+        // cpuAndNeuralEngine shares rank 1 with the cap, so an imported
+        // manifest asking for it would win the tie and reach the Neural
+        // Engine after all. The cap is a hard limit for imported models:
+        // swap the request for the GPU.
+        if entry.status != .bundled, best == .cpuAndNeuralEngine { best = .cpuAndGPU }
         return best.mlComputeUnits
     }
 
@@ -334,13 +340,15 @@ public final class ModelRegistry: @unchecked Sendable {
         }
     }
 
-    /// Memory warning: every loaded model goes.
+    /// Memory warning: every loaded model goes, the shared registry's
+    /// taking the export worker's denoiser with it.
     public func releaseAll() {
         state.withLock { state in
             state.loaded.removeAll()
             state.loading.removeAll()
             state.generation += 1
         }
+        if self === Self.shared { AIDenoiser.releaseShared() }
     }
 }
 

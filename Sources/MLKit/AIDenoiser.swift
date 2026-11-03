@@ -1,6 +1,7 @@
 import Foundation
 import CoreML
 import Metal
+import os
 import PixelEngine
 
 /// Neural noise reduction with NAFNet (SIDD, width 32), converted by
@@ -88,6 +89,38 @@ public final class AIDenoiser: @unchecked Sendable {
 
     private init(variant: Variant, model: MLModel) { self.variant = variant; self.model = model }
 
+    /// One loaded network per variant for the export worker, print and
+    /// contact-sheet cells. Loading builds a fresh MLModel from the
+    /// compiled copy every time, so a batch of N exports used to load the
+    /// 56 MB network N times. A failed load is not kept, so the next ask
+    /// tries again.
+    private static let sharedLoads = OSAllocatedUnfairLock<[Variant: Task<AIDenoiser, Error>]>(initialState: [:])
+
+    /// The loaded network for `variant` (the preferred one by default),
+    /// loading it on the first ask; later asks get the same instance until
+    /// `releaseShared()`.
+    public static func shared(_ variant: Variant? = nil) async throws -> AIDenoiser {
+        let v = variant ?? preferredVariant
+        let task = sharedLoads.withLock { loads in
+            if let running = loads[v] { return running }
+            let task = Task<AIDenoiser, Error> { try await load(v) }
+            loads[v] = task
+            return task
+        }
+        do {
+            return try await task.value
+        } catch {
+            sharedLoads.withLock { loads in if loads[v] == task { loads[v] = nil } }
+            throw error
+        }
+    }
+
+    /// Memory pressure: drops the shared networks. A denoise in flight
+    /// keeps its own reference until it finishes.
+    public static func releaseShared() {
+        sharedLoads.withLock { $0.removeAll() }
+    }
+
     /// Denoises an RGBA float16 image (row-major, four halfs per pixel),
     /// returning the result. `white` is the largest value an unclipped
     /// pixel can take (after white balance a channel can sit well above
@@ -98,67 +131,132 @@ public final class AIDenoiser: @unchecked Sendable {
     /// receives tiles done and total. Checks for cancellation between tiles.
     public func denoise(_ pixels: [Float16], width: Int, height: Int, white: Float = 1,
                         progress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> [Float16] {
+        // Through self, which is Sendable, rather than the MLModel itself.
+        return try await Self.assemble(pixels, width: width, height: height, white: white,
+                                       progress: progress) { [self] input in
+            var out = try Self.unpack(Self.run(self.model, input: input))
+            // Should the network still fail on some tile, keep
+            // the noisy original there rather than a broken block.
+            if Self.diverged(input: input, output: out) { out = Self.unpack(input) }
+            return out
+        }
+    }
+
+    /// The tiling around `denoise`: packs each tile, hands it to
+    /// `runTile` (packed input in, unpacked output out) and blends the
+    /// answers back into the frame. Separate from the network so tests can
+    /// check the blending with a stand-in.
+    ///
+    /// The weighted sums are kept for one band of rows, a tile high, rather
+    /// than the whole frame: tile rows go top to bottom, so once the next
+    /// row of tiles starts lower down, the rows above it are final and are
+    /// written into the result and dropped. Full-frame float sums cost 16
+    /// bytes a pixel, about 1.6 GB for a 100 MP frame, on top of the input
+    /// and the result.
+    static func assemble(_ pixels: [Float16], width: Int, height: Int, white: Float,
+                         progress: (@Sendable (Int, Int) -> Void)?,
+                         runTile: @escaping @Sendable ([Float]) throws -> [Float]) async throws -> [Float16] {
         let white = max(white, 1e-3)
         let t = Self.tile, o = Self.overlap, stride = t - o
         let cols = max(1, Int(ceil(Double(max(width - o, 1)) / Double(stride))))
         let rows = max(1, Int(ceil(Double(max(height - o, 1)) / Double(stride))))
         let total = cols * rows
+        func tileX(_ col: Int) -> Int { min(col * stride, max(0, width - t)) }
+        func tileY(_ row: Int) -> Int { min(row * stride, max(0, height - t)) }
 
         // Accumulate weighted results; weight ramps linearly across the
-        // overlap so seams vanish.
-        var accum = [Float](repeating: 0, count: width * height * 3)
-        var weight = [Float](repeating: 0, count: width * height)
+        // overlap so seams vanish. The band holds rows bandTop..<bandTop+bandRows.
+        let bandRows = min(t, height)
+        var accum = [Float](repeating: 0, count: width * bandRows * 3)
+        var weight = [Float](repeating: 0, count: width * bandRows)
+        var bandTop = 0
         let ramp: [Float] = (0..<t).map { i in
             let a = min(Float(i) + 0.5, Float(t - i) - 0.5)
             return min(1, a / Float(o))
         }
 
+        var result = pixels
+        /// Writes the finished rows lo..<hi (all inside the band) into `result`.
+        func finish(_ lo: Int, _ hi: Int) {
+            for y in lo..<hi {
+                for x in 0..<width {
+                    let i = y * width + x, bi = (y - bandTop) * width + x
+                    let w = weight[bi]
+                    guard w > 0 else { continue }
+                    let r = Float(pixels[i * 4]), g = Float(pixels[i * 4 + 1]), b = Float(pixels[i * 4 + 2])
+                    // Near-clipped pixels keep their original value, fading in
+                    // over the last 15% below white so there is no visible edge.
+                    let peak = max(r, g, b) / white
+                    let keep = Self.smoothstep(0.85, 1.0, peak)
+                    if keep >= 1 { continue }
+                    for c in 0..<3 {
+                        let original = Float(pixels[i * 4 + c])
+                        let denoised = Self.decode(accum[bi * 3 + c] / w) * white
+                        result[i * 4 + c] = Float16(denoised + (original - denoised) * keep)
+                    }
+                }
+            }
+        }
+        /// Finishes the rows above `top` and slides the band down to start there.
+        func moveBand(to top: Int) {
+            finish(bandTop, min(top, bandTop + bandRows))
+            let shift = min(top - bandTop, bandRows)
+            let kept = (bandRows - shift) * width
+            for k in 0..<kept {
+                weight[k] = weight[k + shift * width]
+                for c in 0..<3 { accum[k * 3 + c] = accum[(k + shift * width) * 3 + c] }
+            }
+            for k in kept..<(bandRows * width) {
+                weight[k] = 0
+                for c in 0..<3 { accum[k * 3 + c] = 0 }
+            }
+            bandTop = top
+        }
+
         var done = 0
+        // Tiles finish out of order, and up to `inFlight` of them may
+        // belong to later rows than the band's; those wait here.
+        var waiting: [Int: [(Int, [Float])]] = [:]
+        var doneInRow = [Int](repeating: 0, count: rows)
+        var bandRow = 0
         // A few tiles in flight keeps the GPU busy while the CPU packs the next.
         let inFlight = 3
         var index = 0
         try await withThrowingTaskGroup(of: (Int, Int, [Float]).self) { group in
             func submit(_ i: Int) {
                 let row = i / cols, col = i % cols
-                let x0 = min(col * stride, max(0, width - t))
-                let y0 = min(row * stride, max(0, height - t))
+                let x0 = tileX(col), y0 = tileY(row)
                 let input = Self.packTile(pixels, width: width, height: height, x0: x0, y0: y0, white: white)
-                let model = self.model
                 group.addTask {
                     try Task.checkCancellation()
-                    var out = try Self.unpack(Self.run(model, input: input))
-                    // Should the network still fail on some tile, keep
-                    // the noisy original there rather than a broken block.
-                    if Self.diverged(input: input, output: out) { out = Self.unpack(input) }
-                    return (x0, y0, out)
+                    return (row, x0, try runTile(input))
                 }
             }
             while index < min(inFlight, total) { submit(index); index += 1 }
-            while let (x0, y0, out) = try await group.next() {
-                Self.accumulate(out, into: &accum, weight: &weight, ramp: ramp,
-                                width: width, height: height, x0: x0, y0: y0)
+            while let (row, x0, out) = try await group.next() {
+                if row == bandRow {
+                    Self.accumulate(out, into: &accum, weight: &weight, ramp: ramp,
+                                    width: width, height: height, x0: x0, y0: tileY(row), top: bandTop)
+                } else {
+                    waiting[row, default: []].append((x0, out))
+                }
+                doneInRow[row] += 1
+                // A finished row of tiles: slide the band to the next row
+                // and blend in what already came back for it.
+                while bandRow < rows - 1, doneInRow[bandRow] == cols {
+                    bandRow += 1
+                    moveBand(to: tileY(bandRow))
+                    for (x, tileOut) in waiting.removeValue(forKey: bandRow) ?? [] {
+                        Self.accumulate(tileOut, into: &accum, weight: &weight, ramp: ramp,
+                                        width: width, height: height, x0: x, y0: tileY(bandRow), top: bandTop)
+                    }
+                }
                 done += 1
                 progress?(done, total)
                 if index < total { submit(index); index += 1 }
             }
         }
-
-        var result = pixels
-        for i in 0..<(width * height) {
-            let w = weight[i]
-            guard w > 0 else { continue }
-            let r = Float(pixels[i * 4]), g = Float(pixels[i * 4 + 1]), b = Float(pixels[i * 4 + 2])
-            // Near-clipped pixels keep their original value, fading in
-            // over the last 15% below white so there is no visible edge.
-            let peak = max(r, g, b) / white
-            let keep = Self.smoothstep(0.85, 1.0, peak)
-            if keep >= 1 { continue }
-            for c in 0..<3 {
-                let original = Float(pixels[i * 4 + c])
-                let denoised = Self.decode(accum[i * 3 + c] / w) * white
-                result[i * 4 + c] = Float16(denoised + (original - denoised) * keep)
-            }
-        }
+        finish(bandTop, min(height, bandTop + bandRows))
         return result
     }
 
@@ -238,8 +336,9 @@ public final class AIDenoiser: @unchecked Sendable {
         return result.floats()
     }
 
+    /// Adds one tile into sums that start at row `top` of the frame.
     static func accumulate(_ out: [Float], into accum: inout [Float], weight: inout [Float], ramp: [Float],
-                           width: Int, height: Int, x0: Int, y0: Int) {
+                           width: Int, height: Int, x0: Int, y0: Int, top: Int = 0) {
         let t = tile
         for y in 0..<t {
             let sy = y0 + y
@@ -248,7 +347,7 @@ public final class AIDenoiser: @unchecked Sendable {
                 let sx = x0 + x
                 guard sx < width else { break }
                 let w = ramp[x] * ramp[y]
-                let i = sy * width + sx
+                let i = (sy - top) * width + sx
                 weight[i] += w
                 for c in 0..<3 {
                     accum[i * 3 + c] += w * out[c * t * t + y * t + x]

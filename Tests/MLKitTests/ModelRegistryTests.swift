@@ -236,6 +236,7 @@ final class ModelRegistryTests: XCTestCase {
         try addExternal("imported", kind: "subjectSegmentation")
         try addExternal("imported-all", kind: "subjectSegmentation", computeUnits: "all")
         try addExternal("imported-cpu", kind: "subjectSegmentation", computeUnits: "cpuOnly")
+        try addExternal("imported-ane", kind: "subjectSegmentation", computeUnits: "cpuAndNeuralEngine")
         let r = registry()
         func units(_ id: String, _ preference: MLComputeUnits) -> MLComputeUnits {
             r.effectiveComputeUnits(for: r.entry(id: id)!, preference: preference)
@@ -250,6 +251,9 @@ final class ModelRegistryTests: XCTestCase {
             // Imported: capped at cpuAndGPU whatever anyone says.
             ("imported", .all, .cpuAndGPU), ("imported", .cpuAndNeuralEngine, .cpuAndGPU),
             ("imported", .cpuOnly, .cpuOnly), ("imported-all", .all, .cpuAndGPU), ("imported-cpu", .all, .cpuOnly),
+            // An imported manifest asking for the Neural Engine still gets the GPU.
+            ("imported-ane", .all, .cpuAndGPU), ("imported-ane", .cpuAndGPU, .cpuAndGPU),
+            ("imported-ane", .cpuAndNeuralEngine, .cpuAndGPU), ("imported-ane", .cpuOnly, .cpuOnly),
             (ModelRegistry.builtInSubjectID, .all, .cpuAndGPU),
         ]
         for row in table {
