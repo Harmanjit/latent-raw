@@ -252,52 +252,70 @@ struct LocalAdjust {
     float4 lumRange;   // low, high, feather, enabled
     float4 hueRange;   // centre, width, minSat, enabled
     int4   info;       // type (1 linear, 2 radial, 3 brush, 4 whole), brushSlice, invert
+    float4 adjust2;    // tint, highlights, shadows, whites
+    float4 adjust3;    // amount, blacks, unused, hue (degrees)
+    int4   info2;      // componentStart, componentCount, detailSlot (-1 none), invertMask
+};
+
+// One component of a mask after its first shape (MaskComponents.swift).
+struct MaskComponentGPU {
+    float4 geometry0;  // shape geometry | luminance: low, high, feather | colour: h,s,h,s
+    float4 geometry1;  // radial feather | colour: h,s,h,s
+    float4 extra;      // colour: h, s, radius, sample count
+    int4   info;       // type (1-4 shapes, 5 luminance, 6 colour), slice, invert, mode
 };
 
 constant int kMaxLocals = 8;
 
-inline float localMask(constant LocalAdjust &l, float2 pNorm, float2 sensorSize,
-                       texture2d_array<float, access::sample> brushes,
-                       float displayLuma, float3 perceptual) {
+// A shape's mask, or -1 when it has no pixels yet (a brush or model mask
+// without a slice, an unknown type): such a shape masks nothing, inverted
+// or not.
+inline float shapeMask(int type, int slice, float4 g0, float4 g1, float2 pNorm, float2 sensorSize,
+                       texture2d_array<float, access::sample> brushes) {
     constexpr sampler ms(coord::normalized, address::clamp_to_edge, filter::linear);
-    float m = 0.0;
-    switch (l.info.x) {
+    switch (type) {
         case 1: {   // linear: 1 at start, 0 past end, in sensor pixels
-            float2 a = l.geometry0.xy * sensorSize, b = l.geometry0.zw * sensorSize;
+            float2 a = g0.xy * sensorSize, b = g0.zw * sensorSize;
             float2 d = b - a;
             float len2 = max(dot(d, d), 1e-6);
             float t = dot(pNorm * sensorSize - a, d) / len2;
-            m = 1.0 - smoothstep(0.0, 1.0, t);
-            break;
+            return 1.0 - smoothstep(0.0, 1.0, t);
         }
         case 2: {   // radial ellipse, radii as fractions of the short side
             float shortSide = min(sensorSize.x, sensorSize.y);
-            float2 c = l.geometry0.xy * sensorSize;
-            float2 r = max(l.geometry0.zw * shortSide, float2(1.0));
+            float2 c = g0.xy * sensorSize;
+            float2 r = max(g0.zw * shortSide, float2(1.0));
             float2 q = (pNorm * sensorSize - c) / r;
             float e = length(q);
-            float inner = 1.0 - clamp(l.geometry1.x, 0.0, 0.999);
-            m = 1.0 - smoothstep(inner, 1.0, e);
-            break;
+            float inner = 1.0 - clamp(g1.x, 0.0, 0.999);
+            return 1.0 - smoothstep(inner, 1.0, e);
         }
-        case 3:     // brush or AI: sample the mask slice (none yet -> 0)
-            if (l.info.y < 0) return 0.0;
-            m = brushes.sample(ms, pNorm, uint(l.info.y)).r;
-            break;
+        case 3:     // brush or AI: sample the mask slice (none yet -> nothing)
+            if (slice < 0) return -1.0;
+            return brushes.sample(ms, pNorm, uint(slice)).r;
         case 4:     // whole image
-            m = 1.0;
-            break;
+            return 1.0;
         default:
-            return 0.0;
+            return -1.0;
     }
+}
+
+inline float luminanceRangeWeight(float low, float high, float feather, float displayLuma) {
+    float f = max(feather, 1e-3);
+    float inLow  = smoothstep(low - f, low + f * 0.001, displayLuma);   // ramps up at low
+    float inHigh = 1.0 - smoothstep(high - f * 0.001, high + f, displayLuma);
+    return inLow * inHigh;
+}
+
+inline float localMask(constant LocalAdjust &l, float2 pNorm, float2 sensorSize,
+                       texture2d_array<float, access::sample> brushes,
+                       float displayLuma, float3 perceptual) {
+    float m = shapeMask(l.info.x, l.info.y, l.geometry0, l.geometry1, pNorm, sensorSize, brushes);
+    if (m < 0.0) return 0.0;
     if (l.info.z != 0) m = 1.0 - m;
 
     if (l.lumRange.w != 0.0) {
-        float f = max(l.lumRange.z, 1e-3);
-        float lo = l.lumRange.x, hi = l.lumRange.y;
-        float inLow  = smoothstep(lo - f, lo + f * 0.001, displayLuma);   // ramps up at lo
-        float inHigh = 1.0 - smoothstep(hi - f * 0.001, hi + f, displayLuma);
-        m *= inLow * inHigh;
+        m *= luminanceRangeWeight(l.lumRange.x, l.lumRange.y, l.lumRange.z, displayLuma);
     }
     if (l.hueRange.w != 0.0) {
         float3 hsv = rgbToHSV(perceptual);
@@ -307,6 +325,109 @@ inline float localMask(constant LocalAdjust &l, float2 pNorm, float2 sensorSize,
         m *= hueW * satW;
     }
     return clamp(m, 0.0, 1.0);
+}
+
+// Distance on the colour wheel (hue as angle, saturation as radius) to
+// the nearest sample, faded to zero at `radius` (ColourRange.weight).
+inline float colourRangeWeight(constant MaskComponentGPU &c, float3 perceptual) {
+    float3 hsv = rgbToHSV(perceptual);
+    float a = hsv.x * (M_PI_F / 180.0);
+    float2 p = hsv.y * float2(cos(a), sin(a));
+    float hs[10] = { c.geometry0.x, c.geometry0.y, c.geometry0.z, c.geometry0.w,
+                     c.geometry1.x, c.geometry1.y, c.geometry1.z, c.geometry1.w,
+                     c.extra.x, c.extra.y };
+    int count = min(int(c.extra.w), 5);
+    float d = 1e6;
+    for (int k = 0; k < count; k++) {
+        float sa = hs[2 * k] * (M_PI_F / 180.0);
+        float2 q = hs[2 * k + 1] * float2(cos(sa), sin(sa));
+        d = min(d, length(p - q));
+    }
+    float r = max(c.extra.z, 1e-3);
+    return 1.0 - smoothstep(r * 0.5, r, d);
+}
+
+// The mask with its components: the first shape, then each component
+// added, subtracted or intersected in order, then the whole inverted if
+// asked, then the original luminance and hue ranges. With no components
+// and no whole-mask invert it is exactly `localMask`.
+inline float combinedLocalMask(constant LocalAdjust &l, constant MaskComponentGPU *components,
+                               float2 pNorm, float2 sensorSize,
+                               texture2d_array<float, access::sample> brushes,
+                               float displayLuma, float3 perceptual) {
+    if (l.info2.y == 0 && l.info2.w == 0) {
+        return localMask(l, pNorm, sensorSize, brushes, displayLuma, perceptual);
+    }
+    float m = shapeMask(l.info.x, l.info.y, l.geometry0, l.geometry1, pNorm, sensorSize, brushes);
+    if (m < 0.0) m = 0.0; else if (l.info.z != 0) m = 1.0 - m;
+    for (int k = 0; k < l.info2.y; k++) {
+        constant MaskComponentGPU &c = components[l.info2.x + k];
+        float v;
+        if (c.info.x == 5) {
+            v = luminanceRangeWeight(c.geometry0.x, c.geometry0.y, c.geometry0.z, displayLuma);
+        } else if (c.info.x == 6) {
+            v = colourRangeWeight(c, perceptual);
+        } else {
+            v = shapeMask(c.info.x, c.info.y, c.geometry0, c.geometry1, pNorm, sensorSize, brushes);
+        }
+        if (v < 0.0) v = 0.0; else if (c.info.z != 0) v = 1.0 - v;
+        v = clamp(v, 0.0, 1.0);
+        if (c.info.w == 0)      m = max(m, v);        // add
+        else if (c.info.w == 1) m = m * (1.0 - v);    // subtract
+        else                    m = m * v;            // intersect
+    }
+    if (l.info2.w != 0) m = 1.0 - clamp(m, 0.0, 1.0);
+    if (l.lumRange.w != 0.0) {
+        m *= luminanceRangeWeight(l.lumRange.x, l.lumRange.y, l.lumRange.z, displayLuma);
+    }
+    if (l.hueRange.w != 0.0) {
+        float3 hsv = rgbToHSV(perceptual);
+        float dh = abs(fmod(hsv.x - l.hueRange.x + 540.0, 360.0) - 180.0);
+        float hueW = 1.0 - smoothstep(l.hueRange.y * 0.7, l.hueRange.y, dh);
+        float satW = smoothstep(l.hueRange.z * 0.5, l.hueRange.z, hsv.y);
+        m *= hueW * satW;
+    }
+    return clamp(m, 0.0, 1.0);
+}
+
+// The global Highlights, Shadows, Whites and Blacks bands (ToneRanges.swift),
+// evaluated directly rather than from a table, scaled by the mask.
+inline float3 applyLocalToneRanges(float3 working, float4 amounts /* sh, hi, bl, wh */,
+                                   float contrast, float greyPoint) {
+    float y = dot(working, float3(0.2627, 0.6780, 0.0593));
+    float c = max(contrast, 1e-3);
+    float t = clamp(c * log2(max(y, 1e-10) / max(greyPoint, 1e-6)), -12.0, 12.0);
+    float x = t;
+    float4 a = clamp(amounts, -1.0, 1.0);
+    if (a.x != 0.0) x += a.x * 1.6 * smoothstep(-9.0, -3.3, x) * (1.0 - smoothstep(-3.3, 0.0, x));
+    if (a.y != 0.0) x += a.y * 1.9 * smoothstep(0.0, 3.3, x) * (1.0 - smoothstep(3.3, 9.0, x));
+    if (a.z != 0.0) x += a.z * 3.0 * (1.0 - smoothstep(-10.0, -3.5, x));
+    if (a.w != 0.0) x += a.w * 4.0 * smoothstep(2.0, 9.0, x);
+    return working * exp2((x - t) / c);
+}
+
+// The sliders added with mask components: tone ranges, tint and hue.
+// Applied after the original four; nothing happens when they are zero.
+inline float3 applyLocalMore(float3 working, constant LocalAdjust &l, float m,
+                             float contrast, float greyPoint) {
+    if (m <= 0.0) return working;
+    float4 tones = float4(l.adjust2.z, l.adjust2.y, l.adjust3.y, l.adjust2.w) * m;  // sh, hi, bl, wh
+    if (any(tones != 0.0)) working = applyLocalToneRanges(working, tones, contrast, greyPoint);
+    // Tint: a green/magenta see-saw, as Warmth is red/blue.
+    if (l.adjust2.x != 0.0) {
+        float w = l.adjust2.x * m * 0.15;
+        working *= float3(1.0 + 0.5 * w, 1.0 - w, 1.0 + 0.5 * w);
+    }
+    // Hue: turn every colour about the grey axis (Rodrigues' rotation),
+    // which keeps greys grey and the channel sum the same.
+    if (l.adjust3.w != 0.0) {
+        float th = l.adjust3.w * m * (M_PI_F / 180.0);
+        float cs = cos(th), sn = sin(th);
+        float3 k = float3(0.57735027);
+        float3 kxv = 0.57735027 * float3(working.b - working.g, working.r - working.b, working.g - working.r);
+        working = max(working * cs + kxv * sn + k * dot(k, working) * (1.0 - cs), 0.0);
+    }
+    return working;
 }
 
 inline float3 applyLocal(float3 working, constant LocalAdjust &l, float m, float greyPoint) {
@@ -363,8 +484,14 @@ kernel void colorAndTone(
     constant float *toneRangeLUT                 [[buffer(24)]],  // 256 shifts in t
     constant float *channelCurveLUT              [[buffer(25)]],  // 3 x 256: red, green, blue
     constant uint  &toneRangesOn                 [[buffer(26)]],
+    constant MaskComponentGPU *maskComponents    [[buffer(27)]],
+    constant float4 &overlayStyle                [[buffer(28)]],  // colour (linear), opacity
+    constant uint  &overlayMode                  [[buffer(29)]],  // MaskOverlayMode
+    constant uint  &writeLocalMasks              [[buffer(30)]],  // detail-stage masks wanted
     texture2d_array<float, access::sample> brushMasks [[texture(2)]],
     texture3d<float, access::sample> proofLUT    [[texture(3)]],
+    texture2d<float, access::write> localMaskA   [[texture(4)]],  // detail slots 0-3
+    texture2d<float, access::write> localMaskB   [[texture(5)]],  // detail slots 4-7
     uint2 gid                                    [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
@@ -395,16 +522,27 @@ kernel void colorAndTone(
     // any local changes it, so brightening the shadows can't push a pixel
     // out of its own mask mid-computation.
     float overlay = 0.0;
+    float detailMasks[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
     if (localCount > 0) {
         float2 pNorm = (tileOrigin + (float2(gid) + 0.5) * binSpan) / sensorSize;
         float3 baseDisplay = toneMapSigmoid(working, contrast, greyPoint, 1.0);
         float displayLuma = pow(max(dot(baseDisplay, float3(0.2627, 0.6780, 0.0593)), 0.0), 1.0 / 2.2);
         float3 perceptual = pow(max(baseDisplay, 0.0), 1.0 / 2.2);
         for (int i = 0; i < localCount && i < kMaxLocals; i++) {
-            float m = localMask(locals[i], pNorm, sensorSize, brushMasks, displayLuma, perceptual);
+            float m = combinedLocalMask(locals[i], maskComponents, pNorm, sensorSize, brushMasks,
+                                        displayLuma, perceptual);
             if (i == maskOverlayIndex) overlay = m;
+            // Mask Amount scales the whole effect; a hidden mask has none.
+            if (locals[i].adjust3.x != 1.0) m *= max(locals[i].adjust3.x, 0.0);
             working = applyLocal(working, locals[i], m, greyPoint);
+            working = applyLocalMore(working, locals[i], m, contrast, greyPoint);
+            int slot = locals[i].info2.z;
+            if (slot >= 0 && slot < 8) detailMasks[slot] = m;
         }
+    }
+    if (writeLocalMasks != 0) {
+        localMaskA.write(float4(detailMasks[0], detailMasks[1], detailMasks[2], detailMasks[3]), gid);
+        localMaskB.write(float4(detailMasks[4], detailMasks[5], detailMasks[6], detailMasks[7]), gid);
     }
 
     // Stage 12: scene-referred -> display-referred, up to the headroom.
@@ -449,10 +587,30 @@ kernel void colorAndTone(
     // An EDR screen buffer wants linear light, above 1.0 where the scene
     // was, and the compositor handles the rest.
     float3 outputLinear = workingToOutput * display;
-    // Mask overlay for editing: the selected local's mask as a red tint.
+    // Mask overlay for editing: the selected local's mask, by default as
+    // a red tint (MaskOverlayStyle in MaskOverlay.swift has the others).
     if (maskOverlayIndex >= 0) {
-        float3 red = float3(0.8, 0.05, 0.05) * (encodeOutput != 0 ? 1.0 : 0.6);
-        outputLinear = mix(outputLinear, red, overlay * 0.5);
+        float3 tint = overlayStyle.rgb * (encodeOutput != 0 ? 1.0 : 0.6);
+        float white = encodeOutput != 0 ? 1.0 : 0.6;
+        switch (overlayMode) {
+            case 1: {   // colour over a black-and-white picture
+                float y = dot(outputLinear, float3(0.2627, 0.6780, 0.0593));
+                outputLinear = mix(float3(y), tint, overlay * overlayStyle.a);
+                break;
+            }
+            case 2:     // the picture on black, where the mask is
+                outputLinear = outputLinear * overlay;
+                break;
+            case 3:     // the picture on white
+                outputLinear = mix(float3(white), outputLinear, overlay);
+                break;
+            case 4:     // the mask itself, white on black
+                outputLinear = float3(overlay * overlay * white);
+                break;
+            default:    // colour over the picture
+                outputLinear = mix(outputLinear, tint, overlay * overlayStyle.a);
+                break;
+        }
     }
     float3 result = (encodeOutput != 0) ? encodeSRGB(outputLinear) : max(outputLinear, 0.0);
 

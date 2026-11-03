@@ -303,6 +303,8 @@ public struct RenderOutput: Sendable, Equatable {
     /// Index into `EditParameters.locals` whose mask to paint as a red
     /// overlay, for editing. nil normally. A display concern, not an edit.
     public var maskOverlay: Int? = nil
+    /// How that mask is drawn (MaskOverlay.swift); the red tint unless set.
+    public var maskOverlayStyle = MaskOverlayStyle.standard
     /// Soft-proof table to apply, and whether to flag clipped colours.
     public var proof: SoftProofLUT? = nil
     public var gamutWarning = false
@@ -695,6 +697,14 @@ public final class RenderPipeline {
                                            outputRole: displayRole == .display ? .presence : .presencePreview,
                                            parameters: parameters, output: output,
                                            renderInfo: renderInfo, binSpan: binSpan)
+        }
+
+        // Stage 17b: texture, clarity, dehaze, sharpness, noise and
+        // defringe inside masks, on the masks the colour kernel wrote.
+        if Self.wantsLocalDetail(parameters) {
+            final = try applyLocalDetail(session: session, cmdBuffer: cmdBuffer, input: final,
+                                         preview: displayRole != .display, parameters: parameters,
+                                         output: output, binSpan: binSpan)
         }
 
         // Stage 18: sharpening, on the display-referred result.
@@ -1369,18 +1379,15 @@ public final class RenderPipeline {
         encoder.setBytes(&tint, length: 16, index: 14)
         encoder.setBytes(&balance, length: 4, index: 15)
 
-        // Local adjustments.
-        var packed = locals.map { LocalAdjustGPU($0, brushSlice: slices[$0.id] ?? -1) }
-        if packed.isEmpty { packed = [LocalAdjustGPU(LocalAdjustment(name: "", shape: .whole), brushSlice: 0)] }
-        var localCount = Int32(locals.count)
+        // Local adjustments (RenderPipeline+Locals in LocalDetailStage.swift).
+        try encodeLocals(encoder, session: session, locals: locals, slices: slices,
+                         width: input.width, height: input.height, output: output)
         var sensorSize = SIMD2<Float>(Float(session.file.summary.rawWidth),
                                       Float(session.file.summary.rawHeight))
         var tileOrigin = SIMD2<Float>(Float(renderInfo.sensorRect.origin.x),
                                       Float(renderInfo.sensorRect.origin.y))
         var span = binSpan
         var overlay = Int32(output.maskOverlay ?? -1)
-        encoder.setBytes(&packed, length: packed.count * MemoryLayout<LocalAdjustGPU>.stride, index: 16)
-        encoder.setBytes(&localCount, length: 4, index: 17)
         encoder.setBytes(&sensorSize, length: 8, index: 18)
         encoder.setBytes(&tileOrigin, length: 8, index: 19)
         encoder.setBytes(&span, length: 4, index: 20)
