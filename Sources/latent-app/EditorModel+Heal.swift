@@ -138,6 +138,7 @@ extension EditorModel {
         touchUpToolActive = false
         cropToolActive = false
         maskTool = .none
+        toneTool = .none
         healDrag = nil
         redEyeDrag = nil
         paintingHealStroke = []
@@ -148,9 +149,11 @@ extension EditorModel {
     /// Whether drags on the image belong to a tool rather than panning.
     var imageToolActive: Bool {
         maskToolActive || healToolActive || redEyeToolActive || dustToolActive || touchUpToolActive
+            || toneTool != .none
     }
 
     func imageToolBegan(at screen: CGPoint, exclude: Bool) {
+        if toneTool != .none { toneToolBegan(at: screen); return }
         if healToolActive { healToolBegan(at: screen); return }
         if redEyeToolActive { redEyeToolBegan(at: screen); return }
         // Clicks only: a ring is removed or a spot added on the press.
@@ -160,13 +163,15 @@ extension EditorModel {
         maskToolBegan(at: screen)
     }
     func imageToolMoved(to screen: CGPoint) {
-        if healToolActive { healToolMoved(to: screen) }
+        if toneTool != .none { toneToolMoved(to: screen) }
+        else if healToolActive { healToolMoved(to: screen) }
         else if redEyeToolActive { redEyeToolMoved(to: screen) }
         else if dustToolActive || touchUpToolActive { return }
         else { maskToolMoved(to: screen) }
     }
     func imageToolEnded() {
-        if healToolActive { healToolEnded() }
+        if toneTool != .none { toneToolEnded() }
+        else if healToolActive { healToolEnded() }
         else if redEyeToolActive { redEyeToolEnded() }
         else if dustToolActive || touchUpToolActive { return }
         else { maskToolEnded() }

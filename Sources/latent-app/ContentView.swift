@@ -1250,6 +1250,12 @@ struct ContentView: View {
             }
         case .toggleMaskOverlay:
             model.showMaskOverlay.toggle()
+        case .toggleClipping:
+            model.toggleClipping()
+        case .whiteBalanceSelector:
+            guard mode == .develop, model.hasImage else { break }
+            model.toggleWhiteBalanceSelector()
+            if model.toneTool == .whiteBalance { whiteBalanceExpanded = true }
         case .toolSize(let steps):
             model.stepToolSize(by: steps)
         case .rename:
@@ -1337,6 +1343,8 @@ struct ContentView: View {
         state.canAddMask = model.hasImage && model.parameters.locals.count < LocalAdjustment.maximumCount
         state.hasSelectedMask = model.selectedLocal != nil
         state.showMaskOverlay = model.showMaskOverlay
+        state.clippingShown = !model.clipping.isEmpty
+        state.whiteBalanceSelectorActive = model.toneTool == .whiteBalance
         state.filterActive = library.filter.isActive
         state.hasCompareSelect = compareRecord != nil
         state.canGoBack = navigator.history.canGoBack
@@ -1671,18 +1679,19 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
-                    ToneCurvePanel(master: $model.parameters.toneCurve,
-                                   channels: $model.parameters.channelCurves)
-                        .disabled(!model.hasImage)
+                    ToneCurveControls(model: model)
                         .padding(.top, 8)
                 } label: {
                     disclosureLabel("Tone Curve")
                 }
 
                 DisclosureGroup {
-                    HSLPanel(hsl: $model.parameters.hsl)
-                        .disabled(!model.hasImage)
-                        .padding(.top, 8)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HSLTargetRow(model: model)
+                        HSLPanel(hsl: $model.parameters.hsl)
+                            .disabled(!model.hasImage)
+                    }
+                    .padding(.top, 8)
                 } label: {
                     disclosureLabel("HSL / Colour")
                 }
@@ -1825,15 +1834,16 @@ struct ContentView: View {
     /// image's as-shot value rather than being fixed — see ColorKit.
     private var temperatureRow: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // The slider carries the name and the Kelvin reading for VoiceOver.
+            // The slider carries the name and the Kelvin reading for
+            // VoiceOver, and the field is named too, so the title is skipped.
             HStack {
-                Text("Temperature").font(.subheadline)
+                Text("Temperature").font(.subheadline).accessibilityHidden(true)
                 Spacer()
-                Text(String(format: "%.0f K", model.parameters.whiteBalance.temperature))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                // Typed Kelvin, as Lightroom's Temp field takes.
+                SliderValueField(value: model.temperatureKelvinBinding,
+                                 in: ColorKit.WhiteBalance.temperatureRange,
+                                 format: SliderValueFormat(decimals: 0, unit: " K"), label: "Temperature")
             }
-            .accessibilityHidden(true)
             ResettableSlider(value: model.temperatureSliderBinding,
                              in: model.temperatureSliderRange, label: "Temperature",
                              accessibilityValue: String(format: "%.0f kelvin",
@@ -1856,7 +1866,7 @@ struct ContentView: View {
 
     private var whiteBalanceSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-
+                    WhiteBalancePresetRow(model: model)
                     temperatureRow
                     sliderRow(title: "Tint",
                                value: $model.parameters.whiteBalance.tint,

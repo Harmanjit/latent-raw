@@ -51,6 +51,8 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | R | Crop and straighten tool |
 | H | Spot removal tool |
 | Y | Red-eye tool |
+| W | White Balance Selector: click something neutral in the photo |
+| J | Show or hide clipping on the image: highlights red, crushed shadows blue |
 | [, ] | Smaller, larger brush or spot (while the mask brush, spot removal or red-eye is on) |
 | ⌫ | Delete the selected spot patch or red-eye spot |
 | Esc | Leave any on-image tool; with none on, leave the full-screen image |

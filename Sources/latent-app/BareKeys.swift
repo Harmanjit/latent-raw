@@ -89,6 +89,8 @@ enum KeyCommand: Equatable {
     case rotate(Int), zoomIn, zoomOut, zoomToFit, zoomToActualSize
     case autoAdjust, clearFilter, swapCompare, revealInFinder
     case addMask(NewMask), toggleMaskOverlay
+    /// J: the clipping overlay. W: the White Balance Selector.
+    case toggleClipping, whiteBalanceSelector
     /// [ and ]: the armed brush or spot patch, a step smaller or larger.
     case toolSize(Int)
     /// Files: rename the selected image, move or copy the selection to a

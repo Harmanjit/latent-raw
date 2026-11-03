@@ -63,6 +63,11 @@ struct MetalImageView: NSViewRepresentable {
     let onToolBegan: (CGPoint, Bool) -> Void
     let onToolMoved: (CGPoint) -> Void
     let onToolEnded: () -> Void
+    /// The clipping overlay to draw (J). Display only.
+    var clipping: ClippingIndicators = []
+    /// The pointer moved over the view (nil: it left), for the colour
+    /// readout. nil when nothing wants it, so no tracking is set up.
+    var onPointer: ((CGPoint?) -> Void)? = nil
 
     func makeNSView(context: Context) -> MetalLayerView {
         let view = MetalLayerView()
@@ -85,6 +90,8 @@ struct MetalImageView: NSViewRepresentable {
         view.atFit = atFit
         view.onStep = onStep
         view.allowsMagnifier = allowsMagnifier
+        view.clipping = clipping
+        view.onPointer = onPointer
         view.display(preview: preview, tile: tile, transform: transform, frame: frame,
                      magnifierTile: magnifierTile)
     }
@@ -104,6 +111,7 @@ private struct PresentedFrame: Equatable {
     var displayHeadroom: Float
     var magnifier: ViewerInteraction.Magnifier?
     var magnifierTile: UInt64?
+    var clipping: ClippingIndicators = []
 }
 
 final class MetalLayerView: NSView {
@@ -120,6 +128,15 @@ final class MetalLayerView: NSView {
     var backgroundLevel: Float = 0.12 {
         didSet { if backgroundLevel != oldValue { setNeedsRedraw() } }
     }
+    var clipping: ClippingIndicators = [] {
+        didSet { if clipping != oldValue { setNeedsRedraw() } }
+    }
+    /// See `MetalImageView.onPointer`. Setting it adds or removes the
+    /// tracking area that reports pointer moves.
+    var onPointer: ((CGPoint?) -> Void)? {
+        didSet { if (onPointer == nil) != (oldValue == nil) { updateTrackingAreas() } }
+    }
+    private var pointerTracking: NSTrackingArea?
 
     /// Fires with the screen's refresh while there is a frame to draw, and
     /// is paused the rest of the time, so several changes in one refresh
@@ -331,7 +348,8 @@ final class MetalLayerView: NSView {
                                     backgroundLevel: backgroundLevel,
                                     drawableSize: metalLayer.drawableSize,
                                     displayHeadroom: headroom,
-                                    magnifier: magnifier, magnifierTile: magnifierTile?.generation)
+                                    magnifier: magnifier, magnifierTile: magnifierTile?.generation,
+                                    clipping: clipping)
         guard wanted != presented, let drawable = metalLayer.nextDrawable() else { return }
         presented = wanted
         presenter.present(base: preview, tile: currentTile,
@@ -340,7 +358,8 @@ final class MetalLayerView: NSView {
                           displayHeadroom: headroom,
                           magnifier: magnifier.map {
                               PresentMagnifier(loupe: $0, ringWidth: magnifierRingWidth, tile: magnifierTile)
-                          })
+                          },
+                          clipping: clipping)
         #if DEBUG
         SnapshotHarness.noteDrawable(drawable.texture, presentedBy: self)
         #endif
@@ -401,6 +420,28 @@ final class MetalLayerView: NSView {
         if phase.contains(.changed) || phase.contains(.stationary) { return .changed }
         if phase.contains(.ended) || phase.contains(.cancelled) { return .ended }
         return .none
+    }
+
+    // MARK: - Pointer readout
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let pointerTracking { removeTrackingArea(pointerTracking) }
+        pointerTracking = nil
+        guard onPointer != nil else { return }
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        pointerTracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        onPointer?(screenPoint(for: event))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onPointer?(nil)
     }
 
     // MARK: - Mouse
