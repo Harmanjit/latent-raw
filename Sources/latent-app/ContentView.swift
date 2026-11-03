@@ -341,7 +341,13 @@ struct ContentView: View {
                 if let trouble = FolderAccess.problem(opening: target) {
                     return (FolderAccess.message(for: trouble, folder: target), nil)
                 }
-                return (nil, FolderAccess.owningCatalog(of: target))
+                // An enclosing catalog that can't be read may include it:
+                // refuse rather than guess and split that catalog.
+                switch FolderAccess.ownership(of: target) {
+                case .owned(let membership): return (nil, membership)
+                case .independent: return (nil, nil)
+                case .unreadable(let root): return (FolderAccess.unreadableOwnerMessage(folder: target, root: root), nil)
+                }
             }.value
             if let refusal {
                 model.lastError = refusal
