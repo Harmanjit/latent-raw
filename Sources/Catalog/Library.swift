@@ -57,6 +57,14 @@ public final class Library: ObservableObject {
         }
     }
     private var customPositions: [String: Int] = [:]
+    /// Show the JPEG (or HEIF) of a RAW+JPEG pair as a photo of its own.
+    /// Off by default: it travels with its raw, hidden, as Lightroom treats
+    /// it (`Library+RawJPEGPairs.swift`).
+    @Published public var showsPairedCompanions = false {
+        didSet { if showsPairedCompanions != oldValue { recomputeVisible() } }
+    }
+    /// Raw image id → the JPEGs paired with it, refreshed with the visible list.
+    public internal(set) var pairedCompanions: [Int64: [ImageRecord]] = [:]
     /// image id → keywords, for filtering; refreshed with the image list
     /// and whenever keywords are edited.
     var keywordIndex: [Int64: Set<String>] = [:] {
@@ -195,12 +203,13 @@ public final class Library: ObservableObject {
         let edited = editedImageIDs
         let filter = filter
         let index = keywordIndex
+        let shown = imagesShownInGrid()
         let passing = filter.isActive
-            ? images.filter { record in
+            ? shown.filter { record in
                 filter.matches(record, isEdited: record.id.map(edited.contains) ?? false,
                                keywords: record.id.flatMap { index[$0] } ?? [])
             }
-            : images
+            : shown
         let next = passing.sorted(by: sort, customPositions: customPositions)
         if next != visibleImages {
             if !next.elementsEqual(visibleImages, by: { $0.id == $1.id }) {

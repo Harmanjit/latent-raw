@@ -62,7 +62,10 @@ public final class LibraryFileOperations: ObservableObject {
     public func transfer(_ records: [ImageRecord], to folder: URL, mode: TransferMode) async -> TransferReport {
         guard let library else { return TransferReport() }
         let requests = records.compactMap { library.fileURL(for: $0) }.map { TransferRequest(source: $0, folder: folder) }
-        let report = await execute(.transfer(requests, mode), title: mode == .move ? "Moving" : "Copying")
+        let companions = library.companionURLsTravelling(with: records)
+        var report = await execute(.transfer(requests, mode), title: mode == .move ? "Moving" : "Copying")
+        report.merge(await transferCompanions(companions, following: report.completed, mode: mode,
+                                              title: mode == .move ? "Moving" : "Copying"))
         registerUndo(report.completed, actionName: Self.actionName(mode == .move ? "Move" : "Copy", report.completed))
         return report
     }
@@ -74,9 +77,15 @@ public final class LibraryFileOperations: ObservableObject {
         guard let library, let url = library.fileURL(for: record) else { return }
         if let problem = FileOperations.problem(withName: name) { throw problem }
         let request = TransferRequest(source: url, folder: url.deletingLastPathComponent(), name: name)
-        let report = await execute(.transfer([request], .move), title: "Renaming")
+        let companions = library.companionURLsTravelling(with: [record])
+        var report = await execute(.transfer([request], .move), title: "Renaming")
         if let failure = report.failures.first { throw FileOperationError(message: failure.reason) }
+        let following = await transferCompanions(companions, following: report.completed, mode: .move, title: "Renaming")
+        report.merge(following)
         registerUndo(report.completed, actionName: "Rename")
+        if !following.failures.isEmpty {
+            library.lastError = "Renamed, but its paired JPEG kept its name: \(following.failureDescription)"
+        }
     }
 
     /// The open catalog's subfolders on the way to `folder` that it hasn't
@@ -129,7 +138,7 @@ public final class LibraryFileOperations: ObservableObject {
 
     // MARK: - Running
 
-    private enum Job {
+    enum Job {
         case transfer([TransferRequest], TransferMode)
         /// Undoes (or redoes) what a finished job did, read when it runs.
         case revert(TransferLedger)
@@ -138,7 +147,7 @@ public final class LibraryFileOperations: ObservableObject {
     /// Runs `job` after every job asked for before it, as the Library's
     /// pending work. `ledger`, when given, is filled with what it did before
     /// the next job starts.
-    private func execute(_ job: Job, title: String, ledger: TransferLedger? = nil) async -> TransferReport {
+    func execute(_ job: Job, title: String, ledger: TransferLedger? = nil) async -> TransferReport {
         await enqueue(job, title: title, ledger: ledger).value
     }
 

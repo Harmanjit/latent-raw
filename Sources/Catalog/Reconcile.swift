@@ -34,10 +34,13 @@ public struct ReconcileReport: Sendable, CustomStringConvertible {
 }
 
 extension Catalog {
-    /// File extensions Latent indexes. Raw formats only for now: the
-    /// pipeline can't yet render a JPEG or TIFF, and indexing what can't
-    /// be opened would just be a row with a broken thumbnail.
-    public static let indexedExtensions: Set<String> = [
+    /// File extensions Latent indexes: every raw format, and the ordinary
+    /// picture formats this Mac's ImageIO decodes (JPEG, HEIC, TIFF, PNG,
+    /// and WebP and AVIF where available; `RenderedImageFormat`).
+    public static let indexedExtensions: Set<String> = rawExtensions.union(RenderedImageFormat.extensions)
+
+    /// The raw formats, which LibRaw reads.
+    public static let rawExtensions: Set<String> = [
         "nef", "nrw",                       // Nikon
         "arw", "srf", "sr2",                // Sony
         "cr2", "cr3", "crw",                // Canon

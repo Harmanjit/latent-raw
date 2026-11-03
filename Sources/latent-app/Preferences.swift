@@ -104,6 +104,12 @@ final class AppPreferences: ObservableObject {
     /// stepping images (at fit they still step). Off by default, since
     /// Lightroom-style culling steps with the arrows at any zoom.
     @Published var arrowKeysPanImage: Bool { didSet { defaults.set(arrowKeysPanImage, forKey: "latent.arrowKeysPanImage") } }
+    /// Show the JPEG of a RAW+JPEG pair as a photo of its own rather than
+    /// hidden behind its raw (`Library.showsPairedCompanions`). Off by
+    /// default, as in Lightroom.
+    @Published var showPairedJPEGsSeparately: Bool {
+        didSet { defaults.set(showPairedJPEGsSeparately, forKey: PairedJPEGDefaults.key) }
+    }
 
     /// Set while the stored default export folder is put back, which must
     /// not save its bookmark again.
@@ -122,6 +128,7 @@ final class AppPreferences: ObservableObject {
         thumbnailSize = ThumbnailGridLayout.clamped(defaults.object(forKey: "latent.thumbnailSize") as? Double
                                                     ?? ThumbnailGridLayout.defaultSide)
         arrowKeysPanImage = defaults.bool(forKey: "latent.arrowKeysPanImage")
+        showPairedJPEGsSeparately = defaults.bool(forKey: PairedJPEGDefaults.key)
         // Resolved off the main thread (a share that stopped answering
         // would hold launch); nil until then, as when its disk is away.
         Task { [weak self] in
@@ -213,6 +220,11 @@ struct PreferencesView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Arrow keys pan a zoomed-in image", isOn: $prefs.arrowKeysPanImage)
             Text("In Loupe and Develop, ← → ↑ ↓ move around an image zoomed past fit; at fit ← and → still step to the previous and next image. Off, the arrows always step, as in Lightroom.")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Show JPEGs of RAW+JPEG pairs as separate photos", isOn: $prefs.showPairedJPEGsSeparately)
+                .help("When a camera saves a raw and a JPEG with the same name, the JPEG is normally hidden and moves, copies and renames with its raw.")
+                .accessibilityLabel("Show JPEGs of RAW+JPEG pairs as separate photos")
+            Text("Off, a JPEG (or HEIF) saved beside a raw of the same name is hidden and travels with the raw when it is moved, copied or renamed. On, it is a photo of its own in the grid.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
