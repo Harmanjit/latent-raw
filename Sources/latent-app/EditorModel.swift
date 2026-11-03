@@ -211,6 +211,14 @@ final class EditorModel: ObservableObject {
     /// Captured into each pending save, so a save that fires after the
     /// user has moved on still lands on the right image.
     var catalogImageID: Int64?
+    /// The catalog id of an open image whose stored edit (or a stored
+    /// history step or snapshot) was written by a newer Latent. This build
+    /// can't read it, and every save rebuilds the stack from parameters in
+    /// this build's format, so saving would erase the newer edit. Edits to
+    /// that image are shown but never written back.
+    var newerEditImageID: Int64?
+    /// True while the open image's stored edit must not be overwritten.
+    var storedEditIsReadOnly: Bool { catalogImageID != nil && catalogImageID == newerEditImageID }
     /// The fresh parameters for this image (as-shot white balance and so
     /// on). A stack equal to these is "no edit" and isn't stored.
     var defaultParameters = EditParameters()

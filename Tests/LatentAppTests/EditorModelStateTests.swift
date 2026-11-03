@@ -44,6 +44,48 @@ final class EditorModelStateTests: XCTestCase {
         XCTAssertEqual(saved, [1, 1], "Undo with nothing open writes nothing")
     }
 
+    /// A stored edit from a newer Latent can't be read here. Editing the
+    /// photo must not save this build's stack over it, nor rewrite its
+    /// stored history or snapshots without the steps this build can't read.
+    func testAPhotoEditedByANewerBuildIsNeverSavedOver() async throws {
+        let url = try TestAssets.d750URL()
+        _ = try await GPUContext.shared()
+        let model = EditorModel()
+        var saved: [Int64] = [], historyWrites: [Int64] = [], snapshotWrites: [Int64] = []
+        model.onEditSettled = { id, _ in saved.append(id) }
+        model.onHistoryChanged = { id, _ in historyWrites.append(id) }
+        model.onSnapshotsChanged = { id, _ in snapshotWrites.append(id) }
+        let newer = #"{"schema":2,"process":"1.0","modules":{"exposure":{"ev":0.5},"futureModule":{"x":1}}}"#
+
+        model.open(url: url, catalogImageID: 1, editStackJSON: newer)
+        XCTAssertTrue(model.hasImage)
+        XCTAssertTrue(model.storedEditIsReadOnly)
+        model.loadHistory(steps: [(newer, 1)], snapshots: [("Look", newer)])
+        model.parameters.exposureEV = 1
+        model.flushPendingSave()
+        model.undo()
+        model.saveSnapshot(named: "Mine")
+        XCTAssertEqual(saved, [], "the newer edit stays in the catalog and sidecar")
+        XCTAssertEqual(historyWrites, [], "the stored history keeps its newer steps")
+        XCTAssertEqual(snapshotWrites, [])
+
+        // Another photo, with an edit this build reads, saves as usual.
+        model.open(url: url, catalogImageID: 2, editStackJSON: try EditStack(parameters: EditParameters()).encodeJSON())
+        XCTAssertFalse(model.storedEditIsReadOnly)
+        model.parameters.exposureEV = 1
+        model.flushPendingSave()
+        XCTAssertEqual(saved, [2])
+
+        // Only a history step from the newer build is enough to stop saves.
+        model.open(url: url, catalogImageID: 3)
+        model.loadHistory(steps: [(newer, 1)], snapshots: [])
+        XCTAssertTrue(model.storedEditIsReadOnly)
+        model.parameters.exposureEV = 2
+        model.flushPendingSave()
+        XCTAssertEqual(saved, [2])
+        XCTAssertEqual(historyWrites, [2])
+    }
+
     /// A cancelled denoise run only notices at its next tile. By then the
     /// next image may have started its own run, which must stay running:
     /// memory pressure releases the session's textures only while no run

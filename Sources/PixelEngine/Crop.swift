@@ -66,44 +66,45 @@ public struct CropParameters: Equatable, Sendable, Codable {
     /// a straighten never shows grey corners. Keeps the aspect. This is
     /// also how "largest crop for this angle" is computed: constrain the
     /// full frame.
+    ///
+    /// A crop whose centre is off the sensor (the tilted crop tool lets a
+    /// move drag it there) is slid back on instead, keeping its own size.
+    /// Shrinking about a centre clamped onto the sensor's edge would leave
+    /// no room at all and collapse the crop, and the user only moved it.
+    /// The same slide is used when the centre is on the sensor but so near
+    /// the edge that shrinking would leave a sliver.
     public func constrained(sensorSize s: CGSize) -> CropParameters {
         var result = self
-        // Keep the centre on the sensor first.
+        let onSensor = centre.x >= 0 && centre.x <= 1 && centre.y >= 0 && centre.y <= 1
         result.centre = simd_clamp(centre, SIMD2(0, 0), SIMD2(1, 1))
         let e = result.boundingHalfExtents(sensorSize: s)
         guard e.x > 0, e.y > 0 else { return result }
         let c = CGPoint(x: Double(result.centre.x) * s.width, y: Double(result.centre.y) * s.height)
         let roomX = min(c.x, s.width - c.x), roomY = min(c.y, s.height - c.y)
-        var scale = min(1, roomX / e.x, roomY / e.y)
-        // A centre on or near the sensor's edge leaves no room, and shrinking
-        // about it would collapse the crop to nothing (which saves as "no
-        // crop" and exports as 1x1). The tilted crop tool lets the centre go
-        // there, so keep a small minimum size instead and move the centre
-        // inward until that fits.
-        var raised = false
+        let scale = min(1, roomX / e.x, roomY / e.y)
         let p = result.pixelSize(sensorSize: s)
         let shortSide = min(p.width, p.height)
-        if shortSide > 0 {
-            let minSide = min(Self.minimumSidePixels, shortSide)
-            let largestThatFits = min(1, s.width / 2 / e.x, s.height / 2 / e.y)
-            let minScale = min(minSide / shortSide, largestThatFits)
-            if scale < minScale {
-                scale = minScale
-                raised = true
+        if onSensor && scale * shortSide >= min(Self.minimumSidePixels, shortSide) {
+            if scale < 1 {
+                result.size = result.size * Float(scale)
             }
+            return result
         }
-        if scale < 1 {
-            result.size = result.size * Float(scale)
+        // Slide: keep the crop's size where it fits at all (only a crop
+        // bigger than the sensor allows at this angle shrinks), then move
+        // the centre inward until the whole crop is on the sensor.
+        let largestThatFits = min(1, s.width / 2 / e.x, s.height / 2 / e.y)
+        if largestThatFits < 1 {
+            result.size = result.size * Float(largestThatFits)
         }
-        if raised {
-            let fitted = result.boundingHalfExtents(sensorSize: s)
-            let lo = SIMD2(Float(fitted.x / s.width), Float(fitted.y / s.height))
-            result.centre = simd_clamp(result.centre, lo, simd_max(lo, SIMD2(1, 1) - lo))
-        }
+        let fitted = result.boundingHalfExtents(sensorSize: s)
+        let lo = SIMD2(Float(fitted.x / s.width), Float(fitted.y / s.height))
+        result.centre = simd_clamp(result.centre, lo, simd_max(lo, SIMD2(1, 1) - lo))
         return result
     }
 
-    /// The smallest crop side `constrained` will shrink to, in sensor pixels.
+    /// The smallest crop side `constrained` will shrink to about its
+    /// centre, in sensor pixels; below this it slides the crop instead.
     static let minimumSidePixels: Double = 16
 
     /// Ratio of the crop's width to height in sensor pixels.
