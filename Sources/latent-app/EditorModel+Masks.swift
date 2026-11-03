@@ -139,7 +139,7 @@ extension EditorModel {
     /// define, so it has to be made on that grid too, as export does
     /// (`ExportWorker.modelMaskInputParameters`). Also returns the
     /// geometry key it was made on.
-    private func modelInputImage() throws -> (image: CGImage, geometry: String) {
+    func modelInputImage() throws -> (image: CGImage, geometry: String) {
         guard let session, let pipeline, let gpu = gpuContext else { throw AIMaskError.noResult }
         let longEdge = max(session.file.summary.rawWidth, session.file.summary.rawHeight)
         let quads = max(1, Int((Double(longEdge) / 2048.0).rounded(.up)))

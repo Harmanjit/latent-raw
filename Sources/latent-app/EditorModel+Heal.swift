@@ -32,7 +32,12 @@ extension EditorModel {
         get { selectedHeal?.mode ?? healMode }
         set {
             healMode = newValue
-            if let i = selectedHealIndex, i < parameters.heals.count { parameters.heals[i].mode = newValue }
+            if let i = selectedHealIndex, i < parameters.heals.count, parameters.heals[i].mode != newValue {
+                var patch = parameters.heals[i]
+                patch.source = sourceForModeChange(of: patch, to: newValue)
+                patch.mode = newValue
+                parameters.heals[i] = patch
+            }
         }
     }
 
@@ -59,6 +64,17 @@ extension EditorModel {
         for i in order {
             let h = parameters.heals[i]
             let rPx = h.radius * short
+            // A Remove patch has no source to grab; with an outline, a
+            // click inside its box selects it too.
+            if h.mode == .remove {
+                if h.objectMask != nil, h.targetBounds(sensorSize: sensorSize).contains(
+                    CGPoint(x: CGFloat(p.x) * sensorSize.width, y: CGFloat(p.y) * sensorSize.height)) {
+                    return (i, false, p - h.target)
+                }
+                let reach = h.isStroke ? max(rPx, HealStrokeHandle.minimumGrabPixels / Float(max(viewport.zoom, 1e-6))) : rPx
+                if h.distancePixels(from: p, sensorSize: sensorSize) <= reach { return (i, false, p - h.target) }
+                continue
+            }
             if h.isStroke {
                 // A thin stroke is hard to grab by its width alone.
                 let reach = max(rPx, HealStrokeHandle.minimumGrabPixels / Float(max(viewport.zoom, 1e-6)))
@@ -95,6 +111,16 @@ extension EditorModel {
             healDrag = .painting
             return
         }
+        if healMode == .remove {
+            // Remove has no source: the click places the patch, a drag moves it.
+            guard let patch = preparedRemovePatch(HealPatch(target: p, source: p, radius: healRadius,
+                                                            feather: healFeather, mode: .remove)) else { return }
+            parameters.heals.append(patch)
+            selectedHealIndex = parameters.heals.count - 1
+            // Detect Objects runs when the button is let go, where it landed.
+            healDrag = .placing(parameters.heals.count - 1)
+            return
+        }
         // Default source: 2.5 radii to the right, or to the left near the edge.
         let size = SIMD2(Float(sensorSize.width), Float(sensorSize.height))
         let short = min(size.x, size.y)
@@ -111,10 +137,17 @@ extension EditorModel {
         guard let healDrag else { return }
         let p = simd_clamp(rawNormalized(sensorNormalized(screen)), SIMD2(0, 0), SIMD2(1, 1))
         switch healDrag {
+        case .placing(let i) where i < parameters.heals.count && parameters.heals[i].mode == .remove:
+            parameters.heals[i].target = p
+            parameters.heals[i].source = p
         case .placing(let i) where i < parameters.heals.count:
             parameters.heals[i].source = p
         case .movingTarget(let i, let off) where i < parameters.heals.count:
-            parameters.heals[i].target = simd_clamp(p - off, SIMD2(0, 0), SIMD2(1, 1))
+            var patch = parameters.heals[i]
+            patch.target = simd_clamp(p - off, SIMD2(0, 0), SIMD2(1, 1))
+            // A Remove patch's source stays on its target.
+            if patch.mode == .remove { patch.source = patch.target }
+            parameters.heals[i] = patch
         case .movingSource(let i, let off) where i < parameters.heals.count:
             parameters.heals[i].source = simd_clamp(p - off, SIMD2(0, 0), SIMD2(1, 1))
         case .painting:
@@ -126,6 +159,9 @@ extension EditorModel {
 
     func healToolEnded() {
         if case .painting = healDrag { finishPaintedStroke() }
+        if case .placing(let i) = healDrag, i < parameters.heals.count, parameters.heals[i].mode == .remove {
+            removePatchPlaced(parameters.heals[i])
+        }
         healDrag = nil
     }
 

@@ -25,6 +25,10 @@ struct HealOverlay: View {
                     let r = CGFloat(patch.radius) * short * model.viewport.zoom / scale
                     let t = point(patch.target, scale: scale)
                     let s = point(patch.source, scale: scale)
+                    if patch.mode == .remove {
+                        drawRemoval(patch, radius: r, selected: selected, scale: scale, in: &context)
+                        continue
+                    }
                     if patch.isStroke {
                         drawStroke(patch, radius: r, selected: selected, scale: scale, in: &context)
                         continue
@@ -112,6 +116,35 @@ struct HealOverlay: View {
         }
     }
 
+    /// A Remove patch: its brushed area, dotted (it has no source), and
+    /// once Detect Objects has found the object, the outline it fills,
+    /// tinted.
+    private func drawRemoval(_ patch: HealPatch, radius r: CGFloat, selected: Bool, scale: CGFloat,
+                             in context: inout GraphicsContext) {
+        let colour: Color = selected ? .accentColor : .white
+        if let mask = patch.objectMask, let image = RemoveMaskImage.image(mask) {
+            // The box's corners through the same map as every other point,
+            // so the outline turns with a rotated or flipped view.
+            let corner = patch.target + mask.origin
+            let o = point(corner, scale: scale)
+            let x = point(corner + SIMD2(mask.size.x, 0), scale: scale)
+            let y = point(corner + SIMD2(0, mask.size.y), scale: scale)
+            var tinted = context
+            tinted.opacity = selected ? 0.45 : 0.3
+            tinted.concatenate(CGAffineTransform(a: x.x - o.x, b: x.y - o.y, c: y.x - o.x, d: y.y - o.y, tx: o.x, ty: o.y))
+            tinted.draw(Image(decorative: image, scale: 1), in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        let outline = outlinePath(patch.pathPoints(), radius: r, scale: scale)
+        context.stroke(outline, with: .color(.black.opacity(0.5)), lineWidth: 3)
+        context.stroke(outline, with: .color(colour), style: StrokeStyle(lineWidth: selected ? 2 : 1.5, dash: [2, 2]))
+        let ring = Contrast.selectionOutlineWidth(selected: selected, increased: contrast == .increased)
+        if ring > 0 {
+            let halo = outlinePath(patch.pathPoints(), radius: r + 3 + ring, scale: scale)
+            context.stroke(halo, with: .color(.black), lineWidth: ring + 2)
+            context.stroke(halo, with: .color(.accentColor), lineWidth: ring)
+        }
+    }
+
     /// The outline of a path `radius` view points wide, round at the ends:
     /// the union of one capsule per segment, since a single stroked path
     /// keeps a fold inside each join that would draw as a notch. Without
@@ -151,5 +184,32 @@ struct HealOverlay: View {
         let canvas = model.frame.canvasPoint(fromSensorPoint: sensor)
         let px = model.viewport.screenPoint(forSensorPoint: canvas, drawableSize: model.drawableSize)
         return CGPoint(x: px.x / scale, y: px.y / scale)
+    }
+}
+
+/// A Remove outline as a tinted image for the overlay, cached by mask so a
+/// redraw on every mouse move doesn't rebuild it.
+@MainActor
+enum RemoveMaskImage {
+    private static var cache: [RemoveObjectMask: CGImage] = [:]
+
+    static func image(_ mask: RemoveObjectMask) -> CGImage? {
+        if let hit = cache[mask] { return hit }
+        let w = mask.width, h = mask.height
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        for y in 0..<h { for x in 0..<w where mask.contains(x: x, y: y) {
+            let i = (y * w + x) * 4
+            // Premultiplied red at full alpha; the overlay sets the opacity.
+            rgba[i] = 255; rgba[i + 1] = 40; rgba[i + 2] = 40; rgba[i + 3] = 255
+        } }
+        let image = rgba.withUnsafeMutableBytes { bytes -> CGImage? in
+            guard let context = CGContext(data: bytes.baseAddress, width: w, height: h, bitsPerComponent: 8,
+                                          bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            return context.makeImage()
+        }
+        if cache.count > 64 { cache.removeAll() }
+        cache[mask] = image
+        return image
     }
 }

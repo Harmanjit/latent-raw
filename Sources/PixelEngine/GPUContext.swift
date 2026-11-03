@@ -127,6 +127,16 @@ public final class GPUContext: @unchecked Sendable {
         case dfxEffectsApply
         // Texture, clarity and the rest inside a mask (LocalDetail.metal, LocalDetailStage.swift).
         case localDetailApply
+        // Content-aware Remove (Remove.metal, RemoveFill.swift).
+        case removePrepare
+        case removeDownsample
+        case removeZone
+        case removeInitNNF
+        case removeUpsampleNNF
+        case removePropagate
+        case removeRandomSearch
+        case removeVote
+        case removeComposite
     }
 
     /// Built pipelines, by kernel. A Mutex because renders run on several
@@ -284,7 +294,7 @@ public final class GPUContext: @unchecked Sendable {
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
                             "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye", "Slideshow",
                             "LinearSource", "MergeHDR", "MergeWarp", "MergeDeghost", "MergePanoPrep", "MergePanoBlend",
-                            "Dust", "TouchUp", "DetailEffects", "LocalDetail"]
+                            "Dust", "TouchUp", "DetailEffects", "LocalDetail", "Remove"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound

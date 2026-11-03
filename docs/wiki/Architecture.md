@@ -24,12 +24,17 @@ One Metal command buffer per render, stages back to back:
 
 1. Black level and white balance on the raw plane. A linear source (a merged DNG, or a JPEG or TIFF converted to linear Rec.2020 and unrolled through the default tone curve so its default render is the file itself) starts here already demosaiced, with only the white balance to apply.
 2. Demosaic: RCD or bilinear at full resolution for tiles, or binning for previews. The result is cached per white balance and region, so tone edits skip it.
+<!-- RECONCILE: two branches edited this; merge into one text -->
 3. Neural denoise blend (if run), classic denoise, spot removal (dust spots, then touch-up blemishes, then the user's patches, in order, heal by a ratio field; a brush stroke heals piece by piece along its path), red-eye (flash-red pixels inside each circle turned a dark neutral), lens corrections, all in camera space. The healed result is cached per session, keyed by everything these stages read, so a slider move after a Find Spots with 200 patches skips them.
 <!-- RECONCILE: two branches edited this; merge into one text -->
 <!-- RECONCILE: two branches edited this; merge into one text -->
 4. Colour and tone: highlight reconstruction, camera matrix, exposure, tone ranges (Highlights, Shadows, Whites, Blacks), local adjustments in scene-linear light, sigmoid tone mapping with display headroom, then grading (Calibration's shadow tint; curve, master and RGB; HSL, Point Colour, saturation and vibrance, or the black and white mix in their place; three-way colour grading, which includes split toning) in a perceptual domain, soft proof. Calibration's primaries are not a stage: they are folded into the camera matrix.
 
 4. Colour and tone: highlight reconstruction, camera matrix (or an imported DCP's, interpolated for the white balance, then its HueSatMap), exposure, the profile's look table (a DCP's, or a built-in profile's, mixed in by Amount), tone ranges (Highlights, Shadows, Whites, Blacks), local adjustments in scene-linear light, sigmoid tone mapping with display headroom (then a DCP's tone curve, if switched on), then grading (curve, master and RGB; HSL, vibrance, split toning) in a perceptual domain, soft proof.
+<!-- /RECONCILE -->
+
+3. Neural denoise blend (if run), classic denoise, spot removal (dust spots, then touch-up blemishes, then the user's patches, in order, heal by a ratio field; a brush stroke heals piece by piece along its path; Remove synthesises fill by PatchMatch, coarse to fine, from the region around the patch, `Remove.metal`), red-eye (flash-red pixels inside each circle turned a dark neutral), lens corrections, all in camera space. The healed result is cached per session, keyed by everything these stages read, so a slider move after a Find Spots with 200 patches skips them.
+4. Colour and tone: highlight reconstruction, camera matrix, exposure, tone ranges (Highlights, Shadows, Whites, Blacks), local adjustments in scene-linear light, sigmoid tone mapping with display headroom, then grading (curve, master and RGB; HSL, vibrance, split toning) in a perceptual domain, soft proof.
 <!-- /RECONCILE -->
 5. Touch-up (skin smoothing, teeth whitening, brighter eyes, through three mask slices built from the face landmarks), then presence (texture, clarity, dehaze, defringe) and sharpening, on the display-referred result. On screen only, Visualise Spots can replace the picture with a high-pass view.
 

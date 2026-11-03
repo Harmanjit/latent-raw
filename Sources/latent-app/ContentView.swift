@@ -2061,10 +2061,12 @@ struct ContentView: View {
                                                   set: { model.activeHealMode = $0 })) {
                     Text("Heal").tag(HealPatch.Mode.heal)
                     Text("Clone").tag(HealPatch.Mode.clone)
+                    Text("Remove").tag(HealPatch.Mode.remove)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 100)
+                .frame(width: 170)
+                .help(HealModeHelp.text)
                 Spacer()
                 Button("Delete") { model.deleteSelectedHeal() }
                     .disabled(model.selectedHeal == nil)
@@ -2074,6 +2076,7 @@ struct ContentView: View {
             .disabled(!model.hasImage)
 
             HealShapePicker(model: model)
+            if model.activeHealMode == .remove { RemoveOptions(model: model) }
 
             sliderRow(title: "Size",
                       value: Binding(get: { model.activeHealRadiusPixels },
@@ -2083,6 +2086,7 @@ struct ContentView: View {
                       value: Binding(get: { model.activeHealFeather },
                                      set: { model.activeHealFeather = $0 }),
                       range: 0...1, format: "%.2f", defaultValue: 0.35)
+                .disabled(model.activeHealMode == .remove)
 
             HStack {
                 let n = model.parameters.heals.count

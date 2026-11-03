@@ -307,7 +307,7 @@ final class HealStrokeTests: XCTestCase {
         let w = Self.width, h = Self.height
         let size = SIMD2<Float>(Float(w), Float(h)), sensor = CGSize(width: w, height: h)
         let start = SIMD2<Float>(40, 150)
-        for mode in HealPatch.Mode.allCases {
+        for mode in [HealPatch.Mode.heal, .clone] {
             let patch = HealPatch(target: start / size, source: (start - SIMD2(24, 0)) / size, radius: 6 / Float(h),
                                   mode: mode, stroke: [.zero, SIMD2(300, 0) / size])
             let full = try Q.healed(try Q.texture(width: w, height: h, gpu: gpu) { Self.wired($0, $1) },
