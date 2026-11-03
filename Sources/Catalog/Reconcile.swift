@@ -14,6 +14,10 @@ public struct ReconcileReport: Sendable, CustomStringConvertible {
     public var tagsChanged = 0
     /// Subfolders with no decision yet (mode `ask`), relative paths.
     public var undecidedSubfolders: [String] = []
+    /// New or changed files whose contents are in iCloud (or another file
+    /// provider) and not on this Mac. Reading them would download them, so
+    /// they're left for a pass after they've been downloaded.
+    public var notDownloaded: [String] = []
     /// Files that couldn't be read, with the reason. They're skipped, not
     /// fatal — one corrupt file must not stop a folder from opening.
     public var failures: [(relPath: String, reason: String)] = []
@@ -23,6 +27,7 @@ public struct ReconcileReport: Sendable, CustomStringConvertible {
         var parts = ["\(unchanged) unchanged", "\(added) added", "\(modified) modified",
                      "\(renamed) renamed", "\(removed) removed", "\(sidecarsRead) sidecars read"]
         if !undecidedSubfolders.isEmpty { parts.append("\(undecidedSubfolders.count) subfolders awaiting a decision") }
+        if !notDownloaded.isEmpty { parts.append("\(notDownloaded.count) not downloaded") }
         if !failures.isEmpty { parts.append("\(failures.count) failed") }
         return parts.joined(separator: ", ") + String(format: " (%.2fs)", duration)
     }
@@ -48,7 +53,13 @@ extension Catalog {
         let mtime: Int64
         /// Finder tags in their stored form (`FinderTag.encode`).
         var finderTags: String? = nil
+        /// Its contents are in the cloud, not on this Mac.
+        var isDataless = false
     }
+
+    /// Tests stand in for iCloud with this: a dataless file can't be made
+    /// on purpose. Nil in the app.
+    nonisolated(unsafe) static var datalessOverrideForTesting: (@Sendable (URL) -> Bool)?
 
     /// Brings the database in line with the folder (DESIGN.md §5.3).
     ///
@@ -72,57 +83,134 @@ extension Catalog {
         var newFiles: [DiskFile] = []
         var modifiedFiles: [(DiskFile, ImageRecord)] = []
         var tagChanges: [(id: Int64, tags: String?)] = []
+        var unchangedPaths: [String] = []
         for file in onDisk {
             if let record = knownByPath.removeValue(forKey: file.relPath) {
                 if record.size == file.size && record.mtime == file.mtime {
                     report.unchanged += 1
+                    unchangedPaths.append(file.relPath)
                     // Tagging in Finder moves no mtime, so tags are compared
                     // on every pass; only changed rows are written.
                     if record.finderTags != file.finderTags, let id = record.id {
                         tagChanges.append((id, file.finderTags))
                     }
+                } else if file.isDataless {
+                    // Changed, but hashing it would download it. The row
+                    // stays as it is until the file is on this Mac.
+                    report.notDownloaded.append(file.relPath)
+                    unchangedPaths.append(file.relPath)
                 } else {
                     modifiedFiles.append((file, record))
                 }
+            } else if file.isDataless {
+                report.notDownloaded.append(file.relPath)
             } else {
                 newFiles.append(file)
             }
         }
-        // Whatever is left in knownByPath has no file any more — unless a
-        // new file turns out to have the same content (a rename).
-        var missingByHash: [Data: ImageRecord] = [:]
-        for record in knownByPath.values { missingByHash[record.xxhash] = record }
 
-        // 4. Expensive work, outside any transaction: hash and read
-        //    metadata for the files that need it.
-        var inserts: [ImageRecord] = []
-        var updates: [ImageRecord] = []
-        var renames: [(from: ImageRecord, to: DiskFile)] = []
-
+        // 4. Expensive work, outside any transaction: hash the files that
+        //    need it.
+        var hashedNew: [(file: DiskFile, hash: Data)] = []
         for file in newFiles {
-            let url = fileURL(forRelPath: file.relPath)
-            let hash: Data
             do {
-                hash = ImageRecord.hashData(try FileHash.xxh64(ofFileAt: url))
+                hashedNew.append((file, ImageRecord.hashData(try FileHash.xxh64(ofFileAt: fileURL(forRelPath: file.relPath)))))
             } catch {
                 report.failures.append((file.relPath, "hash failed: \(error)"))
-                continue
             }
-            if let previous = missingByHash.removeValue(forKey: hash) {
-                renames.append((previous, file))
-                continue
-            }
+        }
+        var hashedModified: [(file: DiskFile, previous: ImageRecord, hash: Data)] = []
+        // A modified file that can't be read keeps its row as it is.
+        var heldPaths: [String] = []
+        for (file, previous) in modifiedFiles {
             do {
-                inserts.append(try makeRecord(for: file, hash: hash))
+                hashedModified.append((file, previous, ImageRecord.hashData(try FileHash.xxh64(ofFileAt: fileURL(forRelPath: file.relPath)))))
             } catch {
-                report.failures.append((file.relPath, "\(error)"))
+                report.failures.append((file.relPath, "hash failed: \(error)"))
+                heldPaths.append(file.relPath)
             }
         }
 
-        for (file, previous) in modifiedFiles {
-            let url = fileURL(forRelPath: file.relPath)
+        // 5. Renames. A row can be claimed by a file with its content when
+        //    its own file is gone, or when its path now holds other content
+        //    (a rename chain or a swap: B.NEF to C.NEF, then A.NEF to
+        //    B.NEF). Rows are queued per hash, so byte-identical copies
+        //    renamed together each find a row.
+        var claimable: [Data: [ImageRecord]] = [:]
+        for record in knownByPath.values.sorted(by: { $0.relPath < $1.relPath }) {
+            claimable[record.xxhash, default: []].append(record)
+        }
+        for entry in hashedModified where entry.hash != entry.previous.xxhash {
+            claimable[entry.previous.xxhash, default: []].append(entry.previous)
+        }
+        func claim(_ hash: Data, for relPath: String) -> ImageRecord? {
+            guard var candidates = claimable[hash], !candidates.isEmpty else { return nil }
+            // Of identical copies, the one with the same name (moved to
+            // another subfolder) is the likeliest.
+            let name = (relPath as NSString).lastPathComponent
+            let index = candidates.firstIndex { ($0.relPath as NSString).lastPathComponent == name } ?? 0
+            let record = candidates.remove(at: index)
+            claimable[hash] = candidates.isEmpty ? nil : candidates
+            return record
+        }
+
+        var renames: [(from: ImageRecord, to: DiskFile)] = []
+        var renamedTo = Set<String>()
+        for entry in hashedModified where entry.hash != entry.previous.xxhash {
+            if let record = claim(entry.hash, for: entry.file.relPath) {
+                renames.append((record, entry.file))
+                renamedTo.insert(entry.file.relPath)
+            }
+        }
+        var toInsert: [(file: DiskFile, hash: Data)] = []
+        for entry in hashedNew {
+            if let record = claim(entry.hash, for: entry.file.relPath) {
+                renames.append((record, entry.file))
+                renamedTo.insert(entry.file.relPath)
+            } else {
+                toInsert.append(entry)
+            }
+        }
+        let claimedIDs = Set(renames.compactMap { $0.from.id })
+
+        // A modified file that took no other row is either the same photo
+        // with new content (its row stays and keeps what the user did to
+        // it) or, when its row was claimed by a file elsewhere, a new photo.
+        var toUpdate: [(file: DiskFile, previous: ImageRecord, hash: Data)] = []
+        for entry in hashedModified where !renamedTo.contains(entry.file.relPath) {
+            if let id = entry.previous.id, claimedIDs.contains(id) {
+                toInsert.append((entry.file, entry.hash))
+            } else {
+                toUpdate.append(entry)
+                if var queue = claimable[entry.previous.xxhash],
+                   let index = queue.firstIndex(where: { $0.id == entry.previous.id }) {
+                    queue.remove(at: index)
+                    claimable[entry.previous.xxhash] = queue.isEmpty ? nil : queue
+                }
+            }
+        }
+        // Whatever no file claimed has gone.
+        let removals = claimable.values.flatMap { $0 }
+
+        // 6. Move sidecars and thumbnails for renames before touching the
+        //    database. A rename whose sidecar can't be moved is left for
+        //    the next pass, with its row pointing at the old name.
+        let moved = moveCompanions(of: renames, report: &report)
+        renames = moved.renames
+        toInsert.removeAll { moved.blockedPaths.contains($0.file.relPath) }
+
+        // 7. Metadata for new and changed files.
+        var inserts: [ImageRecord] = []
+        for entry in toInsert {
             do {
-                let hash = ImageRecord.hashData(try FileHash.xxh64(ofFileAt: url))
+                inserts.append(try makeRecord(for: entry.file, hash: entry.hash))
+            } catch {
+                report.failures.append((entry.file.relPath, "\(error)"))
+            }
+        }
+        var updates: [ImageRecord] = []
+        for (file, previous, hash) in toUpdate {
+            do {
                 var fresh = try makeRecord(for: file, hash: hash)
                 // Content changed but it's the same photo as far as the
                 // user is concerned: keep everything they've done to it.
@@ -141,37 +229,40 @@ extension Catalog {
             }
         }
 
-        let removals = Array(missingByHash.values)
-
-        // 5. Move sidecars and thumbnails for renames before touching the
-        //    database, so a failure here leaves the DB pointing at files
-        //    that still exist under the old name.
-        for (previous, file) in renames {
-            try moveCompanions(from: previous.relPath, to: file.relPath)
-        }
-
-        // 6. One transaction for all the row changes.
+        // 8. One transaction for all the row changes. Removals go first and
+        //    renamed rows pass through a placeholder path, so a chain or a
+        //    swap never has two rows on one path at once.
         try dbQueue.write { db in
-            for var record in inserts {
-                try record.insert(db)
+            for record in removals {
+                // image_keywords has no foreign key to cascade with.
+                if let id = record.id {
+                    try db.execute(sql: "DELETE FROM image_keywords WHERE image_id = ?", arguments: [id])
+                }
+                try record.delete(db)
+            }
+            for (previous, _) in renames {
+                guard let id = previous.id else { continue }
+                try db.execute(sql: "UPDATE images SET rel_path = ? WHERE id = ?",
+                               arguments: ["\u{1}reconcile-\(id)", id])
+            }
+            for (previous, file) in renames {
+                var row = previous
+                row.relPath = file.relPath
+                row.size = file.size
+                row.mtime = file.mtime
+                row.finderTags = file.finderTags
+                if let id = previous.id, moved.thumbnailsLost.contains(id) { row.thumbKey = nil }
+                try row.update(db)
             }
             for record in updates {
                 try record.update(db)
             }
-            for (previous, file) in renames {
-                var moved = previous
-                moved.relPath = file.relPath
-                moved.size = file.size
-                moved.mtime = file.mtime
-                moved.finderTags = file.finderTags
-                try moved.update(db)
+            for var record in inserts {
+                try record.insert(db)
             }
             for change in tagChanges {
                 try db.execute(sql: "UPDATE images SET finder_tags = ? WHERE id = ?",
                                arguments: [change.tags, change.id])
-            }
-            for record in removals {
-                try record.delete(db)
             }
         }
         report.added = inserts.count
@@ -179,6 +270,15 @@ extension Catalog {
         report.renamed = renames.count
         report.removed = removals.count
         report.tagsChanged = tagChanges.count
+
+        // A removed row's thumbnail is a cache nothing will read again,
+        // unless its path (in any letter case) is now some other row's.
+        let livePaths = Set((unchangedPaths + heldPaths + renames.map(\.to.relPath)
+                             + inserts.map(\.relPath) + updates.map(\.relPath)
+                             + moved.blockedPaths).map { $0.lowercased() })
+        for record in removals where !livePaths.contains(record.relPath.lowercased()) {
+            try? FileManager.default.removeItem(at: thumbnailURL(forRelPath: record.relPath))
+        }
 
         // A file renamed outside Latent keeps its place in the custom order.
         if !renames.isEmpty {
@@ -189,8 +289,8 @@ extension Catalog {
             }
         }
 
-        // 7. Sidecars: re-read only those whose mtime moved.
-        report.sidecarsRead = try syncSidecars(report: &report)
+        // 9. Sidecars: re-read only those whose mtime moved.
+        report.sidecarsRead = try syncSidecars(report: &report, leaving: moved.sidecarsMissing)
 
         report.duration = Date().timeIntervalSince(start)
         return report
@@ -212,8 +312,9 @@ extension Catalog {
     private func scan(directory: URL, relPrefix: String, defaultMode: SubfolderMode,
                       into files: inout [DiskFile], report: inout ReconcileReport) throws {
         let fm = FileManager.default
-        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey,
-                                      .contentModificationDateKey, .nameKey]
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .isRegularFileKey, .isSymbolicLinkKey,
+                                      .fileSizeKey, .contentModificationDateKey, .nameKey,
+                                      .ubiquitousItemDownloadingStatusKey]
         let entries = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys,
                                                  options: [.skipsHiddenFiles])
 
@@ -230,9 +331,13 @@ extension Catalog {
 
             if values.isDirectory == true {
                 if name == Self.containerName || name == Self.legacyContainerName { continue }
-                let hasOwnContainer = fm.fileExists(
-                    atPath: entry.appendingPathComponent(Self.containerName).path)
-                if hasOwnContainer { continue }   // independent by existence
+                // A package (a Photos library, an app) is one document to
+                // Finder and the sidebar, and its insides belong to the app
+                // that made it. Rewriting files in there would damage it.
+                if values.isPackage == true { continue }
+                // Independent by existence, under either container name, as
+                // the sidebar and transfers see it.
+                if FolderAccess.hasCatalog(entry) { continue }
 
                 var mode = try subfolderMode(forRelPath: relPath)
                 if mode == nil {
@@ -254,12 +359,26 @@ extension Catalog {
             }
 
             guard Self.indexedExtensions.contains(entry.pathExtension.lowercased()) else { continue }
+            // A named pipe or device called *.nef would block the read
+            // that hashes it, and the whole catalog with it.
+            guard values.isRegularFile == true else { continue }
             files.append(DiskFile(
                 relPath: relPath,
                 size: Int64(values.fileSize ?? 0),
                 mtime: ImageRecord.milliseconds(values.contentModificationDate ?? .distantPast),
-                finderTags: FinderTag.encode(FinderTag.read(from: entry))))
+                finderTags: FinderTag.encode(FinderTag.read(from: entry)),
+                isDataless: Self.isDataless(entry, values)))
         }
+    }
+
+    /// Whether a file's contents are only in the cloud: evicted by
+    /// Optimize Mac Storage, or a placeholder from another file provider.
+    /// Opening one would download it.
+    static func isDataless(_ url: URL, _ values: URLResourceValues) -> Bool {
+        if let override = datalessOverrideForTesting { return override(url) }
+        if values.ubiquitousItemDownloadingStatus == .notDownloaded { return true }
+        var st = stat()
+        return lstat(url.path, &st) == 0 && (st.st_flags & UInt32(SF_DATALESS)) != 0
     }
 
     // MARK: - Metadata
@@ -295,18 +414,132 @@ extension Catalog {
             finderTags: file.finderTags)
     }
 
+
     // MARK: - Renames
 
-    /// Same-volume renames of a file's sidecar and thumbnail. Nothing is
-    /// copied (DESIGN.md §5.2).
-    private func moveCompanions(from oldRelPath: String, to newRelPath: String) throws {
+    /// What moving the companions of a pass's renames came to.
+    struct CompanionMoves {
+        /// The renames that can go ahead.
+        var renames: [(from: ImageRecord, to: DiskFile)] = []
+        /// Paths still held by rows whose rename waits for the next pass.
+        var blockedPaths: [String] = []
+        /// Rows whose thumbnail couldn't follow them; they get a new one.
+        var thumbnailsLost = Set<Int64>()
+        /// New paths whose sidecar couldn't be put in place. Their rows are
+        /// not reset to defaults for want of one (the sidecar is reported
+        /// where it is).
+        var sidecarsMissing = Set<String>()
+    }
+
+    /// Same-volume renames of each renamed file's sidecar and thumbnail.
+    /// Nothing is copied (DESIGN.md §5.2) and nothing is overwritten.
+    ///
+    /// Every companion first moves to a hidden name beside itself, then on
+    /// to its new name, so chains, swaps and changes of letter case on a
+    /// case-insensitive volume never find their destination still taken
+    /// by another source (or by themselves). A sidecar already at a new
+    /// name was left by a deleted file; it is set aside under a dated name,
+    /// never deleted. A thumbnail there is a cache and is replaced.
+    func moveCompanions(of renames: [(from: ImageRecord, to: DiskFile)],
+                        report: inout ReconcileReport) -> CompanionMoves {
+        struct Staged { let from: URL; let hidden: URL; let to: URL; let isSidecar: Bool }
         let fm = FileManager.default
-        for (from, to) in [(sidecarURL(forRelPath: oldRelPath), sidecarURL(forRelPath: newRelPath)),
-                           (thumbnailURL(forRelPath: oldRelPath), thumbnailURL(forRelPath: newRelPath))] {
-            guard fm.fileExists(atPath: from.path) else { continue }
-            try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if fm.fileExists(atPath: to.path) { try fm.removeItem(at: to) }
-            try fm.moveItem(at: from, to: to)
+        var staged: [[Staged]] = Array(repeating: [], count: renames.count)
+        var failed = Set<Int>()
+
+        // Phase 1: everything out of the way.
+        for (i, rename) in renames.enumerated() {
+            let pairs = [(sidecarURL(forRelPath: rename.from.relPath), sidecarURL(forRelPath: rename.to.relPath), true),
+                         (thumbnailURL(forRelPath: rename.from.relPath), thumbnailURL(forRelPath: rename.to.relPath), false)]
+            for (from, to, isSidecar) in pairs where FileOperations.itemExists(from) {
+                let hidden = from.deletingLastPathComponent()
+                    .appendingPathComponent(".latent-rename-\(UUID().uuidString)")
+                do {
+                    try FileOperations.renameExclusively(from, to: hidden)
+                    staged[i].append(Staged(from: from, hidden: hidden, to: to, isSidecar: isSidecar))
+                } catch where isSidecar {
+                    report.failures.append((rename.to.relPath, "sidecar not moved from \(rename.from.relPath): \(error)"))
+                    failed.insert(i)
+                    break
+                } catch {
+                    // Only a thumbnail; the row gets a new one.
+                }
+            }
+        }
+
+        // A rename that waits keeps its row on the old path, so a rename
+        // onto that path (a chain or a swap) has to wait too.
+        var held = Set(failed.map { renames[$0].from.relPath })
+        var changed = !failed.isEmpty
+        while changed {
+            changed = false
+            for (i, rename) in renames.enumerated() where !failed.contains(i) && held.contains(rename.to.relPath) {
+                failed.insert(i)
+                held.insert(rename.from.relPath)
+                report.failures.append((rename.to.relPath, "rename from \(rename.from.relPath) waits for \(rename.to.relPath) to be free"))
+                changed = true
+            }
+        }
+
+        var result = CompanionMoves()
+        for i in failed.sorted() {
+            for item in staged[i] where (try? FileOperations.renameExclusively(item.hidden, to: item.from)) == nil {
+                report.failures.append((renames[i].from.relPath, "companion left at \(item.hidden.path)"))
+            }
+            result.blockedPaths.append(renames[i].from.relPath)
+        }
+
+        // Phase 2: everything to its new name.
+        for (i, rename) in renames.enumerated() where !failed.contains(i) {
+            result.renames.append(rename)
+            var thumbnailMoved = false
+            for item in staged[i] {
+                do {
+                    try fm.createDirectory(at: item.to.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    if FileOperations.itemExists(item.to) {
+                        if item.isSidecar {
+                            let aside = try Self.setAside(item.to)
+                            report.failures.append((rename.to.relPath, "a sidecar left by a deleted file was moved to \(aside.lastPathComponent)"))
+                        } else {
+                            try fm.removeItem(at: item.to)
+                        }
+                    }
+                    try FileOperations.renameExclusively(item.hidden, to: item.to)
+                    if !item.isSidecar { thumbnailMoved = true }
+                } catch {
+                    let back = (try? FileOperations.renameExclusively(item.hidden, to: item.from)) != nil
+                    let left = back ? item.from : item.hidden
+                    if item.isSidecar {
+                        report.failures.append((rename.to.relPath, "sidecar not moved, left at \(left.path): \(error)"))
+                        result.sidecarsMissing.insert(rename.to.relPath)
+                    }
+                }
+            }
+            let hadThumbnail = rename.from.thumbKey != nil
+            if hadThumbnail && !thumbnailMoved, let id = rename.from.id { result.thumbnailsLost.insert(id) }
+        }
+        return result
+    }
+
+    /// Renames a sidecar that must make way to `<name>.orphaned-<date>.xmp`
+    /// beside it (numbered if that is taken), and returns the new URL.
+    static func setAside(_ sidecar: URL, now: Date = Date()) throws -> URL {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        let folder = sidecar.deletingLastPathComponent()
+        let stem = sidecar.deletingPathExtension().lastPathComponent
+        let stamp = formatter.string(from: now)
+        var attempt = 1
+        while true {
+            let suffix = attempt == 1 ? "" : "-\(attempt)"
+            let target = folder.appendingPathComponent("\(stem).orphaned-\(stamp)\(suffix).xmp")
+            do {
+                try FileOperations.renameExclusively(sidecar, to: target)
+                return target
+            } catch let error as CocoaError where error.code == .fileWriteFileExists && attempt < 100 {
+                attempt += 1
+            }
         }
     }
 
@@ -315,8 +548,9 @@ extension Catalog {
     /// Applies any sidecar whose mtime differs from what the row recorded.
     /// Sidecars are authoritative (DESIGN.md §5.3), so their rating, label,
     /// keywords and edit stack overwrite the row's. Returns how many were
-    /// read.
-    private func syncSidecars(report: inout ReconcileReport) throws -> Int {
+    /// read. Rows at `missing` lost their sidecar to a move that failed
+    /// this pass and keep what they have.
+    private func syncSidecars(report: inout ReconcileReport, leaving missing: Set<String> = []) throws -> Int {
         let records = try dbQueue.read { db in try ImageRecord.fetchAll(db) }
         let fm = FileManager.default
         var applied: [(ImageRecord, XMPSidecar.Fields?, Int64?)] = []
@@ -327,16 +561,36 @@ extension Catalog {
                   let date = attrs[.modificationDate] as? Date else {
                 // No sidecar. If there used to be one, its metadata is gone
                 // with it: the row goes back to defaults.
-                if record.sidecarMtime != nil { applied.append((record, nil, nil)) }
+                if record.sidecarMtime != nil && !missing.contains(record.relPath) {
+                    applied.append((record, nil, nil))
+                }
                 continue
             }
             let mtime = ImageRecord.milliseconds(date)
             guard mtime != record.sidecarMtime else { continue }
+            let fields: XMPSidecar.Fields
             do {
-                applied.append((record, try XMPSidecar.read(from: url), mtime))
+                fields = try XMPSidecar.read(from: url)
             } catch {
                 report.failures.append((record.relPath + ".xmp", "sidecar unreadable: \(error)"))
+                continue
             }
+            // A row that has never had a sidecar meeting one written for
+            // other content: a file deleted earlier left it, and a new photo
+            // has taken its name. Applying it would give the new photo the
+            // old one's rating and edits, so it is set aside instead.
+            if record.sidecarMtime == nil, !fields.sourceHash.isEmpty, fields.sourceHash != record.hashString {
+                do {
+                    let aside = try Self.setAside(url)
+                    report.failures.append((record.relPath + ".xmp",
+                                            "sidecar was written for another file; moved to \(aside.lastPathComponent)"))
+                } catch {
+                    report.failures.append((record.relPath + ".xmp",
+                                            "sidecar was written for another file and not applied: \(error)"))
+                }
+                continue
+            }
+            applied.append((record, fields, mtime))
         }
         guard !applied.isEmpty else { return 0 }
 
