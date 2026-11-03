@@ -103,6 +103,31 @@ extension EditorModel {
         }
     }
 
+    /// The stored history of catalog image `id`, read after asking for it
+    /// to open. Loaded now if that image is the open one; parked if its
+    /// open is waiting for the GPU, so the history is not lost and its
+    /// steps and snapshots are still written for the session; dropped if
+    /// another image has been asked for since.
+    func loadHistory(steps: [(stackJSON: String, createdAt: Int64)],
+                     snapshots stored: [(name: String, stackJSON: String)],
+                     forImage id: Int64?) {
+        if openWhenGPUReady != nil {
+            if deferredOpenCatalogImageID == id { deferredHistory = (steps, stored) }
+        } else if catalogImageID == id {
+            loadHistory(steps: steps, snapshots: stored)
+        }
+    }
+
+    /// After a deferred open: the history that arrived while it waited.
+    func loadDeferredHistory() {
+        let parked = deferredHistory
+        let id = deferredOpenCatalogImageID
+        deferredHistory = nil
+        deferredOpenCatalogImageID = nil
+        guard let parked, catalogImageID == id else { return }
+        loadHistory(steps: parked.steps, snapshots: parked.snapshots)
+    }
+
     /// Called when an edit settles: records a step and persists.
     private func recordHistoryStep() {
         guard !restoringState else { return }
@@ -163,10 +188,16 @@ extension EditorModel {
         flushPendingSave()
         if let stack = history.redo() { restore(stack) }
     }
+    /// `index` is the row the History panel drew, in the list as it was
+    /// before the flush. Recording the pending change can drop the oldest
+    /// step (at the cap) or the undone ones, so the row is found again by
+    /// its id; a click on a row the flush removed does nothing.
     func jumpToHistory(index: Int) {
-        guard hasImage else { return }
+        guard hasImage, history.steps.indices.contains(index) else { return }
+        let clicked = history.steps[index].id
         flushPendingSave()
-        if let stack = history.jump(to: index) { restore(stack) }
+        guard let now = history.steps.firstIndex(where: { $0.id == clicked }) else { return }
+        if let stack = history.jump(to: now) { restore(stack) }
     }
 
     /// After Undo, Redo, a jump or a snapshot. The crop the straighten

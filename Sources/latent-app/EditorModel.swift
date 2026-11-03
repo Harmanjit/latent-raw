@@ -320,6 +320,12 @@ final class EditorModel: ObservableObject {
     /// the output grid those settings define, so a change makes them
     /// again (EditorModel+Masks.swift).
     var modelMaskGeometry: [UUID: String] = [:]
+    /// The shape (model and prompt points) each model mask on the
+    /// session was made, or is being made, for, by local id. The pixels
+    /// outlive their local (Undo of a paste removes the local, not the
+    /// pixels), so a later local with the same id but another shape is
+    /// told apart by this record, not by the edit it replaced.
+    var modelMaskShapes: [UUID: MaskShape] = [:]
     /// The rebuild queued after a geometry change, 300 ms after the last.
     var modelMaskGeometryTask: Task<Void, Never>?
 
@@ -390,6 +396,13 @@ final class EditorModel: ObservableObject {
 
     /// An image asked for before the GPU was ready, opened when it is.
     var openWhenGPUReady: (() -> Void)?
+    /// The catalog id that deferred open is for, and that image's stored
+    /// history and snapshots if their read arrived before the GPU did:
+    /// they are loaded once the open has happened
+    /// (`loadHistory(steps:snapshots:forImage:)`).
+    var deferredOpenCatalogImageID: Int64?
+    var deferredHistory: (steps: [(stackJSON: String, createdAt: Int64)],
+                          snapshots: [(name: String, stackJSON: String)])?
 
     /// Every model shares the process's one GPU context, built off the
     /// main thread (`GPUContext.shared()`), so the window appears without
@@ -429,6 +442,8 @@ final class EditorModel: ObservableObject {
             setupError = String(describing: error)
             status = "Metal setup failed"
             openWhenGPUReady = nil
+            deferredOpenCatalogImageID = nil
+            deferredHistory = nil
         }
         watchMemoryPressure()
     }

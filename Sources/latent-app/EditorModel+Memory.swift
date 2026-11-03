@@ -86,6 +86,7 @@ extension EditorModel {
         modelMaskGeometryTask?.cancel()
         modelMaskGeometryTask = nil
         modelMaskGeometry = [:]
+        modelMaskShapes = [:]
         storedHistoryLoaded = false
         undecodableHistorySteps = []
         undecodableSnapshots = []

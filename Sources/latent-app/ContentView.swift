@@ -542,8 +542,9 @@ struct ContentView: View {
             do {
                 let steps = try await library.history(for: record)
                 let snaps = try await library.snapshots(for: record)
-                if model.catalogImageID == record.id, library.catalog === catalog {
-                    model.loadHistory(steps: steps, snapshots: snaps)
+                // Loaded now, or after the open if it waits for the GPU.
+                if library.catalog === catalog {
+                    model.loadHistory(steps: steps, snapshots: snaps, forImage: record.id)
                 }
             } catch {
                 model.reportFailure("Reading history for \(record.fileName)", error)

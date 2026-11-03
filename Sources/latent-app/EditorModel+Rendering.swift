@@ -60,6 +60,25 @@ extension EditorModel {
         return max(reach, p.touchUpTileReach(beyondMargin: 0, sensorSize: sensorSize))
     }
 
+    /// The part of a render's coverage that looks as the full frame does:
+    /// `inset` in from every side, and `reach` in from each side that lies
+    /// inside the sensor, where the render clamped reads the full frame
+    /// makes. A side on the sensor's own edge is clamped there by the
+    /// full-frame render too, so its band is right and stays usable;
+    /// trimming it would make every pan near an image edge render again.
+    static func usableCoverage(_ coverage: CGRect, inset: CGFloat, reach: CGFloat,
+                               sensorSize: CGSize) -> CGRect {
+        guard !coverage.isNull, !coverage.isEmpty else { return coverage }
+        let inner = max(inset, reach)
+        let left = coverage.minX > 0.5 ? inner : inset
+        let top = coverage.minY > 0.5 ? inner : inset
+        let right = coverage.maxX < sensorSize.width - 0.5 ? inner : inset
+        let bottom = coverage.maxY < sensorSize.height - 0.5 ? inner : inset
+        let width = coverage.width - left - right, height = coverage.height - top - bottom
+        guard width > 0, height > 0 else { return .null }
+        return CGRect(x: coverage.minX + left, y: coverage.minY + top, width: width, height: height)
+    }
+
     /// What the tile is rendered for: the visible area, the margin a pan
     /// may use without a render, and beyond that the neighbourhood reach,
     /// so what a pan reveals is never the band the edge clamped.
@@ -94,8 +113,9 @@ extension EditorModel {
               tile.texture.height == Int(tileSize.height) else { return false }
         let visible = visibleSensorRect
         // The band the neighbourhood stages clamped is not usable either.
-        let trim = max(Self.tileInset, Self.neighbourhoodReach(of: renderParameters, sensorSize: sensorSize))
-        let usable = tileHealedCoverage.insetBy(dx: trim, dy: trim)
+        let usable = Self.usableCoverage(tileHealedCoverage, inset: Self.tileInset,
+                                         reach: Self.neighbourhoodReach(of: renderParameters, sensorSize: sensorSize),
+                                         sensorSize: sensorSize)
         // Only the part of the view that's actually over the image matters.
         let sensorBounds = CGRect(origin: .zero, size: sensorSize)
         return usable.contains(visible.intersection(sensorBounds))

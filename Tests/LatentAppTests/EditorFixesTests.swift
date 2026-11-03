@@ -66,6 +66,41 @@ final class EditorFixesTests: XCTestCase {
                       "the change made before the restore is in the history")
     }
 
+    /// The flush a jump does first can drop the oldest step (at the cap):
+    /// the row clicked is still the one restored, not the one after it.
+    func testAJumpRestoresTheClickedRowWhenTheFlushDropsTheOldest() async throws {
+        let model = try await openModel()
+        for i in 1..<EditHistory.maximumSteps {
+            model.parameters.exposureEV = Float(i) / 10
+            model.flushPendingSave()
+        }
+        XCTAssertEqual(model.history.steps.count, EditHistory.maximumSteps)
+        let clicked = model.history.steps[5].stack.parameters(defaults: model.defaultParameters).exposureEV
+        model.parameters.contrast = 0.3   // pending
+        model.jumpToHistory(index: 5)
+        XCTAssertEqual(model.history.steps.count, EditHistory.maximumSteps, "the oldest step dropped off")
+        XCTAssertEqual(model.parameters.exposureEV, clicked, "the clicked row, not the one after it")
+        XCTAssertEqual(model.parameters.contrast, model.defaultParameters.contrast)
+    }
+
+    /// A click on an undone row that the flush of a pending change
+    /// discards does nothing; it does not land on another step.
+    func testAJumpToARowTheFlushRemovedDoesNothing() async throws {
+        let model = try await openModel()
+        model.parameters.exposureEV = 0.1
+        model.flushPendingSave()
+        model.parameters.exposureEV = 0.2
+        model.flushPendingSave()
+        model.undo()
+        model.undo()
+        XCTAssertEqual(model.history.cursor, 0)
+        model.parameters.exposureEV = 0.3   // pending, after undoing
+        model.jumpToHistory(index: 2)        // the row for 0.2, which the flush discards
+        XCTAssertEqual(model.history.steps.count, 2)
+        XCTAssertEqual(model.history.cursor, 1)
+        XCTAssertEqual(model.parameters.exposureEV, 0.3)
+    }
+
     // MARK: - History without a catalog id (#107)
 
     func testUndoWorksForAFileOpenedWithoutACatalog() async throws {
@@ -107,6 +142,49 @@ final class EditorFixesTests: XCTestCase {
         XCTAssertTrue(snapshotWrites.isEmpty, "the stored snapshots are not replaced")
         XCTAssertTrue(model.status.contains("this session only"), model.status)
         XCTAssertEqual(model.history.steps.count, 2, "undo still works in memory")
+    }
+
+    /// An open asked for before the GPU is ready is deferred; the
+    /// history read that follows it is loaded once the open happens,
+    /// whichever arrives first.
+    func testHistoryReadBeforeADeferredOpenIsLoadedAfterIt() async throws {
+        try await checkDeferredOpenLoadsHistory(historyFirst: true)
+    }
+
+    func testHistoryReadAfterADeferredOpenIsLoaded() async throws {
+        try await checkDeferredOpenLoadsHistory(historyFirst: false)
+    }
+
+    private func checkDeferredOpenLoadsHistory(historyFirst: Bool) async throws {
+        let url = try TestAssets.d750URL()
+        _ = try await GPUContext.shared()
+        let model = EditorModel()
+        model.onEditSettled = { _, _ in }
+        var historyWrites = 0
+        model.onHistoryChanged = { _, _ in historyWrites += 1 }
+        // As at launch, before the GPU context is built.
+        let gpu = model.gpuContext
+        model.gpuContext = nil
+        model.open(url: url, catalogImageID: 7)
+        XCTAssertNotNil(model.openWhenGPUReady)
+        XCTAssertNil(model.catalogImageID)
+        let good = try EditStack(parameters: EditParameters()).encodeJSON()
+        let stored: [(stackJSON: String, createdAt: Int64)] = [(good, 1000)]
+        // A read for an image asked for earlier is not this one's.
+        model.loadHistory(steps: stored, snapshots: [], forImage: 6)
+        if historyFirst { model.loadHistory(steps: stored, snapshots: [("S", good)], forImage: 7) }
+        // The GPU arrives (`attachGPU`).
+        model.gpuContext = gpu
+        let open = try XCTUnwrap(model.openWhenGPUReady)
+        model.openWhenGPUReady = nil
+        open()
+        XCTAssertEqual(model.catalogImageID, 7)
+        if !historyFirst { model.loadHistory(steps: stored, snapshots: [("S", good)], forImage: 7) }
+        XCTAssertTrue(model.storedHistoryLoaded, "the stored history was loaded")
+        XCTAssertEqual(model.snapshots.map(\.name), ["S"])
+        model.parameters.exposureEV = 0.5
+        model.flushPendingSave()
+        XCTAssertEqual(historyWrites, 1, "steps are persisted")
     }
 
     func testUnreadableRowsAreWrittenBack() async throws {
@@ -273,6 +351,34 @@ final class EditorFixesTests: XCTestCase {
         XCTAssertTrue(model.generatingMasks.contains(local.id))
     }
 
+    /// Pixels outlive their local: Undo of a paste removes the local but
+    /// not the pixels. A later paste of the same id with another shape
+    /// must not render them.
+    func testPixelsLeftByAnUndonePasteAreNotKeptForAnotherShape() async throws {
+        let model = try await openModel()
+        let session = try XCTUnwrap(model.session)
+        let local = LocalAdjustment(name: "Subject", shape: .ai(kind: "subject", modelVersion: Self.vision))
+        var pasted = model.defaultParameters
+        pasted.locals = [local]
+        model.apply(EditStack(parameters: pasted), groups: [.locals])
+        model.flushPendingSave()
+        await waitUntil("the first mask", seconds: 60) { !model.generatingMasks.contains(local.id) }
+        session.setAIMask(MaskBitmap(width: 1, height: 1, data: [255]), forLocal: local.id)
+
+        model.undo()
+        XCTAssertTrue(model.parameters.locals.isEmpty)
+        XCTAssertTrue(session.hasAIMask(forLocal: local.id), "the pixels stay in the session")
+
+        let other = LocalAdjustment(id: local.id, name: "Subject",
+                                    shape: .ai(kind: "subject", modelVersion: "birefnet-lite@1"))
+        pasted.locals = [other]
+        model.apply(EditStack(parameters: pasted), groups: [.locals])
+        XCTAssertFalse(session.hasAIMask(forLocal: local.id) && !model.generatingMasks.contains(local.id),
+                       "the old shape's pixels are not kept for the new one")
+        XCTAssertTrue(model.generatingMasks.contains(local.id))
+        await waitUntil("the second mask", seconds: 60) { !model.generatingMasks.contains(local.id) }
+    }
+
     func testModelMaskInputCarriesTheEditsGeometryOnly() {
         var defaults = EditParameters()
         defaults.exposureEV = 0
@@ -339,5 +445,48 @@ final class EditorFixesTests: XCTestCase {
             XCTAssertTrue(usable.contains(model.visibleSensorRect.intersection(sensor)),
                           "step \(step): the view reaches the clamped band")
         }
+    }
+
+    /// The reach is trimmed only from sides inside the sensor: at the
+    /// image's edge the full frame clamps the same way.
+    func testUsableCoverageKeepsTheSensorEdge() {
+        let sensor = CGSize(width: 6000, height: 4000)
+        let inside = EditorModel.usableCoverage(CGRect(x: 1000, y: 1000, width: 2000, height: 1000),
+                                                inset: 8, reach: 200, sensorSize: sensor)
+        XCTAssertEqual(inside, CGRect(x: 1200, y: 1200, width: 1600, height: 600))
+        let corner = EditorModel.usableCoverage(CGRect(x: 0, y: 0, width: 2000, height: 1000),
+                                                inset: 8, reach: 200, sensorSize: sensor)
+        XCTAssertEqual(corner, CGRect(x: 8, y: 8, width: 1792, height: 792))
+        let farCorner = EditorModel.usableCoverage(CGRect(x: 4000, y: 3000, width: 2000, height: 1000),
+                                                   inset: 8, reach: 200, sensorSize: sensor)
+        XCTAssertEqual(farCorner, CGRect(x: 4200, y: 3200, width: 1792, height: 792))
+        XCTAssertTrue(EditorModel.usableCoverage(CGRect(x: 100, y: 100, width: 300, height: 300),
+                                                 inset: 8, reach: 200, sensorSize: sensor).isNull)
+    }
+
+    /// Near an image edge, within the reach but past the inset, a small
+    /// pan with nothing changed reuses the tile.
+    func testAPanNearAnImageEdgeDoesNotRender() async throws {
+        let model = try await openModel()
+        model.parameters.clarity = 0.6
+        let reach = EditorModel.neighbourhoodReach(of: model.parameters, sensorSize: model.sensorSize)
+        model.zoomToActualSize()
+        // Which way a horizontal pan moves the view's left sensor edge.
+        let start = model.visibleSensorRect.minX
+        model.pan(by: CGSize(width: 10, height: 0))
+        let sign: CGFloat = model.visibleSensorRect.minX < start ? 1 : -1
+        var guardSteps = 0
+        while model.visibleSensorRect.minX > reach / 2, guardSteps < 2000 {
+            model.pan(by: CGSize(width: 10 * sign, height: 0))
+            guardSteps += 1
+        }
+        let edgeGap = model.visibleSensorRect.minX
+        XCTAssertGreaterThan(edgeGap, 16, "the view is inside the inset")
+        XCTAssertLessThan(edgeGap, reach, "the view is within the reach of the edge")
+        model.rerenderForViewport()
+        XCTAssertTrue(model.tileCoversView)
+        model.pan(by: CGSize(width: -4 * sign, height: 0))   // a little away from the edge
+        model.rerenderForViewport()
+        XCTAssertEqual(model.renderReport, "view moved · no render")
     }
 }

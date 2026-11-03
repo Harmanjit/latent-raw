@@ -73,8 +73,12 @@ extension EditorModel {
               magnifierState.parameters == renderParameters else { return false }
         // As the view's tile: the band the neighbourhood stages clamped
         // at the render's edge is not usable.
-        let trim = max(Self.magnifierInset, Self.neighbourhoodReach(of: renderParameters, sensorSize: sensorSize))
-        return magnifierState.healedCoverage.insetBy(dx: trim, dy: trim).contains(needed)
+        // Only the sides inside the sensor: at the image's edge the full
+        // frame clamps the same way.
+        let usable = Self.usableCoverage(magnifierState.healedCoverage, inset: Self.magnifierInset,
+                                         reach: Self.neighbourhoodReach(of: renderParameters, sensorSize: sensorSize),
+                                         sensorSize: sensorSize)
+        return usable.contains(needed)
     }
 
     /// Renders now if the last render was long enough ago, else once when

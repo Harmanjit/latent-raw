@@ -28,9 +28,15 @@ extension EditorModel {
               editStackJSON: String? = nil) {
         guard let gpu = gpuContext else {
             if setupError == nil {
+                // The caller reads this image's history next and finds no
+                // open image to give it to: it is parked and loaded after
+                // the open (`loadHistory(steps:snapshots:forImage:)`).
+                deferredOpenCatalogImageID = catalogImageID
+                deferredHistory = nil
                 openWhenGPUReady = { [weak self] in
                     self?.open(url: url, userRotation: userRotation, catalogImageID: catalogImageID,
                                editStackJSON: editStackJSON)
+                    self?.loadDeferredHistory()
                 }
             }
             return
@@ -99,6 +105,7 @@ extension EditorModel {
             modelMaskGeometryTask?.cancel()
             modelMaskGeometryTask = nil
             modelMaskGeometry = [:]
+            modelMaskShapes = [:]
             history = EditHistory(initial: EditStack(parameters: parameters))
             snapshots = []
             // Nothing of this image's stored history is on hand until

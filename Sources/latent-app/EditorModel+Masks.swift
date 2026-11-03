@@ -103,12 +103,15 @@ extension EditorModel {
     /// rendering the pixels of the shape it no longer names. Those are
     /// dropped and made again; a local with no pixels at all gets them
     /// too, as on open. Called from the restore paths with the value
-    /// `parameters` had before.
+    /// `parameters` had before. The shape the pixels were made for comes
+    /// from `modelMaskShapes` first: pixels left by a local that Undo
+    /// removed are not in `old`, but must not serve a pasted local that
+    /// reuses its id with another shape.
     func syncModelMasks(from old: EditParameters) {
         guard let session else { return }
         let before = Dictionary(old.locals.map { ($0.id, $0.shape) }, uniquingKeysWith: { a, _ in a })
         for local in parameters.locals where local.shape.isModelGenerated {
-            if let previous = before[local.id], previous != local.shape {
+            if let previous = modelMaskShapes[local.id] ?? before[local.id], previous != local.shape {
                 session.setAIMask(nil, forLocal: local.id)
                 generateAIMask(for: local)
             } else if !session.hasAIMask(forLocal: local.id), !generatingMasks.contains(local.id) {
@@ -196,6 +199,7 @@ extension EditorModel {
             return
         }
         modelMaskGeometry[local.id] = geometry
+        modelMaskShapes[local.id] = local.shape
         let input = SendableImage(cgImage: image)
         let localID = local.id
         // The analysis render is unrotated; the subject models turn it
@@ -228,6 +232,7 @@ extension EditorModel {
                       case .ai(_, let current) = now.shape, current == modelVersion,
                       Self.touchUpGeometryKey(of: self.parameters) == geometry else { return }
                 session.setAIMask(result.mask, forLocal: localID)
+                self.modelMaskShapes[localID] = now.shape
                 let made = result.substitutedModel.map { "\(runner), \($0) is not installed" } ?? runner
                 self.status = String(format: "%@ mask (%@): %.0f ms on device, %.0f%% of the frame",
                                      kind.maskNoun.capitalized, made, result.seconds * 1000,
@@ -358,6 +363,7 @@ extension EditorModel {
         let shape = local.shape
         generatingMasks.insert(localID)
         modelMaskGeometry[localID] = geometry
+        modelMaskShapes[localID] = shape
         Task { @MainActor [weak self] in
             let outcome = await Task.detached(priority: .userInitiated) {
                 Result { try sam.predict(points: prompts) }
@@ -371,6 +377,7 @@ extension EditorModel {
                 guard self.parameters.locals.first(where: { $0.id == localID })?.shape == shape,
                       Self.touchUpGeometryKey(of: self.parameters) == geometry else { return }
                 session.setAIMask(prediction.mask, forLocal: localID)
+                self.modelMaskShapes[localID] = shape
                 self.status = String(format: "Selection: %.0f ms, confidence %.2f, %.0f%% of the frame",
                                      prediction.seconds * 1000, prediction.score, prediction.mask.coverage * 100)
                 self.rerender()
