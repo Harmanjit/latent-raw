@@ -12,6 +12,7 @@ struct LibraryPanel: View {
     @ObservedObject var selectionJobs: SelectionJobQueue
     @ObservedObject var model: EditorModel
     @State private var metadataExpanded = true
+    @AppStorage("latent.panel.descriptionExpanded") private var descriptionExpanded = true
     @State private var historyExpanded = false
     @AppStorage("latent.keywordListExpanded") private var keywordListExpanded = false
     @State private var exportExpanded = true
@@ -28,6 +29,8 @@ struct LibraryPanel: View {
     /// Export Open Image offered: not in Survey, whose panes aren't the
     /// editor's image.
     var exportsOpenImage = true
+    /// A colour label chosen in the panel (nil removes it).
+    var onLabel: (ColorLabel?) -> Void = { _ in }
 
     /// The selected photo's merge recipe, when it is one Photo Merge made;
     /// read from the catalog when the selection settles.
@@ -84,6 +87,11 @@ struct LibraryPanel: View {
 
             if let selected = library.selectedImage {
                 selectionSection(selected)
+                DisclosureGroup(isExpanded: $descriptionExpanded) {
+                    DescriptiveMetadataSection(library: library).padding(.top, 6)
+                } label: {
+                    sectionLabel("Title & Copyright")
+                }
                 DisclosureGroup(isExpanded: $metadataExpanded) {
                     metadataSection(selected).padding(.top, 6)
                 } label: {
@@ -317,6 +325,7 @@ struct LibraryPanel: View {
             return
         }
         model.export(to: destination, options: options, rating: record.rating,
+                     descriptive: record.exportDescription,
                      readKeywords: { try await catalog.keywords(forImageID: id) })
     }
 
@@ -367,6 +376,8 @@ struct LibraryPanel: View {
                 .frame(width: 80)
                 .accessibilityValue(SpokenText.flag(image.flag))
             }
+
+            ColorLabelPicker(current: image.label, onChoose: onLabel)
 
             // Chips and an add field over the whole selection (KeywordingViews).
             KeywordingField(library: library)

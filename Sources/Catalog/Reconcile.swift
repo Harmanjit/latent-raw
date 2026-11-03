@@ -261,6 +261,10 @@ extension Catalog {
                 fresh.userRotation = previous.userRotation
                 fresh.preservedName = previous.preservedName
                 fresh.mergeJSON = previous.mergeJSON
+                fresh.title = previous.title
+                fresh.caption = previous.caption
+                fresh.creator = previous.creator
+                fresh.copyright = previous.copyright
                 fresh.sidecarMtime = previous.sidecarMtime
                 fresh.thumbKey = nil   // pixels changed; thumbnail is stale
                 updates.append(fresh)
@@ -646,6 +650,12 @@ extension Catalog {
                 // A merge result's recipe, like its edit, comes from the
                 // sidecar; an image whose sidecar has none isn't a merge.
                 row.mergeJSON = fields.flatMap { $0.mergeJSON.isEmpty ? nil : $0.mergeJSON }
+                // Title, caption, creator and copyright too: the sidecar
+                // is the truth, and one without them clears them.
+                row.title = fields?.title
+                row.caption = fields?.caption
+                row.creator = fields?.creator
+                row.copyright = fields?.copyright
                 row.sidecarMtime = mtime
                 try row.update(db)
 

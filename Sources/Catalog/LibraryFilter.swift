@@ -14,17 +14,20 @@ public struct LibraryFilter: Equatable, Sendable {
     public var camera: String?
     public var lens: String?
     public var keyword: String?
-    /// Case-insensitive substring of the file name.
+    /// Case-insensitive substring of the file name, title or caption.
     public var text = ""
     /// Show only files carrying the Finder tag of this name.
     public var finderTag: String?
+    /// Show only images with one of these colour labels (or none, or a
+    /// custom one); empty = any.
+    public var labels: Set<LabelFilterChoice> = []
 
     public init() {}
 
     public var isActive: Bool {
         minRating > 0 || !flags.isEmpty || editedOnly || camera != nil
             || lens != nil || keyword != nil || !text.trimmingCharacters(in: .whitespaces).isEmpty
-            || finderTag != nil
+            || finderTag != nil || !labels.isEmpty
     }
 
     /// Whether `record` passes every active criterion. Keywords and the
@@ -38,8 +41,11 @@ public struct LibraryFilter: Equatable, Sendable {
         // A keyword finds the photos tagged with any keyword inside it too.
         if let keyword, !keywords.contains(where: { KeywordPath.path($0, isWithin: keyword) }) { return false }
         if let finderTag, !FinderTag.stored(record.finderTags, contains: finderTag) { return false }
+        if !labels.isEmpty, !labels.contains(where: { $0.matches(record.label) }) { return false }
         let needle = text.trimmingCharacters(in: .whitespaces)
-        if !needle.isEmpty, record.fileName.range(of: needle, options: .caseInsensitive) == nil {
+        // The name, or the title or caption the photographer gave it.
+        if !needle.isEmpty, ![record.fileName, record.title ?? "", record.caption ?? ""]
+            .contains(where: { $0.range(of: needle, options: .caseInsensitive) != nil }) {
             return false
         }
         return true

@@ -79,6 +79,23 @@ public final class LibraryFileOperations: ObservableObject {
         registerUndo(report.completed, actionName: "Rename")
     }
 
+    /// Renames the photos of `plan` (RenamePlan) in its order, each in its
+    /// own folder, as one undoable action. Photos the plan found a problem
+    /// with are left alone; a name taken since the plan was made fails that
+    /// photo and the rest go on. Returns what happened.
+    @discardableResult
+    public func rename(_ plan: RenamePlan) async -> TransferReport {
+        guard let library else { return TransferReport() }
+        let requests = plan.renames.compactMap { item -> TransferRequest? in
+            guard let url = library.fileURL(for: item.record) else { return nil }
+            return TransferRequest(source: url, folder: url.deletingLastPathComponent(), name: item.newName)
+        }
+        guard !requests.isEmpty else { return TransferReport() }
+        let report = await execute(.transfer(requests, .move), title: "Renaming")
+        registerUndo(report.completed, actionName: Self.actionName("Rename", report.completed))
+        return report
+    }
+
     /// The open catalog's subfolders on the way to `folder` that it hasn't
     /// been told whether to include (DESIGN.md §5.2 `ask`), outermost first.
     /// Images put there with a sidecar would otherwise make the folder a

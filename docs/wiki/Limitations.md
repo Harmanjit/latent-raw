@@ -27,10 +27,17 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **The sandbox limits the sidebar** to folders inside a favourite. Anything else needs Open Folder, or adding a folder that contains it.
 - **Subfolder include/independent choices are not stored in sidecars.** They live only in the catalog database, so rebuilding the catalog, including the automatic rebuild of a damaged database, resets them and asks again. Changing the choice moves no existing sidecars or thumbnails.
 - **No video, no plugins.**
+<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Metadata editing** is limited to rating, flag and keywords. Colour labels, title, caption and copyright can't be set. Keywords have no synonyms, no keyword sets, no import or export of keyword lists, and the Keyword List shows only keywords some photo carries: there is no keeping an empty keyword for later.
 - **Finder tags are read, never written,** and a tag changed in Finder while the folder is open shows only when the folder is opened again.
 - **Undo in the Library has edges.** It covers ratings, flags, rotation, keywords, collections, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export, print, contact sheet or Photo Merge is running.
 - **Rename is one image at a time.** There is no batch rename.
+
+- **Metadata editing** covers rating, flag, colour label, keywords, title, caption, creator and copyright. Other IPTC fields (headline, location, contact details, usage terms) and capture time can't be edited, and there are no metadata presets. Keywords apply to one image at a time, not to a multiple selection. Colour labels use the five standard names; there are no label sets.
+- **Finder tags are read, never written,** and a tag changed in Finder while the folder is open shows only when the folder is opened again.
+- **Undo in the Library has edges.** It covers ratings, flags, labels, titles, captions, creators and copyrights, rotation, keywords, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export, print, contact sheet or Photo Merge is running.
+- **Renaming files on import** isn't possible, since there is no import step; Rename with Template renames photos already in the folder.
+<!-- /RECONCILE -->
 - **Rename, Move and Copy work only in the Library grid,** and not while an export, print, contact sheet or Photo Merge is running.
 - **A move takes only the raw file.** A JPEG shot alongside it (RAW+JPEG) and an `.xmp` sidecar another application put beside the raw stay where they were.
 - **A move to another disk copies, then deletes the original.** If Latent crashes or is force-quit during a long copy, a hidden `.latent-transfer-…` file can be left in the destination. The original is still in place, and the hidden file can be deleted.

@@ -100,6 +100,8 @@ struct ContentView: View {
     @State private var compareSyncsView = true
     /// The image Rename (F2) is naming, while its sheet is up.
     @State private var renaming: ImageRecord?
+    /// The photos Rename with Template is naming, while its sheet is up.
+    @State private var templateRenaming: TemplateRenameRequest?
     /// What Undo and Redo would do outside Develop (see LibraryUndo.swift).
     @StateObject private var libraryUndo = LibraryUndoObserver()
     /// Survey's panes (N), each with its own view-only model.
@@ -255,6 +257,17 @@ struct ContentView: View {
             RemoveDustSheet(model: sheet, onRemove: { startRemoveDust(from: $0) }, canRemove: !exportQueue.isGPUBusy)
                 .motionFollowsAccessibility()
         }
+        .sheet(item: $templateRenaming) { request in
+            TemplateRenameSheet(request: request,
+                                plan: { library.renamePlan(for: request.records, template: $0, customText: $1, start: $2) },
+                                onRename: { plan in
+                                    let report = await library.fileOperations.rename(plan)
+                                    if !report.failures.isEmpty {
+                                        library.lastError = "Rename failed for \(report.failures.count) of \(plan.renameCount): \(report.failureDescription)"
+                                    }
+                                })
+            .motionFollowsAccessibility()
+        }
         .sheet(item: $renaming) { record in
             RenameSheet(record: record) { name in
                 do {
@@ -328,7 +341,8 @@ struct ContentView: View {
                      presets: model.presets,
                      onApplyPreset: { applyPresetToSelection($0) },
                      onPaste: { pasteSettings() },
-                     exportsOpenImage: mode != .survey)
+                     exportsOpenImage: mode != .survey,
+                     onLabel: { chooseLabel($0) })
     }
 
     // MARK: - Library wiring
@@ -479,10 +493,24 @@ struct ContentView: View {
         }
     }
 
-    /// F2: the rename sheet for the selected image.
+    /// F2: the rename sheet for the selected image, or the template sheet
+    /// when several are selected.
     private func beginRename() {
+        if library.selectedImageIDs.count > 1 { beginTemplateRename(); return }
         guard let record = library.selectedImage else { return }
         renaming = record
+    }
+
+    /// Rename with Template…: the visible selection, in the grid's order,
+    /// which is the order the sequence numbers follow.
+    private func beginTemplateRename() {
+        let records = library.batchTargets(onlyPrimary: false)
+        guard !records.isEmpty else { return }
+        let order = Dictionary(library.visibleImages.enumerated().compactMap { index, record in
+            record.id.map { ($0, index) } }, uniquingKeysWith: { first, _ in first })
+        templateRenaming = TemplateRenameRequest(records: records.sorted {
+            (order[$0.id ?? -1] ?? .max) < (order[$1.id ?? -1] ?? .max)
+        })
     }
 
     /// Back (-1) or Forward (+1). The history moves at once, so pressing
@@ -561,7 +589,11 @@ struct ContentView: View {
             rename: beginRename,
             canChangeFiles: { canChangeFiles() },
             transfer: { fileCommands.transferSelection($0, to: $1) },
-            recentDestinations: { RecentDestinations.shared.availableFolders })
+            recentDestinations: { RecentDestinations.shared.availableFolders },
+            label: { label in
+                library.perform("Labelling") { try await library.setLabel(label, onlyPrimary: mode != .library) }
+            },
+            renameWithTemplate: beginTemplateRename)
     }
 
     /// Loads `record` (with its stored edit, history and snapshots) into
@@ -1057,6 +1089,11 @@ struct ContentView: View {
         library.perform("Flagging") { try await library.setFlag(flag, onlyPrimary: mode != .library) }
     }
 
+    /// A label key, menu item or the panel's dots: toggles by the primary.
+    private func chooseLabel(_ label: ColorLabel?) {
+        library.perform("Labelling") { try await library.chooseLabel(label, onlyPrimary: mode != .library) }
+    }
+
     /// Rotates the selected image in the catalog and, if it's the one in
     /// the editor, on screen too.
     private func rotate(by quarterTurns: Int) {
@@ -1139,6 +1176,8 @@ struct ContentView: View {
             flag(.rejected)
         case .unflag:
             flag(.none)
+        case .label(let label):
+            chooseLabel(label)
         case .beforeAfter:
             if model.hasImage { model.showingBefore.toggle() }
         case .crop:
@@ -1255,6 +1294,8 @@ struct ContentView: View {
             model.stepToolSize(by: steps)
         case .rename:
             beginRename()
+        case .renameWithTemplate:
+            beginTemplateRename()
         case .moveToFolder:
             fileCommands.transferSelection(.move, to: nil)
         case .copyToFolder:

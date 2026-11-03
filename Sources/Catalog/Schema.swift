@@ -131,6 +131,19 @@ enum Schema {
 
         // Collections and smart collections (Collections.swift).
         CollectionsSchema.register(in: &migrator)
+        migrator.registerMigration("metadata_v1_descriptive") { db in
+            // Title, caption, creator and copyright, as the Library panel
+            // edits them (DescriptiveField). Columns on the row, as the merge
+            // recipe is, so copies and undo carry them with everything else;
+            // the sidecar holds the truth as dc:title, dc:description,
+            // dc:creator and dc:rights. Existing rows get NULL: nothing set.
+            try db.alter(table: "images") { t in
+                t.add(column: "title", .text)
+                t.add(column: "caption", .text)
+                t.add(column: "creator", .text)
+                t.add(column: "copyright", .text)
+            }
+        }
 
         return migrator
     }

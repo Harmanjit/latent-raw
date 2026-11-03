@@ -31,7 +31,11 @@ _latent/
 
 **Reconciliation** runs each time a folder opens; to re-scan the open folder, open it again from the sidebar or with Open Folder. Files are matched by name, size and modification time. A renamed file is recognised by its content hash and keeps its sidecar. Sidecars newer than the database are re-read, so editing a sidecar in another tool is picked up, and Finder tags are read again. There is no live file watching; the app never touches the folder while you are not looking. After a move, copy or rename made in Latent, the open folder is re-read by itself.
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 **Sidecars** are standard XMP. Rating, label and keywords are written in the fields Lightroom and others read, keyword hierarchies included (`lr:hierarchicalSubject`). The edit, history and snapshots are under Latent's own namespace. A sidecar written by another application is read for whatever standard fields it has.
+
+**Sidecars** are standard XMP. Rating, colour label, keywords, title, caption, creator and copyright are written in the fields Lightroom and others read (`xmp:Rating`, `xmp:Label`, `dc:subject`, `dc:title`, `dc:description`, `dc:creator`, `dc:rights`). The edit, history and snapshots are under Latent's own namespace. A sidecar written by another application is read for whatever standard fields it has.
+<!-- /RECONCILE -->
 
 **A damaged database** is not a lost catalog. If SQLite reports `catalog.sqlite` as damaged, Latent moves it aside as `catalog.damaged-<date>.sqlite` in the same `_latent/` folder, starts a new one that fills from the sidecars, and tells you. Ratings, keywords and edits come back, and collections come back from `collections.json`; the include-or-separate answers for subfolders were kept only in the database, so they are asked again.
 
@@ -43,7 +47,7 @@ Extensions indexed: NEF, NRW, ARW, SRF, SR2, CR2, CR3, CRW, DNG, RAF, ORF, RW2, 
 
 ## The grid
 
-Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to open in Develop. With several selected, the image you clicked last (for a ⇧-click, the end you clicked) leads: Loupe, Develop and the left panel show it, and ⌘A keeps it. Rating, flag and rotate keys act on every selected image. Selected images that the filter hides are deselected, so these keys, Paste Settings and Export act only on images the grid shows. Badges show a pencil for edited images and ✓ and ✗ for flags.
+Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to open in Develop. With several selected, the image you clicked last (for a ⇧-click, the end you clicked) leads: Loupe, Develop and the left panel show it, and ⌘A keeps it. Rating, flag and rotate keys act on every selected image. Selected images that the filter hides are deselected, so these keys, Paste Settings and Export act only on images the grid shows. Badges show a pencil for edited images and ✓ and ✗ for flags, and a coloured dot left of the stars shows the colour label.
 
 **Stars.** Click the stars under a thumbnail to rate it; the empty ones appear when you point at the cell. Clicking a selected image's stars rates the whole selection, clicking another image's selects it first, and clicking the rating it already has clears it.
 
@@ -53,13 +57,40 @@ Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to
 
 **Thumbnail size.** The slider in the filter bar, or ⌘= and ⌘- while the grid shows (View > Larger Thumbnails, Smaller Thumbnails). The size is remembered.
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 **Right-click** an image for Open in Loupe, Open in Develop, Compare Selected (with exactly two selected), Survey Selected (two to four), Rating, Flag, Rotate Left and Right, Copy Settings, Paste Settings, Apply Preset, Export, Reveal in Finder, Rename… (one image), Move to Folder and Copy to Folder, and Add to Quick Collection (B), Add to Collection and, while the grid shows a collection, Remove from it, acting on the selection. Right-click between images for Select All and Reveal Folder in Finder.
 
 **Filter bar** above the grid: rating threshold (click a star for "this many or better"), flag states, edited-only, camera, lens, keyword, Finder tag, and file-name search, combined with AND. A keyword also finds the photos tagged with keywords inside it (Places finds Places › France › Paris). While a collection is shown, the filter narrows its photos. The count shows how many pass. ⇧⌘L clears the filter. Arrow keys walk only the visible images.
 
+**Right-click** an image for Open in Loupe, Open in Develop, Compare Selected (with exactly two selected), Survey Selected (two to four), Rating, Flag, Label, Rotate Left and Right, Copy Settings, Paste Settings, Apply Preset, Export, Reveal in Finder, Rename…, Rename with Template…, and Move to Folder and Copy to Folder, acting on the selection. Right-click between images for Select All and Reveal Folder in Finder.
+
+**Filter bar** above the grid: rating threshold (click a star for "this many or better"), flag states, colour label, edited-only, camera, lens, keyword, Finder tag, and a search that looks in file names, titles and captions, combined with AND. The Label menu takes any number of labels, plus No Label and Custom Label (a label another application named), and shows images with any one of them. The count shows how many pass. ⇧⌘L clears the filter. Arrow keys walk only the visible images.
+<!-- /RECONCILE -->
+
 **Sort** by capture time, file name, rating, modified date or Custom. Each key remembers its own direction: the first time, capture time and modified run newest first, rating most stars first, and file name and Custom front to back. Latent reopens with the last sort you used, whichever folder you open.
 
 **Custom sort.** Choose Custom, then drag thumbnails to arrange them. The arrangement is saved per folder in `_latent/custom-order.json`, so it survives a rebuilt catalog and moves with the folder. New files appear after your arrangement, by name. Images hidden by a filter keep their places. An image renamed or moved within the folder with Latent's own commands keeps its place, and so does a file renamed in Finder, the next time the folder is opened. ⌘Z undoes a rearrangement.
+
+## Colour labels
+
+Give photos a colour label to sort a shoot beyond stars and flags: red for the client's choices, green for the portfolio, whatever you like. The keys are Lightroom's: **6** red, **7** yellow, **8** green, **9** blue. Purple has no key; use **Photo › Label** or the right-click **Label** menu. Pressing the key of the label a photo already has takes it off. With several photos selected in the grid, the key labels all of them, or takes the label off all of them when the photo the panel shows already has it. In Loupe, Compare and Develop the key labels the photo shown.
+
+The left panel shows the five colours under the stars: click one to label the photo, click it again (or the ⓧ) to take it off. ⌘Z undoes a label like a rating.
+
+Labels are written to the sidecar as `xmp:Label` with the colour's English name ("Red"), the way Lightroom and Bridge write them, so a label set in either shows in Latent and the other way round. A label another application gave a name of its own ("Approved") is kept; it shows as a hollow ring on the thumbnail and by name in the panel, and the filter's Custom Label finds it.
+
+## Title, caption, creator and copyright
+
+The left panel's **Title & Copyright** section edits four fields for the selected photos:
+
+- **Title**: a short name for the photo.
+- **Caption**: what it shows. It can run to several lines: Return saves, ⌥Return starts a new line.
+- **Creator**: who took it. Separate several names with a semicolon.
+- **Copyright**: the notice, such as © 2026 Ann Smith. With a creator and no copyright, a link fills it in from the creator and this year.
+
+Press Return or click away to save a field. With several photos selected, each field shows the value they share, or Mixed when they differ; whatever you type is set on every selected photo, and the other fields keep each photo's own. Leaving a Mixed field empty changes nothing. Each change is one step of ⌘Z.
+
+They go into the sidecar as Dublin Core (`dc:title`, `dc:description`, `dc:creator` and `dc:rights`), where Lightroom, Bridge and Capture One look for them, and Latent reads them from sidecars those applications wrote. Exports carry them too (see [Export](Export)). The filter bar's search finds words in titles and captions.
 
 ## Finder tags
 
@@ -71,7 +102,11 @@ Loupe and Develop show the grid's visible images along the bottom, in the grid's
 
 ## Metadata panel
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 The left panel shows the selected image's name, rating, flag, keywords and Finder tags, then its camera, lens, exposure, capture time, dimensions and file size, read from the catalog so changing selection costs nothing. Keywords show as chips; the **Add keywords** field adds to every selected photo, with suggestions from the keywords already in the folder, and a chip's × takes that keyword off them all. The **Keyword List** below lists every keyword in the folder with its count. See [Collections and Keywords](Collections-and-Keywords). Below: history and snapshots, and export.
+
+The left panel shows the selected image's name, rating, flag, colour label, keywords and Finder tags, its title, caption, creator and copyright, then its camera, lens, exposure, capture time, dimensions and file size, read from the catalog so changing selection costs nothing. Keywords typed there apply to that one image, not the whole selection. Below: history and snapshots, and export.
+<!-- /RECONCILE -->
 
 ## Loupe, Compare and Survey
 
@@ -116,7 +151,11 @@ The job runs in the background, one photo at a time, with "Photo 3 of 12: DSC_01
 
 ## Undo
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 ⌘Z and ⇧⌘Z undo and redo what you did in Library, Loupe, Compare and Survey: ratings, picks and rejects, rotation, keywords (added, removed, renamed or deleted), collections (made, renamed, moved, deleted, photos added or taken out), settings pasted or presets applied, a Custom sort rearrangement, and moves, copies and renames. The Edit menu names the step, as in Undo Paste Settings (12 Images). Each image goes back to its own previous value. In Develop, ⌘Z steps through that image's edit history instead, and while you are typing in a field, ⌘Z undoes only the typing. Opening another folder clears the undo of ratings, flags, rotation, keywords, collections, settings and rearrangements; moves, copies and renames can still be undone.
+
+⌘Z and ⇧⌘Z undo and redo what you did in Library, Loupe, Compare and Survey: ratings, picks and rejects, colour labels, titles, captions, creators and copyrights, rotation, keywords, settings pasted or presets applied, a Custom sort rearrangement, and moves, copies and renames. The Edit menu names the step, as in Undo Paste Settings (12 Images). Each image goes back to its own previous value. In Develop, ⌘Z steps through that image's edit history instead, and while you are typing in a field, ⌘Z undoes only the typing. Opening another folder clears the undo of ratings, flags, labels, titles and the other text fields, rotation, keywords, settings and rearrangements; moves, copies and renames can still be undone.
+<!-- /RECONCILE -->
 
 ## Moving, copying and renaming
 
@@ -127,6 +166,23 @@ Ratings, flags, keywords, edits, snapshots, history and the thumbnail go with ea
 Progress shows in the status bar with a stop button. Stopping, or quitting, finishes the image under way, so no image is left half-moved; quitting waits up to a minute for it, and an image still being copied then stays where it was. While an export, print, contact sheet or Photo Merge is running, images can't be moved, copied, renamed or dropped on a folder, and those can't be undone. ⌘Z moves images back; undoing a copy puts the copy and its sidecar in the Trash. Nothing is ever overwritten or permanently deleted, apart from thumbnails, which are made again, a moved image's old sidecar, whose contents are already in the new one, and, for a move to another disk, the original once its copy is complete.
 
 **Rename…** (F2, the File menu or the right-click menu) renames one image, keeping its extension; its sidecar and thumbnail follow. A name that differs only in letter case works.
+
+**Rename with Template…** (File menu or right-click; F2 opens it when several photos are selected) names the selection from a filename template, as Lightroom's Rename Photos does. It works for a single photo too. Type the template, or click the token buttons to add tokens to its end:
+
+| Token | Becomes |
+|---|---|
+| `{name}` | the original name, without extension |
+| `{text}` | the custom text typed below the template, such as the name of the shoot |
+| `{seq}` | a sequence number from the start number, three digits (001, 002…), in the grid's order |
+| `{date}` | the capture date, 2026-06-01 |
+| `{date:yyyyMMdd}` | the capture date in a pattern of your own (yyyy year, MM month, dd day) |
+| `{time}` | the capture time, 143005 |
+| `{title}` | the photo's title |
+| `{camera}`, `{rating}`, `{folder}` | the camera model, the stars, the subfolder |
+
+Anything else in the template is used as typed, and the extension is always kept. The template, custom text and start number are remembered, and the template language is the same as the export's file naming.
+
+The sheet lists every photo with its new name before anything happens. Photos whose name wouldn't change are left alone. A photo isn't renamed, and the list says why, when two photos would get the same name (add `{seq}`), when the name belongs to another file, or when two photos would swap names. A photo may take a name another photo of the batch is giving up: they are renamed in an order that frees each name first. The whole rename is one step of ⌘Z, and every photo's original name is kept in its sidecar.
 
 These commands work in the Library grid, and not while an export, print, contact sheet or Photo Merge is running.
 

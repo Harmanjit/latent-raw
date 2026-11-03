@@ -249,7 +249,7 @@ extension Catalog {
                                              arguments: [id]).map { ($0["name"] as String, $0["params_json"] as String) }
             let history = try Row.fetchAll(db, sql: "SELECT params_json, created_at FROM history WHERE image_id = ? ORDER BY step",
                                            arguments: [id]).map { ($0["params_json"] as String, $0["created_at"] as Int64? ?? 0) }
-            return XMPSidecar.Fields(
+            var fields = XMPSidecar.Fields(
                 rating: row.rating, label: row.label, flag: row.flag,
                 rotation: row.userRotation, keywords: keywords,
                 preservedFileName: row.preservedName, sourceHash: row.hashString,
@@ -259,6 +259,11 @@ extension Catalog {
                 snapshotsJSON: Self.snapshotsJSON(snapshots),
                 historyJSON: Self.historyJSON(history),
                 mergeJSON: row.mergeJSON ?? "")
+            fields.title = row.title
+            fields.caption = row.caption
+            fields.creator = row.creator
+            fields.copyright = row.copyright
+            return fields
         }
     }
 

@@ -26,6 +26,9 @@ struct GridActions {
     /// Moves or copies the selection into a folder; nil asks which.
     var transfer: (TransferMode, URL?) -> Void = { _, _ in }
     var recentDestinations: () -> [URL] = { [] }
+    /// Sets the selection's colour label; nil removes it.
+    var label: (String?) -> Void = { _ in }
+    var renameWithTemplate: () -> Void = {}
 }
 
 /// The grid's context menus, built fresh each time they open so every
@@ -50,6 +53,7 @@ enum GridContextMenu {
         let targets = library.selectedImages
         menu.addItem(submenu("Rating", ratingItems(targets: targets, actions: actions)))
         menu.addItem(submenu("Flag", flagItems(targets: targets, actions: actions)))
+        menu.addItem(submenu("Label", labelItems(targets: targets, actions: actions)))
         menu.addItem(ClosureMenuItem("Rotate Left", enabled: hasLead) { actions.rotate(-1) })
         menu.addItem(ClosureMenuItem("Rotate Right", enabled: hasLead) { actions.rotate(1) })
         menu.addItem(.separator())
@@ -72,8 +76,9 @@ enum GridContextMenu {
         })
         menu.addItem(.separator())
         let canChange = hasLead && actions.canChangeFiles()
-        menu.addItem(ClosureMenuItem(Shortcuts.menuTitle("Rename…", for: .rename), enabled: canChange && count <= 1,
-                                     actions.rename))
+        menu.addItem(ClosureMenuItem(Shortcuts.menuTitle(count > 1 ? "Rename \(count) Images…" : "Rename…", for: .rename),
+                                     enabled: canChange, actions.rename))
+        menu.addItem(ClosureMenuItem("Rename with Template…", enabled: canChange, actions.renameWithTemplate))
         menu.addItem(destinationMenu("Move to Folder", mode: .move, enabled: canChange, actions: actions))
         menu.addItem(destinationMenu("Copy to Folder", mode: .copy, enabled: canChange, actions: actions))
         CollectionCommands.addItems(to: menu, library: library)
@@ -141,6 +146,28 @@ enum GridContextMenu {
             item.state = shared == flag.rawValue ? .on : .off
             return item
         }
+    }
+
+    /// The five labels and No Label, the one every target shares checked.
+    /// Unlike the keys, choosing a label here always sets it.
+    private static func labelItems(targets: [ImageRecord], actions: GridActions) -> [NSMenuItem] {
+        let labels = Set(targets.map { $0.label ?? "" })
+        let shared = labels.count == 1 ? labels.first : nil
+        var items: [NSMenuItem] = ColorLabel.allCases.map { label in
+            let item = ClosureMenuItem(Shortcuts.menuTitle(label.title, for: .label(label)), enabled: !targets.isEmpty) {
+                actions.label(label.xmpValue)
+            }
+            item.state = shared.flatMap { ColorLabel(xmpLabel: $0) } == label ? .on : .off
+            item.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(paletteColors: [label.nsColor]))
+            item.setAccessibilityLabel("\(label.title) label")
+            return item
+        }
+        items.append(.separator())
+        let none = ClosureMenuItem("No Label", enabled: !targets.isEmpty) { actions.label(nil) }
+        none.state = shared == "" ? .on : .off
+        items.append(none)
+        return items
     }
 
     private static func submenu(_ title: String, _ items: [NSMenuItem]) -> NSMenuItem {

@@ -194,6 +194,8 @@ final class ExternalEditorHandOff: ObservableObject {
         var userRotation: Int
         var rating: Int
         var readKeywords: (@Sendable () async throws -> [String])?
+        /// Title, caption, creator and copyright from the catalog.
+        var descriptive = ExportDescription()
     }
 
     /// Runs the hand-off for the image the command means: in Loupe, Compare
@@ -227,6 +229,7 @@ final class ExternalEditorHandOff: ObservableObject {
         if let id = model.catalogImageID, let catalog = library.catalog,
            let record = library.images.first(where: { $0.id == id && $0.fileName == model.imageTitle }) {
             source.rating = record.rating
+            source.descriptive = record.exportDescription
             source.readKeywords = { try await catalog.keywords(forImageID: id) }
         }
         send(source, name: url.lastPathComponent, model: model)
@@ -247,7 +250,8 @@ final class ExternalEditorHandOff: ObservableObject {
             }
             guard library.catalog === catalog else { return }
             send(Source(url: url, editStackJSON: json, userRotation: record.userRotation, rating: record.rating,
-                        readKeywords: { try await catalog.keywords(forImageID: id) }),
+                        readKeywords: { try await catalog.keywords(forImageID: id) },
+                        descriptive: record.exportDescription),
                  name: record.fileName, model: model)
         }
     }
@@ -305,7 +309,7 @@ final class ExternalEditorHandOff: ObservableObject {
             // A file that appears under the name during the render is kept,
             // and the next number is tried.
             while written == nil, failure == nil, attempt < 20 {
-                let request = ExportWorker.Request(
+                var built = ExportWorker.Request(
                     sourceURL: source.url,
                     destinationURL: folder.appendingPathComponent(ExternalEditorNaming.fileName(forSourceNamed: name,
                                                                                                attempt: attempt)),
@@ -316,6 +320,8 @@ final class ExternalEditorHandOff: ObservableObject {
                     includeMetadata: options.includeMetadata,
                     includeLocation: options.includeMetadata && options.includeLocation,
                     replacesExisting: false)
+                built.descriptive = source.descriptive
+                let request = built
                 let gpuContext = gpu, from = attempt
                 // The first free name from `attempt` on, looked for off the
                 // main thread like the render: the folder may be on a slow share.

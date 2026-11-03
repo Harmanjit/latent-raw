@@ -486,6 +486,7 @@ final class ThumbnailItem: NSCollectionViewItem {
         self.isEdited = isEdited
         cellView.setMarks(name: record.fileName, rating: record.rating, flag: record.flag, isEdited: isEdited)
         cellView.setTags(stored: record.finderTags)
+        cellView.setLabel(record.label)
         loadIfNeeded()
     }
 
@@ -603,6 +604,7 @@ final class ThumbnailCellView: NSView {
     private let badgeField = NSTextField(labelWithString: "")
     private let starsView = StarRatingView()
     private let tagDotsView = TagDotsView()
+    private let labelDotView = LabelDotView()
     private var storedTags: String?
     private var hoverArea: NSTrackingArea?
     private var imagePixels: CGSize?
@@ -653,6 +655,7 @@ final class ThumbnailCellView: NSView {
         }
         addSubview(starsView)
         addSubview(tagDotsView)
+        addSubview(labelDotView)
 
         // VoiceOver reads the cell as one image (name, flag, stars, edited)
         // rather than scraps of it.
@@ -671,7 +674,8 @@ final class ThumbnailCellView: NSView {
     override func accessibilityLabel() -> String? {
         let text = Self.accessibilityText(name: nameField.stringValue, rating: rating, flag: flag, isEdited: isEdited)
         let tags = SpokenText.finderTags(tagDotsView.tags)
-        return tags.isEmpty ? text : text + ", " + tags
+        let label = SpokenText.label(labelDotView.label)
+        return [text, label, tags].filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
     /// The stars' clicks, for VoiceOver: one action per rating.
@@ -721,6 +725,15 @@ final class ThumbnailCellView: NSView {
         storedTags = stored
         tagDotsView.tags = FinderTag.decode(stored)
         tagDotsView.isHidden = tagDotsView.tags.isEmpty
+        needsLayout = true
+    }
+
+    /// The colour label as stored; the dot shows only for one.
+    func setLabel(_ label: String?) {
+        let stored = label?.isEmpty == true ? nil : label
+        guard stored != labelDotView.label else { return }
+        labelDotView.label = stored
+        labelDotView.isHidden = stored == nil
         needsLayout = true
     }
 
@@ -776,7 +789,8 @@ final class ThumbnailCellView: NSView {
         let tagCount = tagDotsView.tags.count
         nameField.frame = info.nameFrame(tagCount: tagCount)
         tagDotsView.frame = info.tagDotsFrame(tagCount: tagCount)
-        badgeField.frame = info.flagBadgeFrame
+        badgeField.frame = info.flagBadgeFrame(hasLabel: labelDotView.label != nil)
+        labelDotView.frame = info.labelDotFrame
         starsView.frame = info.starsFrame
     }
 

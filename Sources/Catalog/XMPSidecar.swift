@@ -37,6 +37,14 @@ public enum XMPSidecar {
         /// back (docs/PhotoMerge.md). The catalog keeps it as written and
         /// never interprets it.
         public var mergeJSON: String = ""
+        /// dc:title, dc:description, dc:creator and dc:rights
+        /// (DescriptiveField), nil for none. Several creators read from
+        /// another application's sidecar come back joined by "; ", and are
+        /// written as one name each again.
+        public var title: String? = nil
+        public var caption: String? = nil
+        public var creator: String? = nil
+        public var copyright: String? = nil
 
         public init(rating: Int = 0, label: String? = nil, flag: Int = 0, rotation: Int = 0,
                     keywords: [String] = [],
@@ -111,7 +119,7 @@ public enum XMPSidecar {
             latent:Rotation="\(f.rotation)">
            <dc:subject><rdf:Bag>
         \(keywordItems)
-           </rdf:Bag></dc:subject>
+           </rdf:Bag></dc:subject>\(descriptiveElements(f))
         \(hierarchyBlock)   <latent:EditStack>\(cdata(f.editStackJSON))</latent:EditStack>
         \(f.snapshotsJSON.isEmpty ? "" : "   <latent:Snapshots>\(cdata(f.snapshotsJSON))</latent:Snapshots>")
         \(f.historyJSON.isEmpty ? "" : "   <latent:History>\(cdata(f.historyJSON))</latent:History>")
@@ -121,6 +129,34 @@ public enum XMPSidecar {
         </x:xmpmeta>
         <?xpacket end="w"?>
         """
+    }
+
+    /// The Dublin Core elements for the descriptive fields, each on a line
+    /// of its own after dc:subject; nothing at all when none is set, so a
+    /// sidecar without them is byte for byte what it always was. Title,
+    /// caption and copyright are language alternatives with only the
+    /// default language, as Lightroom writes them; creators are an
+    /// ordered list.
+    static func descriptiveElements(_ f: Fields) -> String {
+        func alternative(_ name: String, _ value: String?) -> String? {
+            guard let value, !value.isEmpty else { return nil }
+            return "   <dc:\(name)><rdf:Alt><rdf:li xml:lang=\"x-default\">\(escape(value))</rdf:li></rdf:Alt></dc:\(name)>"
+        }
+        var lines: [String] = []
+        if let line = alternative("title", f.title) { lines.append(line) }
+        if let line = alternative("description", f.caption) { lines.append(line) }
+        let creators = creatorNames(f.creator)
+        if !creators.isEmpty {
+            let items = creators.map { "<rdf:li>\(escape($0))</rdf:li>" }.joined()
+            lines.append("   <dc:creator><rdf:Seq>\(items)</rdf:Seq></dc:creator>")
+        }
+        if let line = alternative("rights", f.copyright) { lines.append(line) }
+        return lines.isEmpty ? "" : "\n" + lines.joined(separator: "\n")
+    }
+
+    /// "Ann Smith; Bo Lee" as the names dc:creator lists.
+    static func creatorNames(_ creator: String?) -> [String] {
+        (creator ?? "").split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
     /// Wraps text in a CDATA section, which keeps JSON readable in the file
@@ -245,7 +281,7 @@ public enum XMPSidecar {
         let history = childText("History")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let merge = childText("Merge")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-        return Fields(
+        var fields = Fields(
             rating: Int(property("xmp:Rating", local: "Rating") ?? "") ?? 0,
             label: property("xmp:Label", local: "Label").flatMap { $0.isEmpty ? nil : $0 },
             flag: Int(property("latent:Flag", local: "Flag") ?? "") ?? 0,
@@ -259,5 +295,26 @@ public enum XMPSidecar {
             snapshotsJSON: snapshots,
             historyJSON: history,
             mergeJSON: merge)
+        fields.title = descriptiveText(in: description, "title")
+        fields.caption = descriptiveText(in: description, "description", multiline: true)
+        fields.copyright = descriptiveText(in: description, "rights")
+        let creators = ((try? description.nodes(forXPath: "*[local-name()='creator']//*[local-name()='li']")) ?? [])
+            .compactMap { DescriptiveField.normalized($0.stringValue) }
+        fields.creator = creators.isEmpty
+            ? DescriptiveField.normalized(childText("creator")) : creators.joined(separator: "; ")
+        return fields
+    }
+
+    /// A language alternative's text: the default language's entry, else
+    /// the first one, else the element's own text (some writers leave out
+    /// the rdf:Alt). Cleaned as typed text is, so what comes back from the
+    /// sidecar is what the row stores.
+    private static func descriptiveText(in description: XMLElement, _ localName: String,
+                                        multiline: Bool = false) -> String? {
+        guard let element = (try? description.nodes(forXPath: "*[local-name()='\(localName)']"))?.first
+                as? XMLElement else { return nil }
+        let items = ((try? element.nodes(forXPath: ".//*[local-name()='li']")) ?? []).compactMap { $0 as? XMLElement }
+        let chosen = items.first { $0.attribute(forName: "xml:lang")?.stringValue == "x-default" } ?? items.first
+        return DescriptiveField.normalized(chosen?.stringValue ?? element.stringValue, multiline: multiline)
     }
 }

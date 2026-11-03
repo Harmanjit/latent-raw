@@ -43,6 +43,13 @@ public struct ImageRecord: Codable, FetchableRecord, MutablePersistableRecord,
     /// nil otherwise. Mirrors the sidecar, which holds the truth; kept on
     /// the row so every sidecar written from the row carries it.
     public var mergeJSON: String? = nil
+    /// What the photographer says about the photo (DescriptiveField): kept
+    /// on the row as typed, mirrored to dc:title, dc:description,
+    /// dc:creator and dc:rights in the sidecar, nil for none.
+    public var title: String? = nil
+    public var caption: String? = nil
+    public var creator: String? = nil
+    public var copyright: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, size, mtime, xxhash, camera, lens, iso, shutter, aperture, focal
@@ -50,6 +57,7 @@ public struct ImageRecord: Codable, FetchableRecord, MutablePersistableRecord,
         case userRotation = "user_rotation"
         case finderTags = "finder_tags"
         case mergeJSON = "merge_json"
+        case title, caption, creator, copyright
         case relPath = "rel_path"
         case preservedName = "preserved_name"
         case captureTime = "capture_time"
