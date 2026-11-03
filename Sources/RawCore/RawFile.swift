@@ -348,7 +348,7 @@ public final class RawFile {
          metadataOnly: Bool) throws {
         // Sizes and counts are checked before anything below multiplies
         // or indexes them.
-        try meta.validate()
+        try meta.validate(withPlane: !metadataOnly)
         let summary = meta.summary
         if metadataOnly {
             sensorPlane = nil

@@ -58,6 +58,19 @@ final class RawDecoderHardeningTests: XCTestCase {
         }
     }
 
+    /// A metadata-only reply whose visible size doesn't fit the readout
+    /// (LibRaw reports such sizes for a Fuji SuperCCD) is accepted, as the
+    /// in-process metadata-only open accepts it. With a plane, which was
+    /// cut to that area, it is still refused.
+    func testMetadataOnlyReplyNeedNotFitTheReadout() throws {
+        var meta = try linearFixture().snapshotMetadata
+        meta.width = meta.rawWidth + 100
+        meta.height = meta.rawHeight + 50
+        let opened = try RawFile(serviceReply: meta, plane: nil, preview: nil, metadataOnly: true)
+        XCTAssertEqual(opened.summary.width, meta.width)
+        XCTAssertThrowsError(try meta.validate(withPlane: true))
+    }
+
     /// An embedded preview over the cap is dropped rather than handed to
     /// ImageIO in the app; one at the cap is kept.
     func testOversizedPreviewIsDropped() throws {
@@ -73,8 +86,9 @@ final class RawDecoderHardeningTests: XCTestCase {
     // MARK: - The connection
 
     /// A decode that never replies ends in an error once the deadline
-    /// passes, and the next request gets a fresh, working connection.
-    func testHungDecodeTimesOutAndTheNextRequestWorks() throws {
+    /// passes, and the connection is kept: other requests on it, here the
+    /// next one, still get their answers rather than a dropped connection.
+    func testHungDecodeTimesOutAndTheConnectionStays() throws {
         let service = FakeService()
         let client = service.client(timeout: 0.5)
         let fd = open("/dev/null", O_RDONLY)
@@ -88,7 +102,36 @@ final class RawDecoderHardeningTests: XCTestCase {
 
         let metadata = try client.readMetadata(fileDescriptor: fd)
         XCTAssertEqual(metadata.properties, Data("ok".utf8))
-        XCTAssertEqual(service.connections, 2, "the hung connection was replaced")
+        XCTAssertEqual(service.connections, 1, "the timeout dropped a connection others share")
+    }
+
+    /// A request still running past the service's watchdog ends the
+    /// service (here, calls the stand-in for the exit), whichever
+    /// connection it came on.
+    func testServiceEndsItselfWhenARequestIsStuck() throws {
+        let stuck = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        let service = RawDecoderService(decodeWork: { _, _, reply in
+            _ = release.wait(timeout: .now() + 10)
+            reply(nil, nil, nil, "done")
+        }, watchdog: 0.3, onStuck: { stuck.signal() })
+        let file = FileHandle(forReadingAtPath: "/dev/null")!
+        service.decode(file, metadataOnly: true) { _, _, _, _ in }
+        XCTAssertEqual(stuck.wait(timeout: .now() + 5), .success, "the stuck request was left running")
+    }
+
+    /// A request that finishes in time disarms its watchdog.
+    func testWatchdogStaysQuietForAFinishedRequest() throws {
+        let stuck = DispatchSemaphore(value: 0)
+        let replied = DispatchSemaphore(value: 0)
+        let service = RawDecoderService(decodeWork: { _, _, reply in
+            reply(nil, nil, nil, "done")
+        }, watchdog: 0.3, onStuck: { stuck.signal() })
+        let file = FileHandle(forReadingAtPath: "/dev/null")!
+        service.decode(file, metadataOnly: true) { _, _, _, _ in replied.signal() }
+        XCTAssertEqual(replied.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(stuck.wait(timeout: .now() + 1), .timedOut, "the watchdog fired after the reply")
     }
 
     /// Metadata JSON past its cap is refused before it is parsed.
@@ -192,7 +235,8 @@ private final class ExportingDelegate: NSObject, NSXPCListenerDelegate, @uncheck
 }
 
 /// A service whose first connection never answers a decode (as LibRaw
-/// stuck in a loop would) and whose later connections answer at once.
+/// stuck in a loop would) but answers metadata reads at once, and whose
+/// later connections answer everything at once.
 private final class FakeService: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0

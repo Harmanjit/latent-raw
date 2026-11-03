@@ -76,18 +76,25 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
 
     /// Refuses a reply whose shape the app would otherwise trust: four
     /// camera multipliers, and every size and margin within what LibRaw
-    /// can report, with the active area inside the readout. The sizes are
-    /// range-checked before anything adds or multiplies them, so a
-    /// compromised service gets an error back rather than an overflow trap
-    /// in the app, and no negative size reaches the render pipeline.
-    func validate() throws {
+    /// can report. The sizes are range-checked before anything adds or
+    /// multiplies them, so a compromised service gets an error back rather
+    /// than an overflow trap in the app, and no negative size reaches the
+    /// render pipeline.
+    ///
+    /// The active area must also lie inside the readout when a plane comes
+    /// with the reply (`withPlane`), since the plane was cut to it. A
+    /// metadata-only reply doesn't need that: LibRaw reports a visible
+    /// size that doesn't fit the readout for some sensors (a Fuji SuperCCD,
+    /// whose visible size is the rotated one), and the in-process
+    /// metadata-only open accepts those files, so the service path must too.
+    func validate(withPlane: Bool) throws {
         guard cameraMultipliers.count == 4 else {
             throw RawDecoderClient.ClientError.serviceFailed("reply has \(cameraMultipliers.count) camera multipliers")
         }
         let sides = [width, height, leftMargin, topMargin, rawWidth, rawHeight]
         guard sides.allSatisfy({ (0...Self.maxSide).contains($0) }),
-              SensorActiveArea(left: leftMargin, top: topMargin, width: width, height: height,
-                               fullWidth: rawWidth, fullHeight: rawHeight).isValid else {
+              !withPlane || SensorActiveArea(left: leftMargin, top: topMargin, width: width, height: height,
+                                             fullWidth: rawWidth, fullHeight: rawHeight).isValid else {
             throw RawDecoderClient.ClientError.serviceFailed(
                 "reply has an impossible size: \(width)x\(height) at (\(leftMargin), \(topMargin)) in \(rawWidth)x\(rawHeight)")
         }
@@ -146,6 +153,16 @@ public enum RawDecoderXPC {
     /// larger one back and the app refuses one that arrives anyway.
     static let maxPreviewBytes = 64 << 20
 
+    /// The longest the app waits for one reply. A full decode of a large
+    /// raw read from a slow network volume takes seconds; this is far
+    /// beyond that.
+    static let requestTimeout: TimeInterval = 60
+    /// How long one request may run in the service before the service
+    /// ends itself (`RawDecoderService`). Past the app's deadline, so the
+    /// app has given up on that request already, with a margin so a reply
+    /// that only just missed it isn't cut off for nothing.
+    static let serviceWatchdog: TimeInterval = requestTimeout + 30
+
     /// The interface both ends use. The reply's plane argument is
     /// allowed to decode as an IOSurface and nothing else.
     public static func makeInterface() -> NSXPCInterface {
@@ -180,19 +197,20 @@ public enum RawDecoderXPC {
 /// every caller of `RawFile.init` already expects, but never for longer
 /// than `timeout`: a file that sends LibRaw into an endless loop would
 /// otherwise hold its caller (the main actor, for an open in Develop) for
-/// good, and every later request on the connection with it. On expiry the
-/// connection is dropped, which ends the service and the stuck decode
-/// with it (the service exits when its last connection goes), and the
-/// next call starts a fresh one.
+/// good. On expiry the caller gets an error and the connection is left as
+/// it is: other threads may have requests of their own on it, which the
+/// service runs side by side with the stuck one. The stuck decode itself
+/// is ended by the service, which exits when any one request outlives
+/// `RawDecoderXPC.serviceWatchdog`; the connection is then remade on the
+/// next call.
 public final class RawDecoderClient: @unchecked Sendable {
-    public static let shared = RawDecoderClient(timeout: 60) {
+    public static let shared = RawDecoderClient(timeout: RawDecoderXPC.requestTimeout) {
         NSXPCConnection(serviceName: RawDecoderXPC.serviceName)
     }
     private let lock = NSLock()
     private var connection: NSXPCConnection?
     private let makeConnection: @Sendable () -> NSXPCConnection
-    /// The longest wait for one reply. A full decode of a large raw read
-    /// from a slow network volume takes seconds; this is far beyond that.
+    /// The longest wait for one reply (`RawDecoderXPC.requestTimeout`).
     let timeout: TimeInterval
 
     /// The reply's metadata is a few kilobytes of JSON; more is refused
@@ -247,9 +265,11 @@ public final class RawDecoderClient: @unchecked Sendable {
         }
         send(proxy) { outcome.finish(.success($0)) }
         guard let result = outcome.wait(timeout: timeout) else {
-            RawDecoderXPC.logger.error("raw decoder gave no reply in \(Int(self.timeout)) s; dropping the connection")
-            forget(ObjectIdentifier(c))
-            c.invalidate()
+            // The connection stays: dropping it would fail every other
+            // request in flight on it, and the stuck one is the service's
+            // to end (see `RawDecoderService`). Its late reply, if one
+            // comes, lands in `outcome` and is ignored.
+            RawDecoderXPC.logger.error("raw decoder gave no reply in \(Int(self.timeout)) s")
             throw ClientError.connectionLost("no reply in \(Int(timeout)) s")
         }
         switch result {
