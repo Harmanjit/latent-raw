@@ -264,6 +264,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.vibrance == b.vibrance
             && a.defringePurple == b.defringePurple && a.defringeGreen == b.defringeGreen
             && a.perspective == b.perspective && a.aiDenoise == b.aiDenoise
+            && a.profile == b.profile
     }
 }
 

@@ -289,6 +289,9 @@ final class CameraProfileTests: XCTestCase {
         let reloaded = try EditStack.decode(json: EditStack(parameters: p).encodeJSON()).parameters()
         XCTAssertEqual(reloaded.profile, p.profile)
         XCTAssertEqual(reloaded, p)
+        var other = p
+        other.profile?.amount = 0.7
+        XCTAssertNotEqual(other, p, "a profile change is an edit: it re-renders and records a step")
 
         var d = EditParameters()
         d.profile = ProfileChoice(id: "dcp:Testcam Standard.dcp", name: "Testcam Standard", toneCurve: true)
