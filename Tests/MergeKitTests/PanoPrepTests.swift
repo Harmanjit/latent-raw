@@ -40,10 +40,11 @@ final class PanoPrepTests: XCTestCase {
                      0.3 + 0.2 * sin((fx + 2 * fy) / 15.3))
     }
 
-    private func linearSource(width: Int, height: Int, orientation: Int) throws -> RawFile {
+    private func linearSource(width: Int, height: Int, orientation: Int,
+                              baselineExposure: Float = 0) throws -> RawFile {
         let reference = try summary(width: width, height: height, orientation: orientation)
         return try XCTUnwrap(RawFile.linearSource(width: width, height: height, like: reference, cameraToXYZ: nil,
-                                                  baselineExposure: 0, mergeInfo: nil, fill: { plane in
+                                                  baselineExposure: baselineExposure, mergeInfo: nil, fill: { plane in
             for y in 0..<height {
                 for x in 0..<width {
                     let v = Self.pattern(x, y), i = 4 * (y * width + x)
@@ -171,6 +172,40 @@ final class PanoPrepTests: XCTestCase {
                 XCTAssertEqual(pixels[i + 2], Float(Float16(v.z)), accuracy: 1e-3)
             }
         }
+    }
+
+    /// An HDR merge's DNG stores its radiance divided by a normalising
+    /// shift and records the way back in BaselineExposure. The panorama must
+    /// prepare it at that gain, as the editor opens it, or the stitch lands
+    /// stops away from the reference photo.
+    func testLinearSourceIsPreparedAtItsBaselineExposure() throws {
+        let gpu = try HDRTestSupport.gpu()
+        let kernels = MergePanoPrepKernels(gpu: gpu)
+        let file = try linearSource(width: 64, height: 48, orientation: 0, baselineExposure: 1)
+        XCTAssertEqual(MergePanoPrepKernels.linearGain(file), 2)
+        for span in [1, 2] {
+            let texture = try kernels.prepare(.linear(file, clipLevel: 2), span: span, lens: nil, storage: .shared,
+                                              windowPixelBudget: 1_000)
+            let pixels = try readBack(texture, gpu: gpu)
+            // Texel (5, 7) of the span-1 frame, or the 2x2 block at the same place.
+            let x = 5, y = 7, i = 4 * (y * texture.width + x)
+            var expected = SIMD3<Float>.zero
+            for yy in (y * span)..<((y + 1) * span) {
+                for xx in (x * span)..<((x + 1) * span) {
+                    let v = Self.pattern(xx, yy)
+                    expected += SIMD3(Float(Float16(v.x)), Float(Float16(v.y)), Float(Float16(v.z)))
+                }
+            }
+            expected = expected / Float(span * span) * 2
+            XCTAssertEqual(pixels[i], expected.x, accuracy: 4e-3, "span \(span)")
+            XCTAssertEqual(pixels[i + 1], expected.y, accuracy: 4e-3, "span \(span)")
+            XCTAssertEqual(pixels[i + 2], expected.z, accuracy: 4e-3, "span \(span)")
+        }
+        let thumb = try kernels.thumbnail(.linear(file, clipLevel: 2), span: 4, lens: nil)
+        let mean = thumb.rgba.enumerated().filter { $0.offset % 4 == 1 }.map(\.element).reduce(0, +)
+            / Float(thumb.width * thumb.height)
+        // Green averages about 0.5 on the plane, so about 1.0 at gain 2.
+        XCTAssertEqual(mean, 1.0, accuracy: 0.2, "the thumbnail is at the same gain")
     }
 
     func testBandPlanWindowsHoldEveryReadAndShareOneSize() {

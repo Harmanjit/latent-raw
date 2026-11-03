@@ -182,4 +182,49 @@ final class CropTests: XCTestCase {
         // last pixel: 1000 x 0.8993 is 899. Bin less.
         XCTAssertEqual(quads(4003, 3000, CropParameters(size: [0.8993, 0.8993]), 900), 1)
     }
+
+    /// The tilted crop tool lets a small crop be dragged into a corner of
+    /// its canvas, off the sensor. Constraining that must keep a usable
+    /// crop on the sensor at its own size rather than collapse it (to 0x0,
+    /// which saved as "no crop" and exported as 1x1, or to a 16 px sliver).
+    func testCropDraggedOffTiltedSensorKeepsASize() {
+        let big = CGSize(width: 6000, height: 4000)
+        let frame = CropFrame(sensorSize: big, crop: CropParameters(size: [0.1, 0.1], angle: 30))
+        _ = frame.toolFrame.canvasSize
+        let rect = CGRect(x: 0, y: 0, width: 600, height: 400)
+        let dragged = frame.cropForToolCanvasRect(rect)
+        XCTAssertTrue(dragged.centre.x < 0 || dragged.centre.y < 0, "the dragged centre is off the sensor")
+        let fitted = dragged.constrained(sensorSize: big)
+        let px = fitted.pixelSize(sensorSize: big)
+        let before = dragged.pixelSize(sensorSize: big)
+        // The user only moved it, so it keeps its size and slides back on.
+        XCTAssertEqual(px.width, before.width, accuracy: 1, "keeps its own width")
+        XCTAssertEqual(px.height, before.height, accuracy: 1, "keeps its own height")
+        XCTAssertTrue(fitted.fitsInside(sensorSize: big))
+        XCTAssertEqual(fitted.angle, 30)
+        XCTAssertEqual(fitted.ratio(sensorSize: big), dragged.ratio(sensorSize: big), accuracy: 1e-3)
+    }
+
+    /// A centre on the sensor but right at its edge leaves no room to
+    /// shrink into; that too slides rather than collapsing to a sliver.
+    func testCropCentredOnTheSensorEdgeSlidesInward() {
+        let big = CGSize(width: 6000, height: 4000)
+        let crop = CropParameters(centre: [0, 0.5], size: [0.1, 0.1], angle: 30)
+        let fitted = crop.constrained(sensorSize: big)
+        let px = fitted.pixelSize(sensorSize: big)
+        XCTAssertEqual(px.width, 600, accuracy: 1)
+        XCTAssertEqual(px.height, 400, accuracy: 1)
+        XCTAssertTrue(fitted.fitsInside(sensorSize: big))
+    }
+
+    /// A crop that overhangs with its centre well inside still shrinks
+    /// about that centre, which is what a resize handle expects.
+    func testCropOverhangingWithCentreInsideShrinksAboutCentre() {
+        let big = CGSize(width: 6000, height: 4000)
+        let crop = CropParameters(centre: [0.4, 0.5], size: [1, 1], angle: 0)
+        let fitted = crop.constrained(sensorSize: big)
+        XCTAssertEqual(fitted.centre, crop.centre)
+        XCTAssertEqual(fitted.size.x, 0.8, accuracy: 1e-5)
+        XCTAssertTrue(fitted.fitsInside(sensorSize: big))
+    }
 }

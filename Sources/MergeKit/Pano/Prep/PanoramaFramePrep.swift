@@ -219,7 +219,9 @@ public final class PanoramaFramePrep {
             // really saturates.
             return .bayer(file, levels: try HDRMerger.levels(for: file, gpu: gpu), multipliers: multipliers)
         case .linearRGB:
-            return .linear(file, clipLevel: file.summary.mergeInfo?.clipLevel ?? 1)
+            // Prepared at its BaselineExposure gain, so it clips that much higher.
+            return .linear(file, clipLevel: (file.summary.mergeInfo?.clipLevel ?? 1)
+                                * MergePanoPrepKernels.linearGain(file))
         default:
             throw PanoramaError.unsupportedSource(fileName: file.summary.cameraModel)
         }

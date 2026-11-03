@@ -309,6 +309,42 @@ final class PanoMergeTests: XCTestCase {
         XCTAssertEqual(PanoramaFrameStore.removeScratchOfThisProcess(), 0)
     }
 
+    /// The prepared frames are written through memory maps in the scratch
+    /// folder, where a full disk is a crash, not an error. A scratch volume
+    /// too small for them must refuse the merge before a frame is made,
+    /// however roomy the destination's volume is.
+    func testAFullScratchVolumeRefusesTheMergeBeforeAnyFrameIsWritten() async throws {
+        let urls = try PanoMergeTestSupport.cached("row3", PanoMergeTestSupport.row(count: 3))
+        let scratch = folder.appendingPathComponent("scratch", isDirectory: true)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let scratchPath = scratch.path
+        let merger = PanoramaMerger(gpu: try HDRTestSupport.gpu(), availableCapacity: { url in
+            url.standardizedFileURL.path.hasPrefix(scratchPath) ? 1_000_000 : Int64.max
+        }, scratchParent: scratch.appendingPathComponent("LatentPanorama", isDirectory: true))
+        let analysis = try await merger.analyse(urls, options: PanoramaMergeOptions())
+        let destination = folder.appendingPathComponent("scratch-full.dng")
+        do {
+            _ = try await merger.merge(analysis, options: PanoramaMergeOptions(),
+                                       sources: PanoMergeTestSupport.sources(analysis), to: destination,
+                                       prepareSidecar: { _ in }, progress: { _ in })
+            XCTFail("the merge should have been refused")
+        } catch PanoramaError.notEnoughDiskSpace(let needed, let available) {
+            XCTAssertEqual(available, 1_000_000)
+            XCTAssertGreaterThan(needed, available)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        let stores = (try? FileManager.default.contentsOfDirectory(
+            atPath: scratch.appendingPathComponent("LatentPanorama").path)) ?? []
+        XCTAssertEqual(stores, [], "no frame store may be made")
+    }
+
+    func testScratchEstimateCoversEveryFrameAndTheRowBuffer() {
+        // 17 frames of a 24 MP sensor at full resolution: about 3.3 GB.
+        let bytes = PanoramaMerger.estimatedScratchBytes(frameCount: 17, width: 6016, height: 4016, span: 1,
+                                                         outputWidth: 20_000)
+        XCTAssertEqual(bytes, 17 * 6016 * 4016 * 8 + 20_000 * Int64(PanoramaMerger.tileSize) * 6)
+    }
+
     func testAPhotoThatCantBeJoinedIsReportedAndLeftOut() async throws {
         // Three overlapping photos and one of a different part of the sky.
         var shots = PanoMergeTestSupport.row(count: 3)

@@ -162,8 +162,9 @@ public enum HDRPanoramaGrouper {
     /// How much longer a gap between positions must be than the longest gap
     /// inside a bracket for the split to be believed.
     public static let gapRatio = 2.5
-    /// When the gaps inside a bracket are all 0 (EXIF's whole seconds), a
-    /// gap of at least this many seconds still splits positions.
+    /// When gaps inside a bracket are 0 (EXIF's whole seconds), a gap of
+    /// more than this many seconds still splits positions. Exactly 1 s does
+    /// not: a burst that straddles a second boundary shows a 1 s gap inside it.
     public static let gapFloorSeconds = 1.0
     /// Exposures are compared to a third of a stop, the smallest step
     /// cameras bracket by.
@@ -341,9 +342,12 @@ public enum HDRPanoramaGrouper {
 
     /// The smallest value that counts as "between positions", when the
     /// values fall into clear groups: the *lowest* step in the sorted
-    /// values that is at least `ratio` times the value below it — or at
-    /// least `floorValue` when that value is 0 (the gaps EXIF rounded to
-    /// the same second). Nil when no step is clear enough.
+    /// values that is at least `ratio` times the value below it — or more
+    /// than `floorValue` when that value is 0 (the gaps EXIF rounded to
+    /// the same second). Only more: whole-second timestamps put a gap of
+    /// exactly one second inside any burst that crosses a second boundary,
+    /// so 0 and 1 together are still one burst's gaps. Nil when no step is
+    /// clear enough.
     ///
     /// The lowest rather than the largest, because gaps often come at three
     /// sizes: within a bracket, between positions, and the long pause when
@@ -356,7 +360,7 @@ public enum HDRPanoramaGrouper {
         for index in 1..<sorted.count {
             let below = sorted[index - 1], above = sorted[index]
             guard above > below else { continue }
-            if below > 0 ? above >= below * ratio : above >= floorValue { return above }
+            if below > 0 ? above >= below * ratio : above > floorValue { return above }
         }
         // Every value alike: no split. Photos evenly spaced are a sweep of
         // single shots, not brackets.

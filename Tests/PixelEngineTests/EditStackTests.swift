@@ -44,6 +44,19 @@ final class EditStackTests: XCTestCase {
         XCTAssertEqual(p.highlightRecovery, 0.25, "untouched module keeps the default")
     }
 
+    /// A stack from a newer build must not be read leniently: the save that
+    /// follows would re-encode it as this build's schema and erase whatever
+    /// this build doesn't know.
+    func testNewerSchemaIsRefusedNotDroppedSilently() {
+        let json = #"{"schema":2,"process":"1.0","modules":{"exposure":{"ev":0.5},"futureModule":{"x":1}}}"#
+        XCTAssertThrowsError(try EditStack.decode(json: json)) { error in
+            XCTAssertEqual(error as? EditStack.DecodeError, .newerSchema(2))
+            XCTAssertTrue(error.localizedDescription.contains("newer version of Latent"))
+        }
+        // This build's own schema still reads.
+        XCTAssertNoThrow(try EditStack.decode(json: #"{"schema":1,"process":"1.0","modules":{"exposure":{"ev":0.5}}}"#))
+    }
+
     func testIsDefault() {
         let defaults = EditParameters()
         XCTAssertTrue(EditStack.isDefault(defaults, relativeTo: defaults))

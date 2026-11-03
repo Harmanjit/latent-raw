@@ -297,7 +297,8 @@ public struct RenderOutput: Sendable, Equatable {
     /// buffer no — it wants linear light.
     public var encoded: Bool
     /// Run the tone curve? Off for analysis renders that want scene-linear
-    /// values (exposure applied, nothing else).
+    /// values (exposure applied, nothing else): the shader then also skips
+    /// colour grading and the soft proof, which work on display values.
     public var toneMapped: Bool
     /// Index into `EditParameters.locals` whose mask to paint as a red
     /// overlay, for editing. nil normally. A display concern, not an edit.

@@ -194,6 +194,38 @@ public final class HDRPanoramaMerger: HDRPanoramaMerging {
 
     // MARK: - Merging
 
+    /// Refuses a merge the disks can't hold, before any slow work. The
+    /// intermediate HDRs and the panorama's prepared frames go to the
+    /// scratch folder (the temporary directory, on the boot volume), the
+    /// result to the destination; each volume is measured for its own
+    /// share, and for both only when they are the same volume.
+    func checkDiskSpace(_ analysis: HDRPanoramaAnalysis, destination: URL) throws {
+        var scratchNeeded = analysis.estimatedScratchBytes
+        if let first = analysis.photos.first, let size = try? Self.frameSize(first.url) {
+            scratchNeeded += PanoramaMerger.estimatedScratchBytes(
+                frameCount: analysis.grouping.positions.count, width: size.width, height: size.height,
+                span: analysis.panorama.outputSize.decodeSpan, outputWidth: analysis.panorama.outputSize.width)
+        }
+        let outputNeeded = analysis.estimatedOutputBytes
+        // The capacity query reads the folder holding the URL it is given:
+        // a name inside the scratch folder measures the scratch folder, and
+        // the destination itself measures the folder it is written to.
+        let scratchProbe = scratchRoot.appendingPathComponent("x")
+        let shared = PanoramaMerger.sameVolume(scratchRoot, destination)
+        if let available = availableCapacity(scratchProbe) {
+            let needed = scratchNeeded + (shared ? outputNeeded : 0) + Self.freeSpaceMargin
+            if available < needed {
+                throw HDRPanoramaError.notEnoughDiskSpace(neededBytes: needed, availableBytes: available)
+            }
+        }
+        if !shared, let available = availableCapacity(destination) {
+            let needed = outputNeeded + Self.freeSpaceMargin
+            if available < needed {
+                throw HDRPanoramaError.notEnoughDiskSpace(neededBytes: needed, availableBytes: available)
+            }
+        }
+    }
+
     public func merge(_ analysis: HDRPanoramaAnalysis, options: HDRPanoramaOptions,
                       sources: [MergeRecipe.Source], to destination: URL,
                       prepareSidecar: @escaping @Sendable (MergeRecipe) async throws -> Void,
@@ -203,10 +235,7 @@ public final class HDRPanoramaMerger: HDRPanoramaMerging {
                 position: 0, reason: "the merge was given \(sources.count) sources for "
                     + "\(analysis.photos.count) photos")
         }
-        let needed = analysis.estimatedScratchBytes + analysis.estimatedOutputBytes + Self.freeSpaceMargin
-        if let available = availableCapacity(destination.deletingLastPathComponent()), available < needed {
-            throw HDRPanoramaError.notEnoughDiskSpace(neededBytes: needed, availableBytes: available)
-        }
+        try checkDiskSpace(analysis, destination: destination)
 
         let scratch = scratchRoot.appendingPathComponent("Latent-HDRPano-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)

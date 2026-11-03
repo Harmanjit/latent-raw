@@ -303,8 +303,32 @@ public struct EditStack: Codable, Equatable, Sendable {
         return String(decoding: try encoder.encode(self), as: UTF8.self)
     }
 
+    /// Reads a stored stack. A stack whose `schema` is newer than this
+    /// build's is refused rather than read leniently: its unknown modules
+    /// and values would be dropped here, and the next save (which rebuilds
+    /// the stack from parameters and stamps this build's schema) would
+    /// erase them from the catalog, the sidecar and the history for good.
+    /// Refusing makes every caller take its "stored edit can't be read"
+    /// path, which tells the user instead of quietly losing the edit.
     public static func decode(json: String) throws -> EditStack {
-        try JSONDecoder().decode(EditStack.self, from: Data(json.utf8))
+        let stack = try JSONDecoder().decode(EditStack.self, from: Data(json.utf8))
+        guard stack.schema <= schemaVersion else {
+            throw DecodeError.newerSchema(stack.schema)
+        }
+        return stack
+    }
+
+    public enum DecodeError: Error, LocalizedError, Equatable {
+        /// The stack was written by a newer Latent, in this edit format.
+        case newerSchema(Int)
+
+        public var errorDescription: String? {
+            switch self {
+            case .newerSchema(let found):
+                return "The edit was made with a newer version of Latent (edit format \(found); "
+                    + "this version reads format \(EditStack.schemaVersion)). Open it in the newer version."
+            }
+        }
     }
 
     /// True when the stack changes nothing about the default rendering, in

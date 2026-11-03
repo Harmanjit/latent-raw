@@ -69,11 +69,18 @@ extension EditorModel {
             fresh.whiteBalance = newSession.asShotWhiteBalance
             defaultParameters = fresh
             var restored = fresh
+            newerEditImageID = nil
             if let editStackJSON {
                 do {
                     let stack = try newSession.stackForThisImage(EditStack.decode(json: editStackJSON))
                     restored = stack.parameters(defaults: fresh)
                     if restored.whiteBalance.isAsShot { restored.whiteBalance = fresh.whiteBalance }
+                } catch EditStack.DecodeError.newerSchema(let found) {
+                    // Saving would overwrite the newer edit with this
+                    // build's format, so this image is not saved back.
+                    newerEditImageID = catalogImageID
+                    reportFailure("Reading the stored edit for \(url.lastPathComponent) (showing defaults; "
+                                  + "changes here won't be saved)", EditStack.DecodeError.newerSchema(found))
                 } catch {
                     // Showing defaults is the only option, but the user must
                     // know the stored edit exists and wasn't applied.

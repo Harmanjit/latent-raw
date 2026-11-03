@@ -22,7 +22,9 @@ extension EditorModel {
         guard let id = catalogImageID, let pendingSave else { return }
         pendingSave.cancel()
         self.pendingSave = nil
-        if EditStack.isDefault(parameters, relativeTo: defaultParameters) {
+        if storedEditIsReadOnly {
+            status = Self.newerEditNotSaved
+        } else if EditStack.isDefault(parameters, relativeTo: defaultParameters) {
             onEditSettled?(id, nil)
         } else {
             let stack = stackWithProvenance()
@@ -34,6 +36,8 @@ extension EditorModel {
         }
         recordHistoryStep()
     }
+
+    static let newerEditNotSaved = "Not saved: this photo was edited with a newer version of Latent"
 
     /// The edit as it is stored: the parameters plus which lens profile
     /// and Lensfun database version produced the corrections (DESIGN.md
@@ -64,8 +68,22 @@ extension EditorModel {
                      snapshots stored: [(name: String, stackJSON: String)]) {
         // Stored steps are converted like the current edit was when the
         // image opened, so undo never steps back into the old geometry.
+        // A step or snapshot from a newer build can't be read here, and the
+        // next persist would rewrite the stored list without it, so the
+        // image's stored state becomes read-only instead.
+        var foundNewer = false
+        func read(_ json: String) -> EditStack? {
+            do {
+                return onThisImage(try EditStack.decode(json: json))
+            } catch EditStack.DecodeError.newerSchema {
+                foundNewer = true
+                return nil
+            } catch {
+                return nil
+            }
+        }
         var entries: [EditHistory.Step] = steps.compactMap { step in
-            guard let stack = try? onThisImage(EditStack.decode(json: step.stackJSON)) else { return nil }
+            guard let stack = read(step.stackJSON) else { return nil }
             return EditHistory.Step(stack: stack, label: "", date: Date(timeIntervalSince1970: Double(step.createdAt) / 1000))
         }
         // Labels are derived, not stored.
@@ -79,7 +97,12 @@ extension EditorModel {
         h.record(current)
         history = h
         snapshots = stored.compactMap { s in
-            (try? onThisImage(EditStack.decode(json: s.stackJSON))).map { EditSnapshot(name: s.name, stack: $0) }
+            read(s.stackJSON).map { EditSnapshot(name: s.name, stack: $0) }
+        }
+        if foundNewer, let id = catalogImageID, newerEditImageID != id {
+            pendingSave?.cancel(); pendingSave = nil
+            newerEditImageID = id
+            status = "Some of this photo's history was made with a newer version of Latent; changes here won't be saved"
         }
     }
 
@@ -90,7 +113,7 @@ extension EditorModel {
     }
 
     private func persistHistory() {
-        guard let id = catalogImageID else { return }
+        guard let id = catalogImageID, !storedEditIsReadOnly else { return }
         let steps = history.steps.compactMap { step -> (String, Int64)? in
             guard let json = try? step.stack.encodeJSON() else { return nil }
             return (json, Int64(step.date.timeIntervalSince1970 * 1000))
@@ -109,7 +132,9 @@ extension EditorModel {
         syncModelMasks(from: before)
         // The stored edit must follow the cursor, so save without waiting.
         pendingSave?.cancel(); pendingSave = nil
-        if let id = catalogImageID {
+        if storedEditIsReadOnly {
+            status = Self.newerEditNotSaved
+        } else if let id = catalogImageID {
             let isDefault = EditStack.isDefault(parameters, relativeTo: defaultParameters)
             do {
                 onEditSettled?(id, isDefault ? nil : try stackWithProvenance().encodeJSON())
@@ -154,7 +179,7 @@ extension EditorModel {
     }
 
     private func persistSnapshots() {
-        guard let id = catalogImageID else { return }
+        guard let id = catalogImageID, !storedEditIsReadOnly else { return }
         onSnapshotsChanged?(id, snapshots.compactMap { s in
             (try? s.stack.encodeJSON()).map { (s.name, $0) }
         })

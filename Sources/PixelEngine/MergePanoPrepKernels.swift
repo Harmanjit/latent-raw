@@ -185,7 +185,9 @@ public final class MergePanoPrepKernels: @unchecked Sendable {
         /// every frame of the panorama; divided back out).
         case bayer(RawFile, levels: HDRFrameLevels, multipliers: SIMD3<Float>)
         /// A linear DNG (an HDR merge): already demosaiced camera RGB at unit
-        /// white balance; `clipLevel` is where it clips (its merge info's).
+        /// white balance. It is prepared at `linearGain` (its BaselineExposure),
+        /// so `clipLevel` is where the prepared pixels clip: its merge info's
+        /// clip level times that gain.
         case linear(RawFile, clipLevel: Float)
 
         var file: RawFile {
@@ -193,6 +195,16 @@ public final class MergePanoPrepKernels: @unchecked Sendable {
             case .bayer(let file, _, _), .linear(let file, _): file
             }
         }
+    }
+
+    /// The gain a linear DNG's plane is prepared at: 2^BaselineExposure,
+    /// as the editor opens it. An HDR merge stores its radiance divided by
+    /// a normalising shift and records the way back in BaselineExposure;
+    /// ignoring it would stitch each such frame several stops away from
+    /// the reference photo it was anchored to.
+    public static func linearGain(_ file: RawFile) -> Float {
+        let ev = file.summary.baselineExposure
+        return ev.isFinite ? powf(2, ev) : 1
     }
 
     // MARK: - Prepared frames
@@ -417,10 +429,10 @@ public final class MergePanoPrepKernels: @unchecked Sendable {
                 encoder.setComputePipelineState(pso)
                 encoder.setBuffer(buffer, offset: 0, index: 0)
                 var planeWidth = UInt32(file.summary.rawWidth)
-                var unit = SIMD4<Float>(repeating: 1)
+                var gain = SIMD4<Float>(SIMD3(repeating: Self.linearGain(file)), 1)
                 var origin = SIMD2<UInt32>(UInt32(band.windowX), UInt32(band.windowY))
                 encoder.setBytes(&planeWidth, length: 4, index: 1)
-                encoder.setBytes(&unit, length: 16, index: 2)
+                encoder.setBytes(&gain, length: 16, index: 2)
                 encoder.setBytes(&origin, length: 8, index: 3)
                 encoder.setTexture(window, index: 0)
                 HDRMergeKernels.dispatch(encoder, pso: pso, width: ww, height: wh)
@@ -476,11 +488,11 @@ public final class MergePanoPrepKernels: @unchecked Sendable {
             encoder.setComputePipelineState(pso)
             encoder.setBuffer(buffer, offset: 0, index: 0)
             var planeWidth = UInt32(rawW), planeHeight = UInt32(rawH)
-            var unit = SIMD4<Float>(repeating: 1)
+            var gain = SIMD4<Float>(SIMD3(repeating: Self.linearGain(file)), 1)
             var span32 = UInt32(span)
             encoder.setBytes(&planeWidth, length: 4, index: 1)
             encoder.setBytes(&planeHeight, length: 4, index: 2)
-            encoder.setBytes(&unit, length: 16, index: 3)
+            encoder.setBytes(&gain, length: 16, index: 3)
             encoder.setBytes(&span32, length: 4, index: 4)
             encoder.setTexture(out, index: 0)
             HDRMergeKernels.dispatch(encoder, pso: pso, width: w, height: h)

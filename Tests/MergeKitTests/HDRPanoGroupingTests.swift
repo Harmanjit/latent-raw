@@ -61,6 +61,28 @@ final class HDRPanoGroupingTests: XCTestCase {
         XCTAssertEqual(grouping.evidence, .exposurePatternAndTiming)
     }
 
+    /// Whole-second timestamps put a 1 s gap inside a burst that crosses a
+    /// second boundary. That must not read as a move: an uneven sweep (no
+    /// exposure pattern) was cut inside its brackets, and an even one got a
+    /// spurious "the gaps don't quite match" warning.
+    func testABurstStraddlingASecondBoundaryIsNotCut() throws {
+        XCTAssertEqual(HDRPanoramaGrouper.splitThreshold([0, 1, 4, 0, 1, 4, 0, 1], ratio: 2.5, floorValue: 1), 4)
+        XCTAssertNil(HDRPanoramaGrouper.splitThreshold([0, 1, 0, 1], ratio: 2.5, floorValue: 1))
+
+        let stops: [Double] = [-2, 0, 2, -4, -2, 0, 2, 4]
+        let seconds: [Double] = [10, 10, 11, 15, 15, 16, 16, 17]
+        let uneven = zip(stops, seconds).enumerated().map { photo("U\($0.offset).NEF", stops: $0.element.0, second: $0.element.1) }
+        let grouping = try HDRPanoramaGrouper.group(uneven)
+        XCTAssertEqual(frames(grouping), [[0, 1, 2], [3, 4, 5, 6, 7]])
+
+        // Three even brackets, each crossing a second boundary.
+        let evenSeconds: [Double] = [10, 10, 11, 15, 15, 16, 20, 20, 21]
+        let even = evenSeconds.enumerated().map { photo("E\($0.offset).NEF", stops: [-2, 0, 2][$0.offset % 3], second: $0.element) }
+        let evenGrouping = try HDRPanoramaGrouper.group(even)
+        XCTAssertEqual(frames(evenGrouping), [[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+        XCTAssertEqual(evenGrouping.evidence, .exposurePatternAndTiming)
+    }
+
     /// Two exposures, six positions: the shortest repeating period wins,
     /// and it isn't confused by the pattern also repeating at 4 or 6.
     func testTwoExposuresAtSixPositions() throws {
