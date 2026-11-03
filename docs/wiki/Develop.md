@@ -2,15 +2,10 @@
 
 The right panel holds the modules in pipeline order. All controls are live at full quality. Double-click a slider to reset it. ⌘Z and ⇧⌘Z undo and redo; `\` shows the unedited image. The Develop menu holds Auto Adjust, the crop, spot removal, red-eye, sensor dust and touch-up tools, the White Balance Selector, new masks and brush size, and View › Show Clipping shows clipping on the image; the Edit menu holds undo, redo and Copy and Paste Settings.
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
-**Typed values.** Most sliders show their value as a number you can click: type a value and press Return or Tab (or click elsewhere) to apply it, or Escape to cancel. If the value changes while the field is open, because the slider moved or another image opened, the field follows it and anything typed is dropped. ↑ and ↓ step it by the last digit shown, ⇧↑ and ⇧↓ by ten steps. The unit can be typed or left out, and the value is clamped to the slider's range. A typed value is an ordinary edit and lands in history like a drag. Temperature, the four tone ranges, HSL, the B&W Mix, the luminance sliders under the three small colour wheels and export quality don't take typed values yet.
-
-**Typed values.** Most sliders show their value as a number you can click: type a value and press Return or Tab (or click elsewhere) to apply it, or Escape to cancel. If the value changes while the field is open, because the slider moved or another image opened, the field follows it and anything typed is dropped. ↑ and ↓ step it by the last digit shown, ⇧↑ and ⇧↓ by ten steps. The unit can be typed or left out, and the value is clamped to the slider's range. A typed value is an ordinary edit and lands in history like a drag. Temperature takes a typed value in Kelvin; the four tone ranges, HSL, Split Toning and export quality don't take typed values yet.
-<!-- /RECONCILE -->
+**Typed values.** Most sliders show their value as a number you can click: type a value and press Return or Tab (or click elsewhere) to apply it, or Escape to cancel. If the value changes while the field is open, because the slider moved or another image opened, the field follows it and anything typed is dropped. ↑ and ↓ step it by the last digit shown, ⇧↑ and ⇧↓ by ten steps. The unit can be typed or left out, and the value is clamped to the slider's range. A typed value is an ordinary edit and lands in history like a drag. Temperature takes a typed value in Kelvin. The four tone ranges, HSL, the B&W Mix, the luminance sliders under the three small colour wheels and export quality don't take typed values yet.
 
 ## Modules
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
 **White Balance.** Temperature and tint, starting from the camera's own setting. As Shot returns to it. Click the Kelvin number beside Temperature to type one (2000–12000 K).
 
 The menu above the sliders offers Lightroom's starting points: **As Shot** (the camera's setting), **Auto** (an estimate from the picture, the same one Auto Adjust makes, without touching exposure or contrast), and the light sources **Daylight** (5500 K), **Cloudy** (6500 K), **Shade** (7500 K), **Tungsten** (2850 K), **Fluorescent** (3800 K, leaning a little magenta to cancel the green of the tubes) and **Flash** (5500 K). Moving a slider afterwards makes the setting **Custom**. Latent's tint scale is its own, so the numbers don't match Lightroom's.
@@ -34,9 +29,6 @@ Latent reads what makes a profile's colour: its colour matrices and forward matr
 A profile's own **tone curve** is off to start with: Latent keeps its own tone mapping (the sigmoid behind Contrast and Mid Grey, which holds highlights well past white) and takes only the profile's colour. A profile that carries a curve shows **Use profile's tone curve**; tick it to apply the curve on top of Latent's tone mapping, which is closer to the camera maker's contrast but usually stronger than in other editors, because those use the curve *instead* of a curve of their own.
 
 A photo whose edit names a camera profile this Mac doesn't have (edited on another Mac, say) shows in Latent Standard, and the Profile row says which profile is missing. Import that profile and the photo looks as it was made. Copy and paste, presets and snapshots carry the profile as the **Profile** group.
-
-**White Balance.** Temperature and tint, starting from the camera's own setting. As Shot returns to it.
-<!-- /RECONCILE -->
 
 **Tone.** Exposure in stops, contrast and mid-grey for the sigmoid tone curve. **Highlights, Shadows, Whites and Blacks** each brighten or darken one band of tones without moving mid grey. They change exposure per pixel by its brightness, so colours keep their hue, there are no halos, and tones never swap order. **Auto** (⌘U) sets exposure, contrast and white balance from the image itself, backing exposure off if it would blow the brightest highlights. On an HDR screen, **HDR display** shows highlights above paper white using the screen's headroom.
 
@@ -62,17 +54,6 @@ A photo whose edit names a camera profile this Mac doesn't have (edited on anoth
 
 **Local Adjustments.** Masks with their own sliders: linear gradient, radial, brush, whole image, colour and luminance ranges, and model masks (*Subject* with BiRefNet Lite or Apple Vision, *Click to Select* and *Select Objects* with Segment Anything 2.1, *Select by Class* with SegFormer). A mask can combine several parts (add, subtract, intersect), has an Amount, and offers Exposure, Contrast, Highlights, Shadows, Whites, Blacks, Temperature, Tint, Hue, Saturation, Texture, Clarity, Dehaze, Sharpness, Noise and Defringe. Model masks take Feather and Edge, and masks can be renamed, duplicated, duplicated and inverted, hidden and tidied. Model masks are regenerated from the image when needed rather than stored, and each records the model that made it; see [Models](Models). Everything about masks is on its own page: [Masking](Masking).
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
-**Tone Curve.** Two editors, picked with **Point** and **Region** at the top of the group.
-
-*Point* is a master curve plus red, green and blue curves, picked with the RGB, Red, Green, Blue control above the graph; the channel curves apply after the master, on the display-referred image. Drag points, click the curve to add one, double-click a point to remove it. Channel curves you have changed stay faintly visible behind the one you are editing. Linear resets the curve shown. The **Point Curve** menu starts the RGB curve from **Linear**, **Medium Contrast** or **Strong Contrast**, Lightroom's three; it says Custom once you move a point.
-
-*Region* is Lightroom's parametric curve: four sliders, **Highlights**, **Lights**, **Darks** and **Shadows**, each lifting or lowering one stretch of tones, with the ends pinned at black and white. The three triangles under the graph move where the stretches meet; drag one, or double-click it to put it back. The region curve applies first and the point curve after it, so the two combine; with the region curve in use, the Point editor says so. Neither can turn tones over: a strong negative slider flattens, it doesn't reverse.
-
-**Refine Saturation**, under either editor, sets how much colour the curve's contrast brings. A steep curve applied to red, green and blue pulls them apart and saturates the picture; at −100 the curve changes brightness only and leaves colour as it was, at +100 it adds twice the colour. It does nothing while the curve is straight.
-
-**Targeted adjustment.** The **Target** button in the Tone Curve group, and the **Hue**, **Saturation** and **Luminance** buttons above the HSL sliders, turn on a tool that works on the photo itself: press on a tone or colour and drag up to raise it, down to lower it. For the curve, the drag moves a point at that tone (an existing point if one is close, otherwise a new one) or, with Region showing, the region slider that tone falls in. For HSL, it moves the one or two hue bands that colour belongs to, in the proportion each acts on it. A whole drag is one step in history. Esc, or the same button, leaves the tool.
-
 **Lens Blur.** A shallow depth of field after the fact: the background (or the foreground) goes soft while what you choose stays sharp, as with a fast lens wide open. It is off until **Amount** leaves 0; the first move makes a depth map of the photo on this Mac, which takes a moment, and nothing is sent anywhere.
 
 - **Amount** (0–100) sets how large the blur grows. At 100 it reaches 2 % of the photo's long edge, about 120 pixels on a 24 MP frame.
@@ -85,8 +66,15 @@ A photo whose edit names a camera profile this Mac doesn't have (edited on anoth
 
 The blur works in linear light after the local adjustments, so a brightened background blurs brightened. Behind a sharp subject it never spreads across the subject's outline; a blurred foreground does overlap what is behind it, as it would through a lens. The depth map is made again after a lens or keystone change, and each time the photo opens, like model masks; the edit keeps only the sliders, the focus range and which depth source it was set on, so a photo edited on one Mac says what it needs on another, and one without that depth model uses the two planes and says so. Exports, prints, contact sheets and slides carry the blur; thumbnails and `latent-cli` renders leave it out. Copy, paste and presets carry it as the **Lens Blur** group, off by default like the masks.
 
-**Tone Curve.** A master curve plus red, green and blue curves, picked with the RGB, Red, Green, Blue control above the graph; the channel curves apply after the master, on the display-referred image. Drag points, click the curve to add one, double-click a point to remove it. Channel curves you have changed stay faintly visible behind the one you are editing. Linear resets the curve shown.
-<!-- /RECONCILE -->
+**Tone Curve.** Two editors, picked with **Point** and **Region** at the top of the group.
+
+*Point* is a master curve plus red, green and blue curves, picked with the RGB, Red, Green, Blue control above the graph; the channel curves apply after the master, on the display-referred image. Drag points, click the curve to add one, double-click a point to remove it. Channel curves you have changed stay faintly visible behind the one you are editing. Linear resets the curve shown. The **Point Curve** menu starts the RGB curve from **Linear**, **Medium Contrast** or **Strong Contrast**, Lightroom's three; it says Custom once you move a point.
+
+*Region* is Lightroom's parametric curve: four sliders, **Highlights**, **Lights**, **Darks** and **Shadows**, each lifting or lowering one stretch of tones, with the ends pinned at black and white. The three triangles under the graph move where the stretches meet; drag one, or double-click it to put it back. The region curve applies first and the point curve after it, so the two combine; with the region curve in use, the Point editor says so. Neither can turn tones over: a strong negative slider flattens, it doesn't reverse.
+
+**Refine Saturation**, under either editor, sets how much colour the curve's contrast brings. A steep curve applied to red, green and blue pulls them apart and saturates the picture; at −100 the curve changes brightness only and leaves colour as it was, at +100 it adds twice the colour. It does nothing while the curve is straight.
+
+**Targeted adjustment.** The **Target** button in the Tone Curve group, and the **Hue**, **Saturation** and **Luminance** buttons above the HSL sliders, turn on a tool that works on the photo itself: press on a tone or colour and drag up to raise it, down to lower it. For the curve, the drag moves a point at that tone (an existing point if one is close, otherwise a new one) or, with Region showing, the region slider that tone falls in. For HSL, it moves the one or two hue bands that colour belongs to, in the proportion each acts on it. A whole drag is one step in history. Esc, or the same button, leaves the tool.
 
 **HSL / Colour.** Hue, saturation and luminance for eight hue bands.
 
@@ -128,7 +116,7 @@ Two gamut warnings can paint over the proof:
 
 Where both apply, red wins. The line under the warnings says what share of all colours the target can't reproduce.
 
-**Create Proof Copy** keeps the edit as it is now as a snapshot named "Proof — " and the target's name, such as "Proof — Canson Rag Photographique". Latent has no virtual copies, so a proof copy is a snapshot: the version adjusted for that paper, kept with the photo in the History panel's snapshot list, to restore before printing. A typical session: save a snapshot of your screen version, switch on Soft Proof, adjust the photo until the proof looks right, then Create Proof Copy. Pressing it again for the same target replaces that proof copy (the button then reads **Update Proof Copy**). Like other snapshots, saving one isn't a step in History.
+**Create Proof Copy** keeps the edit as it is now as a snapshot named "Proof — " and the target's name, such as "Proof — Canson Rag Photographique". A proof copy is a snapshot, not a [virtual copy](Library#virtual-copies): the version adjusted for that paper, kept with the photo in the History panel's snapshot list, to restore before printing. To keep the screen version and the print version side by side as two photos, make a virtual copy (⌘') first and proof that. A typical session: save a snapshot of your screen version, switch on Soft Proof, adjust the photo until the proof looks right, then Create Proof Copy. Pressing it again for the same target replaces that proof copy (the button then reads **Update Proof Copy**). Like other snapshots, saving one isn't a step in History.
 
 The target, intent, paper simulation and warnings are view settings, never part of the edit, and the intent and paper simulation are remembered between launches. Printing starts from the intent chosen here; see [Export](Export#print).
 
@@ -136,8 +124,6 @@ The target, intent, paper simulation and warnings are view settings, never part 
 
 On an HDR screen, the **HDR Limit** slider under the **HDR display** switch sets how far above white this photo's highlights may go, from half a stop to three stops. The default is two stops, which is what Latent always used. Lower it for a portrait or a quiet scene whose highlights shouldn't glare; raise it for a sunset or specular light that deserves the sparkle. It is part of the edit: it is undoable, named "HDR Limit" in History, copied and pasted with the **Tone** group, and it sets the headroom of an exported HDR gain map, so the file looks on an HDR screen the way the photo looked while you edited it. It changes nothing in an SDR file or on an SDR screen. The slider only shows on a screen with HDR headroom; an edit's limit is kept and exported either way.
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
 ## JPEG, TIFF and other pictures
 
 JPEG, HEIC, TIFF, PNG, WebP and AVIF files open in Develop like raws, and every edit is stored the same way, in the catalog and its sidecar, never in the file.
@@ -181,7 +167,6 @@ Upright works on the picture after its lens corrections (its lines are straight 
 **Constrain Crop** keeps the crop inside the picture: whenever the transform or the straighten angle changes, the crop becomes the largest of its shape that shows no empty edge, and it grows back as the correction eases. With it off, the transform can show empty (black) areas at the edges, which you can crop by hand.
 
 Develop › Transform has Auto Straighten, the flips, each Upright mode, and the crop guide commands.
-<!-- /RECONCILE -->
 
 ## Sharpening and noise reduction
 
@@ -217,27 +202,14 @@ At their starting values these sliders give exactly the noise reduction Latent a
 **Grain** adds film-like grain. **Amount** is its strength, 0 is off; **Size** the size of each grain relative to the picture, so a setting looks the same on a 12 and a 60 megapixel file; **Roughness** goes from smooth, even grain to clumpier, irregular grain. Grain is strongest in the midtones and gentler in deep shadows and bright highlights, as on film. The pattern is fixed to the photo: the same grains in the same places on screen, at every zoom, and in the export, and a different pattern for every photo. Zoomed out, the preview shows the grain softened, as a smaller print would; look at 100% to judge it.
 
 Effects travel with copy, paste and presets as their own group, **Effects (post-crop vignetting, grain)**, on by default like the other look groups.
-<!-- /RECONCILE -->
 
 ## Presets and clipboard
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
-Presets and Clipboard holds a menu of presets, five built in and any you save, and a checklist of which module groups copy and paste carry. The **Profile** group carries the chosen profile and its Amount, and is on by default. Spot removal patches and red-eye spots travel together, as **Spot Removal & Red-Eye**; **Sensor Dust** and **Touch-up** are groups of their own, off by default like the masks, and Touch-up carries its sliders and Remove blemishes switch but never the faces or blemishes found on another photo. ⇧⌘C copies the current edit; ⇧⌘V pastes into the open image or onto the whole Library selection. Presets are JSON files in Application Support and can be shared.
+Presets and Clipboard holds a menu of presets, five built in and any you save, and a checklist of which module groups copy and paste carry. The **Profile** group carries the chosen profile and its Amount, and is on by default. Spot removal patches and red-eye spots travel together, as **Spot Removal & Red-Eye**; **Sensor Dust**, **Touch-up** and **Lens Blur** are groups of their own, off by default like the masks, and Touch-up carries its sliders and Remove blemishes switch but never the faces or blemishes found on another photo. ⇧⌘C copies the current edit; ⇧⌘V pastes into the open image or onto the whole Library selection. Presets are JSON files in Application Support and can be shared.
 
 ## History and snapshots
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
-The left panel lists every settled edit newest first; click one to jump, ⌘Z and ⇧⌘Z step. Thirty steps are kept per image, in the sidecar as well as the catalog. Snapshots are named copies of the whole edit; restoring one is itself a history step. Steps are named by what changed, such as Tone, Saturation, Treatment, B&W Mix, Colour Grading, Calibration, Point Colour, Spot Removal, Red-Eye, Sensor Dust or Touch-up; Find Spots, Find Faces and Find Blemishes are each one step.
-
-Presets and Clipboard holds a menu of presets, five built in and any you save, and a checklist of which module groups copy and paste carry. Spot removal patches and red-eye spots travel together, as **Spot Removal & Red-Eye**; **Sensor Dust**, **Touch-up** and **Lens Blur** are groups of their own, off by default like the masks, and Touch-up carries its sliders and Remove blemishes switch but never the faces or blemishes found on another photo. ⇧⌘C copies the current edit; ⇧⌘V pastes into the open image or onto the whole Library selection. Presets are JSON files in Application Support and can be shared.
-
-## History and snapshots
-
-The left panel lists every settled edit newest first; click one to jump, ⌘Z and ⇧⌘Z step. Thirty steps are kept per image, in the sidecar as well as the catalog. Snapshots are named copies of the whole edit; restoring one is itself a history step. Steps are named by what changed, such as Tone, Spot Removal, Red-Eye, Sensor Dust, Touch-up or Lens Blur; Find Spots, Find Faces and Find Blemishes are each one step.
-<!-- /RECONCILE -->
-
-The left panel lists every settled edit newest first; click one to jump, ⌘Z and ⇧⌘Z step. Thirty steps are kept per image, in the sidecar as well as the catalog. Snapshots are named copies of the whole edit; restoring one is itself a history step. Steps are named by what changed, such as Tone, Spot Removal, Red-Eye, Sensor Dust, Touch-up or HDR Limit; Find Spots, Find Faces and Find Blemishes are each one step.
-<!-- /RECONCILE -->
+The left panel lists every settled edit newest first; click one to jump, ⌘Z and ⇧⌘Z step. Thirty steps are kept per image, in the sidecar as well as the catalog. Snapshots are named copies of the whole edit; restoring one is itself a history step. Steps are named by what changed, such as Tone, Saturation, Treatment, B&W Mix, Colour Grading, Calibration, Point Colour, Spot Removal, Red-Eye, Sensor Dust, Touch-up, Lens Blur or HDR Limit; Find Spots, Find Faces and Find Blemishes are each one step.
 
 ## The viewport
 

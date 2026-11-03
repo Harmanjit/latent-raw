@@ -6,31 +6,14 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 - **Bayer sensors only.** Fujifilm X-Trans, Sigma Foveon, monochrome and four-colour sensors are read for metadata but do not render.
 - **Colour checked on one camera.** The golden-image tests, which compare renders with reference images, use a Nikon D750 NEF. The Photo Merge tests also read raws from a Canon EOS 5D Mark II and a Nikon D200, but don't check their colour. LibRaw supports hundreds of cameras and the pipeline is generic, but colour and exposure on other cameras have not been checked against a reference.
-<!-- RECONCILE: two branches edited this; merge into one text -->
-- **Camera matrix colour only.** Colour comes from the camera's characterisation matrix. There are no camera-matching profiles, so the default rendering will not match the in-camera JPEG look.
-<!-- RECONCILE: two branches edited this; merge into one text -->
-- **JPEG, HEIC, TIFF and other pictures are SDR and flattened.** An HDR gain map in a phone's HEIC or JPEG is ignored and the SDR picture opens; a floating-point or HDR TIFF is clipped at white. Layers, PSD and PSB files, multi-page TIFFs beyond the first page, and JPEG XL aren't read. A picture's edits are Latent's own and live in its sidecar; they are not written into the file, and other applications won't see them.
-
 - **No built-in camera-matching profiles.** Latent Standard renders from the camera's characterisation matrix, so it will not match the in-camera JPEG look. Camera-matching looks come from DNG camera profiles (.dcp) you import yourself: Latent bundles none and downloads none. Triple-illuminant profiles (DNG 1.6) are read as dual-illuminant ones, a profile's tone curve is applied on top of Latent's tone mapping rather than instead of it, and there is no Adaptive profile, Profile Browser with previews, favourites or LUT-based creative profiles.
-<!-- /RECONCILE -->
-- **Lens profiles** cover the bundled Lensfun subset; a lens the matcher cannot identify gets manual sliders only.
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
-
+- **JPEG, HEIC, TIFF and other pictures are SDR and flattened.** An HDR gain map in a phone's HEIC or JPEG is ignored and the SDR picture opens; a floating-point or HDR TIFF is clipped at white. Layers, PSD and PSB files, multi-page TIFFs beyond the first page, and JPEG XL aren't read. A picture's edits are Latent's own and live in its sidecar; they are not written into the file, and other applications won't see them.
 - **Lens profiles** cover the bundled Lensfun subset. A lens the matcher cannot identify gets no profile automatically; pick one by hand from the Lens Corrections panel, or rely on the manual sliders and Remove chromatic aberration. Profiles remembered for a lens are kept per catalog, and `latent-cli` doesn't read them.
-- **Golden-image tests don't yet pin the new detail and effects stages** (grain, post-crop vignetting, sharpening Detail and Masking, noise reduction Detail, Contrast and Smoothness); they have render tests that check each control's effect and that off renders exactly as before.
-<!-- /RECONCILE -->
-- **No DNG export.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is fixed at two stops. PNG and TIFF are SDR only.
-
-- **HDR in exports is a gain map only.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is fixed at two stops. PNG, TIFF, AVIF and JPEG XL are SDR only, and a gain map is written only in sRGB or Display P3.
+- **HDR in exports is a gain map only.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is the photo's HDR Limit (at most three stops); there are no separate settings for the SDR rendition. PNG, TIFF, AVIF and JPEG XL are SDR only, and a gain map is written only in sRGB or Display P3.
 - **DNG export bakes the corrections, not the look.** A DNG holds white balance, exposure, noise reduction, lens corrections, healing and masks; tone, colour grading, presence and sharpening are left out, so it opens with the default look. Keep its white balance at As Shot: the pixels are already balanced. AVIF and JPEG XL appear only when this Mac's system can write them; there is no PSD.
-<!-- /RECONCILE -->
-
-- **No DNG export.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is the photo's HDR Limit (at most three stops); there are no separate settings for the SDR rendition. PNG and TIFF are SDR only.
-<!-- /RECONCILE -->
-- **Optional interop XMP beside the image is not implemented.** Latent's sidecars live in `_latent/xmp/`, where Lightroom and darktable do not look.
+- **No XMP beside the raw while you work.** Latent's sidecars live in `_latent/xmp/`, where Lightroom and darktable do not look. To hand a raw to another application with its rating, label and keywords, export it as **Original + XMP sidecar**.
 - **HDR display** has been verified on a MacBook Pro's XDR screen, and sRGB and Display P3 output on the same machine. Other HDR displays are untested.
-- **Soft proofing has two intents,** Perceptual and Relative Colorimetric (always with black point compensation); Saturation isn't offered. Black point compensation treats the paper's black as neutral. The monitor gamut warning reads the profile of the screen the window was on when the warning was switched on; move the window to another screen and switch it off and on again. Proof copies are snapshots, not virtual copies, so only one version shows and exports at a time.
+- **Soft proofing has two intents,** Perceptual and Relative Colorimetric (always with black point compensation); Saturation isn't offered. Black point compensation treats the paper's black as neutral. The monitor gamut warning reads the profile of the screen the window was on when the warning was switched on; move the window to another screen and switch it off and on again. Proof copies are snapshots, not virtual copies, so only one version of a photo shows and exports at a time; to keep a screen version and a print version side by side, make a virtual copy and proof that.
 
 ## Platform and distribution
 
@@ -41,6 +24,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 ## Workflow
 
+- **No Lightroom catalog import.** Latent can't read a Lightroom catalog (`.lrcat`), its collections or its develop settings, nor the `.xmp` files Lightroom writes beside raws. Ratings, labels and keywords made in Lightroom don't come across; see [Coming from Lightroom](Coming-from-Lightroom).
 - **No import from memory cards, no tethering.** Copy files yourself, or let **Auto Import** move them in from a watched folder that another app saves into. Auto Import takes only the files directly in the watched folder, not its subfolders, and can't be undone.
 - **Folder watching misses some changes on network shares.** Changes made from another computer may not be noticed; use File › Refresh Folder (⌘R). The sidebar's folder tree isn't watched: a folder made in Finder appears when its parent is expanded again.
 - **No Locate Missing Photo.** A photo deleted or moved out of the folder leaves the catalog; its sidecar stays, so putting the file back restores its rating and edits.
@@ -49,33 +33,16 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **The sandbox limits the sidebar** to folders inside a favourite. Anything else needs Open Folder, or adding a folder that contains it.
 - **Subfolder include/independent choices are not stored in sidecars.** They live only in the catalog database, so rebuilding the catalog, including the automatic rebuild of a damaged database, resets them and asks again. Changing the choice moves no existing sidecars or thumbnails.
 - **No video, no plugins.**
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
-- **Metadata editing** is limited to rating, flag and keywords. Colour labels, title, caption and copyright can't be set. Keywords have no synonyms, no keyword sets, no import or export of keyword lists, and the Keyword List shows only keywords some photo carries: there is no keeping an empty keyword for later.
-- **Finder tags are read, never written,** and a tag changed in Finder while the folder is open shows only when the folder is opened again.
-- **Undo in the Library has edges.** It covers ratings, flags, rotation, keywords, collections, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export, print, contact sheet or Photo Merge is running.
-
-- **Metadata editing** is limited to rating, flag and keywords. Colour labels, title, caption and copyright can't be set. Keywords apply to one image at a time, not to a multiple selection.
+- **Metadata editing** covers rating, flag, colour label, keywords, title, caption, creator and copyright. Other IPTC fields (headline, location, contact details, usage terms) and capture time can't be edited, and there are no metadata presets. Colour labels use the five standard names; there are no label sets. Keywords have no synonyms, no keyword sets, no import or export of keyword lists, and the Keyword List shows only keywords some photo carries: there is no keeping an empty keyword for later.
 - **Finder tags are read, never written.** A tag changed in Finder shows when the folder is next scanned: at once while it is watched, otherwise after Refresh Folder.
-- **Undo in the Library has edges.** It covers ratings, flags, rotation, keywords, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export, print, contact sheet or Photo Merge is running.
-<!-- /RECONCILE -->
-- **Rename is one image at a time.** There is no batch rename.
-
-- **Metadata editing** covers rating, flag, colour label, keywords, title, caption, creator and copyright. Other IPTC fields (headline, location, contact details, usage terms) and capture time can't be edited, and there are no metadata presets. Keywords apply to one image at a time, not to a multiple selection. Colour labels use the five standard names; there are no label sets.
-- **Finder tags are read, never written,** and a tag changed in Finder while the folder is open shows only when the folder is opened again.
-- **Undo in the Library has edges.** It covers ratings, flags, labels, titles, captions, creators and copyrights, rotation, keywords, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export, print, contact sheet or Photo Merge is running.
+- **Undo in the Library has edges.** It covers ratings, flags, labels, titles, captions, creators and copyrights, rotation, keywords, collections, pasted settings and presets, Custom sort rearrangements, virtual copies, and moves, copies, duplicates and renames. Exports and Auto Import can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export, print, contact sheet or Photo Merge is running.
 - **Renaming files on import** isn't possible, since there is no import step; Rename with Template renames photos already in the folder.
-<!-- /RECONCILE -->
 - **Rename, Move and Copy work only in the Library grid,** and not while an export, print, contact sheet or Photo Merge is running.
 - **A move takes the raw and its paired JPEG only.** An `.xmp` sidecar another application put beside the raw stays where it was.
 - **A move to another disk copies, then deletes the original.** If Latent crashes or is force-quit during a long copy, a hidden `.latent-transfer-…` file can be left in the destination. The original is still in place, and the hidden file can be deleted.
 - **Arranging the Custom order needs dragging.** There are no keys for it.
-<!-- RECONCILE: two branches edited this; merge into one text -->
-- **Typed values aren't on every slider.** Temperature, Highlights, Shadows, Whites and Blacks, HSL, the B&W Mix, the luminance sliders under the three small colour wheels and export quality show their value but can't be typed into.
-
-- **Typed values aren't on every slider.** Highlights, Shadows, Whites and Blacks, HSL, Split Toning and export quality show their value but can't be typed into.
-- **The pointer readout and the targeted tools read the picture as shown.** They sample the screen render, so at fit one readout pixel covers several of the photo's, and the tone curve's targeted tool traces the tone back through the curve as it stands, which after HSL or split toning is close rather than exact. The White Balance Selector reads the raw data itself and is not affected.
-<!-- /RECONCILE -->
+- **Typed values aren't on every slider.** Highlights, Shadows, Whites and Blacks, HSL, the B&W Mix, the luminance sliders under the three small colour wheels and export quality show their value but can't be typed into. Temperature takes a typed Kelvin value.
+- **The pointer readout and the targeted tools read the picture as shown.** They sample the screen render, so at fit one readout pixel covers several of the photo's, and the tone curve's targeted tool traces the tone back through the curve as it stands, which after HSL or colour grading is close rather than exact. The White Balance Selector reads the raw data itself and is not affected.
 - **Export open image… is always full size in sRGB.** Use the export sheet for anything else.
 - **Compare's and Survey's Sync aren't remembered;** they are on again at every launch.
 - **Survey shows at most four images** and has no before/after view. It is for looking; to edit, open an image in Develop.
@@ -117,12 +84,9 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Sensor dust has been tested on synthetic dust** and checked on only a few real photos. It looks for round dark shadows: foliage, birds and stars can be taken for dust, and faint spots at wide apertures can be missed; the rings are there to correct it. A dust map is keyed by the camera's make and model, so two bodies of the same model share one.
 - **Touch-up works on faces at least 64 pixels wide** on a render about 4000 pixels across, seen more or less straight on; a turned head, glasses or hair across the face can defeat the landmarks. Smoothing acts on brightness only, so colour blotches stay; the teeth gate can catch a tongue or a lip highlight. Survey panes rebuild the regions when they open, which costs a moment per pane.
 - **Subject masks with BiRefNet take about half a second each** on an M4 and longer on an M1, so a Survey of four such photos takes a few seconds to settle. Added models run on the GPU only.
-<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Upright needs straight lines.** It reads edges on a render about a thousand pixels across, so a photo of nature, a soft or very dark one, or a building seen mostly as curves may give nothing to correct, and busy patterns (tiles, bars, text) can mislead it; Guided Upright is the fallback. Constrain Crop refits the crop when the transform or straighten changes, but a crop dragged by hand afterwards can still reach an empty edge. Flips are part of the edit, not of the photo's orientation like ⌘[ and ⌘], so they travel with Copy Settings when the crop is copied, and Reset to Camera Orientation leaves them alone.
-
 - **Lens Blur has no refine brushes,** so a depth map that is wrong in one place (a gap between the arms, a glass of water) can only be fixed by moving the focus range or choosing another depth source. Without a depth model the depth is two planes, subject and background, so a scene that recedes blurs evenly rather than more with distance; no depth model is bundled, since the one that may be shipped has to be converted from its weights. The blur is worked out at most 16 pixels across on a shrunk copy, so a very large blur of fine bright detail can look slightly smoother than a real lens's.
 - **No Depth Range mask.** Local adjustments can't yet be limited to a range of distances.
-<!-- /RECONCILE -->
 - **Thumbnails ignore AI denoise**, since running the network in the background for every thumbnail would be too slow.
 - **Limits:** 8 local adjustments of up to 7 parts each (a shape and 6 components), 5 colours per colour range, 32 spot patches (a brush stroke counts as one), 32 red-eye spots, 200 dust spots, 16 faces and 64 blemishes per image, 30 history steps.
 - **No process-version pinning.** When a rendering algorithm changes, existing edits render differently rather than being pinned to the old behaviour. This has already happened once: spot healing changed in September 2026, so heal patches made before then now render with the new method.
@@ -137,6 +101,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 ## Development
 
 - **Golden-image tests don't cover AI noise reduction** or gain maps. Every other stage of the render is pinned against reference images, the touch-up stage with a fixed set of face regions; Core ML and Vision output varies between compute units and macOS versions, so neural denoise, the model masks and the face landmarks have only unit tests, and the dust detector is tested on synthetic scenes. What the magnifier and the slideshow draw on screen, and printed pages, aren't pictured by any test either.
+- **Golden-image tests don't yet pin the new detail and effects stages** (grain, post-crop vignetting, sharpening Detail and Masking, noise reduction Detail, Contrast and Smoothness); they have render tests that check each control's effect and that off renders exactly as before.
 - **Red-eye's thresholds are written twice,** in `RedEye.metal` and in `RedEyeTuning` (`RedEye.swift`), which Auto uses to decide an eye is red. They are kept in step by hand; no test ties them.
 - Tests that render a raw need a sample that is not in the repository. `scripts/fetch_test_assets.sh` downloads the public-domain one the golden-image tests use, and with `--merge` the freely licensed brackets the Photo Merge tests use (about 390 MB), which skip without them; a few tests use the author's own samples and skip everywhere else, CI included.
 - **`LATENT_RAW_INPROCESS=1` only works in debug builds.** `scripts/make_app.sh` always builds release, so no bundle it makes can decode in process.
