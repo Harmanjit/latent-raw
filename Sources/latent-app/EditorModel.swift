@@ -97,6 +97,14 @@ final class EditorModel: ObservableObject {
     /// image isn't re-rendered for every mouse move.
     @Published var paintingHealStroke: [SIMD2<Float>] = []
 
+    // MARK: - Content-aware Remove (EditorModel+Remove.swift)
+
+    /// Whether a new Remove patch is refined to the outline of the object
+    /// under it (Detect Objects).
+    @Published var removeDetectsObjects = true
+    /// Remove patches whose object is being detected, by id.
+    @Published var detectingObjectIDs: Set<UUID> = []
+
     // MARK: - Red-eye tool (EditorModel+RedEye.swift)
 
     @Published var redEyeToolActive = false {

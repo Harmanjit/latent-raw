@@ -2,6 +2,7 @@ import XCTest
 import Metal
 import simd
 @testable import PixelEngine
+@testable import RawCore
 
 /// Content-aware Remove: the synthesis on synthetic scenes, its planning,
 /// and the stored patch.
@@ -246,6 +247,34 @@ final class RemoveFillTests: XCTestCase {
         print("remove 600 px hole on 6 MP: \(seconds) s")
         XCTAssertGreaterThan(simd_reduce_min(out(1500, 1000)), 0.15)
         XCTAssertLessThan(seconds, 20)
+    }
+
+    /// Through the whole pipeline: a Remove patch changes its area only,
+    /// the heal cache keeps the fill, and an outline is part of the key.
+    func testPipelineRendersARemovalAndCachesIt() throws {
+        let gpu = try GPUContext()
+        let session = try ImageSession(file: try RawFile(path: LinearFixtures.path(LinearFixtures.plain)), gpu: gpu)
+        let pipeline = RenderPipeline(gpu: gpu)
+        func render(_ p: EditParameters) throws -> (pixels: [Float16], cached: Bool, width: Int) {
+            var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: false)
+            let t = try pipeline.render(session, scale: .full, parameters: p, output: .file(.sRGB), info: &info)
+            return (try TextureReadback.float16Pixels(of: t, gpu: gpu), info.healWasCached, t.width)
+        }
+        let plain = try render(EditParameters())
+        var p = EditParameters()
+        p.heals = [HealPatch(target: [0.5, 0.5], source: [0.5, 0.5], radius: 0.1, mode: .remove)]
+        let removed = try render(p)
+        XCTAssertFalse(removed.cached)
+        XCTAssertEqual(try render(p).cached, true, "the fill is cached")
+        // Far from the patch nothing changes.
+        let w = plain.width
+        for (x, y) in [(2, 2), (w - 3, 3), (4, 44)] {
+            for c in 0..<3 { XCTAssertEqual(plain.pixels[(y * w + x) * 4 + c], removed.pixels[(y * w + x) * 4 + c]) }
+        }
+        var outlined = p
+        outlined.heals[0].objectMask = RemoveObjectMask(cells: [true, true, true, true], width: 2, height: 2,
+                                                        origin: [-0.05, -0.05], size: [0.1, 0.1])
+        XCTAssertFalse(try render(outlined).cached, "a new outline fills again")
     }
 
     // MARK: - Stored patch

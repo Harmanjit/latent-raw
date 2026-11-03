@@ -55,9 +55,14 @@ extension EditorModel {
             patch = HealPatch.stroke(path: path, radius: healRadius, feather: healFeather, mode: healMode,
                                      sensorSize: sensorSize)
         }
-        guard let patch else { return }
+        guard var patch else { return }
+        if healMode == .remove {
+            guard let prepared = preparedRemovePatch(patch) else { return }
+            patch = prepared
+        }
         parameters.heals.append(patch)
         selectedHealIndex = parameters.heals.count - 1
+        removePatchPlaced(patch)
     }
 
     // MARK: - Red-eye tool
