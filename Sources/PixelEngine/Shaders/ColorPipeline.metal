@@ -203,6 +203,22 @@ inline float3 applyCurve(float3 p, constant float *lut) {
     return out;
 }
 
+/// Refine Saturation (`EditParameters.curveSaturation`). A curve applied
+/// to red, green and blue separately also changes saturation: steepening
+/// the midtones pulls
+/// the channels apart. The same curve applied to brightness alone, scaling
+/// the three channels together, doesn't. The slider moves between and
+/// past the two: −1 keeps only the brightness change, 0 is the curve as
+/// drawn, +1 doubles the colour it added or took away.
+inline float3 refineCurveSaturation(float3 before, float3 curved, constant float *lut, float amount) {
+    float lumIn = dot(before, float3(0.2627, 0.6780, 0.0593));
+    float idx = clamp(lumIn, 0.0, 1.0) * 255.0;
+    int i = int(idx);
+    float lumOut = mix(lut[i], lut[min(i + 1, 255)], idx - float(i));
+    float3 brightnessOnly = before * (lumOut / max(lumIn, 1e-5));
+    return max(brightnessOnly + (curved - brightnessOnly) * (1.0 + amount), 0.0);
+}
+
 /// The red, green and blue curves: three 256-entry tables end to end,
 /// each channel looked up in its own.
 inline float3 applyChannelCurves(float3 p, constant float *lut) {
@@ -348,7 +364,7 @@ kernel void colorAndTone(
     constant uint  &encodeOutput                 [[buffer(9)]],
     constant uint  &applyToneMap                 [[buffer(10)]],
     constant uint3 &gradingFlags                 [[buffer(11)]],  // curve, hsl, split
-    constant float *curveLUT                     [[buffer(12)]],  // 256 entries
+    constant float *curveLUT                     [[buffer(12)]],  // 256 entries, then Refine Saturation
     constant float *hsl                          [[buffer(13)]],  // 8 hue, 8 sat, 8 lum
     constant float4 &splitTint                   [[buffer(14)]],
     constant float &splitBalance                 [[buffer(15)]],
@@ -421,7 +437,11 @@ kernel void colorAndTone(
     // otherwise depend on the look and lose everything above 1.0.
     if (applyToneMap != 0 && (any(gradingFlags != uint3(0)) || vibrance != 0.0)) {
         float3 p = pow(max(display / headroom, 0.0), 1.0 / 2.2);
-        if ((gradingFlags.x & 1) != 0) p = applyCurve(p, curveLUT);
+        if ((gradingFlags.x & 1) != 0) {
+            float3 curved = applyCurve(p, curveLUT);
+            if ((gradingFlags.x & 4) != 0) curved = refineCurveSaturation(p, curved, curveLUT, curveLUT[256]);
+            p = curved;
+        }
         if ((gradingFlags.x & 2) != 0) p = applyChannelCurves(p, channelCurveLUT);
         if (gradingFlags.y != 0) p = applyHSL(p, hsl);
         if (vibrance != 0.0) p = applyVibrance(p, vibrance);

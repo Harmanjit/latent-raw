@@ -94,17 +94,26 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var red: [[Float]]?
         public var green: [[Float]]?
         public var blue: [[Float]]?
+        /// The region sliders and their splits, absent while neutral (and
+        /// in every stack older than them).
+        public var parametric: ParametricCurve?
+        /// Refine Saturation, absent at 0.
+        public var saturation: Float?
 
-        public init(points: [[Float]], red: [[Float]]? = nil, green: [[Float]]? = nil, blue: [[Float]]? = nil) {
+        public init(points: [[Float]], red: [[Float]]? = nil, green: [[Float]]? = nil, blue: [[Float]]? = nil,
+                    parametric: ParametricCurve? = nil, saturation: Float? = nil) {
             self.points = points; self.red = red; self.green = green; self.blue = blue
+            self.parametric = parametric; self.saturation = saturation
         }
 
-        init(master: ToneCurve, channels: RGBCurves) {
+        init(master: ToneCurve, channels: RGBCurves, parametric: ParametricCurve = .neutral, saturation: Float = 0) {
             func encoded(_ c: ToneCurve) -> [[Float]] { c.points.map { [$0.x, $0.y] } }
             self.init(points: encoded(master),
                       red: channels.red.isIdentity ? nil : encoded(channels.red),
                       green: channels.green.isIdentity ? nil : encoded(channels.green),
-                      blue: channels.blue.isIdentity ? nil : encoded(channels.blue))
+                      blue: channels.blue.isIdentity ? nil : encoded(channels.blue),
+                      parametric: parametric.isNeutral ? nil : parametric,
+                      saturation: saturation == 0 ? nil : saturation)
         }
 
         /// A usable curve from stored points, or nil when there are fewer
@@ -194,7 +203,8 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.lens = Lens(distortion: p.lensDistortion, tca: p.lensTCA, vignetting: p.lensVignetting,
                             manualDistortion: p.manualDistortion, manualVignetting: p.manualVignetting,
                             profile: nil, lensfunDb: nil)
-        modules.curve = Curve(master: p.toneCurve, channels: p.channelCurves)
+        modules.curve = Curve(master: p.toneCurve, channels: p.channelCurves,
+                              parametric: p.parametricCurve, saturation: p.curveSaturation)
         modules.toneranges = p.toneRanges.isNeutral ? nil : p.toneRanges
         modules.hsl = p.hsl
         modules.splittoning = p.splitToning
@@ -262,6 +272,8 @@ public struct EditStack: Codable, Equatable, Sendable {
             p.channelCurves = RGBCurves(red: Curve.decoded(c.red) ?? .identity,
                                         green: Curve.decoded(c.green) ?? .identity,
                                         blue: Curve.decoded(c.blue) ?? .identity)
+            p.parametricCurve = c.parametric?.sanitized ?? .neutral
+            p.curveSaturation = c.saturation.map { $0.isFinite ? min(max($0, -1), 1) : 0 } ?? 0
         }
         p.toneRanges = modules.toneranges ?? .neutral
         if let h = modules.hsl, h.hue.count == 8, h.saturation.count == 8, h.luminance.count == 8 {
