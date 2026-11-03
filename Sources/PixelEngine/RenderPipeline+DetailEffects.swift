@@ -57,7 +57,7 @@ extension AutoChromaticAberration {
 
 extension RenderPipeline {
     /// Sensor pixels the noise reduction Smoothness average reaches.
-    static let colourSmoothnessReach: Float = 8
+    public static let colourSmoothnessReach: Float = 8
 
     /// Noise reduction's second pass (Contrast, Smoothness).
     func refineDenoise(session: ImageSession, cmdBuffer: MTLCommandBuffer, original: MTLTexture,
