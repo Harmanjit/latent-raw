@@ -194,8 +194,10 @@ final class EditorModel: ObservableObject {
             guard cropToolActive != oldValue else { return }
             if !cropToolActive {
                 straightenBase = nil
+                geometry.straightenLineArmed = false
             } else {
                 healToolActive = false; redEyeToolActive = false; dustToolActive = false; touchUpToolActive = false
+                geometry.guidedToolActive = false
                 // With crop on a mask tool is inert, so it must not stay
                 // shown as armed either.
                 maskTool = .none
@@ -208,6 +210,8 @@ final class EditorModel: ObservableObject {
     /// turning the angle back re-grows the crop instead of leaving it at
     /// whatever the largest angle forced it to.
     var straightenBase: CropParameters?
+    /// Upright, Guided Upright and the straighten ruler (EditorModel+Geometry.swift).
+    @Published var geometry = GeometryToolState()
 
     // MARK: - Saving
 

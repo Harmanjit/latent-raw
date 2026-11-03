@@ -98,6 +98,8 @@ enum KeyCommand: Equatable {
     case fullScreenImage, secondaryDisplay
     /// Arrow keys on a zoomed-in image, when Settings has them pan.
     case panImage(PanDirection)
+    /// Crop guides, straighten, flips, Upright, and the camera's orientation.
+    case geometry(GeometryCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).

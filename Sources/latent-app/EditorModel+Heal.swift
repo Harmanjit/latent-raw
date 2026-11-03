@@ -137,6 +137,7 @@ extension EditorModel {
         dustToolActive = false
         touchUpToolActive = false
         cropToolActive = false
+        geometry.guidedToolActive = false
         maskTool = .none
         healDrag = nil
         redEyeDrag = nil

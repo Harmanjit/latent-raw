@@ -146,7 +146,7 @@ extension EditorModel {
     /// they are built again from the stored raw-grid boxes; a face toggle
     /// or a slider is not in it and only rebuilds the texture.
     static func touchUpGeometryKey(of p: EditParameters) -> String {
-        "\(p.lensDistortion) \(p.lensTCA) \(p.manualDistortion) \(p.perspective.vertical) \(p.perspective.horizontal)"
+        "\(p.lensDistortion) \(p.lensTCA) \(p.manualDistortion) \(p.perspective.geometryKey)"
     }
 
     /// Builds the region masks for the stored faces when the stage needs
