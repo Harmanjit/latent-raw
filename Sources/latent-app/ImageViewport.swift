@@ -58,7 +58,9 @@ struct ImageViewport: View {
                                 toolActive: allowsTools && model.imageToolActive,
                                 onToolBegan: { model.imageToolBegan(at: $0, exclude: $1) },
                                 onToolMoved: { model.imageToolMoved(to: $0) },
-                                onToolEnded: { model.imageToolEnded() })
+                                onToolEnded: { model.imageToolEnded() },
+                                clipping: allowsTools ? model.clipping : [],
+                                onPointer: allowsTools ? { model.pointerMoved(to: $0) } : nil)
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isImage)
                     .accessibilityLabel(model.imageTitle ?? "Image")
@@ -78,6 +80,9 @@ struct ImageViewport: View {
                 }
                 if allowsTools && model.touchUpToolActive {
                     TouchUpOverlay(model: model)
+                }
+                if allowsTools && model.toneTool != .none {
+                    ToneToolHint(tool: model.toneTool)
                 }
             } else {
                 VStack(spacing: 12) {

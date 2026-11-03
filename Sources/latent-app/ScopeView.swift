@@ -32,6 +32,7 @@ struct ScopePanel: View {
             switch model.scope {
             case .histogram:
                 HistogramView(histogram: model.histogram)
+                    .overlay(HistogramAdjustOverlay(model: model))
                 ClippingReadout(histogram: model.histogram,
                                 showsAboveSDRWhite: model.rendersAboveSDRWhite)
             case .waveform:
@@ -39,6 +40,7 @@ struct ScopePanel: View {
             case .vectorscope:
                 VectorscopeView(vectorscope: model.vectorscope)
             }
+            PixelReadoutBar(model: model)
         }
     }
 }

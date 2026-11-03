@@ -98,6 +98,8 @@ enum KeyCommand: Equatable {
     case addMask(NewMask), toggleMaskOverlay
     /// V: the open image's treatment, Color or Black & White.
     case toggleBlackAndWhite
+    /// J: the clipping overlay. W: the White Balance Selector.
+    case toggleClipping, whiteBalanceSelector
     /// [ and ]: the armed brush or spot patch, a step smaller or larger.
     case toolSize(Int)
     /// Files: rename the selected image, move or copy the selection to a

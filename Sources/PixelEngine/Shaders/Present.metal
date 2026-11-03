@@ -81,6 +81,22 @@ constant uint kTileNearest      = 1u << 0;
 constant uint kMagnifier        = 1u << 1;
 constant uint kMagnifierHasTile = 1u << 2;
 constant uint kMagnifierNearest = 1u << 3;
+// ClippingIndicators in PixelReadout.swift, shifted up by four.
+constant uint kClipShadows      = 1u << 4;
+constant uint kClipHighlights   = 1u << 5;
+
+// The clipping overlay (J). Same lines as the histogram's end bins
+// (Histogram.metal), so what turns red is what the clipped readout counts:
+// a channel encoding to 255 is clipped, a pixel whose every channel
+// encodes to 0 is crushed. 0.9955 is the linear value that encodes to
+// 254.5/255; the top is the layer's own ceiling, which is SDR white
+// unless the view is rendered with HDR headroom.
+inline float3 clippingIndicator(float3 c, float contentHeadroom, uint flags) {
+    float peak = max(c.r, max(c.g, c.b));
+    if ((flags & kClipHighlights) != 0 && peak >= 0.9955 * contentHeadroom) return float3(1.0, 0.0, 0.0);
+    if ((flags & kClipShadows) != 0 && peak < 0.000152) return float3(0.0, 0.3, 1.0);
+    return c;
+}
 
 // One screen pixel of the picture: the full-resolution tile where it
 // covers, the base layer elsewhere, the surround outside the image.
@@ -94,7 +110,7 @@ inline float3 composite(float3 p,
                         texture2d<float, access::sample> tile, float3x2 tileMap, float4 tileSource,
                         bool hasTile, bool tileNearest,
                         float backgroundLevel, float displayHeadroom,
-                        float baseHeadroom, float tileHeadroom)
+                        float baseHeadroom, float tileHeadroom, uint flags)
 {
     constexpr sampler linearSampler(coord::normalized, address::clamp_to_edge, filter::linear);
     constexpr sampler nearestSampler(coord::normalized, address::clamp_to_edge, filter::nearest);
@@ -104,7 +120,9 @@ inline float3 composite(float3 p,
         if (uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= 1.0 && uv.y <= 1.0) {
             float2 st = tileSource.xy + uv * tileSource.zw;
             float4 c = tileNearest ? tile.sample(nearestSampler, st) : tile.sample(linearSampler, st);
-            return toneMapToHeadroom(c.rgb, displayHeadroom, tileHeadroom);
+            float3 shown = (flags & (kClipShadows | kClipHighlights)) != 0
+                ? clippingIndicator(c.rgb, tileHeadroom, flags) : c.rgb;
+            return toneMapToHeadroom(shown, displayHeadroom, tileHeadroom);
         }
     }
 
@@ -116,7 +134,9 @@ inline float3 composite(float3 p,
         return float3(backgroundLevel);
     }
     float4 c = base.sample(linearSampler, uv);
-    return toneMapToHeadroom(c.rgb, displayHeadroom, baseHeadroom);
+    float3 shown = (flags & (kClipShadows | kClipHighlights)) != 0
+        ? clippingIndicator(c.rgb, baseHeadroom, flags) : c.rgb;
+    return toneMapToHeadroom(shown, displayHeadroom, baseHeadroom);
 }
 
 kernel void presentToScreen(
@@ -151,14 +171,14 @@ kernel void presentToScreen(
     if (outside > 0.0) {
         color = composite(p, base, baseMap, tile, tileMap, tileSource,
                           hasTile != 0, (flags & kTileNearest) != 0,
-                          backgroundLevel, headrooms.x, headrooms.y, headrooms.z);
+                          backgroundLevel, headrooms.x, headrooms.y, headrooms.z, flags);
     }
     if (outside < 1.0) {
         float3 inside = float3(0.8);
         if (inRing < 1.0) {
             float3 magnified = composite(p, base, loupe.baseMap, loupeTile, loupe.tileMap, loupe.tileSource,
                                          (flags & kMagnifierHasTile) != 0, (flags & kMagnifierNearest) != 0,
-                                         backgroundLevel, headrooms.x, headrooms.y, headrooms.w);
+                                         backgroundLevel, headrooms.x, headrooms.y, headrooms.w, flags);
             inside = mix(magnified, inside, inRing);
         }
         inside = mix(inside, float3(0.0), inHairline);

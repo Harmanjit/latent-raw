@@ -75,7 +75,7 @@ final class EditorModel: ObservableObject {
         didSet {
             guard healToolActive != oldValue else { return }
             if healToolActive {
-                cropToolActive = false; maskTool = .none; redEyeToolActive = false
+                cropToolActive = false; maskTool = .none; redEyeToolActive = false; toneTool = .none
                 dustToolActive = false; touchUpToolActive = false
             } else {
                 selectedHealIndex = nil
@@ -111,7 +111,7 @@ final class EditorModel: ObservableObject {
         didSet {
             guard redEyeToolActive != oldValue else { return }
             if redEyeToolActive {
-                cropToolActive = false; maskTool = .none; healToolActive = false
+                cropToolActive = false; maskTool = .none; healToolActive = false; toneTool = .none
                 dustToolActive = false; touchUpToolActive = false
             } else {
                 selectedRedEyeIndex = nil
@@ -134,7 +134,7 @@ final class EditorModel: ObservableObject {
             guard dustToolActive != oldValue else { return }
             if dustToolActive {
                 healToolActive = false; redEyeToolActive = false; cropToolActive = false; maskTool = .none
-                touchUpToolActive = false
+                touchUpToolActive = false; toneTool = .none
             } else {
                 selectedDustIndex = nil
                 dustToolDidDisarm()
@@ -168,7 +168,7 @@ final class EditorModel: ObservableObject {
             guard touchUpToolActive != oldValue else { return }
             if touchUpToolActive {
                 healToolActive = false; redEyeToolActive = false; cropToolActive = false; maskTool = .none
-                dustToolActive = false
+                dustToolActive = false; toneTool = .none
             } else {
                 selectedBlemishIndex = nil
             }
@@ -204,6 +204,7 @@ final class EditorModel: ObservableObject {
                 straightenBase = nil
             } else {
                 healToolActive = false; redEyeToolActive = false; dustToolActive = false; touchUpToolActive = false
+                toneTool = .none
                 // With crop on a mask tool is inert, so it must not stay
                 // shown as armed either.
                 maskTool = .none
@@ -297,6 +298,27 @@ final class EditorModel: ObservableObject {
     @Published var proofStatus = ""
     var proofLUT: SoftProofLUT?
 
+    // MARK: - Tone tools (EditorModel+ToneTools.swift)
+
+    /// The White Balance Selector or a Targeted Adjustment Tool, armed on
+    /// the image. Arming one disarms the other image tools, and arming any
+    /// of those disarms it.
+    @Published var toneTool: ToneTool = .none {
+        didSet { if toneTool != oldValue { toneToolDidChange() } }
+    }
+    /// Whether the Tone Curve panel shows points or regions; the curve's
+    /// targeted tool adjusts whichever is showing.
+    @Published var curveEditorMode: CurveEditorMode = .point
+    /// The clipping overlay on the viewport (J). Display only.
+    @Published var clipping: ClippingIndicators = []
+    /// The last Auto white balance and the image it was for, so the White
+    /// Balance menu can go on calling that setting Auto.
+    @Published var autoWhiteBalance: (url: URL?, balance: ColorKit.WhiteBalance)?
+    var toneToolDrag: ToneToolDrag?
+    /// The colour under the pointer, in its own object so moving the
+    /// pointer redraws the readout and not the whole window.
+    let pixelProbe = PixelProbe()
+
     // MARK: - Local adjustments
 
     enum MaskTool: String, CaseIterable { case none, linear, radial, brush, erase, prompt }
@@ -316,6 +338,7 @@ final class EditorModel: ObservableObject {
             cropToolActive = false
             dustToolActive = false
             touchUpToolActive = false
+            toneTool = .none
         }
     }
     @Published var showMaskOverlay = false {

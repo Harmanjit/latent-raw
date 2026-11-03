@@ -181,10 +181,12 @@ public final class Presenter {
                          to drawable: CAMetalDrawable,
                          backgroundLevel: Float = 0.12,
                          displayHeadroom: Float = 1,
-                         magnifier: PresentMagnifier? = nil) {
+                         magnifier: PresentMagnifier? = nil,
+                         clipping: ClippingIndicators = []) {
         guard let cmdBuffer = encode(base: base, tile: tile, transform: transform, frame: frame,
                                      into: drawable.texture, backgroundLevel: backgroundLevel,
-                                     displayHeadroom: displayHeadroom, magnifier: magnifier) else { return }
+                                     displayHeadroom: displayHeadroom, magnifier: magnifier,
+                                     clipping: clipping) else { return }
         cmdBuffer.present(drawable)
         cmdBuffer.commit()
     }
@@ -198,14 +200,16 @@ public final class Presenter {
                 into target: MTLTexture,
                 backgroundLevel: Float,
                 displayHeadroom: Float,
-                magnifier: PresentMagnifier? = nil) -> MTLCommandBuffer? {
+                magnifier: PresentMagnifier? = nil,
+                clipping: ClippingIndicators = []) -> MTLCommandBuffer? {
         let drawableSize = CGSize(width: target.width, height: target.height)
         let baseMap = transform.screenToTextureMap(coverage: base.coverage, frame: frame,
                                                    drawableSize: drawableSize)
         let (tileMap, tileSource) = Self.tilePlacement(tile, transform: transform, frame: frame,
                                                        drawableSize: drawableSize, fallback: baseMap)
 
-        var flags: UInt32 = 0
+        // The clipping overlay's two bits sit above the layer flags.
+        var flags: UInt32 = clipping.rawValue << 4
         // Full-resolution layers show square pixels past 200%.
         if ViewerInteraction.samplesNearest(zoom: transform.zoom) { flags |= PresentFlags.tileNearest }
         var loupe = PresentLoupe(baseMap: baseMap, tileMap: tileMap, tileSource: tileSource,

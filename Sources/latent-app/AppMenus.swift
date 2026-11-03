@@ -53,6 +53,9 @@ struct CommandState: Equatable {
     var canAddMask = false
     var hasSelectedMask = false
     var showMaskOverlay = false
+    /// The clipping overlay is on (J), and the White Balance Selector armed (W).
+    var clippingShown = false
+    var whiteBalanceSelectorActive = false
     var filterActive = false
     var hasCompareSelect = false
     /// A folder is open, for Refresh Folder.
@@ -107,6 +110,7 @@ struct CommandState: Equatable {
         case .addMask: mode == .develop && canAddMask
         case .toggleMaskOverlay: mode == .develop && hasSelectedMask
         case .toggleBlackAndWhite: mode == .develop && hasImage
+        case .toggleClipping, .whiteBalanceSelector: mode == .develop && hasImage
         case .makeSelect: mode == .compare && hasSelection
         case .survey: mode == .survey || (hasSelection && SurveyPanes.canSurvey(selectionCount: selectionCount))
         case .removeFromSurvey: mode == .survey && hasSelection
@@ -232,6 +236,7 @@ struct CommandState: Equatable {
     }
 
     var beforeAfterTitle: String { showingBefore ? "Show After" : "Show Before" }
+    var clippingTitle: String { clippingShown ? "Hide Clipping" : "Show Clipping" }
 
     /// ⌘= and ⌘- size the thumbnails in the grid and zoom elsewhere.
     var zoomInTitle: String { mode == .library ? "Larger Thumbnails" : "Zoom In" }
@@ -355,9 +360,7 @@ struct LatentCommands: Commands {
             toolToggle("Show Loupe on Second Display", .secondaryDisplay, isOn: state.secondaryDisplayShowing)
             Divider()
             item(state.beforeAfterTitle, .beforeAfter)
-            // TODO(display): Show/Hide Clipping belongs here once the
-            // clipping overlay has a command; title it from its state as
-            // Before/After is.
+            item(state.clippingTitle, .toggleClipping)
             item("Make Select", .makeSelect)
             item("Swap Select and Candidate", .swapCompare)
             item("Remove from Survey", .removeFromSurvey)
@@ -409,6 +412,7 @@ struct LatentCommands: Commands {
             toolToggle("Red-Eye Removal", .redEye, isOn: state.redEyeToolActive)
             toolToggle("Sensor Dust", .dust, isOn: state.dustToolActive)
             toolToggle("Touch-up", .touchUp, isOn: state.touchUpToolActive)
+            toolToggle("White Balance Selector", .whiteBalanceSelector, isOn: state.whiteBalanceSelectorActive)
             Menu("Masks") {
                 item("New Linear Gradient", .addMask(.linear))
                 item("New Radial Gradient", .addMask(.radial))

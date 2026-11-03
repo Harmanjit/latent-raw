@@ -139,6 +139,7 @@ extension EditorModel {
         cropToolActive = false
         maskTool = .none
         pointColourPicking = false
+        toneTool = .none
         healDrag = nil
         redEyeDrag = nil
         paintingHealStroke = []
@@ -150,11 +151,13 @@ extension EditorModel {
     var imageToolActive: Bool {
         maskToolActive || healToolActive || redEyeToolActive || dustToolActive || touchUpToolActive
             || pointColourPicking
+            || toneTool != .none
     }
 
     func imageToolBegan(at screen: CGPoint, exclude: Bool) {
         // Point Colour's picker takes one click, then lets go on release.
         if pointColourPicking { pointColourPicked(at: screen); return }
+        if toneTool != .none { toneToolBegan(at: screen); return }
         if healToolActive { healToolBegan(at: screen); return }
         if redEyeToolActive { redEyeToolBegan(at: screen); return }
         // Clicks only: a ring is removed or a spot added on the press.
@@ -165,14 +168,16 @@ extension EditorModel {
     }
     func imageToolMoved(to screen: CGPoint) {
         if pointColourPicking { return }
-        if healToolActive { healToolMoved(to: screen) }
+        if toneTool != .none { toneToolMoved(to: screen) }
+        else if healToolActive { healToolMoved(to: screen) }
         else if redEyeToolActive { redEyeToolMoved(to: screen) }
         else if dustToolActive || touchUpToolActive { return }
         else { maskToolMoved(to: screen) }
     }
     func imageToolEnded() {
         if pointColourPicking { pointColourPicking = false; return }
-        if healToolActive { healToolEnded() }
+        if toneTool != .none { toneToolEnded() }
+        else if healToolActive { healToolEnded() }
         else if redEyeToolActive { redEyeToolEnded() }
         else if dustToolActive || touchUpToolActive { return }
         else { maskToolEnded() }

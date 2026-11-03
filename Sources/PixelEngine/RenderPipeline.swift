@@ -115,6 +115,12 @@ public struct EditParameters: Sendable, Equatable {
     public var toneCurve: ToneCurve
     /// Per-channel curves, after `toneCurve`.
     public var channelCurves: RGBCurves = .identity
+    /// The Tone Curve's region sliders, applied before `toneCurve`.
+    public var parametricCurve: ParametricCurve = .neutral
+    /// Refine Saturation, −1…1: how much of the colour the master curve
+    /// adds or takes away it keeps (0 as drawn; −1 none, as if it moved
+    /// brightness only; +1 twice as much).
+    public var curveSaturation: Float = 0
     public var hsl: HSLAdjustments
     public var splitToning: SplitToning
     /// Local adjustments, applied in order.
@@ -248,6 +254,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.highlightRecovery == b.highlightRecovery
             && a.highlightThreshold == b.highlightThreshold
             && a.toneRanges == b.toneRanges && a.channelCurves == b.channelCurves
+            && a.parametricCurve == b.parametricCurve && a.curveSaturation == b.curveSaturation
             && a.demosaic == b.demosaic
             && String(describing: a.outputSpace) == String(describing: b.outputSpace)
             && a.denoiseLuminance == b.denoiseLuminance && a.denoiseColor == b.denoiseColor
@@ -1359,10 +1366,16 @@ public final class RenderPipeline {
         // Grading. The LUT is 1 KB and the HSL table 96 bytes, both well
         // under setBytes' 4 KB limit, so no buffers to manage.
         // The curve flag is a bit mask: 1 master curve, 2 channel curves.
-        var flags = SIMD3<UInt32>((parameters.toneCurve.isIdentity ? 0 : 1) | (parameters.channelCurves.isIdentity ? 0 : 2),
+        // 4 marks Refine Saturation, which only acts with the master curve.
+        // The master table is the parametric and point curves together,
+        // with Refine Saturation riding in its 257th entry.
+        let masterOn = parameters.wantsMasterCurve
+        let refineOn = masterOn && parameters.curveSaturation != 0
+        var flags = SIMD3<UInt32>((masterOn ? 1 : 0) | (parameters.channelCurves.isIdentity ? 0 : 2) | (refineOn ? 4 : 0),
                                   parameters.hsl.isNeutral ? 0 : 1,
                                   parameters.splitToning.isNeutral ? 0 : 1)
-        var lut = parameters.toneCurve.isIdentity ? Self.identityLUT : parameters.toneCurve.lookupTable()
+        var lut = (masterOn ? parameters.toneCurve.masterLookupTable(parametric: parameters.parametricCurve)
+                            : Self.identityLUT) + [refineOn ? parameters.curveSaturation : 0]
         var hslTable = parameters.hsl.packed
         let st = parameters.splitToning
         var tint = SIMD4<Float>(st.shadowHue, st.shadowSaturation, st.highlightHue, st.highlightSaturation)
