@@ -14,15 +14,7 @@ Select images in the Library and press ⇧⌘E (File > Export), or right-click t
 
 **HDR gain map** (JPEG and HEIC, off by default). Adds a gain map so HDR screens show highlights above white up to the photo's HDR Limit (two stops unless changed in Develop, see [HDR Limit](Develop#hdr-limit)), as the editor's HDR display shows them. Every other viewer, and the file's main image, shows the normal SDR export. It costs a second render of the image. PNG and TIFF have nowhere to put one.
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
-**Metadata.** On by default: the file keeps the photo's own camera and lens details, capture time, artist and copyright, and other IPTC and XMP fields from the raw. Latent's keywords are added to the file's own, a keyword inside others (Places › France › Paris) as each of its levels, and its rating replaces the file's when there is one. Tags that only describe the raw's storage (orientation, sensor layout, autofocus points), makers' private data and Camera Raw's edit settings are left out. Turn **Include camera metadata, keywords and rating** off to write none of it.
-
-**Metadata.** On by default: the file keeps the photo's own camera and lens details, capture time, artist and copyright, and other IPTC and XMP fields from the raw. Latent's keywords are added to the file's own, and its rating replaces the file's when there is one. The title, caption, creator and copyright you gave the photo in the Library panel replace the raw's own: they go in the IPTC fields (Object Name, Caption/Abstract, By-line, Copyright Notice), the TIFF fields (Image Description, Artist, Copyright) and XMP (`dc:title`, `dc:description`, `dc:creator`, `dc:rights`), so photo sites and other catalogs show them. Export Open Image and Edit in External Editor carry them too. Tags that only describe the raw's storage (orientation, sensor layout, autofocus points), makers' private data and Camera Raw's edit settings are left out. Turn **Include camera metadata, keywords and rating** off to write none of it.
-<!-- /RECONCILE -->
-
 **Image sizing.** Off, the file is the photo's full cropped size. **Resize to fit** by:
-<!-- /RECONCILE -->
 
 | Fit | Means |
 |---|---|
@@ -43,11 +35,13 @@ Select images in the Library and press ⇧⌘E (File > Export), or right-click t
 
 | Choice | Writes |
 |---|---|
-| All | the photo's own camera and lens details, capture time, artist and copyright and other IPTC and XMP fields from the raw, plus Latent's keywords (added to the file's own) and rating |
+| All | the photo's own camera and lens details, capture time, artist and copyright and other IPTC and XMP fields from the raw, plus Latent's keywords (added to the file's own), its rating (replacing the file's when there is one), and the title, caption, creator and copyright you gave it |
 | All except camera info | the same without the camera's make and model, the lens, the exposure settings, maker notes and serial numbers |
 | Copyright and contact | only the copyright notice, the creator and their contact details |
 | Copyright only | only the copyright notice |
 | None | nothing |
+
+A keyword inside others (Places › France › Paris) is written as each of its levels. The title, caption, creator and copyright you gave the photo in the Library panel's **Title & Copyright** section replace the raw's own: they go in the IPTC fields (Object Name, Caption/Abstract, By-line, Copyright Notice), the TIFF fields (Image Description, Artist, Copyright) and XMP (`dc:title`, `dc:description`, `dc:creator`, `dc:rights`), so photo sites and other catalogs show them. Export Open Image and Edit in External Editor carry them too, unless their **Include camera metadata** switch is off.
 
 Tags that only describe the raw's storage (orientation, sensor layout, autofocus points), makers' private data and Camera Raw's edit settings are never written. **Include location** (off by default, and in presets saved before it existed) also keeps the **GPS position**, place names, and the camera body's and lens's serial numbers, at All and All except camera info; see [Security and Privacy](Security-and-Privacy#location-in-exports).
 

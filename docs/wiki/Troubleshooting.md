@@ -1,5 +1,7 @@
 # Troubleshooting
 
+The problems people hit first, and what to do. For general questions see the [FAQ](FAQ); if your problem isn't here, see [Report an issue or get help](FAQ#report-an-issue-or-get-help).
+
 **macOS says Latent can't be opened, or can't be checked for malware.**
 Try to open it once, then click **Open Anyway** in System Settings > Privacy & Security. Since macOS 15, Control-click > Open no longer skips this step. Alternatively, run `xattr -dr com.apple.quarantine /path/to/Latent.app`. The app is not notarised; see [Installation](Installation).
 
@@ -43,7 +45,7 @@ Latent crashed or was force-quit during a copy into that folder, or a move into 
 The copy had changed or been replaced since Latent made it, so Latent didn't put it in the Trash. Remove it yourself if you don't want it.
 
 **A Finder tag I just set doesn't show.**
-Tags are read when a folder opens. Open the folder again from the sidebar.
+While the open folder is watched, a tag changed in Finder shows within a moment. If watching is off (Settings › Folders), or the folder is on a network share, choose **File › Refresh Folder** (⌘R).
 
 **A trackpad swipe doesn't go to the next image.**
 Swipes step only at fit, in Loupe and Develop, with no crop, spot or mask tool on. Zoomed in, a swipe pans instead; a mouse wheel never steps. The arrow keys always do, unless Settings › Library › Arrow keys pan a zoomed-in image is on and the image is zoomed in.
