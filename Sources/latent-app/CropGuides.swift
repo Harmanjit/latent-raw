@@ -48,7 +48,7 @@ enum CropGuide: String, CaseIterable, Identifiable {
         case .none:
             break
         case .thirds:
-            verticals([1 / 3, 2 / 3]); horizontals([1 / 3, 2 / 3])
+            verticals([1.0 / 3, 2.0 / 3]); horizontals([1.0 / 3, 2.0 / 3])
         case .grid:
             // Squares of about a twelfth of the short side.
             let step = max(min(rect.width, rect.height) / 12, 8)
