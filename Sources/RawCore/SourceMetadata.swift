@@ -251,7 +251,23 @@ public struct SourceMetadata: Sendable, Equatable {
         "http://iptc.org/std/Iptc4xmpExt/2008-02-29/ LocationCreated",
         "http://iptc.org/std/Iptc4xmpExt/2008-02-29/ LocationShown",
         "http://ns.adobe.com/exif/1.0/aux/ SerialNumber", "http://ns.adobe.com/exif/1.0/aux/ LensSerialNumber",
+        // DJI drones write their own copy of the position in XMP (with
+        // "Longtitude" misspelt in some firmware).
+        "http://www.dji.com/drone-dji/1.0/ GpsLatitude", "http://www.dji.com/drone-dji/1.0/ GpsLongitude",
+        "http://www.dji.com/drone-dji/1.0/ GpsLongtitude", "http://www.dji.com/drone-dji/1.0/ AbsoluteAltitude",
+        "http://www.dji.com/drone-dji/1.0/ RelativeAltitude",
     ]
+
+    /// Whether a carried top-level XMP tag says where the photo was taken:
+    /// one listed above, or, as a backstop for other vendors' namespaces,
+    /// any tag whose name speaks of GPS, latitude, longitude or altitude.
+    /// Dropping a harmless tag by that rule costs little; leaking a
+    /// position the user asked to leave out costs a lot.
+    static func isLocationXMPTag(namespace: String, name: String) -> Bool {
+        if locationXMPTags.contains("\(namespace) \(name)") { return true }
+        let lower = name.lowercased()
+        return ["gps", "latitude", "longitude", "longtitude", "altitude"].contains { lower.contains($0) }
+    }
 
     // MARK: - XMP
 
@@ -336,7 +352,7 @@ public struct SourceMetadata: Sendable, Equatable {
 
     /// The carried XMP rebuilt as metadata for the export, through
     /// ImageIO's tag API (no XMP parsing). nil when there is none. Without
-    /// `includingLocation`, the tags in `locationXMPTags` are left out.
+    /// `includingLocation`, the tags `isLocationXMPTag` picks are left out.
     public func xmpMetadata(includingLocation: Bool) -> CGMutableImageMetadata? {
         guard let xmpTags,
               let nodes = try? PropertyListSerialization.propertyList(from: xmpTags, format: nil)
@@ -347,7 +363,7 @@ public struct SourceMetadata: Sendable, Equatable {
             guard let prefix = node["prefix"] as? String, let name = node["name"] as? String,
                   Self.isXMLName(prefix), Self.isXMLName(name),
                   let rawType = node["type"] as? Int,
-                  includingLocation || !Self.locationXMPTags.contains("\(node["namespace"] as? String ?? "") \(name)"),
+                  includingLocation || !Self.isLocationXMPTag(namespace: node["namespace"] as? String ?? "", name: name),
                   Self.register(node, in: metadata) else { continue }
             let path = "\(prefix):\(name)" as CFString
             if rawType == Int(CGImageMetadataType.alternateText.rawValue) {

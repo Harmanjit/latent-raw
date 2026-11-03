@@ -9,32 +9,12 @@ import RawCore
 /// shared IOSurface, written once here and read in place by the app's
 /// GPU) and the embedded preview. If a file
 /// crashes LibRaw, this process dies and the host gets a connection
-/// error instead of a crash of its own.
-final class RawDecoderService: NSObject, RawDecoderProtocol {
-    func decode(_ file: FileHandle, metadataOnly: Bool,
-                reply: @escaping (Data?, IOSurface?, Data?, String?) -> Void) {
-        do {
-            let raw = try RawFile(fileDescriptor: file.fileDescriptor, metadataOnly: metadataOnly)
-            let meta = try JSONEncoder().encode(raw.snapshotMetadata)
-            // One surface either way: the metadata's source kind tells the
-            // app whether it holds sensor counts or linear RGB.
-            reply(meta, raw.sensorPlane?.surface ?? raw.linearPlane?.surface, raw.embeddedJPEGPreview(), nil)
-        } catch {
-            reply(nil, nil, nil, String(describing: error))
-        }
-    }
-
-    func readMetadata(_ file: FileHandle, reply: @escaping (Data?, Data?, String?) -> Void) {
-        do {
-            let metadata = try SourceMetadata(fileDescriptor: file.fileDescriptor)
-            reply(metadata.properties, metadata.xmpTags, nil)
-        } catch {
-            reply(nil, nil, String(describing: error))
-        }
-    }
-}
-
-final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
+/// error instead of a crash of its own. The exported object,
+/// `RawDecoderService`, is in RawCore.
+///
+/// A request stuck in LibRaw is ended by the service's own watchdog
+/// (see `RawDecoderService`), not by connections closing.
+final class ListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         connection.exportedInterface = RawDecoderXPC.makeInterface()
         connection.exportedObject = RawDecoderService()
