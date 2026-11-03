@@ -176,7 +176,7 @@ final class CameraProfileTests: XCTestCase {
     func testWorkingAndProPhotoMapWhiteToWhite() {
         let w = ColorKit.workingToProPhoto * SIMD3<Float>(1, 1, 1)
         XCTAssertEqual(simd_length(w - SIMD3(1, 1, 1)), 0, accuracy: 1e-5)
-        let back = ColorKit.proPhotoToWorking * ColorKit.workingToProPhoto * SIMD3<Float>(0.2, 0.7, 0.1)
+        let back = ColorKit.proPhotoToWorking * (ColorKit.workingToProPhoto * SIMD3<Float>(0.2, 0.7, 0.1))
         XCTAssertEqual(simd_length(back - SIMD3(0.2, 0.7, 0.1)), 0, accuracy: 1e-5)
     }
 

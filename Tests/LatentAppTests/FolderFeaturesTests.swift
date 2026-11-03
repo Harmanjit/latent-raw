@@ -49,7 +49,8 @@ final class FolderFeaturesTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suite: String!
 
-    override func setUpWithError() throws {
+    // Async, so they keep the class's main-actor isolation (Swift 6.1).
+    override func setUp() async throws {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("latent-autoimport-app-\(UUID().uuidString)", isDirectory: true)
         source = root.appendingPathComponent("Incoming", isDirectory: true)
@@ -61,7 +62,7 @@ final class FolderFeaturesTests: XCTestCase {
         defaults = UserDefaults(suiteName: suite)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         if let root { try? FileManager.default.removeItem(at: root) }
         defaults?.removePersistentDomain(forName: suite)
     }
