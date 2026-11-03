@@ -65,11 +65,11 @@ PLACEHOLDER = latent_manifest.PLACEHOLDER
 
 CODE_URL = "https://github.com/DepthAnything/Depth-Anything-V2"
 WEIGHTS_PAGE = "https://huggingface.co/depth-anything/Depth-Anything-V2-Small"
-# The git commit of DepthAnything/Depth-Anything-V2 that was vetted, the
-# revision of the Hugging Face repository the weights came from, and the
-# SHA-256 of depth_anything_v2_vits.pth as that revision serves it.
+# The git commit of DepthAnything/Depth-Anything-V2 that was vetted, and
+# the SHA-256 of depth_anything_v2_vits.pth as the Hugging Face repository
+# serves it. The hash is the pin on the weights: whichever revision they
+# were downloaded at, only the vetted bytes convert.
 CODE_REVISION = PLACEHOLDER
-WEIGHTS_REVISION = PLACEHOLDER
 WEIGHTS_NAME = "depth_anything_v2_vits.pth"
 WEIGHTS_SHA256 = PLACEHOLDER
 LICENCE_URL = "https://huggingface.co/depth-anything/Depth-Anything-V2-Small/blob/main/LICENSE"
@@ -92,10 +92,11 @@ parser.add_argument("--verify-only", action="store_true",
 parser.add_argument("--runs", type=int, default=5, help="timed predictions per compute unit after one warm-up")
 args = parser.parse_args()
 
-if PLACEHOLDER in (CODE_REVISION, WEIGHTS_REVISION, WEIGHTS_SHA256):
+if CODE_REVISION == PLACEHOLDER or WEIGHTS_SHA256 == PLACEHOLDER:
     sys.exit(f"convert_depth_anything.py is not pinned yet: vet {CODE_URL} and {WEIGHTS_NAME} from {WEIGHTS_PAGE}, "
-             f"then record the git commit in CODE_REVISION, the Hugging Face revision in WEIGHTS_REVISION and the "
-             f"file's SHA-256 in WEIGHTS_SHA256 before converting. Nothing was fetched.")
+             f"then record the git commit in CODE_REVISION and the file's SHA-256 in WEIGHTS_SHA256 before "
+             f"converting (scripts/pin_model.py depth-anything-v2-small --from-file … --code-revision … does "
+             f"both). Nothing was fetched.")
 if not args.weights:
     parser.error(f"--weights is needed: {WEIGHTS_NAME} from {WEIGHTS_PAGE}")
 if args.size % 14 != 0:
@@ -217,7 +218,7 @@ if not args.verify_only:
     mlmodel.user_defined_metadata["source"] = CODE_URL
     mlmodel.user_defined_metadata["license"] = licence
     mlmodel.user_defined_metadata["revision"] = CODE_REVISION
-    mlmodel.user_defined_metadata["weights"] = f"{WEIGHTS_PAGE}@{WEIGHTS_REVISION}/{WEIGHTS_NAME}"
+    mlmodel.user_defined_metadata["weights"] = f"{WEIGHTS_PAGE}/{WEIGHTS_NAME}"
     mlmodel.user_defined_metadata["weights_sha256"] = WEIGHTS_SHA256
     mlmodel.user_defined_metadata["input_size"] = str(args.size)
     mlmodel.user_defined_metadata["input"] = "image: RGB 0-255, ImageNet mean/std normalisation is inside the graph"
