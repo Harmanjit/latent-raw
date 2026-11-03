@@ -74,12 +74,37 @@ public struct CropParameters: Equatable, Sendable, Codable {
         guard e.x > 0, e.y > 0 else { return result }
         let c = CGPoint(x: Double(result.centre.x) * s.width, y: Double(result.centre.y) * s.height)
         let roomX = min(c.x, s.width - c.x), roomY = min(c.y, s.height - c.y)
-        let scale = min(1, roomX / e.x, roomY / e.y)
+        var scale = min(1, roomX / e.x, roomY / e.y)
+        // A centre on or near the sensor's edge leaves no room, and shrinking
+        // about it would collapse the crop to nothing (which saves as "no
+        // crop" and exports as 1x1). The tilted crop tool lets the centre go
+        // there, so keep a small minimum size instead and move the centre
+        // inward until that fits.
+        var raised = false
+        let p = result.pixelSize(sensorSize: s)
+        let shortSide = min(p.width, p.height)
+        if shortSide > 0 {
+            let minSide = min(Self.minimumSidePixels, shortSide)
+            let largestThatFits = min(1, s.width / 2 / e.x, s.height / 2 / e.y)
+            let minScale = min(minSide / shortSide, largestThatFits)
+            if scale < minScale {
+                scale = minScale
+                raised = true
+            }
+        }
         if scale < 1 {
             result.size = result.size * Float(scale)
         }
+        if raised {
+            let fitted = result.boundingHalfExtents(sensorSize: s)
+            let lo = SIMD2(Float(fitted.x / s.width), Float(fitted.y / s.height))
+            result.centre = simd_clamp(result.centre, lo, simd_max(lo, SIMD2(1, 1) - lo))
+        }
         return result
     }
+
+    /// The smallest crop side `constrained` will shrink to, in sensor pixels.
+    static let minimumSidePixels: Double = 16
 
     /// Ratio of the crop's width to height in sensor pixels.
     public func ratio(sensorSize s: CGSize) -> Float {

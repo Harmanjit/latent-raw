@@ -167,7 +167,10 @@ inline float3 applyVibrance(float3 p, float amount) {
     if (amount < 0.0) {
         hsv.y *= 1.0 + amount;
     } else {
-        float skin = 1.0 - 0.7 * smoothstep(0.02, 0.06, hsv.x) * (1.0 - smoothstep(0.10, 0.16, hsv.x));
+        // rgbToHSV gives the hue in degrees; the skin band is written in
+        // turns (about 7 to 58 degrees), so compare like with like.
+        float hueTurns = hsv.x / 360.0;
+        float skin = 1.0 - 0.7 * smoothstep(0.02, 0.06, hueTurns) * (1.0 - smoothstep(0.10, 0.16, hueTurns));
         float room = 1.0 - hsv.y;
         hsv.y = clamp(hsv.y + amount * room * hsv.y * 1.5 * skin, 0.0, 1.0);
     }
@@ -412,8 +415,11 @@ kernel void colorAndTone(
 
     // Stage 13: colour grading, in a perceptual domain, on the display-
     // referred image scaled to [0,1] by the headroom so nothing clips in
-    // HDR mode. Skipped entirely when every module is neutral.
-    if (any(gradingFlags != uint3(0)) || vibrance != 0.0) {
+    // HDR mode. Skipped entirely when every module is neutral, and for
+    // analysis renders: the curve clamps to [0,1] and the rest shift hues
+    // and saturation, so scene-linear numbers (what Auto measures) would
+    // otherwise depend on the look and lose everything above 1.0.
+    if (applyToneMap != 0 && (any(gradingFlags != uint3(0)) || vibrance != 0.0)) {
         float3 p = pow(max(display / headroom, 0.0), 1.0 / 2.2);
         if ((gradingFlags.x & 1) != 0) p = applyCurve(p, curveLUT);
         if ((gradingFlags.x & 2) != 0) p = applyChannelCurves(p, channelCurveLUT);
@@ -427,7 +433,7 @@ kernel void colorAndTone(
     // show of it. The table covers [0,1]^3 at 33 samples; the sampler maps
     // the colour onto texel centres so the corners of the cube land exactly
     // on the first and last samples.
-    if (proofMode != 0) {
+    if (proofMode != 0 && applyToneMap != 0) {
         constexpr sampler s3(coord::normalized, address::clamp_to_edge, filter::linear);
         float3 d = clamp(display / headroom, 0.0, 1.0);
         float3 uvw = d * (32.0 / 33.0) + (0.5 / 33.0);

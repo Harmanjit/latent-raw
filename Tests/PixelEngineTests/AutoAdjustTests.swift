@@ -39,4 +39,39 @@ final class AutoAdjustTests: XCTestCase {
         XCTAssertLessThanOrEqual(meanY, params.greyPoint * 1.1)
         XCTAssertGreaterThan(meanY, params.greyPoint * 0.2)
     }
+
+    /// Scene-linear analysis renders skip colour grading: the tone curve's
+    /// table clamps to [0,1], so with a curve set Auto under-read the
+    /// highlights, and HSL, vibrance and split toning moved its estimates.
+    /// The same image with and without a look must measure the same.
+    func testSceneLinearRenderIgnoresGrading() throws {
+        let gpu = try GPUContext()
+        let file = try RawFile(path: LinearFixtures.path(LinearFixtures.ramp))
+        let session = try ImageSession(file: file, gpu: gpu)
+        let pipeline = RenderPipeline(gpu: gpu)
+
+        var plain = EditParameters()
+        plain.exposureEV = 1   // pushes the ramp's top above 1.0 scene-linear
+        var graded = plain
+        graded.toneCurve = ToneCurve(points: [SIMD2(0, 0), SIMD2(0.25, 0.18), SIMD2(0.75, 0.84), SIMD2(1, 1)])
+        var hsl = HSLAdjustments.neutral
+        hsl.saturation[0] = -1; hsl.hue[2] = 0.4
+        graded.hsl = hsl
+        graded.vibrance = 0.5
+        graded.splitToning = SplitToning(shadowHue: 215, shadowSaturation: 0.3,
+                                         highlightHue: 45, highlightSaturation: 0.25, balance: 0.1)
+
+        func linear(_ p: EditParameters) throws -> [Float16] {
+            try TextureReadback.float16Pixels(
+                of: pipeline.render(session, scale: AutoAdjust.analysisScale, parameters: p, output: .sceneLinear),
+                gpu: gpu)
+        }
+        let a = try linear(plain), b = try linear(graded)
+        XCTAssertGreaterThan(a.map { Float($0) }.max() ?? 0, 1.2, "the test needs values above 1.0")
+        XCTAssertEqual(a, b, "grading must not touch a scene-linear render")
+
+        let s1 = try AutoAdjust.suggest(for: session, pipeline: pipeline, gpu: gpu, current: plain)
+        let s2 = try AutoAdjust.suggest(for: session, pipeline: pipeline, gpu: gpu, current: graded)
+        XCTAssertEqual(s1, s2)
+    }
 }
