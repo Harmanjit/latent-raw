@@ -27,6 +27,16 @@ final class PanoramaScratchFile {
         let descriptor = open(url.path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw Self.error("create", url) }
         defer { close(descriptor) }
+        // Reserve the blocks now. Writes go through a shared mapping, where
+        // running out of disk is a SIGBUS rather than an error, so a disk
+        // that can't hold the file must say so here, while it still can.
+        var reservation = fstore_t(fst_flags: UInt32(F_ALLOCATEALL), fst_posmode: F_PEOFPOSMODE,
+                                   fst_offset: 0, fst_length: off_t(byteCount), fst_bytesalloc: 0)
+        if fcntl(descriptor, F_PREALLOCATE, &reservation) == -1, errno == ENOSPC {
+            let error = Self.error("reserve space for", url)
+            unlink(url.path)
+            throw error
+        }
         guard ftruncate(descriptor, off_t(byteCount)) == 0 else {
             let error = Self.error("size", url)
             unlink(url.path)

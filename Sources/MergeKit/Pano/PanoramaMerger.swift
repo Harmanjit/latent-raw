@@ -50,6 +50,9 @@ public final class PanoramaMerger: PanoramaMerging {
     let gpu: GPUContext
     /// Free space on the volume holding a URL; replaceable for tests.
     let availableCapacity: @Sendable (URL) -> Int64?
+    /// Where the prepared frames' scratch folder goes (on the boot volume,
+    /// normally, whatever volume the destination is on); replaceable for tests.
+    let scratchParent: URL
     /// What the output is sized against; nil asks the GPU. Tests force a
     /// small budget to exercise the downsampling path.
     let sizeLimits: SizeLimits?
@@ -75,10 +78,12 @@ public final class PanoramaMerger: PanoramaMerging {
     }
 
     init(gpu: GPUContext, sizeLimits: SizeLimits? = nil,
-         availableCapacity: @escaping @Sendable (URL) -> Int64? = LinearRawDNGWriter.volumeAvailableCapacity) {
+         availableCapacity: @escaping @Sendable (URL) -> Int64? = LinearRawDNGWriter.volumeAvailableCapacity,
+         scratchParent: URL = PanoramaFrameStore.scratchParent) {
         self.gpu = gpu
         self.sizeLimits = sizeLimits
         self.availableCapacity = availableCapacity
+        self.scratchParent = scratchParent
     }
 
     /// Long edge of the JPEG preview stored in the DNG.
@@ -305,7 +310,16 @@ public final class PanoramaMerger: PanoramaMerging {
         }
         let multipliers = PanoramaFramePrep.sharedMultipliers(photos)
         let span = max(1, analysis.outputSize.decodeSpan)
-        let store = try Self.mappingScratchErrors { try PanoramaFrameStore() }
+        // The prepared frames are written through memory maps, where a full
+        // disk is a crash rather than an error, so their volume is checked
+        // here, before the first one is made.
+        let scratchNeeded = cameras.reduce(Int64(0)) { total, camera in
+            let size = MergePanoPrepKernels.preparedSize(
+                MergePanoPrepKernels.Orientation(summary: photos[camera.frameIndex].summary), span: span)
+            return total + Int64(size.width) * Int64(size.height) * 8
+        } + Self.rowBufferBytes(outputWidth: analysis.outputSize.width)
+        try checkScratchSpace(needed: scratchNeeded, outputBytes: analysis.estimatedOutputBytes, destination: destination)
+        let store = try Self.mappingScratchErrors { try PanoramaFrameStore(parent: scratchParent) }
         var finished = false
         defer { if !finished { store.removeScratch() } }
 
@@ -629,6 +643,49 @@ public final class PanoramaMerger: PanoramaMerging {
         guard available >= total else {
             throw PanoramaError.notEnoughDiskSpace(neededBytes: total, availableBytes: available)
         }
+    }
+
+    /// Checks the scratch folder's volume for `needed` bytes, plus the
+    /// output's when the destination is on the same volume.
+    func checkScratchSpace(needed: Int64, outputBytes: Int64, destination: URL) throws {
+        // The capacity query reads the folder holding the URL it is given,
+        // so this asks about the folder the scratch folder goes in, which exists.
+        guard let available = availableCapacity(scratchParent) else { return }
+        let shared = Self.sameVolume(scratchParent, destination)
+        let total = needed + (shared ? outputBytes : 0) + Self.freeSpaceMargin
+        guard available >= total else {
+            throw PanoramaError.notEnoughDiskSpace(neededBytes: total, availableBytes: available)
+        }
+    }
+
+    /// The stitcher's tile row buffer (`PanoramaTileRowBuffer`): one row of
+    /// tiles as RGB half floats.
+    static func rowBufferBytes(outputWidth: Int) -> Int64 {
+        Int64(max(outputWidth, 0)) * Int64(tileSize) * 6
+    }
+
+    /// The prepared frames and row buffer a stitch of `frameCount` photos
+    /// of `width` x `height` writes to scratch, at `span`.
+    static func estimatedScratchBytes(frameCount: Int, width: Int, height: Int, span: Int,
+                                      outputWidth: Int) -> Int64 {
+        let span = max(1, span)
+        let frame = Int64(max(1, width / span)) * Int64(max(1, height / span)) * 8
+        return Int64(frameCount) * frame + rowBufferBytes(outputWidth: outputWidth)
+    }
+
+    /// Whether two locations are on the same volume, judged from their
+    /// nearest existing folders. Unknown counts as the same, which only
+    /// asks for more room.
+    static func sameVolume(_ a: URL, _ b: URL) -> Bool {
+        func volume(_ url: URL) -> NSObject? {
+            var folder = url.standardizedFileURL
+            while !FileManager.default.fileExists(atPath: folder.path), folder.path != "/" {
+                folder = folder.deletingLastPathComponent()
+            }
+            return (try? folder.resourceValues(forKeys: [.volumeIdentifierKey]))?.volumeIdentifier as? NSObject
+        }
+        guard let first = volume(a), let second = volume(b) else { return true }
+        return first.isEqual(second)
     }
 
     static func mappingScratchErrors<T>(_ body: () throws -> T) throws -> T {

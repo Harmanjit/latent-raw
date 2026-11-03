@@ -289,6 +289,34 @@ final class HDRPanoMergeTests: XCTestCase {
             folder.appendingPathComponent("full-HDRPano.dng").path))
     }
 
+    /// The intermediate HDRs go to the scratch folder, not the destination:
+    /// a roomy destination volume must not pass a merge whose scratch
+    /// volume is full (it would fail at a bracket minutes in).
+    func testAFullScratchVolumeIsRefusedThoughTheDestinationHasRoom() async throws {
+        let urls = try HDRPanoTestSupport.cached("sweep3x3", HDRPanoTestSupport.sweep(positions: 3))
+        let scratchPath = folder.standardizedFileURL.path
+        let merger = try merger(availableCapacity: { url in
+            url.standardizedFileURL.path.hasPrefix(scratchPath) ? 1_000_000 : Int64.max
+        })
+        let analysis = try await merger.analyse(urls, options: HDRPanoramaOptions())
+        let elsewhere = try Fixtures.temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: elsewhere) }
+        let destination = elsewhere.appendingPathComponent("roomy-HDRPano.dng")
+        do {
+            _ = try await merger.merge(analysis, options: HDRPanoramaOptions(),
+                                       sources: HDRPanoTestSupport.sources(analysis.photos.map(\.url)),
+                                       to: destination, prepareSidecar: { _ in }, progress: { _ in })
+            XCTFail("a full scratch volume must refuse the merge")
+        } catch let error as HDRPanoramaError {
+            guard case .notEnoughDiskSpace(let needed, let available) = error else {
+                return XCTFail("wrong error: \(error)")
+            }
+            XCTAssertEqual(available, 1_000_000)
+            XCTAssertGreaterThan(needed, analysis.estimatedScratchBytes, "the prepared frames count too")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
     func testCancellingLeavesNoDNGAndNoIntermediates() async throws {
         let urls = try HDRPanoTestSupport.cached("sweep3x3", HDRPanoTestSupport.sweep(positions: 3))
         let merger = try merger()

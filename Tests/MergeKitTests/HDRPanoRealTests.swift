@@ -96,8 +96,11 @@ final class HDRPanoRealTests: XCTestCase {
         XCTAssertEqual(recipe.kind, .hdrPanorama)
         XCTAssertEqual(recipe.sources.count, Self.positions * sources.count)
         // A single frame clips at 1.0; an HDR panorama of a 6-stop bracket
-        // holds far more than that, and records where it really clips.
-        XCTAssertGreaterThan(recipe.clipLevel, 2, "the result should hold highlights one frame can't")
+        // holds far more than that, and records where it really clips. The
+        // recipe stores it as the file does, divided by 2^baselineShift;
+        // compare it as the file opens.
+        let openedClip = recipe.clipLevel * Float(sign: .plus, exponent: recipe.baselineShift, significand: 1)
+        XCTAssertGreaterThan(openedClip, 2, "the result should hold highlights one frame can't")
 
         let merged = try PanoMergeTestSupport.read(destination)
         let expectedWidth = Self.windowWidth + (Self.positions - 1) * Self.windowStep
