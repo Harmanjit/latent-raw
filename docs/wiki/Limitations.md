@@ -8,7 +8,8 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Colour checked on one camera.** The golden-image tests, which compare renders with reference images, use a Nikon D750 NEF. The Photo Merge tests also read raws from a Canon EOS 5D Mark II and a Nikon D200, but don't check their colour. LibRaw supports hundreds of cameras and the pipeline is generic, but colour and exposure on other cameras have not been checked against a reference.
 - **Camera matrix colour only.** Colour comes from the camera's characterisation matrix. There are no camera-matching profiles, so the default rendering will not match the in-camera JPEG look.
 - **Lens profiles** cover the bundled Lensfun subset; a lens the matcher cannot identify gets manual sliders only.
-- **No DNG export.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is fixed at two stops. PNG and TIFF are SDR only.
+- **HDR in exports is a gain map only.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is fixed at two stops. PNG, TIFF, AVIF and JPEG XL are SDR only, and a gain map is written only in sRGB or Display P3.
+- **DNG export bakes the corrections, not the look.** A DNG holds white balance, exposure, noise reduction, lens corrections, healing and masks; tone, colour grading, presence and sharpening are left out, so it opens with the default look. Keep its white balance at As Shot: the pixels are already balanced. AVIF and JPEG XL appear only when this Mac's system can write them; there is no PSD.
 - **Optional interop XMP beside the image is not implemented.** Latent's sidecars live in `_latent/xmp/`, where Lightroom and darktable do not look.
 - **HDR display** has been verified on a MacBook Pro's XDR screen, and sRGB and Display P3 output on the same machine. Other HDR displays are untested.
 
@@ -42,7 +43,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **The Loupe on a second display is for looking only.** It shows one image at fit; zoom, pan and tools stay in the main window.
 - **Edit in External Editor is a one-way hand-off.** It writes a 16-bit Display P3 TIFF (no Adobe RGB or ProPhoto), and the TIFF the other application saves doesn't come back into the Library, since Latent catalogs raw files only.
 - **Slideshows are SDR,** even on an HDR screen, and leave out AI noise reduction so each slide is ready in time. The edit's other noise reduction still applies.
-- **The watermark is for exports.** Prints, contact sheets and the TIFF for an external editor don't carry it, and it is one line of text; there is no logo or image watermark.
+- **The watermark is for exports.** Prints, contact sheets and the TIFF for an external editor don't carry it. It is one line of text or one PNG graphic, in a corner, turned in quarter turns.
 - **A JPEG or PNG contact sheet is one picture,** at most 8192 px a side, holding every photo, so a large selection gets small cells. A PDF can have as many pages as it needs.
 - **The print panel's preview is drawn from thumbnails.** It shows the layout; the photos themselves are rendered for the printer only when you print.
 - **Showing and hiding the sidebar and filmstrip has no keyboard shortcut or menu item.** The filmstrip has its film button in the status bar.
@@ -61,7 +62,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Edits on the bracket's photos aren't used.** The merge reads the raw files; the result starts unedited at the reference photo's exposure.
 - **The merge options are few, and differ by kind.** HDR offers Auto Align, Deghost (with Show Deghost Overlay, which isn't remembered) and Auto Settings, plus a reference photo you pick that lasts for that merge only — HDR Merge Without Dialog always chooses the reference automatically. Panorama offers Projection, Auto Crop and Auto Settings. HDR Panorama offers both sets. There is nothing else to tune.
 - **No re-merge.** The result records which photos made it, but Latent can't merge them again from that record, and a merge can't be undone except by deleting its DNG in Finder.
-- **Merged DNGs are large and uncompressed,** about 6 bytes per pixel (roughly 145 MB for 24 MP). Merges write DNG; export still doesn't.
+- **Merged DNGs are large and uncompressed,** about 6 bytes per pixel (roughly 145 MB for 24 MP). Export to DNG writes the same kind of file.
 - **A merged DNG copied in from Finder without its sidecar** is catalogued as a plain DNG; the record of what made it stays inside the file, unread.
 
 ## Editing
