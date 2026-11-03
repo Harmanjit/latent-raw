@@ -486,6 +486,7 @@ final class ThumbnailItem: NSCollectionViewItem {
         self.isEdited = isEdited
         cellView.setMarks(name: record.fileName, rating: record.rating, flag: record.flag, isEdited: isEdited)
         cellView.setTags(stored: record.finderTags)
+        cellView.setVirtualCopy(record.isVirtualCopy)
         loadIfNeeded()
     }
 
@@ -603,6 +604,7 @@ final class ThumbnailCellView: NSView {
     private let badgeField = NSTextField(labelWithString: "")
     private let starsView = StarRatingView()
     private let tagDotsView = TagDotsView()
+    private let copyBadge = VirtualCopyBadgeView()
     private var storedTags: String?
     private var hoverArea: NSTrackingArea?
     private var imagePixels: CGSize?
@@ -653,6 +655,7 @@ final class ThumbnailCellView: NSView {
         }
         addSubview(starsView)
         addSubview(tagDotsView)
+        addSubview(copyBadge)
 
         // VoiceOver reads the cell as one image (name, flag, stars, edited)
         // rather than scraps of it.
@@ -714,6 +717,12 @@ final class ThumbnailCellView: NSView {
 
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    /// Shows the virtual-copy mark on the picture (VirtualCopyBadgeView).
+    func setVirtualCopy(_ isCopy: Bool) {
+        guard copyBadge.isHidden == isCopy else { return }
+        copyBadge.isHidden = !isCopy
+    }
 
     /// Finder tags in their stored form; decoded only when they changed.
     func setTags(stored: String?) {
@@ -778,6 +787,7 @@ final class ThumbnailCellView: NSView {
         tagDotsView.frame = info.tagDotsFrame(tagCount: tagCount)
         badgeField.frame = info.flagBadgeFrame
         starsView.frame = info.starsFrame
+        copyBadge.frame = VirtualCopyBadgeView.frame(inImageFrame: imageLayer.frame)
     }
 
     /// Colours resolve here, against the view's appearance.

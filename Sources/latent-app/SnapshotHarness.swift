@@ -513,7 +513,7 @@ enum SnapshotHarness {
                 let model = model, library = library
                 _ = await wait("the second display's image", upTo: 60) {
                     guard let root = second.contentView?.superview else { return false }
-                    return model.preview != nil && model.imageTitle == library.selectedImage?.fileName
+                    return model.preview != nil && model.imageTitle == library.selectedImage?.sourceFileName
                         && SnapshotHarness.imageViews(in: root).count >= 1
                 }
                 return second
@@ -693,7 +693,7 @@ enum SnapshotHarness {
             let model = model, library = library
             guard let window = mainWindow, let root = window.contentView?.superview else { return }
             _ = await wait("the image to render", upTo: 60) {
-                model.preview != nil && model.imageTitle == library.selectedImage?.fileName
+                model.preview != nil && model.imageTitle == library.selectedImage?.sourceFileName
                     && SnapshotHarness.imageViews(in: root).count >= views
             }
         }

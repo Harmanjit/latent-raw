@@ -102,7 +102,7 @@ final class SlideshowController: NSWindowController, NSWindowDelegate {
                                             primary: library.selectedImageID)
         var source = Source(records: chosen.records, start: chosen.start, library: library, gpu: gpu)
         if model.hasImage, let id = model.catalogImageID,
-           chosen.records.contains(where: { $0.id == id && $0.fileName == model.imageTitle }) {
+           chosen.records.contains(where: { $0.id == id && $0.sourceFileName == model.imageTitle }) {
             if EditStack.isDefault(model.parameters, relativeTo: model.defaultParameters) {
                 source.editOverrides.updateValue(nil, forKey: id)
             } else if let json = try? model.stackWithProvenance().encodeJSON() {

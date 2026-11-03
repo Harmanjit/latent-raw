@@ -279,7 +279,7 @@ final class PhotoMergeQueue: ObservableObject {
     /// The name the result would take if nothing else held it, shown in the
     /// panel until the job has planned the real one.
     private static func firstCandidateName(forReference reference: ImageRecord, kind: PhotoMergeKind) -> String {
-        (MergeNaming.candidate(forReference: reference.relPath, suffix: kind.suffix, number: 1) as NSString)
+        (MergeNaming.candidate(forReference: reference.fileRelPath, suffix: kind.suffix, number: 1) as NSString)
             .lastPathComponent
     }
 
@@ -462,7 +462,7 @@ final class PhotoMergeQueue: ObservableObject {
             guard !Task.isCancelled else { return .cancelled }
             let relPath: String
             do {
-                relPath = try await catalog.planMergeResult(forReference: job.reference.relPath,
+                relPath = try await catalog.planMergeResult(forReference: job.reference.fileRelPath,
                                                             suffix: job.kind.suffix)
             } catch {
                 return .failed(error)
@@ -627,7 +627,7 @@ final class PhotoMergeQueue: ObservableObject {
     /// The recipe's record of a source photo: where it is from the result's
     /// folder, its hash as the catalog stores it, and when it was taken.
     static func source(_ record: ImageRecord, forResultAt resultRelPath: String) -> MergeRecipe.Source {
-        MergeRecipe.Source(path: relativePath(record.relPath, fromFolderOf: resultRelPath),
+        MergeRecipe.Source(path: relativePath(record.fileRelPath, fromFolderOf: resultRelPath),
                            hash: record.xxhash.map { String(format: "%02x", $0) }.joined(),
                            captureTime: record.captureTime ?? 0)
     }

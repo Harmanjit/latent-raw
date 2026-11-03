@@ -143,6 +143,8 @@ enum Shortcuts {
         Shortcut(.editExternally, "e", .command),
         // Files
         Shortcut(.rename, .f2),
+        // Lightroom's key for Create Virtual Copy.
+        Shortcut(.createVirtualCopy, "'", .command),
         // Photo Merge. Lightroom's key: ⌃H is otherwise only the text
         // system's delete-backward, which the command leaves to a field
         // being typed in (CommandState).
@@ -306,6 +308,7 @@ extension Shortcuts {
         ]),
         ("Files", [
             ShortcutPageRow([.rename], "Rename the selected image (its sidecar and thumbnail follow)"),
+            ShortcutPageRow([.createVirtualCopy], "Create a virtual copy of each selected image (in Loupe and Develop, of the image shown): another version of the photo with its own edit, rating and keywords, sharing the file"),
             ShortcutPageRow(keys: .gesture("Drag images onto a sidebar folder"), "Move them there with their edits (hold ⌥ to copy)"),
         ]),
         ("Photo Merge", [

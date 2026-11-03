@@ -36,7 +36,7 @@ struct SheetItem: Sendable, Equatable {
 
 extension SheetItem {
     init(record: ImageRecord, folder: URL, editStackJSON: String?) {
-        self.init(name: record.fileName, sourceURL: folder.appendingPathComponent(record.relPath),
+        self.init(name: record.fileName, sourceURL: folder.appendingPathComponent(record.fileRelPath),
                   editStackJSON: editStackJSON, userRotation: record.userRotation,
                   captureDate: record.captureTime.map { Date(timeIntervalSince1970: TimeInterval($0)) },
                   camera: record.camera, record: record)
@@ -449,7 +449,7 @@ enum SheetItems {
         let json = EditStack.isDefault(model.parameters, relativeTo: model.defaultParameters)
             ? nil : try model.stackWithProvenance().encodeJSON()
         if let id = model.catalogImageID, let record = library.images.first(where: { $0.id == id }),
-           let folder = library.folderURL, folder.appendingPathComponent(record.relPath).standardizedFileURL == url.standardizedFileURL {
+           let folder = library.folderURL, folder.appendingPathComponent(record.fileRelPath).standardizedFileURL == url.standardizedFileURL {
             var item = SheetItem(record: record, folder: folder, editStackJSON: json)
             item.userRotation = model.userRotation
             return item
