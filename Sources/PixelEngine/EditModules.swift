@@ -6,6 +6,7 @@ import Foundation
 /// inputs and highlight recovery together, the way a person thinks of it.
 public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     case whiteBalance, tone, presence, toneCurve, colour, splitToning, detail, lens, locals, crop, heal, dust, touchUp
+    case profile
 
     public var id: String { rawValue }
 
@@ -24,13 +25,15 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .heal:         return "Spot Removal & Red-Eye"
         case .dust:         return "Sensor Dust"
         case .touchUp:      return "Touch-up (skin, teeth, eyes, blemishes)"
+        case .profile:      return "Profile"
         }
     }
 
     /// What copy/paste and presets take by default: the look, not the
     /// masks (drawn for another frame) and not the lens correction
     /// switches (a property of the lens, already right per image).
-    public static let lookGroups: Set<EditGroup> = [.whiteBalance, .tone, .presence, .toneCurve, .colour, .splitToning, .detail]
+    public static let lookGroups: Set<EditGroup> = [.whiteBalance, .tone, .presence, .toneCurve, .colour, .splitToning, .detail,
+                                                    .profile]
 }
 
 extension EditStack {
@@ -85,6 +88,8 @@ extension EditStack {
                 t?.faces = modules.touchup?.faces ?? []
                 t?.blemishes = modules.touchup?.blemishes ?? []
                 result.modules.touchup = t
+            case .profile:
+                result.modules.profile = other.modules.profile
             }
         }
         // The result's geometry keeps the frame it was written in. When it
@@ -126,6 +131,7 @@ extension EditStack {
         if m.heal != nil || m.redeye != nil { g.insert(.heal) }
         if m.dust != nil { g.insert(.dust) }
         if m.touchup != nil { g.insert(.touchUp) }
+        if m.profile != nil { g.insert(.profile) }
         return g
     }
 }

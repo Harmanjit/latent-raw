@@ -76,6 +76,7 @@ public struct EditHistory: Equatable, Sendable, Codable {
     /// "Exposure", "Tone, Colour", "Local Adjustments"…
     public static func describeChange(from a: EditStack, to b: EditStack) -> String {
         var names: [String] = []
+        if a.modules.profile != b.modules.profile { names.append("Profile") }
         if a.modules.whitebalance != b.modules.whitebalance { names.append("White Balance") }
         if a.modules.exposure != b.modules.exposure { names.append("Exposure") }
         if a.modules.tone != b.modules.tone { names.append("Tone") }
