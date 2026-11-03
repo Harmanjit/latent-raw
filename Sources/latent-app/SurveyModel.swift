@@ -367,6 +367,10 @@ extension EditorModel {
             }
         }
         if next != parameters { parameters = next }
+        // Showing the stored edit is not an edit made here: no settle, so
+        // no history step, as when `open` lays a stored edit down.
+        pendingSave?.cancel()
+        pendingSave = nil
         regenerateAIDenoiseIfNeeded()
     }
 }

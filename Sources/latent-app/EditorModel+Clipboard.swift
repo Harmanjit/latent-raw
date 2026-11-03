@@ -38,7 +38,20 @@ extension EditorModel {
         // and exact for the usual case of syncing between frames of one body.
         var next = current.merged(with: onThisImage(stack), groups: groups).parameters(defaults: defaultParameters)
         if next.whiteBalance.isAsShot { next.whiteBalance = defaultParameters.whiteBalance }
+        let before = parameters
+        let selectedBefore = selectedLocal?.id
         parameters = next
+        // The crop may have changed under the crop tool, and another local
+        // may now sit at the selected index; neither may carry over.
+        straightenBase = nil
+        if selectedLocal?.id != selectedBefore {
+            maskTool = .none
+            isDraggingMask = false
+        }
+        // Pasted model masks have no pixels on this image yet (or pixels
+        // made for another shape under the same id): make them here, as
+        // Undo and opening do.
+        syncModelMasks(from: before)
         // A pasted touch-up keeps this image's own faces, of which it may
         // have none yet.
         findFacesIfPastedTouchUpNeedsThem()

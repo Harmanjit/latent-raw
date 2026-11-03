@@ -40,6 +40,7 @@ final class EditorModel: ObservableObject {
                 rerender()
                 scheduleSave()
                 touchUpParametersDidChange(from: oldValue)
+                modelMaskParametersDidChange(from: oldValue)
             }
         }
     }
@@ -195,6 +196,9 @@ final class EditorModel: ObservableObject {
                 straightenBase = nil
             } else {
                 healToolActive = false; redEyeToolActive = false; dustToolActive = false; touchUpToolActive = false
+                // With crop on a mask tool is inert, so it must not stay
+                // shown as armed either.
+                maskTool = .none
             }
             canvasDidChange()
             rerenderForViewport()
@@ -295,6 +299,13 @@ final class EditorModel: ObservableObject {
     @Published var maskTool: MaskTool = .none {
         didSet {
             guard maskTool != .none, maskTool != oldValue else { return }
+            // Exclusive like every other pair of on-image tools: the drag
+            // dispatch gives heal and red-eye priority, so with either
+            // still on a drag would place a patch while the panel says
+            // "Placing…".
+            healToolActive = false
+            redEyeToolActive = false
+            cropToolActive = false
             dustToolActive = false
             touchUpToolActive = false
         }
@@ -312,6 +323,19 @@ final class EditorModel: ObservableObject {
 
     /// Names of AI locals whose masks are being generated right now.
     @Published var generatingMasks: Set<UUID> = []
+    /// The lens and keystone settings (`touchUpGeometryKey`) each model
+    /// mask on the session was made on, by local id. Masks are sampled on
+    /// the output grid those settings define, so a change makes them
+    /// again (EditorModel+Masks.swift).
+    var modelMaskGeometry: [UUID: String] = [:]
+    /// The shape (model and prompt points) each model mask on the
+    /// session was made, or is being made, for, by local id. The pixels
+    /// outlive their local (Undo of a paste removes the local, not the
+    /// pixels), so a later local with the same id but another shape is
+    /// told apart by this record, not by the edit it replaced.
+    var modelMaskShapes: [UUID: MaskShape] = [:]
+    /// The rebuild queued after a geometry change, 300 ms after the last.
+    var modelMaskGeometryTask: Task<Void, Never>?
 
     /// Option held during the click: the view passes it through so a
     /// prompt click can mean "exclude this".
@@ -327,6 +351,9 @@ final class EditorModel: ObservableObject {
     /// path (EditorModel+Masks.swift).
     var promptSessions: [String: SAM2Session] = [:]
     var promptEncoding: [String: Task<SAM2Session?, Never>] = [:]
+    /// The geometry key each model's encoding was made on: a click
+    /// answered against an encoding of another grid lands off target.
+    var promptSessionGeometry: [String: String] = [:]
     /// What the mask row says about each model's encoding.
     @Published var promptStatus: [String: String] = [:]
 
@@ -377,6 +404,13 @@ final class EditorModel: ObservableObject {
 
     /// An image asked for before the GPU was ready, opened when it is.
     var openWhenGPUReady: (() -> Void)?
+    /// The catalog id that deferred open is for, and that image's stored
+    /// history and snapshots if their read arrived before the GPU did:
+    /// they are loaded once the open has happened
+    /// (`loadHistory(steps:snapshots:forImage:)`).
+    var deferredOpenCatalogImageID: Int64?
+    var deferredHistory: (steps: [(stackJSON: String, createdAt: Int64)],
+                          snapshots: [(name: String, stackJSON: String)])?
 
     /// Every model shares the process's one GPU context, built off the
     /// main thread (`GPUContext.shared()`), so the window appears without
@@ -416,6 +450,8 @@ final class EditorModel: ObservableObject {
             setupError = String(describing: error)
             status = "Metal setup failed"
             openWhenGPUReady = nil
+            deferredOpenCatalogImageID = nil
+            deferredHistory = nil
         }
         watchMemoryPressure()
     }
@@ -530,6 +566,15 @@ final class EditorModel: ObservableObject {
     var onSnapshotsChanged: ((_ imageID: Int64, _ snapshots: [(name: String, stackJSON: String)]) -> Void)?
     /// True while applying a history/snapshot state so it isn't re-recorded.
     var restoringState = false
+    /// Whether the stored history and snapshots of a catalog image have
+    /// been read (`loadHistory`). Both are written back as whole lists, so
+    /// until they are read, or when reading them failed, writing would
+    /// replace the stored ones with the few made since opening.
+    var storedHistoryLoaded = false
+    /// Stored rows this version cannot decode. They are written back with
+    /// the rest rather than deleted by the next save.
+    var undecodableHistorySteps: [(stackJSON: String, createdAt: Int64)] = []
+    var undecodableSnapshots: [(name: String, stackJSON: String)] = []
 
     // MARK: - Before / after
 

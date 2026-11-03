@@ -42,7 +42,7 @@ extension ExportWorker {
         let summary = file.summary
         let rotation = ExportPlan.rotation(for: summary, userRotation: userRotation)
         let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
-                                              rotation: rotation)
+                                              rotation: rotation, geometry: parameters)
         if !masks.substituted.isEmpty {
             slideLogger.notice("\(sourceURL.lastPathComponent, privacy: .private): masks made without \(masks.substituted.joined(separator: ", "), privacy: .public), which the edit names but this Mac lacks")
         }
