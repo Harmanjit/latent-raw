@@ -45,7 +45,8 @@ public enum CustomOrder {
 
     /// A to Z as Finder sorts names ("2" before "10"), path for ties.
     static func byName(_ a: ImageRecord, _ b: ImageRecord) -> Bool {
-        let c = a.fileName.localizedStandardCompare(b.fileName)
+        // The file's own name, so a virtual copy follows its master.
+        let c = a.sourceFileName.localizedStandardCompare(b.sourceFileName)
         return c == .orderedSame ? a.relPath < b.relPath : c == .orderedAscending
     }
 
@@ -149,8 +150,15 @@ extension Catalog {
     /// Whatever renames or moves a file within the catalog calls this
     /// (reconcile does for renames it detects).
     public func renameInCustomOrder(_ renames: [(from: String, to: String)]) throws {
-        guard !renames.isEmpty, let next = CustomOrder.renamed(try CustomOrder.read(from: customOrderURL), renames)
-        else { return }
+        guard !renames.isEmpty else { return }
+        let order = try CustomOrder.read(from: customOrderURL)
+        // A master's virtual copies keep their places as it moves.
+        let movedMasters = Dictionary(renames.map { ($0.from, $0.to) }, uniquingKeysWith: { first, _ in first })
+        let copies = order.compactMap { path -> (from: String, to: String)? in
+            guard let copy = VirtualCopy.parse(path), let to = movedMasters[copy.masterRelPath] else { return nil }
+            return (path, VirtualCopy.relPath(master: to, key: copy.key))
+        }
+        guard let next = CustomOrder.renamed(order, renames + copies) else { return }
         try setCustomOrder(next)
     }
 }

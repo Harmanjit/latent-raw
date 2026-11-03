@@ -276,7 +276,7 @@ public final class Library: ObservableObject {
     }
 
     public func fileURL(for record: ImageRecord) -> URL? {
-        folderURL?.appendingPathComponent(record.relPath)
+        folderURL?.appendingPathComponent(record.fileRelPath)
     }
 
     /// What Reveal in Finder shows: the selected originals, or the primary
@@ -284,7 +284,10 @@ public final class Library: ObservableObject {
     public var revealInFinderURLs: [URL] {
         guard let folderURL else { return [] }
         let targets = selectedImageIDs.isEmpty ? selectedImage.map { [$0] } ?? [] : selectedImages
-        return targets.isEmpty ? [folderURL] : targets.map { folderURL.appendingPathComponent($0.relPath) }
+        // A virtual copy shows its master's file, once.
+        var seen = Set<String>()
+        let paths = targets.map(\.fileRelPath).filter { seen.insert($0).inserted }
+        return paths.isEmpty ? [folderURL] : paths.map { folderURL.appendingPathComponent($0) }
     }
 
     // MARK: - Opening
@@ -316,6 +319,9 @@ public final class Library: ObservableObject {
     /// Called when an undo or redo has put back rotations or stored edits
     /// of images in the open catalog, so an editor holding one catches up.
     public var didRestoreImages: (@MainActor (Set<Int64>, RestoredAspect) -> Void)?
+    /// Called before virtual copies of the open catalog are removed, with
+    /// their ids, so the app can close one open in the editor.
+    public var willRemoveImages: (@MainActor (Set<Int64>) -> Void)?
     /// The undo or redo being restored last; the next waits for it.
     var undoRestores: Task<Void, any Error>?
 
@@ -548,7 +554,7 @@ public final class Library: ObservableObject {
         guard let id = record.id, let thumbnailDirectory else { return nil }
         // Same layout as Catalog.thumbnailURL(forRelPath:), without a hop
         // onto the catalog's actor for every cell.
-        let url = thumbnailDirectory.appendingPathComponent(record.relPath + ".heic")
+        let url = Catalog.thumbnailURL(forRelPath: record.relPath, in: thumbnailDirectory)
         return thumbnailLoader.request(id: id, url: url, quarterTurns: quarterTurns, pixelSize: pixelSize,
                                        completion: completion)
     }

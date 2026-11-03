@@ -129,6 +129,10 @@ enum Schema {
             }
         }
 
+        migrator.registerMigration("vcopies_v1_virtual_copies") { db in
+            try VirtualCopySchema.migrate(db)
+        }
+
         return migrator
     }
 }
