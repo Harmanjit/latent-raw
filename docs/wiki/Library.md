@@ -38,7 +38,7 @@ Extensions indexed: NEF, NRW, ARW, SRF, SR2, CR2, CR3, CRW, DNG, RAF, ORF, RW2, 
 
 ## The grid
 
-Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to open in Develop. With several selected, the image you clicked last (for a ⇧-click, the end you clicked) leads: Loupe, Develop and the left panel show it, and ⌘A keeps it. Rating, flag and rotate keys act on every selected image. Selected images that the filter hides are deselected, so these keys, Paste Settings and Export act only on images the grid shows. Badges show a pencil for edited images and ✓ and ✗ for flags.
+Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to open in Develop. With several selected, the image you clicked last (for a ⇧-click, the end you clicked) leads: Loupe, Develop and the left panel show it, and ⌘A keeps it. Rating, flag and rotate keys act on every selected image. Selected images that the filter hides are deselected, so these keys, Paste Settings and Export act only on images the grid shows. Badges show a pencil for edited images and ✓ and ✗ for flags. A virtual copy has a small stacked-squares mark at the bottom-left of its picture (see [Virtual copies](Library#virtual-copies)).
 
 **Stars.** Click the stars under a thumbnail to rate it; the empty ones appear when you point at the cell. Clicking a selected image's stars rates the whole selection, clicking another image's selects it first, and clicking the rating it already has clears it.
 
@@ -48,7 +48,7 @@ Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to
 
 **Thumbnail size.** The slider in the filter bar, or ⌘= and ⌘- while the grid shows (View > Larger Thumbnails, Smaller Thumbnails). The size is remembered.
 
-**Right-click** an image for Open in Loupe, Open in Develop, Compare Selected (with exactly two selected), Survey Selected (two to four), Rating, Flag, Rotate Left and Right, Copy Settings, Paste Settings, Apply Preset, Export, Reveal in Finder, Rename… (one image), and Move to Folder and Copy to Folder, acting on the selection. Right-click between images for Select All and Reveal Folder in Finder.
+**Right-click** an image for Open in Loupe, Open in Develop, Compare Selected (with exactly two selected), Survey Selected (two to four), Rating, Flag, Rotate Left and Right, Create Virtual Copy, Set Copy as Master, Remove Virtual Copy, Copy Settings, Paste Settings, Apply Preset, Export, Reveal in Finder, Rename… (one image), Move to Folder and Copy to Folder, and Duplicate, acting on the selection. Right-click between images for Select All and Reveal Folder in Finder.
 
 **Filter bar** above the grid: rating threshold (click a star for "this many or better"), flag states, edited-only, camera, lens, keyword, Finder tag, and file-name search, combined with AND. The count shows how many pass. ⇧⌘L clears the filter. Arrow keys walk only the visible images.
 
@@ -109,9 +109,27 @@ A pasted or preset **Touch-up** carries its sliders but not the faces they were 
 
 The job runs in the background, one photo at a time, with "Photo 3 of 12: DSC_0107.NEF" and a Cancel dust removal button in the left panel; quitting stops it and keeps the photos already done. Nothing is written until the job ends, then every photo's spots are saved together as one undo step, "Remove Dust (12 Images)", and the panel reports "Removed dust from 11 photos (412 spots) in 38 s". A photo whose edit changed while the job ran, or that couldn't be read, is left alone and named in the notes. Opening another folder while the job runs gives it nowhere to write, so it ends with "Remove Dust cancelled · the folder changed, so nothing was written" and the first folder's photos are untouched; run it again in that folder. The spots go in as heal patches under Sensor Dust, ahead of any patches of your own, so a photo's existing spot removal is untouched; a spot already under one of your patches is not added twice.
 
+## Virtual copies
+
+A virtual copy is another version of a photo: its own edit, rating, flag, colour label, rotation, keywords, history and snapshots, sharing the one raw file. Use one to try a black-and-white version beside the colour one, or a square crop beside the full frame, and keep both. A copy takes no disk space beyond its sidecar and thumbnail.
+
+**Create Virtual Copy** (⌘', the Photo menu or the grid's right-click menu) makes one copy of each selected image; in Loupe and Develop, of the image shown, and the new copy opens in its place. The copy starts as the image looked: the same edit, rating, flag, label, rotation and keywords. Its history and snapshots start empty and are its own from then on. A copy of a copy is another copy of the same photo.
+
+**In the grid** a copy sits right after its photo (the master) when sorted by capture time or file name, with a stacked-squares mark at the bottom-left of its picture. Its name is the master's with the copy's number, "DSC_0107 (Copy 2).NEF", and the left panel says "Virtual copy of DSC_0107.NEF". The filter's file-name search finds copies by that name, so typing "Copy" shows them all.
+
+**Editing, exporting, printing and slideshows** use the copy's own settings with the master's raw file. An export is named from the copy's name, so with the default {name} template the copy of DSC_0107.NEF exports as "DSC_0107 (Copy 2).jpg" and never takes the master's name.
+
+**Set Copy as Master** (Photo menu or right-click, with one copy selected) swaps the settings of the copy and its master: the master takes the copy's edit, rating, flag, label, rotation, keywords, history and snapshots, and the copy takes the master's. Use it when the copy has become the version you want to keep as the photo itself. ⌘Z swaps them back.
+
+**Remove Virtual Copy** (Photo menu or right-click) takes the selected copies out of the catalog. Masters in the selection are left alone, and the raw file is never touched. ⌘Z puts a removed copy back exactly as it was.
+
+**Copies follow their master.** Renaming or moving the master, with Latent's Rename and Move or in Finder, takes its copies along, with everything they hold. If the master's file is deleted or moved to another folder's catalog, its copies leave the catalog with it. Each copy has its own sidecar in `_latent/xmp/.virtual-copies`, so a catalog rebuilt from its sidecars gets its copies back, and so does a master whose file is put back in the folder.
+
+**Moving, copying or duplicating a copy** acts on its master's file: Move to Folder moves the master, with all its copies; Copy to Folder and Duplicate copy the master's file with the master's settings. To get a copy's settings into a file of its own, use Set Copy as Master first, or export it. Rename is not available for a copy, since it has no file of its own.
+
 ## Undo
 
-⌘Z and ⇧⌘Z undo and redo what you did in Library, Loupe, Compare and Survey: ratings, picks and rejects, rotation, keywords, settings pasted or presets applied, a Custom sort rearrangement, and moves, copies and renames. The Edit menu names the step, as in Undo Paste Settings (12 Images). Each image goes back to its own previous value. In Develop, ⌘Z steps through that image's edit history instead, and while you are typing in a field, ⌘Z undoes only the typing. Opening another folder clears the undo of ratings, flags, rotation, keywords, settings and rearrangements; moves, copies and renames can still be undone.
+⌘Z and ⇧⌘Z undo and redo what you did in Library, Loupe, Compare and Survey: ratings, picks and rejects, rotation, keywords, settings pasted or presets applied, a Custom sort rearrangement, virtual copies made, removed or set as master, and moves, copies, duplicates and renames. The Edit menu names the step, as in Undo Paste Settings (12 Images). Each image goes back to its own previous value. In Develop, ⌘Z steps through that image's edit history instead, and while you are typing in a field, ⌘Z undoes only the typing. Opening another folder clears the undo of ratings, flags, rotation, keywords, settings and rearrangements; moves, copies and renames can still be undone.
 
 ## Moving, copying and renaming
 
@@ -122,6 +140,8 @@ Ratings, flags, keywords, edits, snapshots, history and the thumbnail go with ea
 Progress shows in the status bar with a stop button. Stopping, or quitting, finishes the image under way, so no image is left half-moved; quitting waits up to a minute for it, and an image still being copied then stays where it was. While an export, print, contact sheet or Photo Merge is running, images can't be moved, copied, renamed or dropped on a folder, and those can't be undone. ⌘Z moves images back; undoing a copy puts the copy and its sidecar in the Trash. Nothing is ever overwritten or permanently deleted, apart from thumbnails, which are made again, a moved image's old sidecar, whose contents are already in the new one, and, for a move to another disk, the original once its copy is complete.
 
 **Rename…** (F2, the File menu or the right-click menu) renames one image, keeping its extension; its sidecar and thumbnail follow. A name that differs only in letter case works.
+
+**Duplicate** (File menu or right-click) makes a true copy of each selected file in its own folder, numbered as Copy to Folder numbers it ("DSC_0107 2.NEF"), with its ratings, keywords, edit, history, snapshots and sidecar. It is a second raw file on disk, unlike a [virtual copy](Library#virtual-copies). ⌘Z puts the duplicates in the Trash.
 
 These commands work in the Library grid, and not while an export, print, contact sheet or Photo Merge is running.
 

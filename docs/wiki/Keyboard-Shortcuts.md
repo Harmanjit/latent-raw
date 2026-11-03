@@ -72,6 +72,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | Keys | Action |
 |---|---|
 | F2 | Rename the selected image (its sidecar and thumbnail follow) |
+| ⌘' | Create a virtual copy of each selected image (in Loupe and Develop, of the image shown): another version of the photo with its own edit, rating and keywords, sharing the file |
 | Drag images onto a sidebar folder | Move them there with their edits (hold ⌥ to copy) |
 
 ## Photo Merge

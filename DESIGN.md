@@ -220,7 +220,8 @@ CREATE TABLE images (
   thumb_key BLOB,                       -- hash of the edit that produced the thumbnail
   user_rotation INTEGER NOT NULL DEFAULT 0, -- migration v2: manual quarter turns clockwise
   finder_tags TEXT,                     -- migration v3: the file's Finder tags as last read, "6Red\n0Work"
-  merge_json TEXT                       -- migration v4: latent:Merge recipe of a Photo Merge result, else NULL
+  merge_json TEXT,                      -- migration v4: latent:Merge recipe of a Photo Merge result, else NULL
+  master_id INTEGER REFERENCES images ON DELETE CASCADE -- migration vcopies_v1: a virtual copy's master, else NULL
 );
 CREATE TABLE edits      (image_id INTEGER PRIMARY KEY REFERENCES images ON DELETE CASCADE,
                          schema_version INTEGER, process_version TEXT,
@@ -241,7 +242,9 @@ CREATE TABLE lens_overrides (camera TEXT, lens_id TEXT, lensfun_model TEXT,
 CREATE TABLE settings   (key TEXT PRIMARY KEY, value TEXT);
 ```
 
-Migrations are in `Sources/Catalog/Schema.swift` (`v1_initial`, `v2_user_rotation`, `v3_finder_tags`, `v4_merge_recipe`). `user_rotation` is kept apart from `orientation` (what the camera recorded) so re-reading EXIF never clobbers a manual fix. `finder_tags` is a cache of the file's own attribute (§5.3): one line per tag, Finder's colour digit then the name, a plain string because the filter reads it for every row. The `lens_overrides` table exists but nothing reads or writes it yet.
+Migrations are in `Sources/Catalog/Schema.swift` (`v1_initial`, `v2_user_rotation`, `v3_finder_tags`, `v4_merge_recipe`, `vcopies_v1_virtual_copies`). `user_rotation` is kept apart from `orientation` (what the camera recorded) so re-reading EXIF never clobbers a manual fix. `finder_tags` is a cache of the file's own attribute (§5.3): one line per tag, Finder's colour digit then the name, a plain string because the filter reads it for every row. The `lens_overrides` table exists but nothing reads or writes it yet.
+
+A virtual copy (`VirtualCopy.swift`) is a row of `images` with a `master_id`. Its `rel_path` is the master's with a suffix, `DSC_0107.NEF#vc002-1a2b3c4d` (copy number and a random token), which no raw file can have; `fileRelPath` strips it wherever the file is opened. The trigger `vcopies_follow_master` copies a master's new path and file facts (size, mtime, hash, EXIF, Finder tags) to its copies whenever the master's row changes, so reconcile, Move and Rename carry copies without knowing about them, and the foreign key deletes copies with their master. A copy's sidecar and thumbnail are named by number and token, `xmp/.virtual-copies/vc002-1a2b3c4d.xmp`, so they never move; the sidecar's SourceHash is the master's, which is how reconcile rebuilds a lost copy row (`restoreVirtualCopiesFromSidecars`).
 
 No pixel data and no absolute paths are ever stored in the database.
 
