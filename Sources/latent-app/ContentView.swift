@@ -1671,6 +1671,12 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
+                    LensBlurSection(model: model).padding(.top, 8)
+                } label: {
+                    disclosureLabel("Lens Blur")
+                }
+
+                DisclosureGroup {
                     ToneCurvePanel(master: $model.parameters.toneCurve,
                                    channels: $model.parameters.channelCurves)
                         .disabled(!model.hasImage)

@@ -138,6 +138,7 @@ extension EditorModel {
         touchUpToolActive = false
         cropToolActive = false
         maskTool = .none
+        lensBlurState.pickingFocus = false
         healDrag = nil
         redEyeDrag = nil
         paintingHealStroke = []
@@ -148,6 +149,7 @@ extension EditorModel {
     /// Whether drags on the image belong to a tool rather than panning.
     var imageToolActive: Bool {
         maskToolActive || healToolActive || redEyeToolActive || dustToolActive || touchUpToolActive
+            || lensBlurState.pickingFocus
     }
 
     func imageToolBegan(at screen: CGPoint, exclude: Bool) {
@@ -156,6 +158,7 @@ extension EditorModel {
         // Clicks only: a ring is removed or a spot added on the press.
         if dustToolActive { dustToolBegan(at: screen); return }
         if touchUpToolActive { touchUpToolBegan(at: screen); return }
+        if lensBlurState.pickingFocus, !maskToolActive { lensBlurFocusPicked(at: screen); return }
         promptModifierExclude = exclude
         maskToolBegan(at: screen)
     }
@@ -163,12 +166,14 @@ extension EditorModel {
         if healToolActive { healToolMoved(to: screen) }
         else if redEyeToolActive { redEyeToolMoved(to: screen) }
         else if dustToolActive || touchUpToolActive { return }
+        else if !maskToolActive && lensBlurState.pickingFocus { return }
         else { maskToolMoved(to: screen) }
     }
     func imageToolEnded() {
         if healToolActive { healToolEnded() }
         else if redEyeToolActive { redEyeToolEnded() }
         else if dustToolActive || touchUpToolActive { return }
+        else if !maskToolActive && lensBlurState.pickingFocus { return }
         else { maskToolEnded() }
     }
 }

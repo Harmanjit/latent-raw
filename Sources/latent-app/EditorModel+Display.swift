@@ -34,6 +34,7 @@ extension EditorModel {
         output.gamutWarning = gamutWarning
         output.spotVisualisation = dustVisualisation
         output.touchUpOverlay = touchUpOverlayWanted
+        output.depthVisualisation = lensBlurState.showDepth
         return output
     }
 

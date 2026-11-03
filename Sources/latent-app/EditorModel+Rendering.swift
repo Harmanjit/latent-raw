@@ -57,7 +57,7 @@ extension EditorModel {
             let half = min(Int((3 * max(sigma / Float(factor), 0.3)).rounded(.up)), 32)
             reach = CGFloat((half + 2) * factor)
         }
-        return max(reach, p.touchUpTileReach(beyondMargin: 0, sensorSize: sensorSize))
+        return max(reach, p.touchUpTileReach(beyondMargin: 0, sensorSize: sensorSize), p.lensBlurTileReach(sensorSize: sensorSize))
     }
 
     /// The part of a render's coverage that looks as the full frame does:
