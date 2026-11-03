@@ -6,6 +6,7 @@ import Foundation
 /// inputs and highlight recovery together, the way a person thinks of it.
 public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     case whiteBalance, tone, presence, toneCurve, colour, splitToning, detail, lens, locals, crop, heal, dust, touchUp
+    case lensBlur
 
     public var id: String { rawValue }
 
@@ -24,6 +25,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .heal:         return "Spot Removal & Red-Eye"
         case .dust:         return "Sensor Dust"
         case .touchUp:      return "Touch-up (skin, teeth, eyes, blemishes)"
+        case .lensBlur:     return "Lens Blur (amount, bokeh, focus range)"
         }
     }
 
@@ -85,6 +87,10 @@ extension EditStack {
                 t?.faces = modules.touchup?.faces ?? []
                 t?.blemishes = modules.touchup?.blemishes ?? []
                 result.modules.touchup = t
+            case .lensBlur:
+                // The sliders and the focus range travel; the depth map is
+                // made again for the photo they land on.
+                result.modules.lensblur = other.modules.lensblur
             }
         }
         // The result's geometry keeps the frame it was written in. When it
@@ -126,6 +132,7 @@ extension EditStack {
         if m.heal != nil || m.redeye != nil { g.insert(.heal) }
         if m.dust != nil { g.insert(.dust) }
         if m.touchup != nil { g.insert(.touchUp) }
+        if m.lensblur != nil { g.insert(.lensBlur) }
         return g
     }
 }

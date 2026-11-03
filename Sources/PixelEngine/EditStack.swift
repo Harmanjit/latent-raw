@@ -63,6 +63,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var dust: [HealPatch]?
         /// Touch-up (docs/Retouch.md §7). Absent when neutral.
         public var touchup: TouchUp?
+        /// Lens Blur (LensBlur.swift). Absent when neutral, so an edit
+        /// that never used it encodes exactly as before.
+        public var lensblur: LensBlur?
     }
 
     public struct AIDenoise: Codable, Equatable, Sendable {
@@ -203,6 +206,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.redeye = p.redEyes.isEmpty ? nil : p.redEyes
         modules.dust = p.dust.isEmpty ? nil : p.dust
         modules.touchup = p.touchUp.isNeutral ? nil : p.touchUp
+        modules.lensblur = p.lensBlur.isNeutral ? nil : p.lensBlur
         modules.presence = (p.texture == 0 && p.clarity == 0 && p.dehaze == 0) ? nil
             : Presence(texture: p.texture, clarity: p.clarity, dehaze: p.dehaze)
         modules.vibrance = p.vibrance == 0 ? nil : Vibrance(amount: p.vibrance)
@@ -276,6 +280,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         p.redEyes = (modules.redeye ?? []).prefix(RedEyeSpot.maximumCount).compactMap(\.sanitized)
         p.dust = (modules.dust ?? []).prefix(HealPatch.maximumDustCount).compactMap(\.sanitized)
         p.touchUp = (modules.touchup ?? .neutral).sanitized
+        p.lensBlur = (modules.lensblur ?? .neutral).sanitized
         if let pr = modules.presence { p.texture = pr.texture; p.clarity = pr.clarity; p.dehaze = pr.dehaze }
         else { p.texture = 0; p.clarity = 0; p.dehaze = 0 }
         p.vibrance = modules.vibrance?.amount ?? 0

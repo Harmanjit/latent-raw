@@ -121,6 +121,8 @@ public final class GPUContext: @unchecked Sendable {
         case dustVisualise
         // Touch-up (TouchUp.metal, TouchUpStage.swift).
         case touchUpApply
+        // Lens Blur (LensBlur.metal, LensBlurStage.swift).
+        case lensBlurPrepare, lensBlurGather, lensBlurComposite, lensBlurDepthView
     }
 
     /// Built pipelines, by kernel. A Mutex because renders run on several
@@ -278,7 +280,7 @@ public final class GPUContext: @unchecked Sendable {
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
                             "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye", "Slideshow",
                             "LinearSource", "MergeHDR", "MergeWarp", "MergeDeghost", "MergePanoPrep", "MergePanoBlend",
-                            "Dust", "TouchUp"]
+                            "Dust", "TouchUp", "LensBlur"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound

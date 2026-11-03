@@ -124,6 +124,9 @@ public final class ImageSession {
         case visualised, visualisedPreview // the viewport's Visualise Spots pass
         case touchUpPair, touchUpScratch, touchUpFine, touchUpMid, touchUpDownA, touchUpDownB
         case touchUp, touchUpPreview       // output of the touch-up stage
+        case lensBlurReduced, lensBlurGathered // the lens blur's shrunk copy and its blur
+        case lensBlur, lensBlurPreview     // output of the lens blur stage
+        case depthView, depthViewPreview   // the viewport's Show Depth pass
     }
 
     /// Which set of pooled textures a render draws from. Pools never share
@@ -227,6 +230,11 @@ public final class ImageSession {
         touchUpMaskTexture = (enabled, texture)
         return texture
     }
+
+    // MARK: - Depth (ImageSession+Depth.swift)
+
+    /// The depth map Lens Blur reads, and its texture once uploaded.
+    var depthStore: (map: DepthMap, texture: MTLTexture?)?
 
     public func setAIMask(_ bitmap: MaskBitmap?, forLocal id: UUID) {
         aiMasks[id] = bitmap
@@ -442,6 +450,7 @@ public final class ImageSession {
         total += brushMasks?.texture.allocatedSize ?? 0
         total += aiDenoisedCameraRGB?.allocatedSize ?? 0
         total += touchUpMaskTexture?.texture.allocatedSize ?? 0
+        total += depthStore?.texture?.allocatedSize ?? 0
         return total
     }
 
