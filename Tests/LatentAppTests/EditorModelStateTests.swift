@@ -71,6 +71,9 @@ final class EditorModelStateTests: XCTestCase {
 
         // Another photo, with an edit this build reads, saves as usual.
         model.open(url: url, catalogImageID: 2, editStackJSON: try EditStack(parameters: EditParameters()).encodeJSON())
+        // As the app does on every open: history is written only once the
+        // stored list has been read.
+        model.loadHistory(steps: [], snapshots: [])
         XCTAssertFalse(model.storedEditIsReadOnly)
         model.parameters.exposureEV = 1
         model.flushPendingSave()
