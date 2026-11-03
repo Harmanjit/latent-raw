@@ -820,6 +820,7 @@ struct ContentView: View {
     /// before another folder opens). The write itself runs later, and by
     /// then another folder may be open, where that id is another photo.
     private func wireEditSaving() {
+        LensProfileDefaults.shared.attach(library: library, model: model)
         model.onEditSettled = { imageID, json in
             guard let catalog = library.catalog else { return }
             library.perform("Saving the edit") {
@@ -1696,67 +1697,24 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(model.lensProfileDescription)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Toggle("Distortion", isOn: $model.parameters.lensDistortion)
-                        Toggle("Chromatic aberration", isOn: $model.parameters.lensTCA)
-                        Toggle("Vignetting", isOn: $model.parameters.lensVignetting)
-                        disclosureLabel("Manual")
-                        sliderRow(title: "Distortion", value: $model.parameters.manualDistortion,
-                                  range: -0.1...0.1, format: "%+.3f")
-                        sliderRow(title: "Vignetting", value: $model.parameters.manualVignetting,
-                                  range: -1...1, format: "%+.2f")
-                        disclosureLabel("Defringe")
-                        sliderRow(title: "Purple", value: $model.parameters.defringePurple,
-                                  range: 0...1, format: "%.2f")
-                        sliderRow(title: "Green", value: $model.parameters.defringeGreen,
-                                  range: 0...1, format: "%.2f")
-                    }
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .disabled(!model.hasImage)
-                    .padding(.top, 8)
+                    LensCorrectionsPanel(model: model)
+                        .padding(.top, 8)
                 } label: {
                     disclosureLabel("Lens Corrections")
                 }
 
                 DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Picker("Demosaic", selection: $model.parameters.demosaic) {
-                            ForEach(DemosaicMethod.allCases, id: \.self) { method in
-                                Text(method.displayName).tag(method)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-
-                        Text("Only affects full-resolution renders — export and 100% zoom. The fit-to-window preview bins Bayer quads and never interpolates.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        disclosureLabel("Sharpening")
-                        sliderRow(title: "Amount", value: $model.parameters.sharpenAmount,
-                                  range: 0...2, format: "%.2f")
-                        sliderRow(title: "Radius", value: $model.parameters.sharpenRadius,
-                                  range: 0.5...3, format: "%.1f px", defaultValue: 1.0)
-                        sliderRow(title: "Threshold", value: $model.parameters.sharpenThreshold,
-                                  range: 0...0.1, format: "%.3f", defaultValue: 0.01)
-
-                        disclosureLabel("Noise Reduction")
-                        sliderRow(title: "Luminance", value: $model.parameters.denoiseLuminance,
-                                  range: 0...1, format: "%.2f")
-                        sliderRow(title: "Colour", value: $model.parameters.denoiseColor,
-                                  range: 0...1, format: "%.2f")
-                        Text("Judge both at 100% zoom; the fit-to-window preview is scaled to match but hides fine grain.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 8)
+                    DetailPanel(model: model)
+                        .padding(.top, 8)
                 } label: {
                     disclosureLabel("Detail")
+                }
+
+                DisclosureGroup {
+                    EffectsPanel(model: model)
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Effects")
                 }
 
                 DisclosureGroup {

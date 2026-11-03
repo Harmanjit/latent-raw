@@ -47,7 +47,7 @@ extension EditorModel {
     /// §5.6), so every save path records it, not just the debounced one.
     func stackWithProvenance() -> EditStack {
         var stack = EditStack(parameters: parameters)
-        if let lens = session?.lensCorrection {
+        if let lens = session?.lensCorrection(for: parameters) {
             stack.setLensProvenance(profile: lens.profileName, databaseVersion: lens.databaseVersion)
         }
         return stack

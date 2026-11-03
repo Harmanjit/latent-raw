@@ -34,6 +34,7 @@ extension EditorModel {
         output.gamutWarning = gamutWarning
         output.spotVisualisation = dustVisualisation
         output.touchUpOverlay = touchUpOverlayWanted
+        output.sharpenMaskPreview = sharpenMaskPreview
         return output
     }
 

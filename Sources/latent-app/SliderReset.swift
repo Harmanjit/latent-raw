@@ -24,10 +24,14 @@ struct ResettableSlider: View {
     let format: SliderValueFormat
     let showsField: Bool
     let accessibilityValue: String?
+    /// Told when the knob is pressed (true, with whether Option was held)
+    /// and released (false), for previews shown only while dragging.
+    let onPress: ((_ pressed: Bool, _ option: Bool) -> Void)?
     let reset: () -> Void
 
     init(value: Binding<Float>, in range: ClosedRange<Float>, label: String? = nil,
          format: SliderValueFormat? = nil, showsField: Bool = false, accessibilityValue: String? = nil,
+         onPress: ((_ pressed: Bool, _ option: Bool) -> Void)? = nil,
          reset: @escaping () -> Void) {
         _value = value
         self.range = range
@@ -35,6 +39,7 @@ struct ResettableSlider: View {
         self.format = format ?? .derived(from: range)
         self.showsField = showsField
         self.accessibilityValue = accessibilityValue
+        self.onPress = onPress
         self.reset = reset
     }
 
@@ -51,7 +56,7 @@ struct ResettableSlider: View {
 
     private var slider: some View {
         DoubleClickSliderView(value: $value, range: range, label: label,
-                              valueText: accessibilityValue ?? format.text(value), reset: reset)
+                              valueText: accessibilityValue ?? format.text(value), onPress: onPress, reset: reset)
     }
 }
 
@@ -137,6 +142,7 @@ private struct DoubleClickSliderView: NSViewRepresentable {
     let range: ClosedRange<Float>
     let label: String?
     let valueText: String
+    var onPress: ((_ pressed: Bool, _ option: Bool) -> Void)? = nil
     let reset: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -151,6 +157,7 @@ private struct DoubleClickSliderView: NSViewRepresentable {
         slider.target = context.coordinator
         slider.action = #selector(Coordinator.changed(_:))
         slider.onDoubleClick = { context.coordinator.parent.reset() }
+        slider.onPress = { pressed, option in context.coordinator.parent.onPress?(pressed, option) }
         slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
         return slider
     }
@@ -176,13 +183,18 @@ private struct DoubleClickSliderView: NSViewRepresentable {
 
 final class DoubleClickSlider: NSSlider {
     var onDoubleClick: (() -> Void)?
+    var onPress: ((_ pressed: Bool, _ option: Bool) -> Void)?
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
             onDoubleClick?()
             return
         }
+        // NSSlider tracks the drag inside super.mouseDown and returns on
+        // release, so the two calls bracket the whole drag.
+        onPress?(true, event.modifierFlags.contains(.option))
         super.mouseDown(with: event)
+        onPress?(false, false)
     }
 }
 

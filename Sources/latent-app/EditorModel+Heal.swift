@@ -138,6 +138,7 @@ extension EditorModel {
         touchUpToolActive = false
         cropToolActive = false
         maskTool = .none
+        defringePickerActive = false
         healDrag = nil
         redEyeDrag = nil
         paintingHealStroke = []
