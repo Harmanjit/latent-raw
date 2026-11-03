@@ -5,6 +5,8 @@ import RawCore
 /// What a reconciliation pass found and did.
 public struct ReconcileReport: Sendable, CustomStringConvertible {
     public var added = 0
+    /// Rows of the files added this pass (see `RecentlyAdded`).
+    public var addedIDs: [Int64] = []
     public var modified = 0
     public var renamed = 0
     public var removed = 0
@@ -272,7 +274,7 @@ extension Catalog {
         // 8. One transaction for all the row changes. Removals go first and
         //    renamed rows pass through a placeholder path, so a chain or a
         //    swap never has two rows on one path at once.
-        try dbQueue.write { db in
+        let addedIDs = try dbQueue.write { db -> [Int64] in
             for record in removals {
                 // image_keywords has no foreign key to cascade with.
                 if let id = record.id {
@@ -297,15 +299,21 @@ extension Catalog {
             for record in updates {
                 try record.update(db)
             }
+            var addedIDs: [Int64] = []
             for var record in inserts {
                 try record.insert(db)
+                if let id = record.id { addedIDs.append(id) }
             }
             for change in tagChanges {
                 try db.execute(sql: "UPDATE images SET finder_tags = ? WHERE id = ?",
                                arguments: [change.tags, change.id])
             }
+            // A pass that added nothing leaves the last batch in place.
+            if !addedIDs.isEmpty { try Self.recordRecentlyAdded(addedIDs, at: start, in: db) }
+            return addedIDs
         }
         report.added = inserts.count
+        report.addedIDs = addedIDs
         report.modified = updates.count
         report.renamed = renames.count
         report.removed = removals.count

@@ -18,18 +18,23 @@ public struct LibraryFilter: Equatable, Sendable {
     public var text = ""
     /// Show only files carrying the Finder tag of this name.
     public var finderTag: String?
+    /// The Recently Added view: only these rows, the photos the last scan
+    /// that found anything new added (`Library.showRecentlyAdded`). Nil
+    /// shows every photo.
+    public var recentlyAddedIDs: Set<Int64>?
 
     public init() {}
 
     public var isActive: Bool {
         minRating > 0 || !flags.isEmpty || editedOnly || camera != nil
             || lens != nil || keyword != nil || !text.trimmingCharacters(in: .whitespaces).isEmpty
-            || finderTag != nil
+            || finderTag != nil || recentlyAddedIDs != nil
     }
 
     /// Whether `record` passes every active criterion. Keywords and the
     /// edited flag live outside the record, so the caller supplies them.
     public func matches(_ record: ImageRecord, isEdited: Bool, keywords: Set<String>) -> Bool {
+        if let recentlyAddedIDs, !(record.id.map(recentlyAddedIDs.contains) ?? false) { return false }
         if record.rating < minRating { return false }
         if !flags.isEmpty, !flags.contains(ImageFlag(rawValue: record.flag) ?? .none) { return false }
         if editedOnly, !isEdited { return false }
