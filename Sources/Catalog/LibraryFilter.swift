@@ -35,7 +35,8 @@ public struct LibraryFilter: Equatable, Sendable {
         if editedOnly, !isEdited { return false }
         if let camera, record.camera != camera { return false }
         if let lens, record.lens != lens { return false }
-        if let keyword, !keywords.contains(keyword) { return false }
+        // A keyword finds the photos tagged with any keyword inside it too.
+        if let keyword, !keywords.contains(where: { KeywordPath.path($0, isWithin: keyword) }) { return false }
         if let finderTag, !FinderTag.stored(record.finderTags, contains: finderTag) { return false }
         let needle = text.trimmingCharacters(in: .whitespaces)
         if !needle.isEmpty, record.fileName.range(of: needle, options: .caseInsensitive) == nil {

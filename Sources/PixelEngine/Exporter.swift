@@ -195,7 +195,7 @@ public struct ExportMetadata: Sendable, Equatable {
             exif[kCGImagePropertyExifColorSpace as String] = isSRGB ? 1 : 0xFFFF
         }
         let fileKeywords = iptc[kCGImagePropertyIPTCKeywords as String] as? [String] ?? []
-        let allKeywords = fileKeywords + keywords.filter { !fileKeywords.contains($0) }
+        let allKeywords = fileKeywords + Self.flattenedKeywords(keywords).filter { !fileKeywords.contains($0) }
         if !allKeywords.isEmpty { iptc[kCGImagePropertyIPTCKeywords as String] = allKeywords }
         if rating > 0 { iptc[kCGImagePropertyIPTCStarRating as String] = rating }
 

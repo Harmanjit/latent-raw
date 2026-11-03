@@ -80,7 +80,15 @@ public enum XMPSidecar {
     }
 
     private static func render(_ f: Fields) -> String {
-        let keywordItems = f.keywords.map { "      <rdf:li>\(escape($0))</rdf:li>" }.joined(separator: "\n")
+        // A hierarchical keyword goes in dc:subject as each of its levels and
+        // whole in lr:hierarchicalSubject (see KeywordPath). Only then: a
+        // sidecar with flat keywords stays exactly as it always was.
+        let hierarchical = f.keywords.contains(where: KeywordPath.isHierarchical)
+        let subjects = hierarchical ? KeywordPath.flatSubjects(f.keywords) : f.keywords
+        let keywordItems = subjects.map { "      <rdf:li>\(escape($0))</rdf:li>" }.joined(separator: "\n")
+        let hierarchyItems = f.keywords.map { "      <rdf:li>\(escape($0))</rdf:li>" }.joined(separator: "\n")
+        let hierarchyBlock = hierarchical ? "   <lr:hierarchicalSubject><rdf:Bag>\n\(hierarchyItems)\n   </rdf:Bag></lr:hierarchicalSubject>\n" : ""
+        let lightroomNamespace = hierarchical ? "\n    xmlns:lr=\"http://ns.adobe.com/lightroom/1.0/\"" : ""
         let labelAttr = f.label.map { " xmp:Label=\"\(escape($0))\"" } ?? ""
         let preservedAttr = f.preservedFileName.map {
             " xmpMM:PreservedFileName=\"\(escape($0))\""
@@ -94,7 +102,7 @@ public enum XMPSidecar {
             xmlns:xmp="http://ns.adobe.com/xap/1.0/"
             xmlns:dc="http://purl.org/dc/elements/1.1/"
             xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"
-            xmlns:latent="\(namespaceURI)"
+            xmlns:latent="\(namespaceURI)"\(lightroomNamespace)
             xmp:Rating="\(f.rating)"\(labelAttr)\(preservedAttr)
             latent:SchemaVersion="\(f.schemaVersion)"
             latent:ProcessVersion="\(escape(f.processVersion))"
@@ -104,7 +112,7 @@ public enum XMPSidecar {
            <dc:subject><rdf:Bag>
         \(keywordItems)
            </rdf:Bag></dc:subject>
-           <latent:EditStack>\(cdata(f.editStackJSON))</latent:EditStack>
+        \(hierarchyBlock)   <latent:EditStack>\(cdata(f.editStackJSON))</latent:EditStack>
         \(f.snapshotsJSON.isEmpty ? "" : "   <latent:Snapshots>\(cdata(f.snapshotsJSON))</latent:Snapshots>")
         \(f.historyJSON.isEmpty ? "" : "   <latent:History>\(cdata(f.historyJSON))</latent:History>")
         \(f.mergeJSON.isEmpty ? "" : "   <latent:Merge>\(cdata(f.mergeJSON))</latent:Merge>")
@@ -225,6 +233,11 @@ public enum XMPSidecar {
             "*[local-name()='subject']/*[local-name()='Bag']/*[local-name()='li']"))?
             .compactMap { $0.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty } ?? []
+        // Lightroom's keyword paths ("Places|France|Paris"), when present.
+        let hierarchy = (try? description.nodes(forXPath:
+            "*[local-name()='hierarchicalSubject']/*[local-name()='Bag']/*[local-name()='li']"))?
+            .compactMap { $0.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty } ?? []
 
         let editStack = childText("EditStack")?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -237,7 +250,7 @@ public enum XMPSidecar {
             label: property("xmp:Label", local: "Label").flatMap { $0.isEmpty ? nil : $0 },
             flag: Int(property("latent:Flag", local: "Flag") ?? "") ?? 0,
             rotation: Int(property("latent:Rotation", local: "Rotation") ?? "") ?? 0,
-            keywords: keywords,
+            keywords: KeywordPath.merge(subjects: keywords, hierarchical: hierarchy),
             preservedFileName: property("xmpMM:PreservedFileName", local: "PreservedFileName"),
             sourceHash: property("latent:SourceHash", local: "SourceHash") ?? "",
             schemaVersion: Int(property("latent:SchemaVersion", local: "SchemaVersion") ?? "") ?? 1,
