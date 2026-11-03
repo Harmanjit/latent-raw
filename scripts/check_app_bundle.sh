@@ -36,6 +36,9 @@ done
 check "LibRaw's LGPL text" grep -q "LESSER GENERAL PUBLIC LICENSE" "$RES/Licences/LibRaw-LGPL-2.1.txt"
 check "GRDB's MIT text" grep -q "Gwendal Rou" "$RES/Licences/GRDB-MIT.txt"
 check "the Apache text for SAM 2.1" grep -q "Apache License" "$RES/Licences/Apache-2.0.txt"
+check "NVIDIA's licence for SegFormer" grep -q "NVIDIA Source Code License" "$RES/Licences/SegFormer-NVIDIA.txt"
+check "the BSD notice for LibRaw's DCB/FBDD code" grep -q "Jacek Gozdz" "$RES/Licences/LibRaw-DCB-FBDD-BSD.txt"
+check "the BSD notice for LibRaw's X3F code" grep -q "Roland Karlsson" "$RES/Licences/LibRaw-X3F-BSD.txt"
 check "the Lensfun CC-BY-SA notice" grep -q "Attribution-ShareAlike 3.0" "$RES/Help/Licences.md"
 # Latent handles no open-documents event, so it must not claim document
 # types Finder would then offer it (see make_app.sh).

@@ -118,8 +118,9 @@ rm -f "$APP/Contents/Resources/Help/README.md"
 # changing Assets/Latent.pdf, run `swift scripts/make_icon.swift`.
 cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-# Licence texts. LibRaw (LGPL), GRDB and the bundled models (MIT, Apache)
-# require their notices to travel with every copy, and so does Latent's
+# Licence texts. LibRaw (LGPL, plus the BSD notices of code compiled into
+# it), GRDB and the bundled models (MIT, Apache, and NVIDIA's licence for
+# SegFormer) require their notices to travel with every copy, and so does Latent's
 # own GPLv3; Help > Latent Help > Licences lists what each one covers.
 cp LICENSE "$APP/Contents/Resources/LICENSE"
 mkdir -p "$APP/Contents/Resources/Licences"

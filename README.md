@@ -182,11 +182,11 @@ strips local symbols from the binaries before signing, copies
 `docs/wiki` into `Contents/Resources/Help` for the Help window, copies
 `LICENSE` and the third-party licence texts in `licences/` into
 `Contents/Resources`, and adds the app icon, `Assets/AppIcon.icns`.
-`scripts/check_app_bundle.sh` checks the bundle it leaves; CI runs both on
-every push, so the release configuration is built there too. That file is committed; after changing the
-logo, `Assets/Latent.pdf`, remake it (and the README's `AppIcon.png`) with
-`swift scripts/make_icon.swift`, which places the artwork on Apple's icon grid
-with the grid's shadow.
+That file is committed; after changing the logo, `Assets/Latent.pdf`, remake
+it (and the README's `AppIcon.png`) with `swift scripts/make_icon.swift`,
+which places the artwork on Apple's icon grid with the grid's shadow.
+`scripts/check_app_bundle.sh` checks the bundle `make_app.sh` leaves; CI runs
+both on every push, so the release configuration is built there too.
 
 A debug build can picture its own window without screen-recording
 permission: `LATENT_SNAPSHOT_DIR=.build/snapshots swift run latent-app`
