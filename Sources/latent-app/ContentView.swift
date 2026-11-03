@@ -1295,6 +1295,8 @@ struct ContentView: View {
             }
         case .toggleMaskOverlay:
             model.showMaskOverlay.toggle()
+        case .toggleBlackAndWhite:
+            model.toggleBlackAndWhite()
         case .toolSize(let steps):
             model.stepToolSize(by: steps)
         case .rename:
@@ -1382,6 +1384,7 @@ struct ContentView: View {
         state.healToolActive = model.healToolActive
         state.hasSelectedHeal = model.selectedHeal != nil
         state.redEyeToolActive = model.redEyeToolActive
+        state.blackAndWhite = model.isBlackAndWhite
         state.hasSelectedRedEye = model.selectedRedEye != nil
         state.dustToolActive = model.dustToolActive
         state.hasSelectedDust = model.hasSelectedDust
@@ -1751,13 +1754,9 @@ struct ContentView: View {
                     disclosureLabel("HSL / Colour")
                 }
 
-                DisclosureGroup {
-                    SplitToningPanel(toning: $model.parameters.splitToning)
-                        .disabled(!model.hasImage)
-                        .padding(.top, 8)
-                } label: {
-                    disclosureLabel("Split Toning")
-                }
+                // Black & White, Point Colour, Colour Grading (which took
+                // Split Toning's place) and Calibration.
+                ColourSections(model: model)
 
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 10) {
@@ -1998,6 +1997,8 @@ struct ContentView: View {
             sliderRow(title: "Clarity", value: $model.parameters.clarity, range: -1...1, format: "%+.2f")
             sliderRow(title: "Dehaze", value: $model.parameters.dehaze, range: -1...1, format: "%+.2f")
             sliderRow(title: "Vibrance", value: $model.parameters.vibrance, range: -1...1, format: "%+.2f")
+            sliderRow(title: "Saturation", value: $model.parameters.colour.saturation, range: -1...1, format: "%+.2f")
+                .help("Every colour equally: -1 is black and white. Double-click to reset.")
         }
     }
 

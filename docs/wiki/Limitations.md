@@ -51,7 +51,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **A move takes the raw and its paired JPEG only.** An `.xmp` sidecar another application put beside the raw stays where it was.
 - **A move to another disk copies, then deletes the original.** If Latent crashes or is force-quit during a long copy, a hidden `.latent-transfer-…` file can be left in the destination. The original is still in place, and the hidden file can be deleted.
 - **Arranging the Custom order needs dragging.** There are no keys for it.
-- **Typed values aren't on every slider.** Temperature, Highlights, Shadows, Whites and Blacks, HSL, Split Toning and export quality show their value but can't be typed into.
+- **Typed values aren't on every slider.** Temperature, Highlights, Shadows, Whites and Blacks, HSL, the B&W Mix, the luminance sliders under the three small colour wheels and export quality show their value but can't be typed into.
 - **Export open image… is always full size in sRGB.** Use the export sheet for anything else.
 - **Compare's and Survey's Sync aren't remembered;** they are on again at every launch.
 - **Survey shows at most four images** and has no before/after view. It is for looking; to edit, open an image in Develop.

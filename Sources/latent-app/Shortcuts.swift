@@ -139,6 +139,8 @@ enum Shortcuts {
         Shortcut(.crop, "r"),
         Shortcut(.heal, "h"),
         Shortcut(.redEye, "y"),
+        // Lightroom's key for the Black & White treatment.
+        Shortcut(.toggleBlackAndWhite, "v", in: .develop),
         Shortcut(.toolSize(-1), "[", in: .develop),
         Shortcut(.toolSize(1), "]", in: .develop),
         Shortcut(.deleteHeal, .delete, in: .develop),
@@ -307,6 +309,7 @@ extension Shortcuts {
             ShortcutPageRow([.crop], "Crop and straighten tool"),
             ShortcutPageRow([.heal], "Spot removal tool"),
             ShortcutPageRow([.redEye], "Red-eye tool"),
+            ShortcutPageRow([.toggleBlackAndWhite], "Develop: switch the treatment between Color and Black & White"),
             ShortcutPageRow([.toolSize(-1), .toolSize(1)], "Smaller, larger brush or spot (while the mask brush, spot removal or red-eye is on)"),
             ShortcutPageRow([.deleteHeal], "Delete the selected spot patch or red-eye spot"),
             ShortcutPageRow([.disarmTools], "Leave any on-image tool; with none on, leave the full-screen image"),

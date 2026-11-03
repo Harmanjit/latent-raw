@@ -145,6 +145,9 @@ public struct EditParameters: Sendable, Equatable {
     /// Neural noise reduction strength, 0 (off) … 1. The model's output
     /// is computed once per image (MLKit) and blended in at this weight.
     public var aiDenoise: Float
+    /// Saturation, Black & White, Colour Grading, Calibration and Point
+    /// Colour (ColourControls.swift). Neutral by default.
+    public var colour: ColourControls = .neutral
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -261,6 +264,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.vibrance == b.vibrance
             && a.defringePurple == b.defringePurple && a.defringeGreen == b.defringeGreen
             && a.perspective == b.perspective && a.aiDenoise == b.aiDenoise
+            && a.colour == b.colour
     }
 }
 
@@ -1321,7 +1325,7 @@ public final class RenderPipeline {
         encoder.setTexture(input, index: 0)
         encoder.setTexture(outputTexture, index: 1)
 
-        var camToWorking = cameraToWorking
+        var camToWorking = Self.calibrated(cameraToWorking, parameters.colour.calibration)
         var workingToOut = ColorKit.workingToOutput(output.space)
         var exposureScale = powf(2.0, parameters.exposureEV)
         var contrast = parameters.contrast
@@ -1392,6 +1396,7 @@ public final class RenderPipeline {
         var vibrance = parameters.vibrance
         encoder.setBytes(&vibrance, length: 4, index: 23)
         encodeToneRangesAndChannelCurves(encoder, parameters: parameters)
+        encodeColourControls(encoder, parameters: parameters)
         encoder.setTexture(proofTexture(for: output.proof), index: 3)
 
         dispatch(encoder, pso: gpu.colorAndTonePSO, width: input.width, height: input.height)

@@ -97,6 +97,14 @@ final class EditorModel: ObservableObject {
     /// image isn't re-rendered for every mouse move.
     @Published var paintingHealStroke: [SIMD2<Float>] = []
 
+    // MARK: - Point Colour picker (EditorModel+Colour.swift)
+
+    /// Armed by Point Colour's Pick button: the next click on the image
+    /// adds a swatch. Takes that click before any other tool.
+    @Published var pointColourPicking = false
+    /// The Point Colour swatch whose sliders the panel shows.
+    @Published var selectedPointColour: Int?
+
     // MARK: - Red-eye tool (EditorModel+RedEye.swift)
 
     @Published var redEyeToolActive = false {

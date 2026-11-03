@@ -54,6 +54,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | R | Crop and straighten tool |
 | H | Spot removal tool |
 | Y | Red-eye tool |
+| V | Develop: switch the treatment between Color and Black & White |
 | [, ] | Smaller, larger brush or spot (while the mask brush, spot removal or red-eye is on) |
 | ⌫ | Delete the selected spot patch or red-eye spot |
 | Esc | Leave any on-image tool; with none on, leave the full-screen image |

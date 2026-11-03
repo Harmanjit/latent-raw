@@ -63,6 +63,14 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var dust: [HealPatch]?
         /// Touch-up (docs/Retouch.md §7). Absent when neutral.
         public var touchup: TouchUp?
+        /// Global saturation, Black & White, Colour Grading's additions to
+        /// split toning, Calibration and Point Colour (ColourControls.swift).
+        /// Each absent while neutral, so older edits encode as before.
+        public var saturation: Saturation?
+        public var blackwhite: BlackAndWhite?
+        public var colorgrading: ColourGrading?
+        public var calibration: Calibration?
+        public var pointcolor: [PointColour]?
     }
 
     public struct AIDenoise: Codable, Equatable, Sendable {
@@ -203,6 +211,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.redeye = p.redEyes.isEmpty ? nil : p.redEyes
         modules.dust = p.dust.isEmpty ? nil : p.dust
         modules.touchup = p.touchUp.isNeutral ? nil : p.touchUp
+        setColourControls(p.colour)
         modules.presence = (p.texture == 0 && p.clarity == 0 && p.dehaze == 0) ? nil
             : Presence(texture: p.texture, clarity: p.clarity, dehaze: p.dehaze)
         modules.vibrance = p.vibrance == 0 ? nil : Vibrance(amount: p.vibrance)
@@ -279,6 +288,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         if let pr = modules.presence { p.texture = pr.texture; p.clarity = pr.clarity; p.dehaze = pr.dehaze }
         else { p.texture = 0; p.clarity = 0; p.dehaze = 0 }
         p.vibrance = modules.vibrance?.amount ?? 0
+        p.colour = colourControls
         if let d = modules.defringe { p.defringePurple = d.purple; p.defringeGreen = d.green }
         else { p.defringePurple = 0; p.defringeGreen = 0 }
         p.aiDenoise = modules.aidenoise?.strength ?? 0

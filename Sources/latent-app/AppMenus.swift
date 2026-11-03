@@ -39,6 +39,8 @@ struct CommandState: Equatable {
     var hasSelectedHeal = false
     var redEyeToolActive = false
     var hasSelectedRedEye = false
+    /// The open image's treatment is Black & White (a tick in the menu).
+    var blackAndWhite = false
     /// The dust-spot tool is armed and a ring is selected, so Delete
     /// removes it, as for a spot patch.
     var dustToolActive = false
@@ -104,6 +106,7 @@ struct CommandState: Equatable {
         case .toolSize: mode == .develop && toolSizeAdjustable
         case .addMask: mode == .develop && canAddMask
         case .toggleMaskOverlay: mode == .develop && hasSelectedMask
+        case .toggleBlackAndWhite: mode == .develop && hasImage
         case .makeSelect: mode == .compare && hasSelection
         case .survey: mode == .survey || (hasSelection && SurveyPanes.canSurvey(selectionCount: selectionCount))
         case .removeFromSurvey: mode == .survey && hasSelection
@@ -399,6 +402,7 @@ struct LatentCommands: Commands {
 
         CommandMenu("Develop") {
             item("Auto Adjust", .autoAdjust)
+            toolToggle("Black & White", .toggleBlackAndWhite, isOn: state.blackAndWhite)
             Divider()
             toolToggle("Crop & Straighten", .crop, isOn: state.cropToolActive)
             toolToggle("Spot Removal", .heal, isOn: state.healToolActive)
