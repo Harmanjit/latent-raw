@@ -28,8 +28,9 @@ What `--yes` does, in order:
 
 1. Asks Hugging Face for the current revision of the model's repository and
    prints it with the files and their sizes, so there is something to look
-   at before the bytes arrive. `--revision` takes a particular one instead;
-   `--resolve` stops after this step.
+   at before the bytes arrive. `--revision` takes a particular one instead,
+   and the pin records the commit it resolves to, never a branch or tag
+   name; `--resolve` stops after this step.
 2. Downloads at exactly that revision. This is the only step that fetches
    weights, and it happens under `--yes` and nowhere else.
 3. Hashes what arrived: the content hash of each `.mlpackage` for a model
@@ -38,7 +39,9 @@ What `--yes` does, in order:
 4. Writes those values into the conversion script, in place, by locating
    the pin in its syntax tree rather than by matching text, then re-reads
    the file to confirm the pin now says what it should. A pin already
-   recorded is left alone unless `--repin` says otherwise.
+   recorded is left alone unless `--repin` says otherwise, and a hash that
+   no longer matches what was fetched stops the run rather than being
+   rewritten.
 5. Runs the conversion script, which downloads nothing new (the cache is
    warm), checks what it has against the pin just written, verifies the
    package on a test photo and writes `<id>.model.json`.
@@ -258,6 +261,25 @@ def unpinned(value):
     """Whether a pin is still waiting to be recorded. The scripts write the
     placeholder for this; convert_birefnet.py writes None."""
     return value is None or value == PLACEHOLDER
+
+
+def is_commit(value):
+    """Whether `value` is a full 40-character commit hash. A branch or tag
+    name, or a short hash, can come to mean another commit later, so it is
+    never what gets recorded as a pin."""
+    return isinstance(value, str) and len(value) == 40 and all(c in "0123456789abcdef" for c in value.lower())
+
+
+def moved_hashes(script, edits):
+    """The hash pins in `edits` that are already recorded with a different
+    value, as (where, subkey, recorded, found). The first edit is the
+    revision, which main() guards on its own."""
+    moved = []
+    for where, subkey, value in edits[1:]:
+        recorded = read_pin(script, where, subkey)
+        if not unpinned(recorded) and recorded != value:
+            moved.append((where, subkey, recorded, value))
+    return moved
 
 
 def write_pins(script, edits):
@@ -563,20 +585,32 @@ def main(argv=None):
         if unpinned(revision):
             sys.exit(f"pass --code-revision: the commit of {pin['code_url']} whose model code you read. "
                      f"The conversion runs that code, so it is pinned along with the weights.")
+        # Nothing here can resolve a GitHub ref, so a branch, tag or short
+        # hash would be recorded as typed and could later mean other code.
+        if args.code_revision and not is_commit(args.code_revision):
+            sys.exit(f"--code-revision {args.code_revision} is not a full 40-character commit hash. A branch, "
+                     f"tag or short hash can move; give the commit itself (git rev-parse <ref> in a clone "
+                     f"of {pin['code_url']}).")
     else:
         # A model already pinned is fetched at its pin: that is the revision
         # someone looked at. --revision names another and --repin moves the
         # pin to whatever is current.
         recorded = read_pin(pin["script"], pin["revision"])
         held = None if (unpinned(recorded) or args.repin) else recorded
-        if args.revision and held and args.revision != held:
-            sys.exit(f"scripts/{pin['script']} is pinned at {held[:12]} and --revision asks for "
-                     f"{args.revision[:12]}. Leave --revision off to convert at the pin, or pass --repin "
-                     f"to move it.")
         info = resolve(repo, args.revision or held)
+        # The pin is the commit --revision resolved to, never the string as
+        # typed: a branch or tag name would be re-resolved by every later
+        # run, and BiRefNet runs the repository's own code from it.
+        if not is_commit(getattr(info, "sha", None)):
+            sys.exit(f"https://huggingface.co/{repo} did not say which commit "
+                     f"{args.revision or held or 'its head'} is, so there is nothing safe to pin")
+        if args.revision and held and info.sha != held:
+            sys.exit(f"scripts/{pin['script']} is pinned at {held[:12]} and --revision {args.revision} is "
+                     f"{info.sha[:12]}. Leave --revision off to convert at the pin, or pass --repin "
+                     f"to move it.")
         print(f"{row['displayName']} ({row['id']})")
         total = show_revision(repo, info, pin.get("patterns"))
-        revision = args.revision or held or info.sha
+        revision = info.sha
         if held:
             print("  Pinned       yes, and this is that revision")
         elif not args.revision:
@@ -617,6 +651,19 @@ def main(argv=None):
         edits.append((pin["weights"], None, digest))
 
     # ------------------------------------------------------- 3. write the pin
+    # A hash already recorded is what someone checked. Different bytes under
+    # the same pin (a changed upload, another --from-file) are refused rather
+    # than silently becoming the new pin; --repin is the way to move it.
+    try:
+        moved = moved_hashes(pin["script"], edits)
+    except PinShapeError as e:
+        sys.exit(f"the pin in scripts/{pin['script']} is not the shape this expects ({e}); "
+                 f"record it by hand. Nothing has been changed.")
+    if moved and not args.repin:
+        lines = "\n".join(f"  {subkey or (where if isinstance(where, str) else where[-1])}: recorded {recorded}, "
+                          f"found {found}" for where, subkey, recorded, found in moved)
+        sys.exit(f"what was hashed does not match the pin in scripts/{pin['script']}:\n{lines}\n"
+                 f"Nothing has been changed. If the new bytes are the ones you vetted, pass --repin.")
     try:
         write_pins(pin["script"], edits)
     except PinShapeError as e:
