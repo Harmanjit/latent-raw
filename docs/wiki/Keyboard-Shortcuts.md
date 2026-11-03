@@ -40,6 +40,8 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | P, X, U | Pick, reject, unflag |
 | ⌘[, ⌘] | Rotate left, right |
 | ⇧⌘L | Clear the filter bar |
+| B | Add the selection to the target collection (the Quick Collection unless you chose another), or take it out when it is all there already |
+| ⌘N | New collection (with the selected photos, if you like) |
 
 ## Editing
 

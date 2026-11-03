@@ -76,6 +76,7 @@ enum GridContextMenu {
                                      actions.rename))
         menu.addItem(destinationMenu("Move to Folder", mode: .move, enabled: canChange, actions: actions))
         menu.addItem(destinationMenu("Copy to Folder", mode: .copy, enabled: canChange, actions: actions))
+        CollectionCommands.addItems(to: menu, library: library)
         return menu
     }
 

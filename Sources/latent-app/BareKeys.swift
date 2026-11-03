@@ -98,6 +98,10 @@ enum KeyCommand: Equatable {
     case fullScreenImage, secondaryDisplay
     /// Arrow keys on a zoomed-in image, when Settings has them pan.
     case panImage(PanDirection)
+    /// Collections (CollectionsSidebar.swift): the New sheets, B for the
+    /// target collection, and taking photos out of the collection shown.
+    case newCollection, newSmartCollection, newCollectionSet, saveFilterAsSmartCollection
+    case addToTargetCollection, removeFromCollection
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).

@@ -68,6 +68,12 @@ struct CommandState: Equatable {
     var arrowKeysPanImage = false
     /// The image shown is zoomed in past fit.
     var imageZoomedIn = false
+    /// A folder is open, so it has collections to make.
+    var hasCatalog = false
+    /// The grid shows a regular collection, so photos can be taken out of it.
+    var showsRegularCollection = false
+    /// What B does: "Add to Quick Collection", or the target's name.
+    var targetCollectionTitle = "Add to Quick Collection"
 
     /// Whether the arrow keys pan the image rather than step through images
     /// (Loupe and Develop only; Compare keeps them for the candidate).
@@ -154,6 +160,10 @@ struct CommandState: Equatable {
         case .fullScreenImage: fullScreenImage || hasSelection || (mode == .develop && hasImage)
         case .secondaryDisplay: secondaryDisplayShowing || hasSecondDisplay
         case .panImage: arrowKeysPan
+        case .newCollection, .newSmartCollection, .newCollectionSet: hasCatalog
+        case .saveFilterAsSmartCollection: hasCatalog && filterActive
+        case .addToTargetCollection: hasCatalog && (hasSelection || selectionCount > 0)
+        case .removeFromCollection: showsRegularCollection && (hasSelection || selectionCount > 0)
         }
     }
 
@@ -270,6 +280,11 @@ struct LatentCommands: Commands {
             item("Rename…", .rename)
             item("Move to Folder…", .moveToFolder)
             item("Copy to Folder…", .copyToFolder)
+            Divider()
+            item("New Collection…", .newCollection)
+            item("New Smart Collection…", .newSmartCollection)
+            item("New Collection Set…", .newCollectionSet)
+            item("Save Filter as Smart Collection…", .saveFilterAsSmartCollection)
         }
 
         CommandGroup(replacing: .undoRedo) {
@@ -337,6 +352,9 @@ struct LatentCommands: Commands {
                 item("HDR Panorama… (Experimental)", .photoMergeHDRPanorama)
             }
             item("Remove Dust…", .removeDust)
+            Divider()
+            item(state.targetCollectionTitle, .addToTargetCollection)
+            item("Remove from Collection", .removeFromCollection)
         }
 
         CommandMenu("Develop") {

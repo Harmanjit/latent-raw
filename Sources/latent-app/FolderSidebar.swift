@@ -29,6 +29,8 @@ struct FolderSidebar: View {
     /// Back and Forward, when given.
     var navigator: FolderNavigator?
     var onStepHistory: ((Int) -> Void)?
+    /// The open catalog, whose collections are listed under the folders.
+    var library: Library?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -41,6 +43,10 @@ struct FolderSidebar: View {
                           onOpen: open, onAdd: { urls in urls.forEach { favourites.add($0) } },
                           onRemove: { favourites.remove($0) }, onChooseFolder: onChooseFolder,
                           onDropImages: onDropImages, areLibraryImages: areLibraryImages)
+            if let library {
+                Divider()
+                CollectionsSection(library: library)
+            }
             Divider()
             footer
                 .padding(.horizontal, 12)

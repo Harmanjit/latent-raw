@@ -13,6 +13,7 @@ struct LibraryPanel: View {
     @ObservedObject var model: EditorModel
     @State private var metadataExpanded = true
     @State private var historyExpanded = false
+    @AppStorage("latent.keywordListExpanded") private var keywordListExpanded = false
     @State private var exportExpanded = true
     @AppStorage(OpenImageExportOptions.includeMetadataKey) private var openImageIncludesMetadata = true
     @AppStorage(OpenImageExportOptions.includeLocationKey) private var openImageIncludesLocation = false
@@ -28,7 +29,6 @@ struct LibraryPanel: View {
     /// editor's image.
     var exportsOpenImage = true
 
-    @State private var keywordText = ""
     /// The selected photo's merge recipe, when it is one Photo Merge made;
     /// read from the catalog when the selection settles.
     @State private var mergeSummary: MergeRecipeSummary?
@@ -91,6 +91,14 @@ struct LibraryPanel: View {
                 }
             }
 
+            if library.folderURL != nil {
+                DisclosureGroup(isExpanded: $keywordListExpanded) {
+                    KeywordListView(library: library).padding(.top, 6)
+                } label: {
+                    sectionLabel("Keyword List")
+                }
+            }
+
             DisclosureGroup(isExpanded: $historyExpanded) {
                 HistoryPanel(model: model).padding(.top, 6)
             } label: {
@@ -114,16 +122,6 @@ struct LibraryPanel: View {
         .padding(14)
         }
         .frame(width: 220, alignment: .leading)
-        .onChange(of: library.selectedKeywords, initial: true) { _, keywords in
-            keywordText = keywords.joined(separator: ", ")
-        }
-        // And whenever another image becomes the selection: its keywords may
-        // be the same as the last one's (both none, often), which the change
-        // above doesn't see, and an unsubmitted draft typed for that image
-        // would then stay under this one's name and be saved onto it.
-        .onChange(of: library.selectedImageID) {
-            keywordText = library.selectedKeywords.joined(separator: ", ")
-        }
     }
 
     /// Export the selection, and how the current batch is going.
@@ -370,14 +368,8 @@ struct LibraryPanel: View {
                 .accessibilityValue(SpokenText.flag(image.flag))
             }
 
-            TextField("Keywords, comma separated", text: $keywordText)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Keywords")
-                .controlSize(.small)
-                .onSubmit {
-                    let keywords = keywordText.split(separator: ",").map(String.init)
-                    library.perform("Saving keywords") { try await library.setKeywords(keywords) }
-                }
+            // Chips and an add field over the whole selection (KeywordingViews).
+            KeywordingField(library: library)
 
             if image.finderTags != nil {
                 FinderTagList(tags: image.tags)

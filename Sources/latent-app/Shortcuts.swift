@@ -122,6 +122,10 @@ enum Shortcuts {
         Shortcut(.rotate(-1), "[", .command),
         Shortcut(.rotate(1), "]", .command),
         Shortcut(.clearFilter, "l", [.shift, .command]),
+        // Lightroom's keys: B adds to the target (Quick) collection, ⌘N
+        // makes a collection.
+        Shortcut(.addToTargetCollection, "b"),
+        Shortcut(.newCollection, "n", .command),
         // Editing
         Shortcut(.undo, "z", .command),
         Shortcut(.redo, "z", [.shift, .command]),
@@ -283,6 +287,8 @@ extension Shortcuts {
             ShortcutPageRow([.pick, .reject, .unflag], "Pick, reject, unflag"),
             ShortcutPageRow([.rotate(-1), .rotate(1)], "Rotate left, right"),
             ShortcutPageRow([.clearFilter], "Clear the filter bar"),
+            ShortcutPageRow([.addToTargetCollection], "Add the selection to the target collection (the Quick Collection unless you chose another), or take it out when it is all there already"),
+            ShortcutPageRow([.newCollection], "New collection (with the selected photos, if you like)"),
         ]),
         ("Editing", [
             ShortcutPageRow([.undo, .redo], "Undo, redo (in Develop, the image's edit history; elsewhere, what you did in the Library, moves and renames included)"),

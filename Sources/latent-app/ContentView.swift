@@ -111,12 +111,13 @@ struct ContentView: View {
                           onOpen: { openFolder($0) }, onChooseFolder: chooseFavouriteFolder,
                           onDropImages: { fileCommands.dropImages($0, on: $1, mode: $2) },
                           areLibraryImages: { fileCommands.areLibraryImages($0) },
-                          navigator: navigator, onStepHistory: stepFolderHistory)
+                          navigator: navigator, onStepHistory: stepFolderHistory, library: library)
                 .navigationSplitViewColumnWidth(min: 170, ideal: 220, max: 360)
         } detail: {
             mainArea
         }
         .navigationSplitViewStyle(.balanced)
+        .collectionSheets(library: library)
         .toolbar(fullScreen.isActive ? .hidden : .automatic, for: .windowToolbar)
         .motionFollowsAccessibility()
     }
@@ -1277,6 +1278,9 @@ struct ContentView: View {
             }
         case .panImage(let direction):
             model.panImage(direction)
+        case .newCollection, .newSmartCollection, .newCollectionSet, .saveFilterAsSmartCollection,
+             .addToTargetCollection, .removeFromCollection:
+            CollectionCommands.perform(command, library: library, onlyPrimary: mode != .library)
         }
         return true
     }
@@ -1338,6 +1342,9 @@ struct ContentView: View {
         state.hasSelectedMask = model.selectedLocal != nil
         state.showMaskOverlay = model.showMaskOverlay
         state.filterActive = library.filter.isActive
+        state.hasCatalog = library.folderURL != nil
+        state.showsRegularCollection = library.collections.activeCollection?.kind == .regular
+        state.targetCollectionTitle = CollectionCommands.targetTitle(library)
         state.hasCompareSelect = compareRecord != nil
         state.canGoBack = navigator.history.canGoBack
         state.canGoForward = navigator.history.canGoForward
