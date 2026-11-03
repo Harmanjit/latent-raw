@@ -120,7 +120,7 @@ public enum Thumbnailer {
     static func writeHEIC(_ image: CGImage, to destination: URL) throws {
         let directory = destination.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let tmp = directory.appendingPathComponent(".\(destination.lastPathComponent).tmp-\(UUID().uuidString)")
+        let tmp = FileOperations.companionTemporaryURL(for: destination)
 
         guard let dest = CGImageDestinationCreateWithURL(tmp as CFURL, UTType.heic.identifier as CFString, 1, nil) else {
             throw ThumbnailError.encodeFailed

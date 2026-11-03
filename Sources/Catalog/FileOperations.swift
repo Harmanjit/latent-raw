@@ -35,6 +35,10 @@ public enum FileOperations {
         }
     }
 
+    /// The longest name the rules allow: 255 bytes less the longest
+    /// companion suffix, ".heic".
+    public static let maximumNameBytes = 255 - 5
+
     /// The rules for a name in itself, whatever folder it goes in.
     public static func problem(withName name: String) -> NameProblem? {
         if name.trimmingCharacters(in: .whitespaces).isEmpty { return .empty }
@@ -42,8 +46,10 @@ public enum FileOperations {
         if name.contains("/") || name.contains(":") { return .separator }
         if name.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) { return .controlCharacter }
         if name.hasPrefix(".") { return .leadingDot }
-        // APFS and HFS+ allow 255 bytes of UTF-8 in a name.
-        if name.utf8.count > 255 { return .tooLong }
+        // APFS and HFS+ allow 255 bytes of UTF-8 in a name, and the catalog
+        // keeps a sidecar and a thumbnail under the image's name plus
+        // ".xmp" or ".heic", so five bytes are kept back for those.
+        if name.utf8.count > maximumNameBytes { return .tooLong }
         return nil
     }
 
@@ -176,6 +182,20 @@ public enum FileOperations {
     static func temporaryURL(beside destination: URL) -> URL {
         destination.deletingLastPathComponent()
             .appendingPathComponent(".latent-transfer-\(UUID().uuidString)")
+    }
+
+    /// A hidden sibling of `destination` to write before renaming it into
+    /// place, for sidecars and thumbnails. As `SafeFileWriter.temporaryURL`:
+    /// a short random part and a long name shortened by whole characters,
+    /// so the temporary name stays within the 255-byte limit whatever the
+    /// image is called. The ".tmp" ending keeps it from being taken for a
+    /// sidecar or a thumbnail.
+    static func companionTemporaryURL(for destination: URL) -> URL {
+        let token = UUID().uuidString.prefix(8)
+        var name = destination.lastPathComponent
+        while name.utf8.count > 200 { name.removeLast() }
+        return destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(name).latent-\(token).tmp", isDirectory: false)
     }
 
     /// POSIX failures as Cocoa errors, whose descriptions read as sentences.
