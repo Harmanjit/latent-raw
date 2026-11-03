@@ -131,7 +131,9 @@ private final class FolderNode {
     enum Kind { case header, favourite, folder }
 
     let kind: Kind
-    let title: String
+    /// A favourite starts with its folder's name from the path and gets
+    /// Finder's display name once the background check is back.
+    var title: String
     let url: URL?
     var isAvailable: Bool
     var hasCatalog: Bool
@@ -294,6 +296,9 @@ final class FolderOutlineController: NSViewController, NSOutlineViewDataSource, 
     var onChooseFolder: (() -> Void)?
     var onDropImages: (([URL], URL, TransferMode) -> Void)?
     var areLibraryImages: (([URL]) -> Bool)?
+    /// Finder's name for a folder. It reads the file system, so it is only
+    /// ever called off the main thread; replaceable so tests can check that.
+    var displayName: @Sendable (URL) -> String = { FileManager.default.displayName(atPath: $0.path) }
 
     private let outlineView = FolderOutlineView()
     private let header = FolderNode(kind: .header, title: "Favourites", url: nil, children: [])
@@ -361,7 +366,9 @@ final class FolderOutlineController: NSViewController, NSOutlineViewDataSource, 
         var fresh: [FolderNode] = []
         let nodes = folders.map { folder -> FolderNode in
             if let node = existing.removeValue(forKey: folder.id), node.isAvailable == folder.isAvailable { return node }
-            let node = FolderNode(kind: .favourite, title: FileManager.default.displayName(atPath: folder.url.path),
+            // The name from the path for now: Finder's display name reads the
+            // disk, which on a share that stopped answering would hang here.
+            let node = FolderNode(kind: .favourite, title: folder.url.lastPathComponent,
                                   url: folder.url, isAvailable: folder.isAvailable)
             if folder.isAvailable { fresh.append(node) }
             return node
@@ -376,18 +383,23 @@ final class FolderOutlineController: NSViewController, NSOutlineViewDataSource, 
         reveal(currentFolder, force: true)
     }
 
-    /// Finds out in the background which new favourites can expand.
+    /// Finds out in the background which new favourites can expand, and
+    /// their Finder names.
     private func checkForSubfolders(_ nodes: [FolderNode]) {
         let urls = nodes.compactMap(\.url)
         guard !urls.isEmpty else { return }
+        let displayName = displayName
         Task { [weak self] in
             let answers = await Task.detached(priority: .utility) {
-                urls.map { (FolderAccess.hasSubfolders($0), FolderAccess.hasCatalog($0)) }
+                urls.map { (FolderAccess.hasSubfolders($0), FolderAccess.hasCatalog($0), displayName($0)) }
             }.value
             guard let self else { return }
-            for (node, answer) in zip(nodes, answers) where !node.isDetached && node.children == nil {
-                node.mayHaveChildren = answer.0
-                node.hasCatalog = answer.1
+            for (node, answer) in zip(nodes, answers) where !node.isDetached {
+                node.title = answer.2
+                if node.children == nil {
+                    node.mayHaveChildren = answer.0
+                    node.hasCatalog = answer.1
+                }
                 self.reloadRow(node, children: false)
             }
         }

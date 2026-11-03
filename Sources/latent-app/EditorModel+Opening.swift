@@ -6,8 +6,10 @@ import PixelEngine
 extension EditorModel {
     // MARK: - Opening
 
-    func showOpenPanel() {
-        guard isReady else { return }
+    /// True when a file was chosen and is being opened; false on Cancel.
+    @discardableResult
+    func showOpenPanel() -> Bool {
+        guard isReady else { return false }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -17,8 +19,9 @@ extension EditorModel {
         panel.allowedContentTypes = [UTType.image]
         panel.allowsOtherFileTypes = true
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
         open(url: url)
+        return true
     }
 
     /// `userRotation` and `editStackJSON` are the catalog's stored state

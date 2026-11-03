@@ -107,6 +107,20 @@ enum KeyCommand: Equatable {
     static func command(for press: BareKeyPress) -> KeyCommand? {
         Shortcuts.command(for: press)
     }
+
+    /// Whether holding the key down should run the command again at the
+    /// key-repeat rate. Stepping through images, panning, resizing a tool
+    /// and zooming in or out are meant to repeat. Everything else either
+    /// toggles (Before/After, the crop and heal tools, zoom, Library/Loupe,
+    /// full screen), where a held key would flip it back and forth and leave
+    /// it in whichever state the last repeat landed on, or does the same
+    /// thing again, where a repeat only adds work.
+    var repeatsWhileHeld: Bool {
+        switch self {
+        case .step, .panImage, .toolSize, .zoomIn, .zoomOut: return true
+        default: return false
+        }
+    }
 }
 
 /// What has the keyboard in the window, as far as single keys care.
@@ -241,6 +255,9 @@ struct BareKeyMonitor: NSViewRepresentable {
                                            option: flags.contains(.option), control: flags.contains(.control)),
                   !press.belongs(to: KeyFocus(window.firstResponder)),
                   let command = KeyCommand.command(for: press) else { return false }
+            // A repeat of a command that must not repeat is swallowed, so the
+            // held key neither runs it again nor reaches anything else.
+            if event.isARepeat && !command.repeatsWhileHeld { return true }
             return perform?(command) ?? false
         }
     }

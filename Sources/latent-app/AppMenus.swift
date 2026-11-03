@@ -97,7 +97,9 @@ struct CommandState: Equatable {
         case .removeFromSurvey: mode == .survey && hasSelection
         case .swapCompare: mode == .compare && hasSelection && hasCompareSelect
         case .openFile: editorReady
-        case .export: selectionCount > 0 && !exportQueueRunning && !photoMergeRunning
+        // Not while a print or contact sheet renders either (both are
+        // `outputJobRunning`): one full-size GPU job at a time.
+        case .export: selectionCount > 0 && !exportQueueRunning && !photoMergeRunning && !outputJobRunning
         // The whole selection, as Export takes it: from the grid, or kept
         // from the grid in the other views. One GPU job at a time, and not
         // while typing, where ⌃H is the text system's delete-backward. Not
@@ -118,8 +120,11 @@ struct CommandState: Equatable {
         case .exportOpenImage: hasImage && !exportingOpenImage && mode != .survey
         // Library prints the selection, and so does Survey, whose selection
         // is the images shown; the other modes the image shown.
+        // Not while an export or another job holds the GPU slot: a print
+        // or a sheet renders each photo at full size as they do.
         case .print: editorReady && (mode.showsEditorImage ? hasImage || selectionCount > 0 : selectionCount > 0)
-        case .contactSheet: editorReady && selectionCount > 0
+            && !exportQueueRunning && !photoMergeRunning
+        case .contactSheet: editorReady && selectionCount > 0 && !exportQueueRunning && !photoMergeRunning
         // Edits are undone in Develop, library actions in the other modes
         // (the labels are those of the mode). Typing is undone by the Edit
         // menu itself (see LatentCommands). Undoing a move, copy or rename

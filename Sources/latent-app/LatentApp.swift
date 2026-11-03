@@ -231,13 +231,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
             outputs.cancelAll()
         }
+        let libraries = windows.map(\.library)
+        // Watched from before the flush, so a save that fails while quitting
+        // is caught rather than left on a status bar about to go away.
+        let saves = QuitSaveWatch(libraries)
         // Saving goes through Library.perform, so from here on the flushed
         // edit counts as pending work below.
         for window in windows { window.model.flushPendingSave() }
         // Moves and copies stop after the image under way (which is then
         // waited for below); the rest stay where they are.
         for window in windows { window.library.fileOperations.cancel() }
-        let libraries = windows.map(\.library)
         guard !exporting.isEmpty || !exportingOpenImage.isEmpty || libraries.contains(where: \.hasPendingWork)
                 || outputs.isRunning else {
             SafeFileWriter.abandonPendingWrites()
@@ -266,6 +269,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     Log.catalog.error("Quit: catalog writes did not finish within \(limit, privacy: .public); quitting anyway")
                 }
             }
+            // A save made while quitting failed: that change would be lost
+            // with the app. Asked, so the user can keep working and try again.
+            let failures = saves.failures
+            if !failures.isEmpty, !Self.confirmQuittingAfterFailedSave(failures) {
+                saves.restoreEarlierErrors()
+                sender.reply(toApplicationShouldTerminate: false)
+                return
+            }
             // An export still writing is cut short by the exit: remove its
             // hidden temporary file now, or nothing ever would.
             let abandoned = SafeFileWriter.abandonPendingWrites()
@@ -284,6 +295,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+
+    /// A save made while quitting failed. Returns whether to quit anyway.
+    private static func confirmQuittingAfterFailedSave(_ failures: [String]) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "The last change couldn’t be saved"
+        alert.informativeText = failures.joined(separator: "\n")
+            + "\n\nQuitting now loses it. Keep working to try again, for example once the disk has room "
+            + "or the folder can be written to."
+        alert.addButton(withTitle: "Quit Anyway")
+        alert.addButton(withTitle: "Keep Working").keyEquivalent = "\u{1b}"
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// Asks before cutting an export short, or waiting for Export Open
@@ -335,6 +359,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         func resume(_ finished: Bool) {
             continuation?.resume(returning: finished)
             continuation = nil
+        }
+    }
+}
+
+/// The libraries' errors raised by the saves quitting makes. `Library.perform`
+/// turns a failed write into `lastError`; quitting clears what was already
+/// there (shown earlier, a separate matter) so that whatever is there after
+/// the waits is a failure of the quit's own saves.
+@MainActor
+struct QuitSaveWatch {
+    private let libraries: [Library]
+    private let earlier: [String?]
+
+    init(_ libraries: [Library]) {
+        self.libraries = libraries
+        earlier = libraries.map(\.lastError)
+        for library in libraries { library.lastError = nil }
+    }
+
+    /// What failed since the watch began.
+    var failures: [String] { libraries.compactMap(\.lastError) }
+
+    /// Puts back the errors shown before quitting began, where nothing
+    /// newer has replaced them, when the user keeps working.
+    func restoreEarlierErrors() {
+        for (library, error) in zip(libraries, earlier) where library.lastError == nil {
+            library.lastError = error
         }
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import Catalog
 
 /// The strip above the grid: rating threshold, flag set, edited-only,
@@ -7,6 +8,7 @@ import Catalog
 /// and the grid follows `library.visibleImages`.
 struct FilterBar: View {
     @ObservedObject var library: Library
+    @StateObject private var options = FilterOptions()
 
     /// The controls need about 900 pt. In a column narrower than that (a
     /// small window with the sidebar showing) the bar scrolls sideways
@@ -19,6 +21,7 @@ struct FilterBar: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { options.attach(to: library) }
     }
 
     private var bar: some View {
@@ -29,10 +32,10 @@ struct FilterBar: View {
                 .toggleStyle(.button)
                 .accessibilityLabel("Edited only")
 
-            attributeMenu("Camera", selection: $library.filter.camera, options: library.availableCameras)
-            attributeMenu("Lens", selection: $library.filter.lens, options: library.availableLenses)
-            attributeMenu("Keyword", selection: $library.filter.keyword, options: library.availableKeywords)
-            FinderTagFilterMenu(selection: $library.filter.finderTag, tags: library.availableFinderTags)
+            attributeMenu("Camera", selection: $library.filter.camera, options: options.cameras)
+            attributeMenu("Lens", selection: $library.filter.lens, options: options.lenses)
+            attributeMenu("Keyword", selection: $library.filter.keyword, options: options.keywords)
+            FinderTagFilterMenu(selection: $library.filter.finderTag, tags: options.finderTags)
 
             TextField("Search file names", text: $library.filter.text)
                 .textFieldStyle(.roundedBorder)
@@ -164,5 +167,50 @@ struct FilterBar: View {
             .accessibilityLabel("Sort order")
             .accessibilityValue(library.sort.ascending ? "Ascending" : "Descending")
         }
+    }
+}
+
+/// The filter pickers' choices, kept rather than worked out in the bar's
+/// body. The bar redraws on every change the Library publishes, a
+/// thumbnail finishing among them, and each of `Library.availableCameras`
+/// and the rest goes through every image of the folder (the bar is built
+/// twice, too, inside ViewThatFits). These change only with the image list
+/// or with keywords, so they are worked out again only then.
+@MainActor
+final class FilterOptions: ObservableObject {
+    @Published private(set) var cameras: [String] = []
+    @Published private(set) var lenses: [String] = []
+    @Published private(set) var keywords: [String] = []
+    @Published private(set) var finderTags: [FinderTag] = []
+    /// How many times the lists were worked out, for the tests.
+    private(set) var rebuildCount = 0
+
+    private weak var library: Library?
+    private var observation: AnyCancellable?
+
+    func attach(to library: Library) {
+        guard self.library !== library else { return }
+        self.library = library
+        rebuild()
+        // A new image list, or keywords edited (which reload the selected
+        // image's). Both publish before the Library has finished the
+        // change (and keywords are kept apart from it), so the lists are
+        // read a turn later.
+        observation = Publishers.Merge(library.$images.map { _ in () }, library.$selectedKeywords.map { _ in () })
+            .dropFirst(2)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in MainActor.assumeIsolated { self?.rebuild() } }
+    }
+
+    private func rebuild() {
+        guard let library else { return }
+        rebuildCount += 1
+        let cameras = library.availableCameras, lenses = library.availableLenses
+        let keywords = library.availableKeywords, finderTags = library.availableFinderTags
+        // Assigned only when changed, so the bar isn't told to redraw for nothing.
+        if cameras != self.cameras { self.cameras = cameras }
+        if lenses != self.lenses { self.lenses = lenses }
+        if keywords != self.keywords { self.keywords = keywords }
+        if finderTags != self.finderTags { self.finderTags = finderTags }
     }
 }

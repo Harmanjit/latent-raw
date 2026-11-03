@@ -35,6 +35,20 @@ enum BookmarkStore {
 
     static func clear(key: String) { UserDefaults.standard.removeObject(forKey: key) }
 
+    /// `resolve(key:)` with the resolving on a detached task: it asks the
+    /// file system on the folder's volume, which on a mounted share that
+    /// has stopped answering waits for the network to time out. For what
+    /// launch reopens (the last folder, the default export folder).
+    @MainActor
+    static func resolveInBackground(key: String) async -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return UserDefaults.standard.url(forKey: key) }
+        let resolved = await Task.detached(priority: .userInitiated) { resolveQuietly(data) }.value
+        guard let (url, stale) = resolved else { return nil }
+        _ = url.startAccessingSecurityScopedResource()
+        if stale { save(url, key: key) }
+        return url
+    }
+
     /// The folder a saved bookmark names, read from the bookmark itself
     /// without resolving it: how to name a folder whose disk is away.
     static func storedPath(key: String) -> URL? {
@@ -98,18 +112,33 @@ final class FavouriteFolders: ObservableObject {
     /// starts one twice.
     private var accessing: Set<String> = []
     private var observers: [NSObjectProtocol] = []
+    private let defaults: UserDefaults
+    /// The launch-time resolve of every favourite, for tests to wait on.
+    private(set) var restoring: Task<Void, Never>?
 
-    private init() {
-        for data in UserDefaults.standard.array(forKey: BookmarkStore.favouriteFolders) as? [Data] ?? [] {
-            if let resolved = BookmarkStore.resolveQuietly(data) {
-                startAccessing(resolved.url)
-                let fresh = resolved.stale ? (BookmarkStore.bookmark(for: resolved.url) ?? data) : data
-                folders.append(FavouriteFolder(url: resolved.url, bookmark: fresh, isAvailable: true))
-            } else if let stored = BookmarkStore.storedURL(data) {
-                folders.append(FavouriteFolder(url: stored, bookmark: data, isAvailable: false))
-            }
+    /// The stored favourites are listed at once, by the path each bookmark
+    /// records, as not yet available; resolving them happens on a detached
+    /// task, and each row turns available as its folder is found. Resolving
+    /// asks the file system on the folder's volume, and on a share that is
+    /// mounted but has stopped answering that waits for the network to time
+    /// out, which on the main thread would hold the first window back.
+    init(defaults: UserDefaults = .standard,
+         resolve: @escaping @Sendable (Data) -> (url: URL, stale: Bool)? = BookmarkStore.resolveQuietly,
+         watchesVolumes: Bool = true) {
+        self.defaults = defaults
+        let stored = defaults.array(forKey: BookmarkStore.favouriteFolders) as? [Data] ?? []
+        for data in stored {
+            guard let url = BookmarkStore.storedURL(data) else { continue }
+            folders.append(FavouriteFolder(url: url, bookmark: data, isAvailable: false))
         }
-        persist()
+        let pending = folders
+        restoring = Task { [weak self] in
+            let resolved = await Task.detached(priority: .userInitiated) {
+                pending.map { resolve($0.bookmark) }
+            }.value
+            self?.finishRestoring(pending, resolved)
+        }
+        guard watchesVolumes else { return }
         // A disk plugged in or a share connected may bring a favourite back;
         // one ejected takes its favourites away.
         let center = NSWorkspace.shared.notificationCenter
@@ -118,6 +147,24 @@ final class FavouriteFolders: ObservableObject {
                 MainActor.assumeIsolated { self?.recheckVolumes() }
             })
         }
+    }
+
+    /// The launch resolve has come back: each favourite found becomes
+    /// available, under the path it resolved to, with its scope started.
+    private func finishRestoring(_ pending: [FavouriteFolder], _ resolved: [(url: URL, stale: Bool)?]) {
+        var changedBookmarks = false
+        for (favourite, found) in zip(pending, resolved) {
+            guard let found, let index = folders.firstIndex(where: { $0.id == favourite.id }),
+                  !folders[index].isAvailable else { continue }
+            startAccessing(found.url)
+            folders[index].url = found.url
+            folders[index].isAvailable = true
+            if found.stale, let data = BookmarkStore.bookmark(for: found.url) {
+                folders[index].bookmark = data
+                changedBookmarks = true
+            }
+        }
+        if changedBookmarks { persist() }
     }
 
     func contains(_ url: URL) -> Bool {
@@ -218,6 +265,6 @@ final class FavouriteFolders: ObservableObject {
     }
 
     private func persist() {
-        UserDefaults.standard.set(folders.map(\.bookmark), forKey: BookmarkStore.favouriteFolders)
+        defaults.set(folders.map(\.bookmark), forKey: BookmarkStore.favouriteFolders)
     }
 }

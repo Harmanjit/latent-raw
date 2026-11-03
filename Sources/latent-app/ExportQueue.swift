@@ -160,8 +160,27 @@ final class ExportQueue: ObservableObject {
     /// runs, and it doesn't start while an export runs.
     @Published private(set) var slotHeldByOtherJob = false
 
+    /// Prints and contact sheets being rendered. They don't take the slot
+    /// (they register with `OutputJobs` instead), but a print or a sheet
+    /// renders each photo at full size on the GPU as an export does, so the
+    /// queue waits its turn for them too.
+    let outputJobs: OutputJobs
+
+    init(outputJobs: OutputJobs = .shared) {
+        self.outputJobs = outputJobs
+    }
+
     /// An export or another GPU job is running.
-    var isGPUBusy: Bool { isRunning || slotHeldByOtherJob }
+    var isGPUBusy: Bool {
+        isRunning || slotHeldByOtherJob
+            || outputJobs.running.contains { $0.kind == .print || $0.kind == .contactSheet }
+    }
+
+    /// What the summary says when an export is refused because the GPU is
+    /// taken. The sheet's Export button is greyed out then, but the job may
+    /// have started between the sheet opening and the button being pressed.
+    static let busyRefusal = "Export didn’t start: a Photo Merge, dust removal, face search, print or contact sheet "
+        + "is using the graphics processor. Try again when it finishes."
 
     /// Takes the slot for a job that isn't an export; false, taking
     /// nothing, when an export or another job holds it. Give it back with
@@ -178,7 +197,12 @@ final class ExportQueue: ObservableObject {
 
     func start(records: [ImageRecord], library: Library, preset: ExportPreset,
                destination: URL, gpu: GPUContext) {
-        guard !isGPUBusy, !records.isEmpty, let catalog = library.catalog, let root = library.folderURL else { return }
+        guard !isGPUBusy else {
+            // Said, rather than the sheet closing on nothing.
+            if !isRunning { summary = Self.busyRefusal }
+            return
+        }
+        guard !records.isEmpty, let catalog = library.catalog, let root = library.folderURL else { return }
         isRunning = true
         stoppingForQuit = false
         done = 0; total = records.count; failures = []; notes = []; summary = ""
@@ -225,8 +249,12 @@ final class ExportQueue: ObservableObject {
                 }
                 // The planned name, checked against the disk once more:
                 // earlier files of a long batch take a while, and something
-                // may have appeared under this name meanwhile.
-                let output = plan.recheck(index)
+                // may have appeared under this name meanwhile. Off the main
+                // actor, with the date folder made there too: on a share
+                // that answers slowly each call would stall the window.
+                let settled = await Self.settle(plan, index: index, makeFolder: preset.dateSubfolders)
+                plan = settled.plan
+                let output = settled.output
                 switch output.action {
                 case .write, .replace:
                     break
@@ -242,17 +270,13 @@ final class ExportQueue: ObservableObject {
                     continue
                 }
                 var target = output.url
-                let folder = target.deletingLastPathComponent()
-                if preset.dateSubfolders {
-                    do {
-                        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                    } catch {
-                        await MainActor.run {
-                            self?.failures.append(Failure(name: name, reason: "could not create \(folder.lastPathComponent): \(error)"))
-                            self?.done += 1
-                        }
-                        continue
+                if let error = settled.folderError {
+                    let folder = target.deletingLastPathComponent()
+                    await MainActor.run {
+                        self?.failures.append(Failure(name: name, reason: "could not create \(folder.lastPathComponent): \(error)"))
+                        self?.done += 1
                     }
+                    continue
                 }
                 // Only Replace replaces. Otherwise the file is moved into place
                 // only if its name is still free, so one that appeared while
@@ -271,10 +295,11 @@ final class ExportQueue: ObservableObject {
                     attempts += 1
                     guard case .failure(let error) = outcome, error is SafeFileWriter.DestinationExists,
                           attempts < 3, !Task.isCancelled else { break }
-                    let settled = plan.recheck(index)
-                    switch settled.action {
+                    let resettled = await Self.settle(plan, index: index, makeFolder: false)
+                    plan = resettled.plan
+                    switch resettled.output.action {
                     case .write, .replace:
-                        target = settled.url
+                        target = resettled.output.url
                     case .skip:
                         skipped += 1
                         await MainActor.run { self?.done += 1 }
@@ -324,6 +349,32 @@ final class ExportQueue: ObservableObject {
 
     func cancel() { task?.cancel() }
 
+    /// Output `index` of `plan` settled against the disk, and its folder
+    /// made when `makeFolder` (date subfolders) and it is to be written. On
+    /// a detached task, never the main actor: both ask the file system,
+    /// which on a slow or stalled network share takes as long as it takes.
+    nonisolated static func settle(
+        _ plan: ExportBatchPlan, index: Int, makeFolder: Bool,
+        probe: ExportBatchPlanner.Probe = .system,
+        makeDirectory: @escaping @Sendable (URL) throws -> Void = {
+            try FileManager.default.createDirectory(at: $0, withIntermediateDirectories: true)
+        }
+    ) async -> (plan: ExportBatchPlan, output: ExportBatchPlan.Output, folderError: Error?) {
+        await Task.detached(priority: .userInitiated) {
+            var plan = plan
+            let output = plan.recheck(index, probe: probe)
+            var folderError: Error?
+            switch output.action {
+            case .write, .replace:
+                guard makeFolder else { break }
+                do { try makeDirectory(output.url.deletingLastPathComponent()) } catch { folderError = error }
+            case .skip, .fail:
+                break
+            }
+            return (plan, output, folderError)
+        }.value
+    }
+
     /// Set when quitting stops the run, so it doesn't bring Finder forward
     /// as the app goes away.
     private var stoppingForQuit = false
@@ -344,6 +395,15 @@ final class ExportQueue: ObservableObject {
 /// The export sheet: saved presets, format and size, naming and
 /// destination, with a live preview of the first file name.
 struct ExportSheet: View {
+    /// Where the sheet starts. Settings › Export › Default folder says "The
+    /// export sheet starts here", so when one is set it wins; the folder
+    /// last chosen with the sheet's own Choose… is used only without one.
+    /// `lastUsed` is read only then, since resolving a bookmark asks the
+    /// file system.
+    static func initialDestination(preference: URL?, lastUsed: () -> URL?) -> URL? {
+        preference ?? lastUsed()
+    }
+
     let count: Int
     /// The first selected image, for the naming preview.
     var sample: ImageRecord?
@@ -352,11 +412,14 @@ struct ExportSheet: View {
     var catalogName: String = ""
     /// For the size estimate and quality comparison; nil hides both.
     var preview: ExportPreviewSource?
+    /// False while another job holds the GPU, when the queue would refuse.
+    var canExport = true
     @State var preset = ExportPreset.load()
     @State private var renderer: ExportPreviewRenderer?
     @StateObject private var estimate = ExportEstimateModel()
-    @State private var destination: URL? = BookmarkStore.resolve(key: BookmarkStore.exportDestination)
-        ?? AppPreferences.shared.defaultExportFolder
+    @State private var destination: URL? = ExportSheet.initialDestination(
+        preference: AppPreferences.shared.defaultExportFolder,
+        lastUsed: { BookmarkStore.resolve(key: BookmarkStore.exportDestination) })
     @State private var savedPresets = ExportPresetStore.load()
     @State private var newPresetName = ""
     @State private var showingSavePreset = false
@@ -525,7 +588,8 @@ struct ExportSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(destination == nil || count == 0 || !unknownTokens.isEmpty)
+                .disabled(destination == nil || count == 0 || !unknownTokens.isEmpty || !canExport)
+                .help(canExport ? "" : ExportQueue.busyRefusal)
             }
         }
         .padding(20)
