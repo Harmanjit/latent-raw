@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import CoreText
+import ImageIO
 import ColorKit
 
 /// A line of text stamped into a corner of an exported file ("© 2026 Ana
@@ -34,12 +35,28 @@ public struct ExportWatermark: Sendable, Equatable, Codable {
         }
     }
 
+    /// Text, or a picture (a logo, from a PNG with transparency).
+    public enum Style: String, Sendable, Codable, CaseIterable {
+        case text, graphic
+
+        public var title: String {
+            switch self {
+            case .text: "Text"
+            case .graphic: "Graphic"
+            }
+        }
+    }
+
     public static let defaultText = "© {year}"
     public static let tokens: [(token: String, meaning: String)] = [("{year}", "capture year"), ("{name}", "original name")]
     /// Size and opacity limits, for the sheet's sliders and for values
     /// read from a hand-edited preset.
     public static let sizeRange: ClosedRange<Float> = 0.01...0.2
     public static let opacityRange: ClosedRange<Float> = 0.05...1
+    /// A graphic's longer side, as a share of the picture's short edge.
+    public static let imageSizeRange: ClosedRange<Float> = 0.02...0.5
+    /// The largest PNG kept in a preset: a logo, not a photo.
+    public static let maximumImageBytes = 4 << 20
     /// Gap between the text and the image's edges, as a fraction of the
     /// short edge, the same at every text size.
     public static let marginFraction: Double = 0.025
@@ -54,6 +71,20 @@ public struct ExportWatermark: Sendable, Equatable, Codable {
     public var red: Float
     public var green: Float
     public var blue: Float
+    /// Text (the default, and what presets saved before graphics hold) or
+    /// the PNG in `imageData`.
+    public var style: Style = .text
+    /// The text's font family; nil is the system font, as before.
+    public var fontName: String?
+    /// Quarter turns clockwise: 0, 90, 180 or 270 degrees. Text running up
+    /// the side of a picture is 270.
+    public var rotation: Int = 0
+    /// The graphic's PNG bytes, kept in the preset itself so it still
+    /// stamps after the original file moves (and no folder access is
+    /// needed to read it again).
+    public var imageData: Data?
+    /// The graphic's longer side as a share of the picture's short edge.
+    public var imageSize: Float = 0.15
 
     public init(text: String = ExportWatermark.defaultText, corner: Corner = .bottomRight, size: Float = 0.03,
                 opacity: Float = 0.7, red: Float = 1, green: Float = 1, blue: Float = 1) {
@@ -63,7 +94,9 @@ public struct ExportWatermark: Sendable, Equatable, Codable {
 
     // Lenient decoding, as ExportPreset's: a field missing from an older or
     // hand-edited preset takes its default, and numbers are held in range.
-    enum CodingKeys: String, CodingKey { case text, corner, size, opacity, red, green, blue }
+    enum CodingKeys: String, CodingKey {
+        case text, corner, size, opacity, red, green, blue, style, fontName, rotation, imageData, imageSize
+    }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = ExportWatermark()
@@ -78,10 +111,47 @@ public struct ExportWatermark: Sendable, Equatable, Codable {
         red = number(.red, d.red, 0...1)
         green = number(.green, d.green, 0...1)
         blue = number(.blue, d.blue, 0...1)
+        style = (try? c.decodeIfPresent(Style.self, forKey: .style)) ?? .text
+        fontName = (try? c.decodeIfPresent(String.self, forKey: .fontName)) ?? nil
+        rotation = Self.normalisedRotation((try? c.decodeIfPresent(Int.self, forKey: .rotation)) ?? 0)
+        let png = (try? c.decodeIfPresent(Data.self, forKey: .imageData)) ?? nil
+        imageData = (png?.count ?? 0) <= Self.maximumImageBytes ? png : nil
+        imageSize = number(.imageSize, d.imageSize, Self.imageSizeRange)
+    }
+
+    // Written by hand so a preset without the new settings stays as it
+    // was: only what differs from the defaults is added.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(text, forKey: .text); try c.encode(corner, forKey: .corner)
+        try c.encode(size, forKey: .size); try c.encode(opacity, forKey: .opacity)
+        try c.encode(red, forKey: .red); try c.encode(green, forKey: .green); try c.encode(blue, forKey: .blue)
+        if style != .text { try c.encode(style, forKey: .style) }
+        try c.encodeIfPresent(fontName, forKey: .fontName)
+        if rotation != 0 { try c.encode(rotation, forKey: .rotation) }
+        try c.encodeIfPresent(imageData, forKey: .imageData)
+        if imageSize != ExportWatermark().imageSize { try c.encode(imageSize, forKey: .imageSize) }
+    }
+
+    /// 0, 90, 180 or 270: the nearest quarter turn, clockwise.
+    public static func normalisedRotation(_ degrees: Int) -> Int {
+        let quarter = Int((Double(degrees) / 90).rounded())
+        return ((quarter % 4) + 4) % 4 * 90
     }
 
     /// Whether there is anything to draw.
-    public var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var isEmpty: Bool {
+        switch style {
+        case .text: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .graphic: imageData.flatMap(Self.graphicImage) == nil
+        }
+    }
+
+    /// The graphic's picture, when `data` is an image ImageIO reads.
+    public static func graphicImage(_ data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
 
     /// This watermark with its tokens filled in for one image. Dates use the
     /// Gregorian calendar, so a Buddhist-calendar Mac still writes 2026.
@@ -117,7 +187,8 @@ public struct ExportWatermark: Sendable, Equatable, Codable {
 }
 
 /// A watermark rasterised and placed for one image: 8-bit coverage over
-/// the text's box, where it goes, and its colour in the file's encoding.
+/// its box, where it goes, and its colour in the file's encoding (one
+/// colour for text, a colour per pixel for a graphic).
 struct PlacedWatermark {
     let width: Int
     let height: Int
@@ -127,23 +198,53 @@ struct PlacedWatermark {
     let y: Int
     /// The colour as the file's encoded components, 0...1.
     let color: SIMD3<Float>
+    /// A graphic's own colours, RGB per pixel in the file's encoding (not
+    /// premultiplied), row-major like `coverage`; nil for text.
+    let pixels: [UInt8]?
     let opacity: Float
 
     init?(_ watermark: ExportWatermark, imageWidth: Int, imageHeight: Int, colorSpace: ColorKit.OutputSpace) {
-        guard !watermark.isEmpty, imageWidth > 0, imageHeight > 0,
-              let raster = Self.rasterise(watermark.text,
-                                          fontSize: watermark.fontPixelSize(imageWidth: imageWidth, imageHeight: imageHeight))
-        else { return nil }
-        width = raster.width; height = raster.height; coverage = raster.coverage
+        let name: CFString
+        switch colorSpace {
+        case .sRGB: name = CGColorSpace.sRGB
+        case .displayP3: name = CGColorSpace.displayP3
+        case .rec2020: name = CGColorSpace.itur_2020
+        }
+        guard let space = CGColorSpace(name: name) else { return nil }
+        self.init(watermark, imageWidth: imageWidth, imageHeight: imageHeight, space: space)
+    }
+
+    /// Placed for pixels encoded in `space`, the file's colour space.
+    init?(_ watermark: ExportWatermark, imageWidth: Int, imageHeight: Int, space: CGColorSpace) {
+        guard !watermark.isEmpty, imageWidth > 0, imageHeight > 0 else { return nil }
+        let raster: (width: Int, height: Int, coverage: [UInt8], pixels: [UInt8]?)
+        switch watermark.style {
+        case .text:
+            guard let text = Self.rasterise(watermark.text, fontName: watermark.fontName,
+                                            fontSize: watermark.fontPixelSize(imageWidth: imageWidth,
+                                                                              imageHeight: imageHeight))
+            else { return nil }
+            raster = (text.width, text.height, text.coverage, nil)
+        case .graphic:
+            let longSide = max(1, Int((Double(min(imageWidth, imageHeight)) * Double(watermark.imageSize)).rounded()))
+            guard let data = watermark.imageData, let image = ExportWatermark.graphicImage(data),
+                  let graphic = Self.rasterise(image, longSide: longSide, space: space) else { return nil }
+            raster = (graphic.width, graphic.height, graphic.coverage, graphic.pixels)
+        }
+        let turned = Self.rotated(raster, quarterTurns: watermark.rotation / 90)
+        width = turned.width; height = turned.height; coverage = turned.coverage; pixels = turned.pixels
         (x, y) = watermark.origin(textWidth: width, textHeight: height, imageWidth: imageWidth, imageHeight: imageHeight)
-        color = Self.encodedColor(watermark, in: colorSpace)
+        color = Self.encodedColor(watermark, in: space)
         opacity = min(max(watermark.opacity, 0), 1)
     }
 
-    /// The text as coverage: one line, the system font, grey-scale
+    /// The text as coverage: one line, the chosen font (the system font
+    /// when none is, or the one named isn't installed), grey-scale
     /// antialiasing (no subpixel smoothing, which would tint the edges).
-    static func rasterise(_ text: String, fontSize: CGFloat) -> (width: Int, height: Int, coverage: [UInt8])? {
-        let font = CTFontCreateUIFontForLanguage(.system, fontSize, nil)
+    static func rasterise(_ text: String, fontName: String? = nil,
+                          fontSize: CGFloat) -> (width: Int, height: Int, coverage: [UInt8])? {
+        let font = fontName.flatMap { Self.font(named: $0, size: fontSize) }
+            ?? CTFontCreateUIFontForLanguage(.system, fontSize, nil)
             ?? CTFontCreateWithName("Helvetica" as CFString, fontSize, nil)
         let attributes: [NSAttributedString.Key: Any] = [
             NSAttributedString.Key(kCTFontAttributeName as String): font,
@@ -173,17 +274,97 @@ struct PlacedWatermark {
         return drawn ? (width, height, coverage) : nil
     }
 
-    /// The sRGB colour in the file's space, as the components of the
-    /// profile `Exporter` tags the file with.
+    /// The installed font of that family (or full or PostScript name), or
+    /// nil when there is none: Core Text would otherwise quietly substitute
+    /// Helvetica for a name it doesn't know.
+    static func font(named name: String, size: CGFloat) -> CTFont? {
+        let font = CTFontCreateWithName(name as CFString, size, nil)
+        let family = CTFontCopyFamilyName(font) as String
+        let full = CTFontCopyFullName(font) as String
+        let postScript = CTFontCopyPostScriptName(font) as String
+        return [family, full, postScript].contains { $0.caseInsensitiveCompare(name) == .orderedSame } ? font : nil
+    }
+
+    /// A graphic scaled so its longer side is `longSide` pixels and drawn in
+    /// `space`, as coverage (its alpha) and its colours unpremultiplied.
+    static func rasterise(_ image: CGImage, longSide: Int,
+                          space: CGColorSpace) -> (width: Int, height: Int, coverage: [UInt8], pixels: [UInt8])? {
+        guard image.width > 0, image.height > 0, longSide < 1 << 15 else { return nil }
+        let scale = Double(longSide) / Double(max(image.width, image.height))
+        let width = max(1, Int((Double(image.width) * scale).rounded()))
+        let height = max(1, Int((Double(image.height) * scale).rounded()))
+        // RGBA needs an RGB space; a file in a grey or odd space draws in sRGB.
+        let drawSpace = space.model == .rgb ? space : (CGColorSpace(name: CGColorSpace.sRGB) ?? space)
+        var rgba = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = rgba.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: drawSpace,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.interpolationQuality = .high
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return nil }
+        var coverage = [UInt8](repeating: 0, count: width * height)
+        var pixels = [UInt8](repeating: 0, count: width * height * 3)
+        for i in 0..<(width * height) {
+            let a = rgba[i * 4 + 3]
+            coverage[i] = a
+            guard a > 0 else { continue }
+            for k in 0..<3 {
+                let unpremultiplied = (Int(rgba[i * 4 + k]) * 255 + Int(a) / 2) / Int(a)
+                pixels[i * 3 + k] = UInt8(min(unpremultiplied, 255))
+            }
+        }
+        return (width, height, coverage, pixels)
+    }
+
+    /// A raster turned clockwise by quarter turns.
+    static func rotated(_ raster: (width: Int, height: Int, coverage: [UInt8], pixels: [UInt8]?),
+                        quarterTurns: Int) -> (width: Int, height: Int, coverage: [UInt8], pixels: [UInt8]?) {
+        let turns = ((quarterTurns % 4) + 4) % 4
+        guard turns != 0 else { return raster }
+        let w = raster.width, h = raster.height
+        let (ow, oh) = turns == 2 ? (w, h) : (h, w)
+        var coverage = [UInt8](repeating: 0, count: ow * oh)
+        var pixels = raster.pixels.map { _ in [UInt8](repeating: 0, count: ow * oh * 3) }
+        for sy in 0..<h {
+            for sx in 0..<w {
+                let (dx, dy): (Int, Int)
+                switch turns {
+                case 1: (dx, dy) = (h - 1 - sy, sx)            // clockwise
+                case 2: (dx, dy) = (w - 1 - sx, h - 1 - sy)
+                default: (dx, dy) = (sy, w - 1 - sx)           // counter-clockwise
+                }
+                let s = sy * w + sx, d = dy * ow + dx
+                coverage[d] = raster.coverage[s]
+                if let source = raster.pixels {
+                    pixels![d * 3] = source[s * 3]; pixels![d * 3 + 1] = source[s * 3 + 1]
+                    pixels![d * 3 + 2] = source[s * 3 + 2]
+                }
+            }
+        }
+        return (ow, oh, coverage, pixels)
+    }
+
+    /// `encodedColor` for one of the render's own spaces.
     static func encodedColor(_ watermark: ExportWatermark, in space: ColorKit.OutputSpace) -> SIMD3<Float> {
-        let fallback = SIMD3<Float>(watermark.red, watermark.green, watermark.blue)
         let name: CFString
         switch space {
-        case .sRGB: return fallback
+        case .sRGB: return SIMD3<Float>(watermark.red, watermark.green, watermark.blue)
         case .displayP3: name = CGColorSpace.displayP3
         case .rec2020: name = CGColorSpace.itur_2020
         }
-        guard let source = CGColorSpace(name: CGColorSpace.sRGB), let target = CGColorSpace(name: name),
+        guard let target = CGColorSpace(name: name) else { return SIMD3<Float>(watermark.red, watermark.green, watermark.blue) }
+        return encodedColor(watermark, in: target)
+    }
+
+    /// The sRGB colour in the file's space, as the components of the
+    /// profile `Exporter` tags the file with.
+    static func encodedColor(_ watermark: ExportWatermark, in target: CGColorSpace) -> SIMD3<Float> {
+        let fallback = SIMD3<Float>(watermark.red, watermark.green, watermark.blue)
+        guard (target.name as String?) != (CGColorSpace.sRGB as String) else { return fallback }
+        guard let source = CGColorSpace(name: CGColorSpace.sRGB),
               let color = CGColor(colorSpace: source, components: [CGFloat(watermark.red), CGFloat(watermark.green),
                                                                     CGFloat(watermark.blue), 1]),
               let converted = color.converted(to: target, intent: .relativeColorimetric, options: nil),
@@ -196,6 +377,12 @@ struct PlacedWatermark {
         let x0 = max(x, 0), y0 = max(y, 0)
         let x1 = min(x + width, imageWidth), y1 = min(y + height, imageHeight)
         return x0 < x1 && y0 < y1 ? (x0, y0, x1, y1) : nil
+    }
+
+    /// A graphic's colour at index `i` of its box, 0...1; nil for text.
+    @inline(__always) func colour(at i: Int) -> SIMD3<Float>? {
+        guard let pixels else { return nil }
+        return SIMD3<Float>(Float(pixels[i * 3]), Float(pixels[i * 3 + 1]), Float(pixels[i * 3 + 2])) / 255
     }
 
     /// Blends the text into RGBX pixels (8 or 16 bits per channel, native
@@ -214,8 +401,9 @@ struct PlacedWatermark {
                     let c = coverage[coverageRow + ix]
                     guard c > 0 else { continue }
                     let a = Float(c) * alphaScale, i = (iy * imageWidth + ix) * 4
+                    let own = colour(at: coverageRow + ix).map { $0 * 65535 } ?? target
                     for k in 0..<3 {
-                        let v = Float(pixels[i + k]) * (1 - a) + target[k] * a
+                        let v = Float(pixels[i + k]) * (1 - a) + own[k] * a
                         pixels[i + k] = UInt16(min(max(v.rounded(), 0), 65535))
                     }
                 }
@@ -228,8 +416,9 @@ struct PlacedWatermark {
                     let c = coverage[coverageRow + ix]
                     guard c > 0 else { continue }
                     let a = Float(c) * alphaScale, i = (iy * imageWidth + ix) * 4
+                    let own = colour(at: coverageRow + ix).map { $0 * 255 } ?? target
                     for k in 0..<3 {
-                        let v = Float(bytes[i + k]) * (1 - a) + target[k] * a
+                        let v = Float(bytes[i + k]) * (1 - a) + own[k] * a
                         bytes[i + k] = UInt8(min(max(v.rounded(), 0), 255))
                     }
                 }
@@ -280,8 +469,11 @@ extension Exporter.EncodableImage {
     /// copy of it for each watermark tried, rather than rendering again.
     public func watermarked(_ watermark: ExportWatermark?, colorSpace: ColorKit.OutputSpace) throws -> Self {
         let w = image.width, h = image.height, bitsPerComponent = image.bitsPerComponent
+        // The file's own space (a converted export's profile, say), which
+        // is the render's for the others.
         guard let watermark,
-              let placed = PlacedWatermark(watermark, imageWidth: w, imageHeight: h, colorSpace: colorSpace)
+              let placed = image.colorSpace.flatMap({ PlacedWatermark(watermark, imageWidth: w, imageHeight: h, space: $0) })
+                ?? PlacedWatermark(watermark, imageWidth: w, imageHeight: h, colorSpace: colorSpace)
         else { return self }
         guard image.bitsPerPixel == bitsPerComponent * 4, image.bytesPerRow == w * bitsPerComponent / 2,
               let space = image.colorSpace, let source = image.dataProvider?.data else {

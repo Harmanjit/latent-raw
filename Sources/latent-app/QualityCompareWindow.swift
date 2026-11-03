@@ -82,7 +82,7 @@ final class QualityCompareModel: ObservableObject {
     var subtitle: String {
         var parts = [format.displayName]
         if imageWidth > 0 { parts.append("\(imageWidth) × \(imageHeight) px") }
-        parts.append(preset.colorSpaceIsP3 ? "Display P3" : "sRGB")
+        parts.append(preset.colorSpaceName)
         if preset.settings.watermark != nil { parts.append("watermark") }
         return parts.joined(separator: " · ")
     }

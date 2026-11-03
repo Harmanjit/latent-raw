@@ -226,12 +226,11 @@ struct ContentView: View {
                         records: library.selectedImages,
                         catalogName: library.folderURL?.lastPathComponent ?? "",
                         preview: ExportPreviewSource(library: library, gpu: model.gpu),
-                        canExport: !exportQueue.isGPUBusy) { preset, destination in
+                        canExport: !exportQueue.isGPUBusy, catalogRoot: library.folderURL) { batches in
                 guard let gpu = model.gpu else { return }
                 // Flush the editor's pending edit so the export sees it.
                 model.flushPendingSave()
-                exportQueue.start(records: library.selectedImages, library: library,
-                                  preset: preset, destination: destination, gpu: gpu)
+                exportQueue.start(records: library.selectedImages, library: library, batches: batches, gpu: gpu)
             }
             .motionFollowsAccessibility()
         }
@@ -1244,6 +1243,10 @@ struct ContentView: View {
             openFileOnItsOwn()
         case .export:
             showingExportSheet = true
+        case .exportWithPrevious:
+            guard let gpu = model.gpu else { return false }
+            model.flushPendingSave()
+            exportQueue.exportWithPrevious(records: library.selectedImages, library: library, gpu: gpu)
         case .exportOpenImage:
             LibraryPanel.exportOpenImage(model: model, library: library)
         case .print:

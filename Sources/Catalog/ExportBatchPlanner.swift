@@ -111,6 +111,16 @@ public enum ExportBatchPlanner {
         public var dateSubfolders: Bool
         public var catalogName: String
         public var timeZone: TimeZone
+        /// Same folder as original: each file goes into its photo's own
+        /// folder, the destination being the catalog's folder that the
+        /// images' paths are relative to.
+        public var originalFolders = false
+        /// A folder inside the destination (or inside each photo's folder)
+        /// to put the files in; empty for none. One level, no slashes.
+        public var subfolder = ""
+        /// Exporting originals: each file keeps its photo's own extension,
+        /// in the case it has, and `fileExtension` is not used.
+        public var keepsOriginalExtension = false
 
         public init(template: String, start: Int = 1, step: Int = 1, padding: Int = 3,
                     letterCase: ExportNaming.LetterCase = .unchanged, fileExtension: String,
@@ -120,6 +130,18 @@ public enum ExportBatchPlanner {
             self.letterCase = letterCase; self.fileExtension = fileExtension; self.collision = collision
             self.dateSubfolders = dateSubfolders; self.catalogName = catalogName; self.timeZone = timeZone
         }
+
+        /// A folder name typed for `subfolder`, made safe: no slashes or
+        /// colons, no leading dots (a hidden folder), trimmed.
+        public static func cleanSubfolder(_ name: String) -> String {
+            var cleaned = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            while cleaned.hasPrefix(".") { cleaned.removeFirst() }
+            return cleaned
+        }
+
+        /// Whether the plan puts files in folders that may not exist yet.
+        public var makesFolders: Bool { dateSubfolders || !Self.cleanSubfolder(subfolder).isEmpty }
     }
 
     /// How the planner asks the file system about names, replaceable in tests.
@@ -183,21 +205,28 @@ public enum ExportBatchPlanner {
         var folderItems: [String: Probe.Item?] = [:]
         var outputs: [ExportBatchPlan.Output] = []
         outputs.reserveCapacity(records.count)
-        let ext = options.fileExtension
+        let subfolder = Options.cleanSubfolder(options.subfolder)
 
         for (index, record) in records.enumerated() {
             let context = ExportNaming.Context(index: index, start: options.start, padding: options.padding,
                                                catalogName: options.catalogName, step: options.step,
                                                letterCase: options.letterCase)
             let stem = namer.stem(for: record, context: context)
+            let ext = options.keepsOriginalExtension ? (record.relPath as NSString).pathExtension : options.fileExtension
             let name = ext.isEmpty ? stem : stem + "." + ext
             var folder = destination
+            if options.originalFolders {
+                let parent = (record.relPath as NSString).deletingLastPathComponent
+                if !parent.isEmpty { folder = folder.appendingPathComponent(parent, isDirectory: true) }
+            }
+            if !subfolder.isEmpty { folder = folder.appendingPathComponent(subfolder, isDirectory: true) }
             if options.dateSubfolders {
                 let sub = ExportNaming.dateFolderName(for: record, timeZone: options.timeZone)
-                folder = destination.appendingPathComponent(sub, isDirectory: true)
-                let known = folderItems[sub] ?? {
+                folder = folder.appendingPathComponent(sub, isDirectory: true)
+                let folderKey = folder.standardizedFileURL.path
+                let known = folderItems[folderKey] ?? {
                     let item = probe.item(folder)
-                    folderItems[sub] = item
+                    folderItems[folderKey] = item
                     return item
                 }()
                 if known == .file {

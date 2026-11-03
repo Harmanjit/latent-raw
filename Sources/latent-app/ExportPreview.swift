@@ -41,13 +41,24 @@ final class ExportPreviewRenderer {
         var gainMap: Bool
         var colorSpaceIsP3: Bool
         var maxLongEdge: Int?
+        /// The colour space beyond sRGB and P3, the sizing mode, output
+        /// sharpening and the resolution it reads: each changes the pixels.
+        var profile: ExportProfileChoice?
+        var sizing: ExportSizing?
+        var sharpening: OutputSharpening?
+        var ppi: Double?
 
         init(record: ImageRecord, preset: ExportPreset) {
             imageID = record.id; relPath = record.relPath
-            bitsPerComponent = preset.format == .tiff ? 16 : 8
-            gainMap = preset.settings.writesGainMap
+            let settings = preset.settings
+            bitsPerComponent = settings.bitsPerComponent
+            gainMap = settings.writesGainMap
             colorSpaceIsP3 = preset.colorSpaceIsP3
             maxLongEdge = preset.resize ? preset.maxLongEdge : nil
+            profile = preset.profile
+            sizing = preset.sizing
+            sharpening = settings.outputSharpening
+            ppi = settings.outputSharpening == nil ? nil : settings.ppi
         }
     }
 
@@ -57,11 +68,13 @@ final class ExportPreviewRenderer {
         var watermark: ExportWatermark?
         var includeMetadata: Bool
         var includeLocation: Bool
+        var metadataLevel: ExportMetadataLevel
 
         init(preset: ExportPreset) {
             watermark = preset.settings.watermark
             includeMetadata = preset.includeMetadata
             includeLocation = preset.includeMetadata && preset.includeLocation
+            metadataLevel = preset.metadataLevel
         }
     }
 
@@ -99,6 +112,7 @@ final class ExportPreviewRenderer {
         plain.watermarkEnabled = false
         plain.includeMetadata = true
         plain.includeLocation = true
+        plain.metadataLevel = .all
         let renderPlain = renderPlain
         let rendered = try await renders.value(for: Key(record: record, preset: preset)) { [plain] in
             try await renderPlain(record, plain)
@@ -106,7 +120,7 @@ final class ExportPreviewRenderer {
         let finish = Finish(preset: preset)
         return try await Task.detached(priority: .userInitiated) {
             try rendered.finished(watermark: finish.watermark, includeMetadata: finish.includeMetadata,
-                                  includeLocation: finish.includeLocation)
+                                  includeLocation: finish.includeLocation, metadataLevel: finish.metadataLevel)
         }.value
     }
 
@@ -246,7 +260,8 @@ final class ExportEstimateModel: ObservableObject {
     /// a moment first, so dragging a slider or typing estimates once;
     /// returns quietly when its task is cancelled by a newer request.
     func update(records: [ImageRecord], preset: ExportPreset, renderer: ExportPreviewRenderer?) async {
-        guard let renderer, let first = records.first else { state = .none; return }
+        // DNG and original exports aren't encoded from a render.
+        guard let renderer, let first = records.first, preset.rendersImage else { state = .none; return }
         do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
         state = .working
         do {
@@ -255,16 +270,24 @@ final class ExportEstimateModel: ObservableObject {
             var settings = rendered.settings
             settings.format = preset.format
             settings.quality = preset.quality
+            settings.tiffCompression = preset.tiffCompression
             let encodeSettings = settings
-            let encoding = Task.detached(priority: .userInitiated) { try rendered.encoded(with: encodeSettings).count }
+            let limit = preset.sizeLimitBytes
+            let encoding = Task.detached(priority: .userInitiated) {
+                guard let limit else { return try rendered.encoded(with: encodeSettings).count }
+                return try Exporter.encode(rendered.image, settings: encodeSettings, metadata: rendered.metadata,
+                                           limitedTo: limit).data.count
+            }
             let bytes = try await withTaskCancellationHandler { try await encoding.value } onCancel: { encoding.cancel() }
             try Task.checkCancellation()
             let total = ExportSizeEstimate.totalBytes(sampleBytes: bytes,
                                                       samplePixels: rendered.pixelWidth * rendered.pixelHeight,
                                                       records: records,
                                                       maxLongEdge: preset.resize ? preset.maxLongEdge : nil)
-            lastBytes = total
-            state = .ready(bytes: total, images: records.count)
+            // Each file is held under the limit, so the total is too.
+            let capped = limit.map { min(total, $0 * records.count) } ?? total
+            lastBytes = capped
+            state = .ready(bytes: capped, images: records.count)
         } catch is CancellationError {
             return
         } catch {

@@ -77,3 +77,16 @@ public struct ExportDescription: Sendable, Equatable {
         }
     }
 }
+
+extension ExportDescription {
+    /// What of the description an export at `level` carries: copyright
+    /// only keeps the copyright, copyright and contact adds the creator,
+    /// and the two All levels keep everything.
+    public func limited(to level: ExportMetadataLevel) -> ExportDescription {
+        switch level {
+        case .all, .allExceptCameraInfo: self
+        case .copyrightAndContact: ExportDescription(creator: creator, copyright: copyright)
+        case .copyrightOnly: ExportDescription(copyright: copyright)
+        }
+    }
+}

@@ -11,7 +11,7 @@ public enum XMPSidecar {
     /// (DESIGN.md §5.5); changing it would orphan existing sidecars.
     static let namespaceURI = "https://github.com/Harmanjit/latent-raw/ns/1.0/"
 
-    public struct Fields: Equatable {
+    public struct Fields: Equatable, Sendable {
         public var rating: Int
         public var label: String?
         /// -1 rejected, 0 none, 1 picked (latent:Flag).

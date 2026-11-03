@@ -25,6 +25,9 @@ extension ExportPreset {
             includeLocation: includeMetadata && includeLocation,
             replacesExisting: collision == .replace)
         if includeMetadata { request.descriptive = record.exportDescription }
+        request.sizing = sizing
+        request.sizeLimitBytes = sizeLimitBytes
+        request.metadataLevel = metadataLevel
         return request
     }
 }

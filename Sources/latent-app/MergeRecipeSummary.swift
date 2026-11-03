@@ -95,6 +95,7 @@ struct MergeRecipeSummary: Equatable {
         case .hdr: "HDR"
         case .panorama: "Panorama"
         case .hdrPanorama: "HDR panorama"
+        case .rendered: "Rendered to DNG"
         }
     }
 

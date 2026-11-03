@@ -142,7 +142,7 @@ struct LibraryPanel: View {
 
             // The open image, straight from the editor's render.
             Picker("Format", selection: $model.exportSettings.format) {
-                ForEach(ExportSettings.Format.allCases, id: \.self) { format in
+                ForEach(ExportSettings.Format.available, id: \.self) { format in
                     Text(format.displayName).tag(format)
                 }
             }

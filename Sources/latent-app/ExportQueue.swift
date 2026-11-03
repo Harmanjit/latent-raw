@@ -39,9 +39,39 @@ struct ExportPreset: Codable, Equatable {
     var watermarkEnabled = false
     var watermark = ExportWatermark()
 
+    // Added for Lightroom parity (ExportPreset+Output.swift says what each
+    // does). Every one defaults to what an export did before it existed,
+    // and an older preset without them decodes to those defaults.
+    var fileKind: ExportFileKind = .image
+    /// A colour space beyond sRGB and P3; nil uses `colorSpaceIsP3`.
+    var profile: ExportProfileChoice?
+    var ppiEnabled = false
+    var ppi = 300
+    var sizingMode: ExportSizing.Mode = .longEdge
+    var shortEdge = 1365
+    var boxWidth = 2048
+    var boxHeight = 2048
+    var megapixels = 12.0
+    var percentage = 50.0
+    var dontEnlarge = true
+    var sharpenEnabled = false
+    var sharpenMedium: OutputSharpening.Medium = .screen
+    var sharpenStrength: OutputSharpening.Strength = .standard
+    var sizeLimitEnabled = false
+    var sizeLimitKB = 500
+    var tiffBitDepth = 16
+    var tiffCompression: TIFFCompression = .none
+    var location: ExportLocation = .chosenFolder
+    var subfolder = ""
+    var metadataLevel: ExportMetadataLevel = .all
+    var openInApp = false
+    var openInAppPath: String?
+
     var settings: ExportSettings {
-        ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap,
-                       watermark: watermarkEnabled && !watermark.isEmpty ? watermark : nil)
+        var s = ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap,
+                               watermark: watermarkEnabled && !watermark.isEmpty ? watermark : nil)
+        applyOutputSettings(to: &s)
+        return s
     }
     var colorSpace: ColorKit.OutputSpace { colorSpaceIsP3 ? .displayP3 : .sRGB }
     /// What the location switch covers, for its tooltip here and in the
@@ -75,18 +105,47 @@ struct ExportPreset: Codable, Equatable {
         hdrGainMap = try c.decodeIfPresent(Bool.self, forKey: .hdrGainMap) ?? false
         watermarkEnabled = try c.decodeIfPresent(Bool.self, forKey: .watermarkEnabled) ?? false
         watermark = (try? c.decodeIfPresent(ExportWatermark.self, forKey: .watermark)) ?? ExportWatermark()
+        fileKind = (try? c.decodeIfPresent(ExportFileKind.self, forKey: .fileKind)) ?? .image
+        profile = (try? c.decodeIfPresent(ExportProfileChoice.self, forKey: .profile)) ?? nil
+        ppiEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .ppiEnabled)) ?? false
+        ppi = min(max((try? c.decodeIfPresent(Int.self, forKey: .ppi)) ?? 300, 1), 9999)
+        sizingMode = (try? c.decodeIfPresent(ExportSizing.Mode.self, forKey: .sizingMode)) ?? .longEdge
+        shortEdge = (try? c.decodeIfPresent(Int.self, forKey: .shortEdge)) ?? 1365
+        boxWidth = (try? c.decodeIfPresent(Int.self, forKey: .boxWidth)) ?? 2048
+        boxHeight = (try? c.decodeIfPresent(Int.self, forKey: .boxHeight)) ?? 2048
+        megapixels = (try? c.decodeIfPresent(Double.self, forKey: .megapixels)) ?? 12
+        percentage = (try? c.decodeIfPresent(Double.self, forKey: .percentage)) ?? 50
+        dontEnlarge = (try? c.decodeIfPresent(Bool.self, forKey: .dontEnlarge)) ?? true
+        sharpenEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .sharpenEnabled)) ?? false
+        sharpenMedium = (try? c.decodeIfPresent(OutputSharpening.Medium.self, forKey: .sharpenMedium)) ?? .screen
+        sharpenStrength = (try? c.decodeIfPresent(OutputSharpening.Strength.self, forKey: .sharpenStrength)) ?? .standard
+        sizeLimitEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .sizeLimitEnabled)) ?? false
+        sizeLimitKB = max((try? c.decodeIfPresent(Int.self, forKey: .sizeLimitKB)) ?? 500, 1)
+        tiffBitDepth = (try? c.decodeIfPresent(Int.self, forKey: .tiffBitDepth)) == 8 ? 8 : 16
+        tiffCompression = (try? c.decodeIfPresent(TIFFCompression.self, forKey: .tiffCompression)) ?? .none
+        location = (try? c.decodeIfPresent(ExportLocation.self, forKey: .location)) ?? .chosenFolder
+        subfolder = (try? c.decodeIfPresent(String.self, forKey: .subfolder)) ?? ""
+        metadataLevel = (try? c.decodeIfPresent(ExportMetadataLevel.self, forKey: .metadataLevel)) ?? .all
+        openInApp = (try? c.decodeIfPresent(Bool.self, forKey: .openInApp)) ?? false
+        openInAppPath = (try? c.decodeIfPresent(String.self, forKey: .openInAppPath)) ?? nil
     }
 
     var fileExtension: String {
-        uppercaseExtension ? settings.format.fileExtension.uppercased() : settings.format.fileExtension
+        let ext = fileKind == .dng ? "dng" : settings.format.fileExtension
+        return uppercaseExtension ? ext.uppercased() : ext
     }
 
     /// What the batch planner needs; the sheet's preview and the queue use
     /// the same, so the names shown are the names written.
     func planOptions(catalogName: String) -> ExportBatchPlanner.Options {
-        ExportBatchPlanner.Options(template: template, start: sequenceStart, step: sequenceStep,
-                                   padding: sequencePadding, letterCase: letterCase, fileExtension: fileExtension,
-                                   collision: collision, dateSubfolders: dateSubfolders, catalogName: catalogName)
+        var options = ExportBatchPlanner.Options(template: template, start: sequenceStart, step: sequenceStep,
+                                                 padding: sequencePadding, letterCase: letterCase,
+                                                 fileExtension: fileExtension, collision: collision,
+                                                 dateSubfolders: dateSubfolders, catalogName: catalogName)
+        options.originalFolders = location == .sameAsOriginal
+        options.subfolder = subfolder
+        options.keepsOriginalExtension = fileKind == .original
+        return options
     }
 
     static let defaultsKey = "latent.exportPreset"
@@ -197,16 +256,25 @@ final class ExportQueue: ObservableObject {
 
     func start(records: [ImageRecord], library: Library, preset: ExportPreset,
                destination: URL, gpu: GPUContext) {
+        start(records: records, library: library, batches: [ExportBatch(preset: preset, destination: destination)],
+              gpu: gpu)
+    }
+
+    /// Exports `records` once per batch, one batch after another: one
+    /// preset, or several for a multi-batch export. Each batch plans its
+    /// own names in its own folder.
+    func start(records: [ImageRecord], library: Library, batches: [ExportBatch], gpu: GPUContext) {
         guard !isGPUBusy else {
             // Said, rather than the sheet closing on nothing.
             if !isRunning { summary = Self.busyRefusal }
             return
         }
-        guard !records.isEmpty, let catalog = library.catalog, let root = library.folderURL else { return }
+        guard !records.isEmpty, !batches.isEmpty, let catalog = library.catalog, let root = library.folderURL else { return }
         isRunning = true
         stoppingForQuit = false
-        done = 0; total = records.count; failures = []; notes = []; summary = ""
-        preset.save()
+        done = 0; total = records.count * batches.count; failures = []; notes = []; summary = ""
+        if batches.count == 1 { batches[0].preset.save() }
+        ExportPrevious.save(batches)
         // Held until the loop below finishes, however it finishes.
         let activity = ExportActivity(reason: "Exporting \(records.count) image\(records.count == 1 ? "" : "s")")
 
@@ -220,16 +288,29 @@ final class ExportQueue: ObservableObject {
             var skipped = 0
             var substituted = 0
             var written: [URL] = []
+            var revealed: [URL] = []
+            var opened: [(app: URL, files: [URL])] = []
+          batches: for batch in batches {
+            let preset = batch.preset
+            // Same folder as original plans under the catalog's folder,
+            // which the images' paths are relative to.
+            let destination = preset.location == .sameAsOriginal ? root : batch.destination
+            var writtenInBatch: [URL] = []
             // Every name settled before the first file is written, so two
             // images whose template gives the same name never overwrite each
             // other, whatever the collision policy.
             let options = preset.planOptions(catalogName: catalogName)
+            let makesDestination = preset.location != .sameAsOriginal
             var plan = await Task.detached(priority: .userInitiated) {
-                ExportBatchPlanner.plan(records, into: destination, options: options)
+                // A multi-batch preset's own subfolder of the destination.
+                if makesDestination, !FileManager.default.fileExists(atPath: destination.path) {
+                    try? FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                }
+                return ExportBatchPlanner.plan(records, into: destination, options: options)
             }.value
             images: for (index, record) in records.enumerated() {
-                if Task.isCancelled { break }
-                let name = record.fileName
+                if Task.isCancelled { break batches }
+                let name = batches.count > 1 ? "\(record.fileName) (\(batch.name ?? "batch"))" : record.fileName
                 await MainActor.run { self?.currentName = name }
 
                 // Everything the worker needs, gathered on the actor side. A
@@ -237,9 +318,13 @@ final class ExportQueue: ObservableObject {
                 // be a wrong file with no warning.
                 let json: String?
                 let keywords: [String]
+                var sidecar: XMPSidecar.Fields?
                 do {
                     json = try await catalog.editStack(forImageID: record.id ?? -1)
                     keywords = try await catalog.keywords(forImageID: record.id ?? -1)
+                    if preset.fileKind == .original {
+                        sidecar = try await catalog.sidecarFields(forImageID: record.id ?? -1)
+                    }
                 } catch {
                     await MainActor.run {
                         self?.failures.append(Failure(name: name, reason: "could not read its edit: \(error)"))
@@ -252,7 +337,7 @@ final class ExportQueue: ObservableObject {
                 // may have appeared under this name meanwhile. Off the main
                 // actor, with the date folder made there too: on a share
                 // that answers slowly each call would stall the window.
-                let settled = await Self.settle(plan, index: index, makeFolder: preset.dateSubfolders)
+                let settled = await Self.settle(plan, index: index, makeFolder: options.makesFolders)
                 plan = settled.plan
                 let output = settled.output
                 switch output.action {
@@ -282,14 +367,16 @@ final class ExportQueue: ObservableObject {
                 // only if its name is still free, so one that appeared while
                 // the image rendered is kept, and the name is settled again by
                 // the policy: numbered (rendered again, rarely), or skipped.
-                var outcome: Result<ExportWorker.Outcome, Error>
+                var outcome: Result<ExportFileResult, Error>
                 var attempts = 0
                 while true {
                     let request = preset.workerRequest(for: record, root: root, destination: target,
                                                        editStackJSON: json, keywords: keywords)
-
+                    let job = ExportFileJob(kind: preset.fileKind, request: request, sourceHash: record.hashString,
+                                            captureTime: record.captureTime ?? 0,
+                                            sidecar: sidecar)
                     outcome = await Task.detached(priority: .userInitiated) {
-                        do { return .success(try await ExportWorker.export(request, gpu: gpu)) }
+                        do { return .success(try await job.run(gpu: gpu)) }
                         catch { return .failure(error) }
                     }.value
                     attempts += 1
@@ -318,8 +405,9 @@ final class ExportQueue: ObservableObject {
                     self.done += 1
                     switch outcome {
                     case .success(let o):
-                        totalPixels += o.pixelWidth * o.pixelHeight
+                        totalPixels += o.pixelCount
                         written.append(target)
+                        writtenInBatch.append(target)
                         if !o.maskSubstitutions.isEmpty {
                             substituted += 1
                             self.notes.append(MaskSubstitutions.exportNote(name: name, missing: o.maskSubstitutions))
@@ -328,21 +416,30 @@ final class ExportQueue: ObservableObject {
                     }
                 }
             }
+            if preset.revealWhenDone { revealed += writtenInBatch }
+            if let app = preset.openInAppURL, !writtenInBatch.isEmpty { opened.append((app, writtenInBatch)) }
+          }
             let elapsed = Date().timeIntervalSince(start)
             let exported = written
+            let toReveal = revealed, toOpen = opened
             await MainActor.run {
                 guard let self else { return }
                 self.isRunning = false
                 self.currentName = ""
                 let cancelled = Task.isCancelled ? " (cancelled)" : ""
                 let skippedNote = skipped > 0 ? " · \(skipped) skipped (already there)" : ""
-                self.summary = String(format: "%d of %d exported%@ in %.1fs · %.1f MP total%@%@",
+                // Originals aren't rendered, so they have no pixels to count.
+                let rendered = batches.contains { $0.preset.fileKind != .original }
+                let pixelsNote = rendered ? String(format: " · %.1f MP total", Double(totalPixels) / 1_000_000) : ""
+                self.summary = String(format: "%d of %d exported%@ in %.1fs%@%@%@",
                                       exported.count, self.total, cancelled, elapsed,
-                                      Double(totalPixels) / 1_000_000, skippedNote,
+                                      pixelsNote, skippedNote,
                                       MaskSubstitutions.summarySuffix(count: substituted))
-                if preset.revealWhenDone, !exported.isEmpty, !self.stoppingForQuit {
-                    NSWorkspace.shared.activateFileViewerSelecting(Array(exported.prefix(50)))
+                guard !self.stoppingForQuit else { return }
+                if !toReveal.isEmpty {
+                    NSWorkspace.shared.activateFileViewerSelecting(Array(toReveal.prefix(50)))
                 }
+                for (app, files) in toOpen { Self.open(files, with: app) }
             }
         }
     }
@@ -427,84 +524,57 @@ struct ExportSheet: View {
     /// time the naming or destination changes. The last plan stays shown
     /// until the next arrives, so typing in the template doesn't flicker.
     @State private var plan: ExportBatchPlan?
-    let onExport: (ExportPreset, URL) -> Void
+    /// Saved presets ticked for a multi-batch export; empty for an
+    /// ordinary one with the sheet's settings.
+    @State private var batchPresetIDs: Set<UUID> = []
+    /// The catalog's folder, where Same folder as original writes.
+    var catalogRoot: URL?
+    let onExport: ([ExportBatch]) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Export \(count) image\(count == 1 ? "" : "s")").font(.headline)
-                Spacer()
-                Menu("Presets") {
-                    ForEach(savedPresets) { saved in
-                        Button(saved.name) { preset = saved.preset }
-                    }
-                    Divider()
-                    Button("Save current as preset…") { showingSavePreset = true }
-                    if !savedPresets.isEmpty {
-                        Menu("Delete preset") {
-                            ForEach(savedPresets) { saved in
-                                Button(saved.name, role: .destructive) {
-                                    savedPresets.removeAll { $0.id == saved.id }
-                                    ExportPresetStore.save(savedPresets)
-                                }
-                            }
-                        }
-                    }
-                }
-                .fixedSize()
-            }
+            header
+            ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+            ExportMultiBatchSection(presets: savedPresets, chosen: $batchPresetIDs)
 
             groupLabel("File")
-            Picker("Format", selection: $preset.format) {
-                ForEach(ExportSettings.Format.allCases, id: \.self) { Text($0.displayName).tag($0) }
-            }
-            if preset.format.supportsQuality {
-                HStack {
-                    Text("Quality").accessibilityHidden(true)
-                    ResettableSlider(value: $preset.quality, in: 0.3...1, label: "Quality",
-                                     format: SliderValueFormat(decimals: 0, scale: 100)) { preset.quality = 0.92 }
-                    Text(String(format: "%.0f", preset.quality * 100)).monospacedDigit().frame(width: 30)
-                        .accessibilityHidden(true)
-                    Button("Compare…") { compareQualities() }
-                        .controlSize(.small)
-                        .disabled(renderer == nil || estimateRecords.isEmpty)
-                        .accessibilityLabel("Compare qualities")
-                        .accessibilityHint("Opens a window showing the first image encoded at several qualities side by side.")
-                        .help("See the first image encoded at several qualities side by side at 100%, with file sizes.")
-                }
-            }
-            if preset.format.supportsGainMap {
-                Toggle("HDR gain map", isOn: $preset.hdrGainMap)
-                    .accessibilityLabel("HDR gain map")
-                    .accessibilityHint("Adds a gain map so HDR screens show highlights brighter than white. Other screens show the normal image.")
-                    .help("Highlights up to two stops brighter on HDR screens, as the editor shows them. Every other viewer shows the normal image.")
-            }
-            Picker("Colour space", selection: $preset.colorSpaceIsP3) {
-                Text("sRGB (safe everywhere)").tag(false)
-                Text("Display P3 (wider, modern screens)").tag(true)
-            }
-            Toggle("Resize to fit", isOn: $preset.resize)
-            if preset.resize {
-                HStack {
-                    Text("Long edge")
-                    TextField("px", value: $preset.maxLongEdge, format: .number).frame(width: 80)
-                        .accessibilityLabel("Long edge in pixels")
-                    Text("px").foregroundStyle(.secondary).accessibilityHidden(true)
-                    Spacer()
-                    ForEach([1024, 2048, 4096], id: \.self) { n in
-                        Button("\(n)") { preset.maxLongEdge = n }.controlSize(.small)
-                            .accessibilityLabel("\(n) pixels")
+            ExportFormatPicker(preset: $preset)
+            if preset.rendersImage {
+                if preset.format.supportsQuality {
+                    HStack {
+                        Text("Quality").accessibilityHidden(true)
+                        ResettableSlider(value: $preset.quality, in: 0.3...1, label: "Quality",
+                                         format: SliderValueFormat(decimals: 0, scale: 100)) { preset.quality = 0.92 }
+                        Text(String(format: "%.0f", preset.quality * 100)).monospacedDigit().frame(width: 30)
+                            .accessibilityHidden(true)
+                        Button("Compare…") { compareQualities() }
+                            .controlSize(.small)
+                            .disabled(renderer == nil || estimateRecords.isEmpty
+                                      || !(preset.format == .jpeg || preset.format == .heic))
+                            .accessibilityLabel("Compare qualities")
+                            .accessibilityHint("Opens a window showing the first image encoded at several qualities side by side.")
+                            .help("See the first image encoded at several qualities side by side at 100%, with file sizes.")
                     }
                 }
+                ExportFileOptionsSection(preset: $preset)
+                if preset.format.supportsGainMap {
+                    Toggle("HDR gain map", isOn: $preset.hdrGainMap)
+                        .accessibilityLabel("HDR gain map")
+                        .accessibilityHint("Adds a gain map so HDR screens show highlights brighter than white. Other screens show the normal image.")
+                        .help("Highlights up to two stops brighter on HDR screens, as the editor shows them. Every other viewer shows the normal image.")
+                }
+                ExportColorSpacePicker(preset: $preset)
+
+                groupLabel("Image Sizing")
+                ExportSizingSection(preset: $preset)
+                ExportSharpeningSection(preset: $preset)
+                ExportWatermarkSection(preset: $preset)
+                ExportMetadataSection(preset: $preset)
+            } else {
+                ExportKindNote(kind: preset.fileKind)
             }
-            ExportWatermarkSection(preset: $preset)
-            Toggle("Include camera metadata, keywords and rating", isOn: $preset.includeMetadata)
-            Toggle("Include location", isOn: $preset.includeLocation)
-                .disabled(!preset.includeMetadata)
-                .padding(.leading, 20)
-                .accessibilityHint(ExportPreset.locationHelp)
-                .help(ExportPreset.locationHelp)
 
             groupLabel("Naming")
             HStack {
@@ -549,29 +619,18 @@ struct ExportSheet: View {
             .frame(width: 260)
             namingNotes
                 .task(id: PlanRequest(options: preset.planOptions(catalogName: catalogName),
-                                      destination: destination, count: records.count)) {
+                                      destination: planFolder, count: records.count)) {
                     await updatePlan()
                 }
 
             groupLabel("Destination")
-            HStack {
-                Text(destination?.path ?? "choose a folder…").lineLimit(1).truncationMode(.middle)
-                    .foregroundStyle(destination == nil ? .secondary : .primary)
-                    .accessibilityLabel("Destination")
-                    .accessibilityValue(destination?.path ?? "none chosen")
-                Spacer()
-                Button("Choose…") {
-                    let panel = NSOpenPanel()
-                    panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
-                    panel.message = "Folder to export into"
-                    if panel.runModal() == .OK, let url = panel.url {
-                        destination = url
-                        BookmarkStore.save(url, key: BookmarkStore.exportDestination)
-                    }
-                }
-            }
+            ExportLocationSection(preset: $preset, destination: $destination)
             Toggle("Sort into subfolders by capture date", isOn: $preset.dateSubfolders)
-            Toggle("Show in Finder when done", isOn: $preset.revealWhenDone)
+
+            groupLabel("After Export")
+            ExportAfterSection(preset: $preset)
+            }
+            }
             HStack {
                 ExportEstimateLabel(model: estimate)
                     .task(id: estimateRequest) {
@@ -580,20 +639,24 @@ struct ExportSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Export") {
-                    guard let destination else { return }
+                    guard let batches = makeBatches() else { return }
                     // Stopped now rather than when the sheet has gone, so the
                     // export waits for the estimate's render to stop.
                     releaseRender()
-                    onExport(preset, destination)
+                    // Saved here too, as the sheet's own settings, when
+                    // the run is a multi-batch one of saved presets.
+                    preset.save()
+                    onExport(batches)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(destination == nil || count == 0 || !unknownTokens.isEmpty || !canExport)
+                .disabled(!hasDestination || count == 0 || !unknownTokens.isEmpty || !canExport)
                 .help(canExport ? "" : ExportQueue.busyRefusal)
             }
         }
         .padding(20)
-        .frame(width: 520)
+        .frame(width: 560)
+        .frame(minHeight: 420, idealHeight: 760)
         .onAppear {
             if renderer == nil, let preview { renderer = ExportPreviewRenderer(source: preview) }
         }
@@ -620,7 +683,72 @@ struct ExportSheet: View {
         }
     }
 
+    /// The title and the Presets menu, above the scrolling settings.
+    private var header: some View {
+        HStack {
+            Text("Export \(count) image\(count == 1 ? "" : "s")").font(.headline)
+            Spacer()
+            Menu("Presets") {
+                ForEach(savedPresets) { saved in
+                    Button(saved.name) { preset = saved.preset }
+                }
+                Divider()
+                Button("Save current as preset…") { showingSavePreset = true }
+                if !savedPresets.isEmpty {
+                    Menu("Delete preset") {
+                        ForEach(savedPresets) { saved in
+                            Button(saved.name, role: .destructive) {
+                                savedPresets.removeAll { $0.id == saved.id }
+                                ExportPresetStore.save(savedPresets)
+                            }
+                        }
+                    }
+                }
+            }
+            .fixedSize()
+        }
+    }
+
     private var unknownTokens: [String] { ExportNaming.unknownTokens(in: preset.template) }
+
+    /// Whether every batch knows where to go, or can ask (Choose later).
+    private var hasDestination: Bool {
+        if !batchPresetIDs.isEmpty {
+            return destination != nil || !savedPresets.contains {
+                batchPresetIDs.contains($0.id) && $0.preset.location == .chosenFolder
+            }
+        }
+        return preset.location != .chosenFolder || destination != nil
+    }
+
+    /// The folder the names are planned in: the photos' catalog for Same
+    /// folder as original, else the chosen one (nil before one is chosen,
+    /// and for Choose later).
+    private var planFolder: URL? {
+        switch preset.location {
+        case .chosenFolder: destination
+        case .sameAsOriginal: catalogRoot
+        case .chooseLater: nil
+        }
+    }
+
+    /// What Export runs: the ticked presets, or the sheet's settings into
+    /// its destination (asked for now under Choose later). Nil when a
+    /// folder panel was cancelled.
+    private func makeBatches() -> [ExportBatch]? {
+        if !batchPresetIDs.isEmpty {
+            return ExportMultiBatchSection.batches(for: savedPresets, chosen: batchPresetIDs, destination: destination)
+        }
+        switch preset.location {
+        case .chosenFolder:
+            return destination.map { [ExportBatch(preset: preset, destination: $0)] }
+        case .sameAsOriginal:
+            let folder = catalogRoot ?? destination ?? URL(fileURLWithPath: "/", isDirectory: true)
+            return [ExportBatch(preset: preset, destination: folder)]
+        case .chooseLater:
+            return ExportQueue.chooseFolder(for: nil).map { [ExportBatch(preset: preset, destination: $0)] }
+        }
+    }
 
     /// The render and the comparison belong to this sheet.
     private func releaseRender() {
@@ -639,7 +767,8 @@ struct ExportSheet: View {
         return EstimateRequest(render: ExportPreviewRenderer.Key(record: first, preset: preset),
                                finish: ExportPreviewRenderer.Finish(preset: preset),
                                format: preset.format, quality: preset.quality,
-                               imageIDs: estimateRecords.map(\.id))
+                               imageIDs: estimateRecords.map(\.id), fileKind: preset.fileKind,
+                               sizeLimitBytes: preset.sizeLimitBytes, tiffCompression: preset.tiffCompression)
     }
 
     private struct EstimateRequest: Equatable {
@@ -648,6 +777,9 @@ struct ExportSheet: View {
         var format: ExportSettings.Format
         var quality: Float
         var imageIDs: [Int64?]
+        var fileKind: ExportFileKind
+        var sizeLimitBytes: Int?
+        var tiffCompression: TIFFCompression
     }
 
     private func compareQualities() {
@@ -672,8 +804,9 @@ struct ExportSheet: View {
         let options = preset.planOptions(catalogName: catalogName)
         // Before a destination is chosen, the names alone: nothing on disk
         // to collide with yet.
-        let folder = destination ?? URL(fileURLWithPath: "/", isDirectory: true)
-        let probe: ExportBatchPlanner.Probe = destination == nil ? .nothingOnDisk : .system
+        let chosen = planFolder
+        let folder = chosen ?? URL(fileURLWithPath: "/", isDirectory: true)
+        let probe: ExportBatchPlanner.Probe = chosen == nil ? .nothingOnDisk : .system
         let records = records.isEmpty ? (sample.map { [$0] } ?? []) : records
         let result = await Task.detached(priority: .userInitiated) {
             ExportBatchPlanner.plan(records, into: folder, options: options, probe: probe)

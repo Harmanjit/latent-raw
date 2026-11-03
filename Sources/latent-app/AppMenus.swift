@@ -119,6 +119,8 @@ struct CommandState: Equatable {
         // Not while a print or contact sheet renders either (both are
         // `outputJobRunning`): one full-size GPU job at a time.
         case .export: selectionCount > 0 && !exportQueueRunning && !photoMergeRunning && !outputJobRunning
+        case .exportWithPrevious: selectionCount > 0 && !exportQueueRunning && !photoMergeRunning && !outputJobRunning
+            && ExportPrevious.exists
         // The whole selection, as Export takes it: from the grid, or kept
         // from the grid in the other views. One GPU job at a time, and not
         // while typing, where ⌃H is the text system's delete-backward. Not
@@ -307,6 +309,7 @@ struct LatentCommands: Commands {
             item("Refresh Folder", .refreshFolder)
             Divider()
             item(state.exportTitle, .export)
+            item("Export with Previous", .exportWithPrevious)
             item("Export Open Image…", .exportOpenImage)
             item("Edit in \(externalEditors.chosen?.name ?? "External Editor")…", .editExternally)
             item("Reveal in Finder", .revealInFinder)

@@ -34,13 +34,29 @@ public struct ExportSettings: Sendable {
         case heic
         case png
         case tiff
+        /// AVIF and JPEG XL are written only where this Mac's ImageIO can
+        /// encode them (`isAvailable`); they are not in `allCases`.
+        case avif
+        case jxl
+
+        /// The formats every supported macOS writes. AVIF and JPEG XL
+        /// depend on the system (`available` adds them when they work).
+        public static let allCases: [Format] = [.jpeg, .heic, .png, .tiff]
+
+        /// What this Mac can write, in menu order: `allCases`, then AVIF
+        /// and JPEG XL when ImageIO has an encoder for them.
+        public static var available: [Format] {
+            allCases + [.avif, .jxl].filter(\.isAvailable)
+        }
 
         public var displayName: String {
             switch self {
             case .jpeg: return "JPEG"
             case .heic: return "HEIC"
             case .png:  return "PNG"
-            case .tiff: return "TIFF (16-bit)"
+            case .tiff: return "TIFF"
+            case .avif: return "AVIF"
+            case .jxl:  return "JPEG XL"
             }
         }
 
@@ -50,6 +66,8 @@ public struct ExportSettings: Sendable {
             case .heic: return "heic"
             case .png:  return "png"
             case .tiff: return "tif"
+            case .avif: return "avif"
+            case .jxl:  return "jxl"
             }
         }
 
@@ -59,8 +77,19 @@ public struct ExportSettings: Sendable {
             case .heic: return .heic
             case .png:  return .png
             case .tiff: return .tiff
+            case .avif: return UTType("public.avif") ?? UTType(filenameExtension: "avif") ?? .data
+            case .jxl:  return UTType("public.jpeg-xl") ?? UTType(filenameExtension: "jxl") ?? .data
             }
         }
+
+        /// Whether ImageIO on this Mac has an encoder for the format. Asked
+        /// once: the list doesn't change while the app runs.
+        public var isAvailable: Bool {
+            Self.encodableTypes.contains(contentType.identifier)
+        }
+
+        private static let encodableTypes: Set<String> =
+            Set((CGImageDestinationCopyTypeIdentifiers() as? [String]) ?? [])
 
         /// JPEG and PNG are written at 8 bits per channel; TIFF at 16.
         ///
@@ -72,12 +101,12 @@ public struct ExportSettings: Sendable {
         /// 16-bit option is for.
         var bitsPerComponent: Int {
             switch self {
-            case .jpeg, .heic, .png: return 8
-            case .tiff:              return 16
+            case .jpeg, .heic, .png, .avif, .jxl: return 8
+            case .tiff:                           return 16
             }
         }
 
-        public var supportsQuality: Bool { self == .jpeg || self == .heic }
+        public var supportsQuality: Bool { self == .jpeg || self == .heic || self == .avif || self == .jxl }
 
         /// Formats ImageIO writes an ISO 21496-1 gain map into on macOS 15.
         /// PNG and TIFF have no place for one.
@@ -95,6 +124,25 @@ public struct ExportSettings: Sendable {
     /// knows the image (`ExportWorker`); the exporter draws the text as given.
     public var watermark: ExportWatermark?
 
+    /// The file's colour space when it is one the render can't produce
+    /// directly (Adobe RGB, ProPhoto, an installed ICC profile): the
+    /// pixels are rendered in Rec. 2020 and converted by ColorSync
+    /// (ExportColorProfile.swift). Nil, the default, leaves the space to
+    /// the render (sRGB or Display P3), as before.
+    public var colorProfile: ExportColorProfile?
+    /// Pixels per inch written into the file (EXIF/TIFF resolution, JFIF
+    /// density). Nil writes none, as before. Changes no pixel.
+    public var ppi: Double?
+    /// Output sharpening after the resize (ExportOutputSharpening.swift).
+    /// Nil, the default, sharpens nothing and costs nothing.
+    public var outputSharpening: OutputSharpening?
+    /// TIFF only: 8 or 16 bits per channel, and the compression.
+    public var tiffBitDepth: Int = 16
+    public var tiffCompression: TIFFCompression = .none
+    /// Allow the long edge asked for to be larger than the picture
+    /// (Don't Enlarge off). Off, the default, never enlarges.
+    public var enlarges = false
+
     public init(format: Format = .jpeg, quality: Float = 0.92, hdrGainMap: Bool = false,
                 watermark: ExportWatermark? = nil) {
         self.format = format
@@ -103,8 +151,39 @@ public struct ExportSettings: Sendable {
         self.watermark = watermark
     }
 
-    /// Whether this export gets a gain map: asked for, and possible.
-    public var writesGainMap: Bool { hdrGainMap && format.supportsGainMap }
+    /// Whether this export gets a gain map: asked for, and possible. Not
+    /// with a converted colour space: the map describes the render's own
+    /// primaries.
+    public var writesGainMap: Bool {
+        hdrGainMap && format.supportsGainMap && !(colorProfile?.needsConversion ?? false)
+    }
+
+    /// Bits per channel of the file's pixels: 16 for a 16-bit TIFF, else 8.
+    public var bitsPerComponent: Int {
+        format == .tiff ? (tiffBitDepth == 8 ? 8 : 16) : format.bitsPerComponent
+    }
+}
+
+/// How a TIFF's pixels are compressed. All three are lossless.
+public enum TIFFCompression: String, Sendable, Codable, CaseIterable {
+    case none, lzw, zip
+
+    public var title: String {
+        switch self {
+        case .none: "None"
+        case .lzw: "LZW"
+        case .zip: "ZIP"
+        }
+    }
+
+    /// The TIFF Compression tag's value: 1 none, 5 LZW, 8 Adobe Deflate (ZIP).
+    public var tagValue: Int {
+        switch self {
+        case .none: 1
+        case .lzw: 5
+        case .zip: 8
+        }
+    }
 }
 
 /// What gets written into the file besides pixels. A file with no
@@ -145,6 +224,9 @@ public struct ExportMetadata: Sendable, Equatable {
     /// own: they are what the user typed, and a camera's stock artist and
     /// copyright strings are exactly what they mean to override.
     public var descriptive = ExportDescription()
+    /// How much of the above is written (ExportMetadataLevel.swift). All,
+    /// the default, is everything described here.
+    public var level: ExportMetadataLevel = .all
 
     public init() {}
 
@@ -227,7 +309,8 @@ public struct ExportMetadata: Sendable, Equatable {
                                                              kCGImagePropertyIPTCStarRating, rating as CFNumber)
             }
         }
-        return (Dictionary(uniqueKeysWithValues: props.map { ($0.key as CFString, $0.value) }), xmp)
+        let (keptProps, keptXMP) = level.filtered(properties: props, xmp: xmp)
+        return (Dictionary(uniqueKeysWithValues: keptProps.map { ($0.key as CFString, $0.value) }), keptXMP)
     }
 
     /// EXIF's date form, "2024:06:01 12:34:56", in local time as cameras
@@ -315,9 +398,42 @@ public final class Exporter {
             return try gainMapImage(texture, settings: settings, colorSpace: colorSpace, rotation: rotation,
                                     crop: crop, maxLongEdge: maxLongEdge, hdrRender: hdrRender)
         }
-        return EncodableImage(image: try cgImage(from: texture, colorSpace: colorSpace, rotation: rotation, crop: crop,
-                                                 bitsPerComponent: settings.format.bitsPerComponent,
-                                                 maxLongEdge: maxLongEdge, watermark: settings.watermark))
+        let finish = PackFinish(settings: settings)
+        if let profile = settings.colorProfile, profile.needsConversion {
+            // Rendered in Rec. 2020 (ExportColorProfile.renderSpace), packed
+            // at 16 bits so the conversion has every step to work with, then
+            // converted and stamped at the file's depth.
+            let packed = try packedTexture(from: texture, rotation: rotation, crop: crop, bitsPerComponent: 16,
+                                           maxLongEdge: maxLongEdge, finish: finish)
+            let wide = try cgImage(packed: packed, colorSpace: .rec2020, bitsPerComponent: 16, watermark: nil,
+                                   space: ExportColorProfile.renderedRec2020)
+            return EncodableImage(image: try Self.converted(wide, to: profile, bitsPerComponent: settings.bitsPerComponent,
+                                                            watermark: settings.watermark))
+        }
+        let packed = try packedTexture(from: texture, rotation: rotation, crop: crop,
+                                       bitsPerComponent: settings.bitsPerComponent, maxLongEdge: maxLongEdge,
+                                       finish: finish)
+        let placed = settings.watermark.flatMap { PlacedWatermark($0, imageWidth: packed.width, imageHeight: packed.height,
+                                                                  colorSpace: colorSpace) }
+        return EncodableImage(image: try cgImage(packed: packed, colorSpace: colorSpace,
+                                                 bitsPerComponent: settings.bitsPerComponent, watermark: placed))
+    }
+
+    /// What happens to the pixels between the render and the readback,
+    /// beyond the crop, turn and resize: enlarging, and output sharpening.
+    /// The default does neither, and costs nothing.
+    struct PackFinish {
+        var enlarge = false
+        var sharpening: OutputSharpening?
+        var ppi: Double?
+
+        init(enlarge: Bool = false, sharpening: OutputSharpening? = nil, ppi: Double? = nil) {
+            self.enlarge = enlarge; self.sharpening = sharpening; self.ppi = ppi
+        }
+
+        init(settings: ExportSettings) {
+            self.init(enlarge: settings.enlarges, sharpening: settings.outputSharpening, ppi: settings.ppi)
+        }
     }
 
     /// The file `write(cgImage:to:)` would write, in memory: the same
@@ -367,6 +483,7 @@ public final class Exporter {
         if settings.format.supportsQuality {
             properties[kCGImageDestinationLossyCompressionQuality] = max(0, min(1, settings.quality))
         }
+        addOutputProperties(to: &properties, settings: settings)
         if let xmp = encoding?.xmp {
             CGImageDestinationAddImageAndMetadata(destination, cgImage, xmp, properties as CFDictionary)
         } else {
@@ -378,11 +495,12 @@ public final class Exporter {
         }
     }
 
-    /// Output size after crop, rotation and resize.
-    static func outputSize(frame: CropFrame, maxLongEdge: Int?) -> (Int, Int) {
+    /// Output size after crop, rotation and resize. Only shrinks, unless
+    /// `enlarge` lets a larger `maxLongEdge` grow the picture.
+    static func outputSize(frame: CropFrame, maxLongEdge: Int?, enlarge: Bool = false) -> (Int, Int) {
         let canvas = frame.canvasSize
         var w = max(1, Int(canvas.width.rounded())), h = max(1, Int(canvas.height.rounded()))
-        if let target = maxLongEdge, target > 0, max(w, h) > target {
+        if let target = maxLongEdge, target > 0, max(w, h) > target || (enlarge && max(w, h) < target) {
             let scale = Double(target) / Double(max(w, h))
             w = max(1, Int((Double(w) * scale).rounded()))
             h = max(1, Int((Double(h) * scale).rounded()))
@@ -394,25 +512,42 @@ public final class Exporter {
     /// 8- or 16-bit texture the CPU can read directly: one GPU pass at full
     /// size, three when resizing.
     func packedTexture(from texture: MTLTexture, rotation: ImageRotation, crop: CropParameters,
-                       bitsPerComponent: Int, maxLongEdge: Int?) throws -> MTLTexture {
+                       bitsPerComponent: Int, maxLongEdge: Int?, finish: PackFinish = PackFinish()) throws -> MTLTexture {
         // The rendered texture stands in for the sensor: the crop is
         // normalized, so a binned render crops identically to a full one.
         let frame = CropFrame(sensorSize: CGSize(width: texture.width, height: texture.height),
                               crop: crop, rotation: rotation)
-        let (w, h) = Self.outputSize(frame: frame, maxLongEdge: maxLongEdge)
+        let (w, h) = Self.outputSize(frame: frame, maxLongEdge: maxLongEdge, enlarge: finish.enlarge)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: bitsPerComponent == 16 ? .rgba16Unorm : .rgba8Unorm,
             width: w, height: h, mipmapped: false)
         descriptor.storageMode = .shared     // read by the CPU straight after
         descriptor.usage = [.shaderWrite]
-        if (w, h) != Self.outputSize(frame: frame, maxLongEdge: nil) {
-            // A resize: filtered properly, in linear light (ExportResampler.swift).
+        // Output sharpening reads the resized pixels before they are
+        // quantised: they go to a float intermediate first, and the sharpen
+        // writes the file's texture. Without it nothing changes.
+        if let sharpening = finish.sharpening {
+            let intermediate = try sharpeningIntermediate(width: w, height: h, bitsPerComponent: bitsPerComponent)
+            try pack(texture, frame: frame, into: intermediate)
             guard let dest = gpu.device.makeTexture(descriptor: descriptor) else { throw ExportError.readbackFailed }
-            try resample(texture, frame: frame, into: dest, sourceIsEncoded: true, encode: true)
+            try applyOutputSharpening(sharpening, ppi: finish.ppi, from: intermediate, into: dest)
             return dest
         }
-        guard let dest = gpu.device.makeTexture(descriptor: descriptor),
-              let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
+        guard let dest = gpu.device.makeTexture(descriptor: descriptor) else { throw ExportError.readbackFailed }
+        try pack(texture, frame: frame, into: dest)
+        return dest
+    }
+
+    /// The render cropped, turned and sized into `dest`: resampled when the
+    /// size changes, else one sampling pass.
+    func pack(_ texture: MTLTexture, frame: CropFrame, into dest: MTLTexture) throws {
+        let w = dest.width, h = dest.height
+        if (w, h) != Self.outputSize(frame: frame, maxLongEdge: nil) {
+            // A resize: filtered properly, in linear light (ExportResampler.swift).
+            try resample(texture, frame: frame, into: dest, sourceIsEncoded: true, encode: true)
+            return
+        }
+        guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
               let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             throw ExportError.readbackFailed
         }
@@ -429,7 +564,6 @@ public final class Exporter {
         cmdBuffer.commit()
         cmdBuffer.waitUntilCompleted()
         guard cmdBuffer.status != .error else { throw ExportError.readbackFailed }
-        return dest
     }
 
     /// A CGImage of a rendered (already display-encoded) texture, rotated
@@ -452,7 +586,7 @@ public final class Exporter {
     /// The CGImage of packed file pixels, with the watermark blended into
     /// the copy read back, before anything is encoded.
     func cgImage(packed: MTLTexture, colorSpace: ColorKit.OutputSpace, bitsPerComponent: Int,
-                 watermark: PlacedWatermark?) throws -> CGImage {
+                 watermark: PlacedWatermark?, space: CGColorSpace? = nil) throws -> CGImage {
         let w = packed.width, h = packed.height
         let bytesPerPixel = bitsPerComponent / 8 * 4
         let bytesPerRow = w * bytesPerPixel
@@ -463,12 +597,13 @@ public final class Exporter {
             watermark?.composite(into: bytes, imageWidth: w, imageHeight: h, bitsPerComponent: bitsPerComponent)
         }
 
-        let cgColorSpace: CGColorSpace?
+        var cgColorSpace: CGColorSpace?
         switch colorSpace {
         case .sRGB:      cgColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
         case .displayP3: cgColorSpace = CGColorSpace(name: CGColorSpace.displayP3)
         case .rec2020:   cgColorSpace = CGColorSpace(name: CGColorSpace.itur_2020)
         }
+        if let space { cgColorSpace = space }
         var bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)
         if bitsPerComponent == 16 {
             bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue

@@ -14,11 +14,16 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **No built-in camera-matching profiles.** Latent Standard renders from the camera's characterisation matrix, so it will not match the in-camera JPEG look. Camera-matching looks come from DNG camera profiles (.dcp) you import yourself: Latent bundles none and downloads none. Triple-illuminant profiles (DNG 1.6) are read as dual-illuminant ones, a profile's tone curve is applied on top of Latent's tone mapping rather than instead of it, and there is no Adaptive profile, Profile Browser with previews, favourites or LUT-based creative profiles.
 <!-- /RECONCILE -->
 - **Lens profiles** cover the bundled Lensfun subset; a lens the matcher cannot identify gets manual sliders only.
+<!-- RECONCILE: two branches edited this; merge into one text -->
 
 - **Lens profiles** cover the bundled Lensfun subset. A lens the matcher cannot identify gets no profile automatically; pick one by hand from the Lens Corrections panel, or rely on the manual sliders and Remove chromatic aberration. Profiles remembered for a lens are kept per catalog, and `latent-cli` doesn't read them.
 - **Golden-image tests don't yet pin the new detail and effects stages** (grain, post-crop vignetting, sharpening Detail and Masking, noise reduction Detail, Contrast and Smoothness); they have render tests that check each control's effect and that off renders exactly as before.
 <!-- /RECONCILE -->
 - **No DNG export.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is fixed at two stops. PNG and TIFF are SDR only.
+
+- **HDR in exports is a gain map only.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is fixed at two stops. PNG, TIFF, AVIF and JPEG XL are SDR only, and a gain map is written only in sRGB or Display P3.
+- **DNG export bakes the corrections, not the look.** A DNG holds white balance, exposure, noise reduction, lens corrections, healing and masks; tone, colour grading, presence and sharpening are left out, so it opens with the default look. Keep its white balance at As Shot: the pixels are already balanced. AVIF and JPEG XL appear only when this Mac's system can write them; there is no PSD.
+<!-- /RECONCILE -->
 - **Optional interop XMP beside the image is not implemented.** Latent's sidecars live in `_latent/xmp/`, where Lightroom and darktable do not look.
 - **HDR display** has been verified on a MacBook Pro's XDR screen, and sRGB and Display P3 output on the same machine. Other HDR displays are untested.
 
@@ -72,7 +77,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **The Loupe on a second display is for looking only.** It shows one image at fit; zoom, pan and tools stay in the main window.
 - **Edit in External Editor is a one-way hand-off.** It writes a 16-bit Display P3 TIFF (no Adobe RGB or ProPhoto), and the TIFF the other application saves doesn't come back by itself. Saved into a catalogued folder, it appears in the Library, as a picture of its own, once that folder is read again.
 - **Slideshows are SDR,** even on an HDR screen, and leave out AI noise reduction so each slide is ready in time. The edit's other noise reduction still applies.
-- **The watermark is for exports.** Prints, contact sheets and the TIFF for an external editor don't carry it, and it is one line of text; there is no logo or image watermark.
+- **The watermark is for exports.** Prints, contact sheets and the TIFF for an external editor don't carry it. It is one line of text or one PNG graphic, in a corner, turned in quarter turns.
 - **A JPEG or PNG contact sheet is one picture,** at most 8192 px a side, holding every photo, so a large selection gets small cells. A PDF can have as many pages as it needs.
 - **The print panel's preview is drawn from thumbnails.** It shows the layout; the photos themselves are rendered for the printer only when you print.
 - **Showing and hiding the sidebar and filmstrip has no keyboard shortcut or menu item.** The filmstrip has its film button in the status bar.
@@ -91,7 +96,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Edits on the bracket's photos aren't used.** The merge reads the raw files; the result starts unedited at the reference photo's exposure.
 - **The merge options are few, and differ by kind.** HDR offers Auto Align, Deghost (with Show Deghost Overlay, which isn't remembered) and Auto Settings, plus a reference photo you pick that lasts for that merge only — HDR Merge Without Dialog always chooses the reference automatically. Panorama offers Projection, Auto Crop and Auto Settings. HDR Panorama offers both sets. There is nothing else to tune.
 - **No re-merge.** The result records which photos made it, but Latent can't merge them again from that record, and a merge can't be undone except by deleting its DNG in Finder.
-- **Merged DNGs are large and uncompressed,** about 6 bytes per pixel (roughly 145 MB for 24 MP). Merges write DNG; export still doesn't.
+- **Merged DNGs are large and uncompressed,** about 6 bytes per pixel (roughly 145 MB for 24 MP). Export to DNG writes the same kind of file.
 - **A merged DNG copied in from Finder without its sidecar** is catalogued as a plain DNG; the record of what made it stays inside the file, unread.
 
 ## Editing

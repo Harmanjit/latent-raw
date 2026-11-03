@@ -142,18 +142,20 @@ extension Exporter {
                       maxLongEdge: Int?,
                       hdrRender: (RenderOutput) throws -> MTLTexture) throws -> EncodableImage {
         let headroom = GainMap.exportHeadroom
+        let finish = PackFinish(settings: settings)
         let base = try linearTexture(from: texture, rotation: rotation, crop: crop,
-                                     maxLongEdge: maxLongEdge, sourceIsEncoded: true)
+                                     maxLongEdge: maxLongEdge, sourceIsEncoded: true, enlarge: finish.enlarge)
         let packed = try packedTexture(from: texture, rotation: rotation, crop: crop,
-                                       bitsPerComponent: settings.format.bitsPerComponent, maxLongEdge: maxLongEdge)
+                                       bitsPerComponent: settings.bitsPerComponent, maxLongEdge: maxLongEdge,
+                                       finish: finish)
         let watermark = settings.watermark.flatMap {
             PlacedWatermark($0, imageWidth: packed.width, imageHeight: packed.height, colorSpace: colorSpace)
         }
         let image = try cgImage(packed: packed, colorSpace: colorSpace,
-                                bitsPerComponent: settings.format.bitsPerComponent, watermark: watermark)
+                                bitsPerComponent: settings.bitsPerComponent, watermark: watermark)
         let hdr = try hdrRender(.hdrFile(colorSpace, headroom: headroom))
         let alternate = try linearTexture(from: hdr, rotation: rotation, crop: crop,
-                                          maxLongEdge: maxLongEdge, sourceIsEncoded: false)
+                                          maxLongEdge: maxLongEdge, sourceIsEncoded: false, enlarge: finish.enlarge)
         var map = try gainMap(base: base, alternate: alternate, headroom: headroom)
         if let watermark {
             map = watermark.neutralising(map, imageWidth: image.width, imageHeight: image.height)
@@ -164,10 +166,10 @@ extension Exporter {
     /// A render cropped, rotated and resampled to gain-map size (half the
     /// export's), in linear light, as a private float texture.
     func linearTexture(from texture: MTLTexture, rotation: ImageRotation, crop: CropParameters,
-                       maxLongEdge: Int?, sourceIsEncoded: Bool) throws -> MTLTexture {
+                       maxLongEdge: Int?, sourceIsEncoded: Bool, enlarge: Bool = false) throws -> MTLTexture {
         let frame = CropFrame(sensorSize: CGSize(width: texture.width, height: texture.height),
                               crop: crop, rotation: rotation)
-        let (w, h) = Self.outputSize(frame: frame, maxLongEdge: maxLongEdge)
+        let (w, h) = Self.outputSize(frame: frame, maxLongEdge: maxLongEdge, enlarge: enlarge)
         let size = GainMap.size(forImageWidth: w, height: h)
         guard let dest = gpu.makePrivateTexture(width: size.width, height: size.height,
                                                 pixelFormat: .rgba16Float) else {

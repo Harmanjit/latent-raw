@@ -153,6 +153,8 @@ enum Shortcuts {
         Shortcut(.pasteSettings, "v", [.shift, .command]),
         // Export
         Shortcut(.export, "e", [.shift, .command]),
+        // Lightroom's key for Export with Previous.
+        Shortcut(.exportWithPrevious, "e", [.option, .shift, .command]),
         Shortcut(.revealInFinder, "r", [.option, .command]),
         Shortcut(.print, "p", .command),
         Shortcut(.editExternally, "e", .command),
@@ -328,6 +330,7 @@ extension Shortcuts {
         ]),
         ("Export", [
             ShortcutPageRow([.export], "Export the selection"),
+            ShortcutPageRow([.exportWithPrevious], "Export with Previous: the selection, with the last export's settings and folder, without the sheet"),
             ShortcutPageRow([.revealInFinder], "Reveal the selection in Finder"),
             ShortcutPageRow([.print], "Print the selection (in Library) or the image shown"),
             ShortcutPageRow([.editExternally], "Edit in External Editor: a 16-bit TIFF of the open or selected image, opened in the app chosen in Settings"),

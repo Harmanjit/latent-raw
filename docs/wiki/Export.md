@@ -4,19 +4,54 @@ Select images in the Library and press ⇧⌘E (File > Export), or right-click t
 
 ## The sheet
 
-**File.** JPEG, HEIC, PNG, or 16-bit TIFF. Quality for the lossy formats; **Compare…** beside it opens the quality comparison (below). Colour space sRGB or Display P3, tagged with the matching profile. Optional resize to a long edge: the render bins the sensor data towards the target size, then shrinks to the exact size with a Lanczos 3 filter in linear light, so fine detail doesn't alias.
+**Format.** JPEG, HEIC, PNG or TIFF on every Mac; AVIF and JPEG XL as well when the Mac's system can write them (the menu only lists what works). Two more choices don't render an image file at all: **DNG** and **Original + XMP sidecar** (below). Quality for the lossy formats; **Compare…** beside it opens the quality comparison (below) for JPEG and HEIC.
+
+**Limit file size.** For the lossy formats: the quality is lowered, photo by photo, until the file is no bigger than the size given (in KB). A photo that doesn't fit even at the lowest quality is reported and not written; export it smaller.
+
+**TIFF.** 16 bits per channel (smooth gradients for further editing) or 8 (half the size), and compression None, LZW or ZIP. All three are lossless; ZIP is usually smallest, LZW is read by the most software.
+
+**Colour space.** sRGB (safe for the web and anyone's screen), Display P3 (wider, for modern Apple screens), **Adobe RGB (1998)** (what print labs usually ask for), **ProPhoto RGB** (the widest, for 16-bit files going on to another editor), any RGB profile installed on the Mac (a printer or paper profile, listed from the ColorSync folders), or **Other…** to pick a profile file. Every file embeds its profile. Adobe RGB, ProPhoto and installed profiles are made by rendering the photo in Latent's wide working space at 16 bits and converting it with macOS's ColorSync, so nothing bands on the way; a printer or paper profile converts with perceptual intent. ProPhoto in an 8-bit file can band in smooth skies, and the sheet says so. A gain map is written only in sRGB or Display P3.
 
 **HDR gain map** (JPEG and HEIC, off by default). Adds a gain map so HDR screens show highlights up to two stops above white, as the editor's HDR display shows them. Every other viewer, and the file's main image, shows the normal SDR export. It costs a second render of the image. PNG and TIFF have nowhere to put one.
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 <!-- RECONCILE: two branches edited this; merge into one text -->
 **Metadata.** On by default: the file keeps the photo's own camera and lens details, capture time, artist and copyright, and other IPTC and XMP fields from the raw. Latent's keywords are added to the file's own, a keyword inside others (Places › France › Paris) as each of its levels, and its rating replaces the file's when there is one. Tags that only describe the raw's storage (orientation, sensor layout, autofocus points), makers' private data and Camera Raw's edit settings are left out. Turn **Include camera metadata, keywords and rating** off to write none of it.
 
 **Metadata.** On by default: the file keeps the photo's own camera and lens details, capture time, artist and copyright, and other IPTC and XMP fields from the raw. Latent's keywords are added to the file's own, and its rating replaces the file's when there is one. The title, caption, creator and copyright you gave the photo in the Library panel replace the raw's own: they go in the IPTC fields (Object Name, Caption/Abstract, By-line, Copyright Notice), the TIFF fields (Image Description, Artist, Copyright) and XMP (`dc:title`, `dc:description`, `dc:creator`, `dc:rights`), so photo sites and other catalogs show them. Export Open Image and Edit in External Editor carry them too. Tags that only describe the raw's storage (orientation, sensor layout, autofocus points), makers' private data and Camera Raw's edit settings are left out. Turn **Include camera metadata, keywords and rating** off to write none of it.
 <!-- /RECONCILE -->
 
-**Watermark.** Off by default. Switch it on to stamp one line of text into a corner of every exported file. `{year}` becomes the capture year and `{name}` the original file name, in any letter case. Size is a share of the picture's short edge (1–20%), so the watermark looks the same at any export size; opacity and colour are adjustable, and the colour is picked as sRGB and converted for Display P3 exports. It is drawn into the file after the resize, never into the photo or its edit. In a file with an HDR gain map the text is not brightened on HDR screens. Presets remember the watermark text even while the switch is off.
+**Image sizing.** Off, the file is the photo's full cropped size. **Resize to fit** by:
+<!-- /RECONCILE -->
 
-**Location.** Off by default, and in presets saved before it existed. Turn **Include location** on to also keep the **GPS position**, place names, and the camera body's and lens's serial numbers; see [Security and Privacy](Security-and-Privacy#location-in-exports).
+| Fit | Means |
+|---|---|
+| Long edge | the longer side in pixels |
+| Short edge | the shorter side in pixels |
+| Width & height | fits inside a box, width across and height down, as given |
+| Dimensions | fits inside a box whichever way the photo is turned: the larger number limits the long side |
+| Megapixels | the whole picture scaled to that many million pixels |
+| Percentage | the whole picture scaled by that share of its full size |
+
+**Don't enlarge** (on by default) writes a photo that is already smaller than the size asked for at its own size. Off, it is enlarged. Either way the render bins the sensor data towards the target size, then sizes it exactly with a Lanczos 3 filter in linear light, so fine detail doesn't alias.
+
+**Resolution.** The pixels per inch written into the file (240, 300 and 360 are a click away). It changes no pixel; it tells other apps and print labs how big the print is, and matte and glossy sharpening use it. Off writes none, as before.
+
+**Sharpen for.** Output sharpening, a last sharpen made for where the file goes, applied after the resize so it suits the file's own pixels: **Screen**, **Matte paper** or **Glossy paper**, at **Low**, **Standard** or **High**. Screen is a light touch. Matte paper gets the most, because ink spreads into uncoated paper; glossy a little less. For paper the radius grows with the resolution (300 ppi when none is set). It sharpens brightness only, so colours don't fringe, and leaves very small differences alone so skies stay smooth. The edit's own sharpening in Develop is unchanged.
+
+**Metadata.** What the file carries besides pixels:
+
+| Choice | Writes |
+|---|---|
+| All | the photo's own camera and lens details, capture time, artist and copyright and other IPTC and XMP fields from the raw, plus Latent's keywords (added to the file's own) and rating |
+| All except camera info | the same without the camera's make and model, the lens, the exposure settings, maker notes and serial numbers |
+| Copyright and contact | only the copyright notice, the creator and their contact details |
+| Copyright only | only the copyright notice |
+| None | nothing |
+
+Tags that only describe the raw's storage (orientation, sensor layout, autofocus points), makers' private data and Camera Raw's edit settings are never written. **Include location** (off by default, and in presets saved before it existed) also keeps the **GPS position**, place names, and the camera body's and lens's serial numbers, at All and All except camera info; see [Security and Privacy](Security-and-Privacy#location-in-exports).
+
+**Watermark.** Off by default. Switch it on to stamp **Text** or a **Graphic** into a corner of every exported file. Text: one line, where `{year}` becomes the capture year and `{name}` the original file name, in any letter case, in the system font or any font installed on the Mac; its size is a share of the picture's short edge (1–20%) and its colour is picked as sRGB and converted for the file's colour space. Graphic: a PNG logo (up to 4 MB; transparent parts stay transparent), sized by its longer side as a share of the picture's short edge (2–50%). The PNG is kept in the preset, so it still works after the original file moves. Either can be turned 90°, 180° or 270° (270° runs text up the side of the picture), and has an opacity. It is drawn into the file after the resize, never into the photo or its edit, so it looks the same at any export size. In a file with an HDR gain map it is not brightened on HDR screens. Presets remember the watermark even while the switch is off.
 
 **Naming.** A template with tokens, expanded per image. Tokens can be typed in any letter case, or picked from Insert:
 
@@ -35,13 +70,31 @@ Dates are written the same on every Mac, whatever its region or calendar. The wh
 
 Every file name is planned before anything is written. A line shows the first file's name, and notes say how many images would share a name within the export (after the first, those always get a number: -1, -2…), how many names are already in the destination, and what happens to those: **Add a number**, **Replace**, or **Skip**. Each name is checked against the folder again just before its file is written, and once more as the finished file is moved into place: under Add a number or Skip, a file that took the name while the image rendered is never replaced; the image gets the next free number (and is rendered again) or is skipped.
 
-**Destination.** A folder, remembered between exports and defaulting to the one in Settings. Optionally sort into subfolders by capture date. Optionally show the results in Finder when done.
+**Destination.** **Export to** a **chosen folder** (remembered between exports, defaulting to the one in Settings), the **same folder as the original** (each file beside its photo), or **choose folder later**, which asks when the export starts: handy for presets and Export with Previous that shouldn't always land in one place. **Subfolder** puts the files in a folder of that name inside the destination (or inside each photo's folder). Optionally sort into subfolders by capture date.
 
-**Presets.** Save the current sheet under a name; four built-ins cover web at 2048 px, full-size JPEG, print TIFF in P3, and proofs by date.
+**After export.** **Show in Finder when done**, and **Open in** an application you choose (Choose App…), which opens the exported files in it, as Lightroom's Open in Other Application does.
 
-**Estimated size.** The sheet renders and encodes the first selected image at the current settings and scales that by each other image's pixel count. Crops and detail vary from photo to photo, so a batch total is approximate; for a single image it is the real file size. Changing only the quality or JPEG versus HEIC re-encodes without rendering again.
+**Presets.** Save the current sheet under a name; four built-ins cover web at 2048 px, full-size JPEG, print TIFF in P3, and proofs by date. A preset keeps every setting above, including its location.
+
+**Export with several presets** (multi-batch). Open it at the top of the sheet and tick saved presets: one run exports the selection once with each, one preset after another, say a web JPEG and a print TIFF. A preset that writes to a chosen folder writes into a subfolder of the sheet's destination named after the preset; one set to the same folder as the original writes there; one set to choose later asks for its folder when the export starts. The sheet's own settings aren't used while presets are ticked.
+
+**Estimated size.** For image formats, the sheet renders and encodes the first selected image at the current settings and scales that by each other image's pixel count. Crops and detail vary from photo to photo, so a batch total is approximate; for a single image it is the real file size. Changing only the quality or JPEG versus HEIC re-encodes without rendering again. With a size limit the estimate is at most the limit per file.
 
 **Compare qualities.** **Compare…** next to Quality (JPEG and HEIC) opens a window with the first image encoded at two to four qualities side by side at 100%. Drag any pane to pan them all. Each pane shows the size of the whole file at that quality, and **Use** sets the sheet's quality. JPEG panes look exactly as the file will; the edges of HEIC panes can differ slightly. The window closes with the sheet.
+
+## DNG export (Render to DNG)
+
+Choosing **DNG** as the format writes a linear DNG of each photo at full size, cropped, straightened and upright. It keeps raw editing room: the pixels are 16-bit floating point linear light, with highlights above white kept. What is **baked in**: white balance, exposure, highlight recovery, noise reduction (classic and AI), lens and perspective corrections, spot healing, dust spots, red eye, blemishes and masks. What is **left out**: the look (contrast and the tone curve, Highlights to Blacks, colour grading, vibrance, texture, clarity, dehaze, defringe, skin smoothing, sharpening), since those work on finished, display-ready values a raw file doesn't hold. The DNG opens in Latent, Lightroom, Apple Photos and other raw converters with their default look, ready to be graded again; its preview shows that default look.
+
+The DNG keeps the camera's name, its colour matrix, the lens, exposure details and capture time, and records the original it came from. Its white balance is already set, so keep it at **As Shot** when you edit it; Latent doesn't apply lens corrections to it again. Image sizing, colour space, sharpening, metadata choices and the watermark don't apply to DNG. Like merged DNGs it is large, about 6 bytes per pixel.
+
+## Exporting originals
+
+**Original + XMP sidecar** copies each raw file itself, byte for byte, with an `.xmp` file beside it named as Lightroom, Bridge and Capture One look for one (`DSC_0107.xmp` for `DSC_0107.NEF`). The sidecar holds the rating, colour label and keywords, which other apps read, and Latent's edit, snapshots and history. The file keeps its own extension; naming, subfolders and the existing-file choices work as for any export.
+
+## Export with Previous
+
+**File › Export with Previous** (⌥⇧⌘E) exports the selection again with the last export's settings and folder, without opening the sheet. A multi-batch export repeats all its presets. A folder set to choose later, or one that can no longer be reached, is asked for; cancelling stops the export.
 
 ## The queue
 
