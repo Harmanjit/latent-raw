@@ -20,19 +20,27 @@ struct LocalAdjustmentsPanel: View {
                     modelMenu("Subject", kind: .subjectSegmentation) { model.addAIMask(model: $0) }
                     modelMenu("Click to Select", kind: .promptedSegmentation) { model.addPromptedMask(model: $0) }
                         .disabled(!model.promptedModelAvailable)
+                    modelMenu("Select Objects (Box)", kind: .promptedSegmentation) { model.addObjectsMask(model: $0) }
+                        .disabled(!model.promptedModelAvailable)
                     Menu("Select by Class") {
                         ForEach(AIMaskKind.allCases.filter { $0 != .subject }, id: \.self) { kind in
                             Button(kind.displayName) { model.addAIMask(kind) }
                         }
                     }
+                    Divider()
+                    Button("Colour Range") { model.addColourRangeMask() }
+                    Button("Luminance Range") { model.addLuminanceRangeMask() }
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 .disabled(!model.hasImage || model.parameters.locals.count >= LocalAdjustment.maximumCount)
+                masksMenu
                 Spacer()
+                MaskOverlayMenu(model: model)
                 Toggle("Show mask", isOn: $model.showMaskOverlay)
                     .toggleStyle(.checkbox)
                     .disabled(model.selectedLocal == nil)
+                    .help("Show the selected mask on the image")
             }
             .controlSize(.small)
 
@@ -70,15 +78,49 @@ struct LocalAdjustmentsPanel: View {
         .disabled(choices.isEmpty)
     }
 
+    /// Housekeeping for the selected mask and the list.
+    private var masksMenu: some View {
+        Menu("Masks") {
+            Button("Duplicate") { if let i = model.selectedLocalIndex { model.duplicateLocal(at: i) } }
+                .disabled(model.selectedLocal == nil || model.parameters.locals.count >= LocalAdjustment.maximumCount)
+            Button("Duplicate and Invert") { if let i = model.selectedLocalIndex { model.duplicateLocal(at: i, invert: true) } }
+                .disabled(model.selectedLocal == nil || model.parameters.locals.count >= LocalAdjustment.maximumCount)
+            Button(model.selectedLocal?.hidden == true ? "Show Mask" : "Hide Mask") {
+                if let i = model.selectedLocalIndex { model.toggleHidden(at: i) }
+            }
+            .disabled(model.selectedLocal == nil)
+            Divider()
+            Button("Delete Empty Masks") { model.deleteEmptyMasks() }
+                .disabled(!model.hasEmptyMasks)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(model.parameters.locals.isEmpty)
+        .help("Duplicate, invert, hide or tidy masks")
+    }
+
     private var localList: some View {
         VStack(spacing: 2) {
             ForEach(Array(model.parameters.locals.enumerated()), id: \.element.id) { index, local in
                 let selected = model.selectedLocalIndex == index
                 HStack(spacing: 6) {
+                    Button {
+                        model.toggleHidden(at: index)
+                    } label: {
+                        Image(systemName: local.hidden ? "eye.slash" : "eye")
+                            .foregroundStyle(local.hidden ? .tertiary : .secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(local.hidden ? "Show this mask's effect" : "Hide this mask's effect")
+                    .accessibilityLabel(local.hidden ? "Show \(local.name)" : "Hide \(local.name)")
                     Image(systemName: icon(for: local.shape)).frame(width: 14)
                     Text(local.name).font(.caption)
+                        .foregroundStyle(local.hidden ? .secondary : .primary)
                     Spacer()
-                    if local.invert { Text("inv").font(.caption2).foregroundStyle(.tertiary) }
+                    if !local.components.isEmpty {
+                        Text("+\(local.components.count)").font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    if local.invert || local.invertMask { Text("inv").font(.caption2).foregroundStyle(.tertiary) }
                 }
                 .padding(.vertical, 3).padding(.horizontal, 6)
                 .background(selected ? Color.accentColor.opacity(0.25) : Color.clear,
@@ -86,10 +128,22 @@ struct LocalAdjustmentsPanel: View {
                 .selectionOutline(selected, cornerRadius: 4)
                 .contentShape(Rectangle())
                 .onTapGesture { model.selectedLocalIndex = index }
+                .contextMenu {
+                    Button("Duplicate") { model.duplicateLocal(at: index) }
+                    Button("Duplicate and Invert") { model.duplicateLocal(at: index, invert: true) }
+                    Button(local.hidden ? "Show" : "Hide") { model.toggleHidden(at: index) }
+                    Divider()
+                    Button("Delete", role: .destructive) {
+                        model.selectedLocalIndex = index
+                        model.removeSelectedLocal()
+                    }
+                }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(local.invert ? "\(local.name), inverted" : local.name)
+                .accessibilityLabel(SpokenText.maskRow(local))
                 .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
                 .accessibilityAction { model.selectedLocalIndex = index }
+                .accessibilityAction(named: local.hidden ? "Show" : "Hide") { model.toggleHidden(at: index) }
+                .accessibilityAction(named: "Duplicate") { model.duplicateLocal(at: index) }
             }
         }
     }
@@ -109,15 +163,33 @@ struct LocalAdjustmentsPanel: View {
     private func selectedControls(_ i: Int) -> some View {
         let binding = $model.parameters.locals[i]
         VStack(alignment: .leading, spacing: 10) {
-            toolRow(i)
+            TextField("Name", text: binding.name)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .help("Rename this mask")
+                .accessibilityLabel("Mask name")
 
-            slider("Exposure", binding.exposureEV, -3...3, "%+.2f EV")
-            slider("Contrast", binding.contrast, -1...1, "%+.2f")
-            slider("Saturation", binding.saturation, -1...1, "%+.2f")
-            slider("Warmth", binding.warmth, -1...1, "%+.2f")
+            MaskComponentList(model: model, index: i)
+
+            if let component = model.selectedMaskComponent, component.shape == nil {
+                MaskRangeComponentControls(model: model, index: i, component: component)
+            } else {
+                toolRow(i)
+                modelRefineRow(i)
+            }
+
+            LocalSliderGroups(local: binding)
 
             HStack {
-                Toggle("Invert", isOn: binding.invert).toggleStyle(.checkbox)
+                // With components, Invert turns the whole combination
+                // over; with one shape it is that shape's own invert.
+                if model.parameters.locals[i].components.isEmpty {
+                    Toggle("Invert", isOn: binding.invert).toggleStyle(.checkbox)
+                        .help("Apply the adjustments outside the mask instead")
+                } else {
+                    Toggle("Invert mask", isOn: binding.invertMask).toggleStyle(.checkbox)
+                        .help("Apply the adjustments outside the combined mask instead")
+                }
                 Spacer()
                 Button("Delete", role: .destructive) { model.removeSelectedLocal() }
             }
@@ -131,20 +203,36 @@ struct LocalAdjustmentsPanel: View {
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
     }
 
+    /// The tool for the element the mask tools work on: the local's own
+    /// shape, or the selected shape component.
     @ViewBuilder
     private func toolRow(_ i: Int) -> some View {
-        switch model.parameters.locals[i].shape {
+        if let element = model.activeMaskElement {
+            elementToolRow(i, element: element)
+        }
+    }
+
+    @ViewBuilder
+    private func elementToolRow(_ i: Int, element: MaskElement) -> some View {
+        switch element.shape {
         case .linear:
             toolHint("Drag on the image from where the effect is full to where it ends.",
                      tool: .linear, label: "Place gradient")
-        case .radial:
-            toolHint("Drag on the image from the centre outward.", tool: .radial, label: "Place radial")
-            if case .radial(let c, let r, let feather) = model.parameters.locals[i].shape {
-                slider("Feather", Binding(
-                    get: { feather },
-                    set: { model.parameters.locals[i].shape = .radial(centre: c, radii: r, feather: $0) }),
-                       0...1, "%.2f", 0.5)
-            }
+        case .radial(let c, let r, let feather):
+            toolHint("Drag from the centre outward to draw; drag inside the circle to move it.",
+                     tool: .radial, label: "Place or move")
+            slider("Width", Binding(
+                get: { r.x },
+                set: { model.setActiveMaskShape(.radial(centre: c, radii: SIMD2($0, r.y), feather: feather)) }),
+                   0.01...1, "%.2f", 0.3)
+            slider("Height", Binding(
+                get: { r.y },
+                set: { model.setActiveMaskShape(.radial(centre: c, radii: SIMD2(r.x, $0), feather: feather)) }),
+                   0.01...1, "%.2f", 0.3)
+            slider("Feather", Binding(
+                get: { feather },
+                set: { model.setActiveMaskShape(.radial(centre: c, radii: r, feather: $0)) }),
+                   0...1, "%.2f", 0.5)
         case .brush:
             VStack(alignment: .leading, spacing: 6) {
                 Picker("Brush tool", selection: $model.maskTool) {
@@ -157,15 +245,17 @@ struct LocalAdjustmentsPanel: View {
                 slider("Size", $model.brushRadius, 0.005...0.2, "%.3f", 0.04)
                 slider("Feather", $model.brushFeather, 0...1, "%.2f", 0.5)
                 slider("Flow", $model.brushFlow, 0.1...1, "%.2f", 1)
+                slider("Density", $model.brushDensity, 0.1...1, "%.2f", 1)
+                    .help("The most a stroke builds up to, however often you paint over it")
             }
         case .whole:
             Text("Whole image — use the ranges below to limit it.")
                 .font(.caption2).foregroundStyle(.secondary)
         case .ai:
-            let shape = model.parameters.locals[i].shape
+            let shape = element.shape
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    if model.generatingMasks.contains(model.parameters.locals[i].id) {
+                    if model.generatingMasks.contains(element.id) {
                         ProgressView().controlSize(.mini)
                         Text("Generating \(ModelMenus.rowTitle(for: shape, registry: .shared))…")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -174,26 +264,33 @@ struct LocalAdjustmentsPanel: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    modelSwitch(i, shape: shape)
+                    modelSwitch(i, element: element.id, shape: shape)
                 }
                 missingModelRow(shape)
             }
         case .prompted(let points, let version):
-            let shape = model.parameters.locals[i].shape
+            let shape = element.shape
+            let isBox = points.contains { $0.corner != nil } || model.maskTool == .box
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Button(model.maskTool == .prompt ? "Clicking…" : "Click to select") { model.maskTool = .prompt }
                         .controlSize(.small).disabled(model.maskTool == .prompt)
-                    Button("Clear points") { model.clearPromptPoints() }
+                        .help("Click the thing to select; option-click to leave something out")
+                    Button(model.maskTool == .box ? "Drawing…" : "Draw box") { model.maskTool = .box }
+                        .controlSize(.small).disabled(model.maskTool == .box)
+                        .help("Drag a rectangle around the object to select it")
+                    Button("Clear") { model.clearPromptPoints() }
                         .controlSize(.small).disabled(points.isEmpty)
-                    if model.generatingMasks.contains(model.parameters.locals[i].id) {
+                        .help("Forget the clicks and the box")
+                    if model.generatingMasks.contains(element.id) {
                         ProgressView().controlSize(.mini)
                     }
                     Spacer()
-                    modelSwitch(i, shape: shape)
+                    modelSwitch(i, element: element.id, shape: shape)
                 }
                 let status = model.promptModelID(for: version).flatMap { model.promptStatus[$0] } ?? ""
-                Text(ModelMenus.promptedRowText(for: shape, status: status, registry: .shared))
+                Text(isBox && points.isEmpty ? "Drag a rectangle around the object."
+                     : ModelMenus.promptedRowText(for: shape, status: status, registry: .shared))
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 missingModelRow(shape)
@@ -201,15 +298,42 @@ struct LocalAdjustmentsPanel: View {
         }
     }
 
+    /// Feather and Edge for a model mask (subject, class, selection).
+    @ViewBuilder
+    private func modelRefineRow(_ i: Int) -> some View {
+        if let element = model.activeMaskElement, element.shape.isModelGenerated {
+            slider("Feather", refineBinding(i, element: element.id, edge: false), 0...1, "%.2f", 0)
+                .help("Softens the edge of the model's mask")
+            slider("Edge", refineBinding(i, element: element.id, edge: true), -1...1, "%+.2f", 0)
+                .help("Grows (right) or shrinks (left) the model's mask")
+        }
+    }
+
+    private func refineBinding(_ i: Int, element id: UUID, edge: Bool) -> Binding<Float> {
+        Binding(get: {
+            let local = model.parameters.locals[i]
+            if id == local.id { return edge ? local.modelEdge : local.modelFeather }
+            let c = local.components.first { $0.id == id }
+            return (edge ? c?.edge : c?.feather) ?? 0
+        }, set: { value in
+            if id == model.parameters.locals[i].id {
+                if edge { model.parameters.locals[i].modelEdge = value } else { model.parameters.locals[i].modelFeather = value }
+            } else if let c = model.parameters.locals[i].components.firstIndex(where: { $0.id == id }) {
+                if edge { model.parameters.locals[i].components[c].edge = value }
+                else { model.parameters.locals[i].components[c].feather = value }
+            }
+        })
+    }
+
     /// Menu("Model"): the other installed models of the mask's kind, each
     /// making the mask again.
     @ViewBuilder
-    private func modelSwitch(_ i: Int, shape: MaskShape) -> some View {
+    private func modelSwitch(_ i: Int, element: UUID, shape: MaskShape) -> some View {
         let others = ModelMenus.alternatives(for: shape, registry: .shared)
         if !others.isEmpty {
             Menu("Model") {
                 ForEach(others) { entry in
-                    Button(entry.manifest.displayName) { model.rerunMask(at: i, with: entry) }
+                    Button(entry.manifest.displayName) { model.rerunMask(at: i, element: element, with: entry) }
                 }
             }
             .menuStyle(.borderlessButton)
@@ -291,17 +415,7 @@ struct LocalAdjustmentsPanel: View {
     /// `defaultValue` is what a double-click puts back.
     private func slider(_ title: String, _ value: Binding<Float>, _ range: ClosedRange<Float>,
                         _ format: String, _ defaultValue: Float = 0) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(title).font(.caption).accessibilityHidden(true)
-                Spacer()
-                SliderValueField(value: value, in: range, format: SliderValueFormat(printf: format), label: title)
-            }
-            ResettableSlider(value: value, in: range, label: title,
-                             format: SliderValueFormat(printf: format)) {
-                value.wrappedValue = Self.resetValue(defaultValue, in: range)
-            }
-        }
+        LocalSliderRow(title: title, value: value, range: range, format: format, defaultValue: defaultValue)
     }
 
     /// A row's default, kept inside its range. Every row used to reset to
@@ -309,6 +423,19 @@ struct LocalAdjustmentsPanel: View {
     /// between dabs, and a colour range of width 0 no edge to smooth.
     static func resetValue(_ defaultValue: Float, in range: ClosedRange<Float>) -> Float {
         min(max(defaultValue, range.lowerBound), range.upperBound)
+    }
+}
+
+extension SpokenText {
+    /// "Sky, hidden, inverted, 2 components" for a mask row.
+    static func maskRow(_ local: LocalAdjustment) -> String {
+        var parts = [local.name]
+        if local.hidden { parts.append("hidden") }
+        if local.invert || local.invertMask { parts.append("inverted") }
+        if !local.components.isEmpty {
+            parts.append(local.components.count == 1 ? "1 component" : "\(local.components.count) components")
+        }
+        return parts.joined(separator: ", ")
     }
 }
 

@@ -10,7 +10,25 @@ public struct PromptPoint: Equatable, Sendable, Codable {
     public var x: Float
     public var y: Float
     public var foreground: Bool
+    /// A corner of a Select Objects box: 1 top-left, 2 bottom-right;
+    /// nil for a click. SAM takes a box as its two corners, labelled 2
+    /// and 3 where a click is 1 (wanted) or 0 (not).
+    public var corner: Int?
     public init(x: Float, y: Float, foreground: Bool) { self.x = x; self.y = y; self.foreground = foreground }
+
+    /// A stored prompt point, click or box corner.
+    public init(_ stored: MaskPromptPoint) {
+        x = stored.x; y = stored.y; foreground = stored.foreground; corner = stored.corner
+    }
+
+    /// The label SAM's prompt encoder expects.
+    var label: Int32 {
+        switch corner {
+        case 1: return 2
+        case 2: return 3
+        default: return foreground ? 1 : 0
+        }
+    }
 }
 
 /// Segment Anything 2.1 (small), Apple's Core ML conversion, driven with
@@ -142,7 +160,7 @@ public final class SAM2Session: @unchecked Sendable {
         for (i, p) in points.enumerated() {
             coords[[0, i, 0] as [NSNumber]] = NSNumber(value: p.x * size)
             coords[[0, i, 1] as [NSNumber]] = NSNumber(value: p.y * size)
-            labels[[0, i] as [NSNumber]] = NSNumber(value: p.foreground ? 1 : 0)
+            labels[[0, i] as [NSNumber]] = NSNumber(value: p.label)
         }
         let promptInput = try MLDictionaryFeatureProvider(dictionary: [
             "points": MLFeatureValue(multiArray: coords),

@@ -39,7 +39,7 @@ extension EditorModel {
         // denoise or encode holds its own reference to the model.
         Self.sharedDenoisers.removeAll()
         ModelRegistry.shared.releaseAll()
-        if level == .critical || maskTool != .prompt {
+        if level == .critical || (maskTool != .prompt && maskTool != .box) {
             resetPromptSessions()
         } else {
             resetPromptSessions(keeping: selectedPromptModelID)
@@ -110,7 +110,7 @@ extension EditorModel {
     /// The model the armed prompt tool clicks against: the selected
     /// click-to-select mask's, resolved as its clicks are.
     private var selectedPromptModelID: String? {
-        guard case .prompted(_, let version)? = selectedLocal?.shape else { return nil }
+        guard case .prompted(_, let version)? = activeMaskElement?.shape else { return nil }
         return promptModelID(for: version)
     }
 }
