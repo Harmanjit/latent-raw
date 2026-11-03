@@ -171,11 +171,14 @@ Most of them work exactly like the example above — name the id, look, then
 | U²-Net, U²-Net Small | `u2net`, `u2net-small` | Weights linked from a README — see below |
 | MODNet | `modnet` | Weights linked from a README |
 | IS-Net | `isnet` | Weights linked from a README; research use only |
+| Depth Anything V2 Small | `depth-anything-v2-small` | One weights file you download from its Hugging Face page, given as `--from-file`, with the commit of the Depth-Anything-V2 code you read as `--code-revision` |
 
 ### Models whose weights are linked from a README
 
 U²-Net, MODNet and IS-Net publish their weights through a download link
-rather than a repository a script can address, so two things come from you:
+rather than a repository a script can address (and Depth Anything V2 Small
+is converted the same way, from the one `.pth` file on its Hugging Face
+page), so two things come from you:
 the file, and the commit of the model's code that you read. The code
 matters because the conversion imports and runs it.
 
@@ -191,7 +194,7 @@ tag or a short hash, any of which could later name other code, so
 
 ## A model that is not in the catalogue at all
 
-Latent can use four kinds of model, and a new one has to be one of them:
+Latent can use five kinds of model, and a new one has to be one of them:
 
 | Kind | What it does | Where it shows up |
 |---|---|---|
@@ -199,6 +202,7 @@ Latent can use four kinds of model, and a new one has to be one of them:
 | `promptedSegmentation` | Three packages: encode, prompt, decode | Click to Select |
 | `semanticSegmentation` | Class labels per pixel, plus a labels file | Class masks |
 | `denoise` | Tiles in, tiles out | AI noise reduction — see the note below |
+| `depth` | One image in, relative depth out (larger is nearer) | Lens Blur's depth map |
 
 A `denoise` model will import, but nothing offers a choice of one: AI noise
 reduction uses the bundled NAFNet and has no picker, so a second one would
