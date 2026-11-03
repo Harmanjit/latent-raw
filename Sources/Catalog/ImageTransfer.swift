@@ -257,6 +257,7 @@ public enum ImageTransfer {
         case changedSinceCopied
         case abandoned
         case originalNotRemoved(copy: URL, reason: String)
+        case ownerUnreadable(folder: URL, root: URL)
 
         var description: String {
             switch self {
@@ -267,6 +268,7 @@ public enum ImageTransfer {
             case .abandoned: "Latent quit before it was in place, so it was left where it was."
             case .originalNotRemoved(let copy, let reason):
                 "It was copied to “\(copy.deletingLastPathComponent().lastPathComponent)”, but the original couldn’t be removed: \(reason)"
+            case .ownerUnreadable(let folder, let root): FolderAccess.unreadableOwnerMessage(folder: folder, root: root)
             }
         }
     }
@@ -321,7 +323,15 @@ public enum ImageTransfer {
         if let openCatalog, isSameFolder(openCatalog.rootPath, ancestor) {
             included = try await openCatalog.includesSubfolder(prefix)
         } else {
-            included = FolderAccess.owningCatalog(of: folder).map { FolderAccess.samePath($0.root, ancestor) } ?? false
+            // A catalog that can't be read (under the sandbox, a folder not
+            // chosen this session) is not one that leaves `folder` out:
+            // guessing so would give `folder` a container of its own, and
+            // that catalog's next reconcile would drop its images.
+            switch FolderAccess.ownership(of: folder) {
+            case .owned(let membership): included = FolderAccess.samePath(membership.root, ancestor)
+            case .independent: included = false
+            case .unreadable(let owner): throw TransferError.ownerUnreadable(folder: folder, root: owner)
+            }
         }
         return included ? CatalogLocation(root: ancestor, prefix: prefix) : CatalogLocation(root: folder, prefix: "")
     }

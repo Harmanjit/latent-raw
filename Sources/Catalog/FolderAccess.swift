@@ -209,7 +209,9 @@ public enum FolderAccess {
     /// above it, belongs to nobody.
     ///
     /// An enclosing catalog that can't be read counts as not owning it
-    /// here; a caller about to give `folder` a container asks `ownership`
+    /// here, so this is only for callers that never give `folder` a
+    /// container or write sidecars for it. Any caller that might (opening
+    /// the folder, moving or copying images into it) asks `ownership`
     /// instead, which tells the two apart.
     public static func owningCatalog(of folder: URL) -> Membership? {
         if case .owned(let membership) = ownership(of: folder) { return membership }

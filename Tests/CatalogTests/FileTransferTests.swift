@@ -303,6 +303,33 @@ final class FileTransferTests: XCTestCase {
         XCTAssertEqual(arrived?.rating, 4)
     }
 
+    /// Under the sandbox a destination picked on its own can sit inside a
+    /// catalog whose database can't be read. Taking that for "doesn't
+    /// include it" wrote the sidecar into a new _latent in the subfolder,
+    /// splitting that catalog; the image now stays where it was instead.
+    /// Simulated with file permissions.
+    func testCopyIntoASubfolderOfAnUnreadableCatalogIsRefused() async throws {
+        let catalog = try await preparedCatalog()
+        let other = base.appendingPathComponent("Archive", isDirectory: true)
+        let inner = other.appendingPathComponent("2026", isDirectory: true)
+        try fm.createDirectory(at: inner, withIntermediateDirectories: true)
+        do {
+            let archive = try Catalog.open(at: other)
+            try await archive.setSubfolderMode(.included, forRelPath: "2026")
+        }
+        let database = other.appendingPathComponent("_latent/catalog.sqlite").path
+        try fm.setAttributes([.posixPermissions: 0], ofItemAtPath: database)
+        defer { try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: database) }
+
+        let report = await ImageTransfer.run([request("A.NEF", to: inner)], mode: .copy, openCatalog: catalog)
+        XCTAssertTrue(report.completed.isEmpty)
+        XCTAssertEqual(report.failures.count, 1)
+        XCTAssertTrue(report.failureDescription.contains("can’t read"), report.failureDescription)
+        XCTAssertFalse(exists(inner.appendingPathComponent("_latent")), "no catalog of its own")
+        XCTAssertFalse(exists(inner.appendingPathComponent("A.NEF")))
+        XCTAssertTrue(exists(root.appendingPathComponent("A.NEF")))
+    }
+
     func testAPlainFolderGetsACatalogOnlyForAnImageWithASidecar() async throws {
         let catalog = try await preparedCatalog()
         let plain = base.appendingPathComponent("Plain", isDirectory: true)
