@@ -66,7 +66,8 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 ## Editing
 
-- **Masks are placed once.** A gradient or radial cannot be dragged into a new position after placement; delete and redraw.
+- **Linear gradients are placed once.** A gradient cannot be dragged into a new position after placement; draw it again with Place gradient. Radials move when dragged from inside, but neither can be rotated.
+- **Masks have no Tone Curve, Point Color, Grain or Moiré of their own,** no brush Auto Mask or pen pressure, and no depth range; Select People chooses everyone, not one person or one body part.
 - **Class masks are soft-edged** at the model's native 128-pixel resolution.
 - **Spot healing copies the source's texture.** Tone and colour are matched to the surroundings, but a source with coarser or different texture than the target still shows; drag to pick a better source. A brush stroke heals from one source beside it along its whole length, so an edge running along the source, such as a horizon, shows as a line. A stroke keeps up to 256 points; a longer scribble is simplified.
 - **Red-eye Auto can miss small faces.** It looks for faces on a render about 1600 px across, so faces in a large group shot may not be found; add those spots by hand. Only red pupils change: an animal's green, yellow or white eyeshine is left as it is.
@@ -76,7 +77,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Touch-up works on faces at least 64 pixels wide** on a render about 4000 pixels across, seen more or less straight on; a turned head, glasses or hair across the face can defeat the landmarks. Smoothing acts on brightness only, so colour blotches stay; the teeth gate can catch a tongue or a lip highlight. Survey panes rebuild the regions when they open, which costs a moment per pane.
 - **Subject masks with BiRefNet take about half a second each** on an M4 and longer on an M1, so a Survey of four such photos takes a few seconds to settle. Added models run on the GPU only.
 - **Thumbnails ignore AI denoise**, since running the network in the background for every thumbnail would be too slow.
-- **Limits:** 8 local adjustments, 32 spot patches (a brush stroke counts as one), 32 red-eye spots, 200 dust spots, 16 faces and 64 blemishes per image, 30 history steps.
+- **Limits:** 8 local adjustments of up to 7 parts each (a shape and 6 components), 5 colours per colour range, 32 spot patches (a brush stroke counts as one), 32 red-eye spots, 200 dust spots, 16 faces and 64 blemishes per image, 30 history steps.
 - **No process-version pinning.** When a rendering algorithm changes, existing edits render differently rather than being pinned to the old behaviour. This has already happened once: spot healing changed in September 2026, so heal patches made before then now render with the new method.
 
 ## Accessibility

@@ -397,7 +397,7 @@ struct LocalAdjustmentsPanel: View {
             slider("High", lr.high, 0...1, "%.2f", lrDefault.high)
             slider("Feather", lr.feather, 0.01...0.5, "%.2f", lrDefault.feather)
         }
-        Toggle("Colour range", isOn: hueOn).toggleStyle(.checkbox).controlSize(.small)
+        Toggle("Hue range", isOn: hueOn).toggleStyle(.checkbox).controlSize(.small)
         if binding.wrappedValue.hueRange != nil {
             let hr = Binding(get: { binding.wrappedValue.hueRange ?? HueRange() },
                              set: { binding.wrappedValue.hueRange = $0 })
