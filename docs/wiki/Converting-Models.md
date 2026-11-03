@@ -112,7 +112,8 @@ Worth understanding, because every model goes through the same six steps.
 
 1. **Resolve.** Ask the source which revision is current, and print it with
    the files and their sizes. Nothing is downloaded yet. `--resolve` stops
-   here; `--revision` names a particular one instead.
+   here; `--revision` names a particular one instead. A branch or tag name
+   is resolved to its commit, and the commit is what gets pinned.
 2. **Download** at exactly that revision.
 3. **Hash.** The content hash of each `.mlpackage` for a model published as
    Core ML packages, or the file's SHA-256 for one published as weights.
@@ -146,8 +147,10 @@ repository, is the licence what you think, does the upload look sane — is
 still yours.
 
 Once a pin is recorded, `pin_model.py` fetches at that pin rather than at
-whatever is current. `--repin` moves it, and the diff in
-`scripts/convert_*.py` shows exactly what moved.
+whatever is current. If what it fetches, or the file you hand it, no
+longer hashes to the recorded value, it stops and prints both hashes
+rather than recording the new one. `--repin` moves the pin, and the diff
+in `scripts/convert_*.py` shows exactly what moved.
 
 ## Any other model
 
@@ -182,7 +185,9 @@ python scripts/pin_model.py u2net --from-file ~/Downloads/u2net.pth \
 ```
 
 Everything after the hash is the same. Take the commit from the repository
-page — the full SHA is better than the short one.
+page, as the full 40-character SHA: nothing here can look up a branch, a
+tag or a short hash, any of which could later name other code, so
+`pin_model.py` refuses them.
 
 ## A model that is not in the catalogue at all
 
@@ -223,7 +228,9 @@ Every field is described in `Sources/MLKit/Resources/Models/README.md`,
 which is the reference for the manifest. Two things catch people out:
 `--output-activation sigmoid` when the graph outputs logits rather than a
 0–1 mask, and `--inside`, which puts the manifest at the package's own root
-so a single `.mlpackage` can be handed round and added on its own.
+so a single `.mlpackage` can be handed round and added on its own. For a
+class model `--inside` copies the `--labels-file` there too, because that
+is where Add Model… looks for it, and `--check` looks in the same place.
 
 Check a manifest you wrote before trying to add it:
 

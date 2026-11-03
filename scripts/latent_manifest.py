@@ -70,6 +70,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 
 HASHED_FILES = ["Manifest.json",
@@ -85,6 +86,22 @@ ROLES = ["imageEncoder", "promptEncoder", "maskDecoder"]
 # vetted yet. A script must refuse to run while any pin it needs still
 # reads this, so an unvetted upload never becomes a package.
 PLACEHOLDER = "<pin me>"
+
+
+# The bundled models live here and are committed to git, so a weight.bin
+# written here must stay under GitHub's 100 MiB limit for an ordinary blob.
+# A package converted anywhere else (a catalogue model the user adds) has
+# no such limit.
+BUNDLED_MODELS = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                                               "Sources", "MLKit", "Resources", "Models"))
+GIT_FILE_LIMIT = 100 * 1024 * 1024
+
+
+def over_bundled_limit(out_dir, weight_bytes):
+    """Whether a package written to `out_dir` breaks the git file limit:
+    only ever true for the bundled Models folder."""
+    bundled = os.path.realpath(out_dir) == os.path.realpath(BUNDLED_MODELS)
+    return bundled and weight_bytes >= GIT_FILE_LIMIT
 
 
 class PackageError(Exception):
@@ -216,8 +233,11 @@ def check_manifest(path, features=True):
     folder = os.path.dirname(os.path.abspath(path))
     rows = manifest.get("packages", [])
     # Inside a package: the folder is the package, and the manifest and
-    # labels at its root are not strays.
+    # labels at its root are not strays. The packages are then looked up
+    # in the package's parent, but the labels file stays where Add Model…
+    # reads it, at the package's root beside the manifest.
     inside = len(rows) == 1 and rows[0].get("name") == os.path.basename(folder)
+    sidecar_folder = folder
     ignore_root = ()
     if inside:
         ignore_root = tuple(n for n in (os.path.basename(path), manifest.get("labelsFile")) if n)
@@ -233,7 +253,7 @@ def check_manifest(path, features=True):
             problems.append(f"{key} is not an http(s) URL")
     if not re.match(r"^https?://", str(manifest.get("licence", {}).get("url", ""))):
         problems.append("licence.url is not an http(s) URL")
-    if manifest.get("labelsFile") and not os.path.isfile(os.path.join(folder, manifest["labelsFile"])):
+    if manifest.get("labelsFile") and not os.path.isfile(os.path.join(sidecar_folder, manifest["labelsFile"])):
         problems.append(f"labels file {manifest['labelsFile']} is missing")
     for row in manifest.get("packages", []):
         package = os.path.join(folder, row["name"])
@@ -256,6 +276,12 @@ def check_manifest(path, features=True):
             if outputs != row.get("outputNames"):
                 problems.append(f"{row['name']}: outputs {outputs} != manifest {row.get('outputNames')}")
     return problems
+
+
+def same_bytes(a, b):
+    """Whether two files hold the same bytes."""
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        return fa.read() == fb.read()
 
 
 def main(argv=None):
@@ -281,7 +307,8 @@ def main(argv=None):
     w.add_argument("--output-activation", choices=ACTIVATIONS,
                    help="subject kinds: 'sigmoid' when the graph outputs logits, 'probabilities' when it applies sigmoid itself")
     w.add_argument("--refine", choices=REFINES, help="subject kinds: guided-filter refinement of the mask")
-    w.add_argument("--labels-file", help="semantic kinds: the class-names JSON beside the package")
+    w.add_argument("--labels-file", help="semantic kinds: the class-names JSON beside the package "
+                                         "(--inside copies it to the package's root)")
     w.add_argument("--compute-units", choices=COMPUTE_UNITS,
                    help="a ceiling the registry applies; leave unset unless the model fails on some unit")
     w.add_argument("--converter-script")
@@ -322,6 +349,31 @@ def main(argv=None):
     if args.inside and (len(args.paths) != 1 or args.out):
         p.error("--inside takes exactly one package and no --out")
 
+    # The labels file is named in the manifest by its bare name and read
+    # from where the manifest sits: the package's root for --inside, which
+    # Add Model… reads, else the --out folder. --inside copies it in from
+    # the path given, as the docs promise, replacing one of the same name
+    # already there: on a rewrite with updated labels, keeping the old file
+    # would write a manifest for labels the package does not carry. Without
+    # --inside nothing is copied, so a given file that differs from the one
+    # the manifest will name is refused rather than silently ignored. Either
+    # way a manifest naming a labels file that is not there is never written.
+    first = os.path.abspath(args.paths[0].partition("@")[0])
+    out_dir = first if args.inside else (args.out or os.path.dirname(first))
+    if args.labels_file:
+        labels_name = os.path.basename(args.labels_file)
+        target = os.path.join(out_dir, labels_name)
+        given = args.labels_file
+        elsewhere = os.path.isfile(given) and not (os.path.isfile(target) and os.path.samefile(given, target))
+        if args.inside and elsewhere:
+            shutil.copyfile(given, target)
+        elif not os.path.isfile(target):
+            p.error(f"the labels file {labels_name} is not in {out_dir}, where the manifest says it is")
+        elif elsewhere and not same_bytes(given, target):
+            p.error(f"{given} differs from {target}, the labels file the manifest would name; "
+                    "copy it there first")
+        args.labels_file = labels_name
+
     rows = []
     for spec in args.paths:
         path, _, role = spec.partition("@")
@@ -343,8 +395,6 @@ def main(argv=None):
         input_size=args.input_size, packages=rows, output_activation=args.output_activation,
         refine=args.refine, labels_file=args.labels_file, compute_units=args.compute_units,
         converter=converter)
-    first = os.path.abspath(args.paths[0].partition("@")[0])
-    out_dir = first if args.inside else (args.out or os.path.dirname(first))
     path = write_manifest(manifest, out_dir)
     print(f"Wrote {path} ({manifest['sizeMB']} MB, {len(rows)} package{'s' if len(rows) != 1 else ''})")
     return 0

@@ -32,6 +32,7 @@ import pin_model
 
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 REVISION = "0123456789abcdef0123456789abcdef01234567"
+CODE = "53dc9da" + "0" * 33                  # a full commit, as --code-revision now requires
 HASHES = {role: f"{i:064x}" for i, role in enumerate(["imageEncoder", "promptEncoder", "maskDecoder"])}
 failures = []
 
@@ -148,23 +149,110 @@ def main():
             "there is no file at")
     refuses("no --code-revision and no pin to fall back on",
             ["u2net", "--yes", "--no-convert", "--out", out, "--from-file", weights], "--code-revision")
+    refuses("a --code-revision that is a branch name or a short hash",
+            ["u2net", "--yes", "--no-convert", "--out", out, "--from-file", weights, "--code-revision", "master"],
+            "not a full 40-character commit")
+    refuses("a short hash too",
+            ["u2net", "--yes", "--no-convert", "--out", out, "--from-file", weights, "--code-revision", "53dc9da"],
+            "not a full 40-character commit")
 
     print("the weights-from-disk path, stopping before the conversion")
     code, text = run(["u2net", "--yes", "--no-convert", "--out", out,
-                      "--from-file", weights, "--code-revision", "53dc9da"])
+                      "--from-file", weights, "--code-revision", CODE])
     check("it finishes", code, 0)
     check("it says what it pinned", "Pinned scripts/convert_u2net.py" in text, True)
-    check("the commit is recorded", pin_model.read_pin("convert_u2net.py", "CODE_REVISION"), "53dc9da")
+    check("the commit is recorded", pin_model.read_pin("convert_u2net.py", "CODE_REVISION"), CODE)
     check("the weights hash is the file's",
           pin_model.read_pin("convert_u2net.py", ("VARIANTS", "full", "weights_sha256")),
           hashlib.sha256(open(weights, "rb").read()).hexdigest())
 
     print("moving a pin that is already recorded")
     refuses("refused on its own", ["u2net", "--yes", "--no-convert", "--out", out,
-                                   "--from-file", weights, "--code-revision", "aaaaaaa"], "--repin")
+                                   "--from-file", weights, "--code-revision", "a" * 40], "--repin")
     code, _ = run(["u2net", "--yes", "--no-convert", "--repin", "--out", out,
-                   "--from-file", weights, "--code-revision", "aaaaaaa"])
+                   "--from-file", weights, "--code-revision", "a" * 40])
     check("allowed with --repin", code, 0)
+
+    print("different weights under a hash that is already recorded")
+    pinned_hash = pin_model.read_pin("convert_u2net.py", ("VARIANTS", "full", "weights_sha256"))
+    other = os.path.join(work, "other.pth")
+    with open(other, "wb") as f:
+        f.write(b"some other upload entirely")
+    other_hash = hashlib.sha256(open(other, "rb").read()).hexdigest()
+    code, text = run(["u2net", "--yes", "--no-convert", "--out", out, "--from-file", other])
+    check("refused without --repin", isinstance(code, str) and "--repin" in code, True)
+    check("the refusal names both hashes",
+          isinstance(code, str) and pinned_hash in code and other_hash in code, True)
+    check("the recorded hash is unchanged",
+          pin_model.read_pin("convert_u2net.py", ("VARIANTS", "full", "weights_sha256")), pinned_hash)
+    code, _ = run(["u2net", "--yes", "--no-convert", "--repin", "--out", out, "--from-file", other])
+    check("allowed with --repin", code, 0)
+    check("and then it is the new hash",
+          pin_model.read_pin("convert_u2net.py", ("VARIANTS", "full", "weights_sha256")), other_hash)
+
+    print("--revision with a branch name records the commit it resolved to")
+    snapshot = os.path.join(work, "snapshot")
+    os.makedirs(snapshot)
+    with open(os.path.join(snapshot, "model.safetensors"), "wb") as f:
+        f.write(b"portrait weights")
+    resolved = "a" * 40
+
+    class Info:
+        sha = resolved
+        siblings = []
+
+    real_resolve, real_download = pin_model.resolve, pin_model.download
+    pin_model.resolve = lambda repo, revision=None: Info
+    pin_model.download = lambda repo, revision, patterns: snapshot
+    try:
+        code, text = run(["birefnet-portrait", "--revision", "main", "--yes", "--no-convert", "--out", out])
+        check("it finishes", code, 0)
+        check("the pin is the commit, not 'main'",
+              pin_model.read_pin("convert_birefnet.py", ("VARIANTS", "portrait", "revision")), resolved)
+        Info.sha = "b" * 40                     # 'main' has moved on since
+        code, _ = run(["birefnet-portrait", "--revision", "main", "--yes", "--no-convert", "--out", out])
+        check("a branch that now names another commit is refused without --repin",
+              isinstance(code, str) and "--repin" in code, True)
+        Info.sha = None
+        code, _ = run(["birefnet-portrait", "--repin", "--yes", "--no-convert", "--out", out])
+        check("no commit from the hub, no pin", isinstance(code, str) and "nothing safe to pin" in code, True)
+    finally:
+        pin_model.resolve, pin_model.download = real_resolve, real_download
+
+    print("a refused SAM run leaves the vetted packages in --out alone")
+    fresh(work, "sam")
+    sam_snapshot = os.path.join(work, "sam-snapshot")
+
+    def sam_upload(content):
+        shutil.rmtree(sam_snapshot, ignore_errors=True)
+        for marker in ("ImageEncoder", "PromptEncoder", "MaskDecoder"):
+            for relative in latent_manifest.HASHED_FILES:
+                path = os.path.join(sam_snapshot, f"SAM2_1Tiny{marker}FLOAT16.mlpackage", relative)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as f:
+                    f.write(content + relative.encode())
+
+    sam_out = os.path.join(work, "sam-out")
+    encoder = os.path.join(sam_out, "SAM2_1TinyImageEncoderFLOAT16.mlpackage", "Manifest.json")
+    Info.sha = resolved
+    pin_model.resolve = lambda repo, revision=None: Info
+    pin_model.download = lambda repo, revision, patterns: sam_snapshot
+    try:
+        sam_upload(b"vetted ")
+        code, _ = run(["sam2.1-tiny", "--yes", "--no-convert", "--out", sam_out])
+        check("the first run pins and copies", code == 0 and os.path.isfile(encoder), True)
+        sam_upload(b"changed ")
+        code, _ = run(["sam2.1-tiny", "--yes", "--no-convert", "--out", sam_out])
+        check("changed packages are refused without --repin", isinstance(code, str) and "--repin" in code, True)
+        check("the copy in --out is still the vetted one", open(encoder, "rb").read(), b"vetted Manifest.json")
+        check("nothing is left staged in --out",
+              sorted(os.listdir(sam_out)), sorted(f"SAM2_1Tiny{m}FLOAT16.mlpackage"
+                                                  for m in ("ImageEncoder", "PromptEncoder", "MaskDecoder")))
+        code, _ = run(["sam2.1-tiny", "--yes", "--no-convert", "--repin", "--out", sam_out])
+        check("with --repin the new packages replace them", code == 0 and open(encoder, "rb").read(),
+              b"changed Manifest.json")
+    finally:
+        pin_model.resolve, pin_model.download = real_resolve, real_download
 
     print("--resolve writes nothing, even for a model with no revision to resolve")
     before = open(os.path.join(pin_model.SCRIPTS, "convert_u2net.py"), "rb").read()

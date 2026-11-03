@@ -16,3 +16,4 @@
 - [Accessibility](Accessibility)
 - [Limitations](Limitations)
 - [Troubleshooting](Troubleshooting)
+- [Licences](Licences)

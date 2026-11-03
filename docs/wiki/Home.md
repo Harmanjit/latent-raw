@@ -5,7 +5,7 @@
 Latent opens a folder of raw files, keeps a catalog inside that folder, and edits every image on the GPU without touching the original. It is in the same family as Lightroom, darktable and RawTherapee, but it targets one platform only and uses everything that platform has: unified memory, Metal compute, and on-device machine learning.
 
 - **Status:** version 0.9, a beta for review. Everything planned is implemented and tested except **DNG export**, which doesn't exist, and **HDR Panorama**, which works but is marked **experimental** because no real bracketed sweep has ever been merged with it. Panoramas are single-row only. Since the first beta build, Develop has gained **Sensor Dust** (spots found and healed, on one photo or a whole selection), **Touch-up** (skin, teeth, eyes and blemishes, per face) and a choice of **subject-selection models**, with more addable from disk; the dust detector has been tested on synthetic dust and only a few real photos. Expect rough edges, and read [Limitations](Limitations) before relying on it. Please report bugs as [issues on GitHub](https://github.com/Harmanjit/latent-raw/issues).
-- **Licence:** GPLv3.
+- **Licence:** GPLv3. The code, data and models Latent carries from other projects, and their licences, are on [Licences](Licences).
 - **Platform:** macOS 15 or newer on Apple Silicon. Verified on M1 Pro and M4.
 
 These pages are also in the app: **Help > Latent Help** (⌘?) shows them with search, and nothing is fetched from the network.
@@ -29,3 +29,4 @@ These pages are also in the app: **Help > Latent Help** (⌘?) shows them with s
 | [Accessibility](Accessibility) | VoiceOver, Reduce Motion, Increase Contrast |
 | [Limitations](Limitations) | What it does not do, honestly |
 | [Troubleshooting](Troubleshooting) | The problems people hit first |
+| [Licences](Licences) | The licences of the code, data and models Latent carries |
