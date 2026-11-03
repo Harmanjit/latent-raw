@@ -77,7 +77,26 @@ public struct EditStack: Codable, Equatable, Sendable {
     }
     public struct Vibrance: Codable, Equatable, Sendable { public var amount: Float }
     public struct Defringe: Codable, Equatable, Sendable { public var purple: Float, green: Float }
-    public struct Perspective: Codable, Equatable, Sendable { public var vertical: Float, horizontal: Float }
+    /// Keystone, and since the Transform panel the rest of the geometry
+    /// that composes into the same homography. Each newer field is
+    /// optional and only written when it differs from its default, so a
+    /// stack without them encodes, and renders, exactly as before.
+    public struct Perspective: Codable, Equatable, Sendable {
+        public var vertical: Float, horizontal: Float
+        public var rotate: Float?
+        public var aspect: Float?
+        public var scale: Float?
+        public var offsetX: Float?
+        public var offsetY: Float?
+        public var flipHorizontal: Bool?
+        public var flipVertical: Bool?
+        public var upright: UprightCorrection?
+        public var constrainCrop: Bool?
+
+        public init(vertical: Float, horizontal: Float) {
+            self.vertical = vertical; self.horizontal = horizontal
+        }
+    }
 
     /// Normalized sensor coordinates; see `CropParameters`.
     public struct Crop: Codable, Equatable, Sendable {
@@ -209,8 +228,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.defringe = (p.defringePurple == 0 && p.defringeGreen == 0) ? nil
             : Defringe(purple: p.defringePurple, green: p.defringeGreen)
         modules.aidenoise = p.aiDenoise == 0 ? nil : AIDenoise(strength: p.aiDenoise, model: Self.aiDenoiseModelName)
-        modules.perspective = p.perspective.isIdentity ? nil
-            : Perspective(vertical: p.perspective.vertical, horizontal: p.perspective.horizontal)
+        modules.perspective = p.perspective.isNeutral ? nil : Perspective(transform: p.perspective)
         modules.crop = (p.crop.isIdentity && p.crop.aspect == nil) ? nil
             : Crop(cx: p.crop.centre.x, cy: p.crop.centre.y, w: p.crop.size.x, h: p.crop.size.y,
                    angle: p.crop.angle, aspect: p.crop.aspect)
@@ -283,7 +301,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         else { p.defringePurple = 0; p.defringeGreen = 0 }
         p.aiDenoise = modules.aidenoise?.strength ?? 0
         if let ps = modules.perspective {
-            p.perspective = PerspectiveCorrection(vertical: ps.vertical, horizontal: ps.horizontal)
+            p.perspective = ps.correction
         } else {
             p.perspective = .none
         }
