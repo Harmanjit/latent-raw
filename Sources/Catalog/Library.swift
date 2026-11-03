@@ -578,7 +578,7 @@ public final class Library: ObservableObject {
     /// For the same reason the grid never changes what its filter hides,
     /// a hidden primary included; Loupe and Develop (`onlyPrimary`) change
     /// the image on screen, filtered out or not.
-    private func metadataTargets(onlyPrimary: Bool) -> [ImageRecord] {
+    func metadataTargets(onlyPrimary: Bool) -> [ImageRecord] {
         guard let primary = selectedImage else { return [] }
         if onlyPrimary { return [primary] }
         let visibleIDs = Set(visibleImages.lazy.compactMap(\.id))
