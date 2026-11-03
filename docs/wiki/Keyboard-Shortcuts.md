@@ -52,6 +52,8 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | `\` | Before / after |
 | ⌘U | Auto adjust |
 | R | Crop and straighten tool |
+| O, ⇧O | While cropping: the next crop guide overlay (thirds, grid, golden ratio, golden spiral, diagonal, triangle, none), and turn the spiral or triangle |
+| ⌘-drag in the crop tool | Draw a line along something level or upright to straighten by it |
 | H | Spot removal tool |
 | Y | Red-eye tool |
 | V | Develop: switch the treatment between Color and Black & White |

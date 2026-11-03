@@ -119,6 +119,8 @@ enum KeyCommand: Equatable {
     /// target collection, and taking photos out of the collection shown.
     case newCollection, newSmartCollection, newCollectionSet, saveFilterAsSmartCollection
     case addToTargetCollection, removeFromCollection
+    /// Crop guides, straighten, flips, Upright, and the camera's orientation.
+    case geometry(GeometryCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).

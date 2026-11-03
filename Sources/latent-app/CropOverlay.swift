@@ -1,19 +1,30 @@
 import SwiftUI
+import AppKit
 import PixelEngine
 
 /// The crop tool's on-image UI: the rectangle, its eight handles, a
-/// rule-of-thirds grid and a dimmed surround — the darktable/Lightroom
+/// composition guide (thirds unless another is chosen; O cycles them) and
+/// a dimmed surround whose opacity is a setting — the darktable/Lightroom
 /// idiom. It works in SwiftUI points and converts to the model's canvas
 /// pixels through the viewport, so it stays aligned at any zoom.
 ///
 /// Drags inside the rectangle move it; on an edge or corner they resize
 /// it (keeping the aspect lock if one is set); outside they do nothing,
 /// so the Metal view underneath still gets scroll and pinch.
+///
+/// ⌘-drag anywhere (or any drag while the panel's ruler is armed) draws
+/// a line instead: let go and the picture is straightened so the line is
+/// level, or plumb if it was nearer upright.
 struct CropOverlay: View {
     @ObservedObject var model: EditorModel
+    @AppStorage(CropToolPreferences.guideKey) private var guide: CropGuide = .thirds
+    @AppStorage(CropToolPreferences.orientationKey) private var guideOrientation = 0
+    @AppStorage(CropToolPreferences.maskOpacityKey) private var maskOpacity = CropToolPreferences.defaultMaskOpacity
 
     private enum Handle { case move, n, s, e, w, ne, nw, se, sw }
     @State private var drag: (handle: Handle, startRect: CGRect, startPoint: CGPoint)?
+    /// The straighten line being drawn, in view points.
+    @State private var ruler: (start: CGPoint, end: CGPoint)?
 
     private static let handleHit: CGFloat = 12
     private static let minimumSide: CGFloat = 32
@@ -27,16 +38,11 @@ struct CropOverlay: View {
                     // Dim everything but the crop.
                     var outside = Path(CGRect(origin: .zero, size: size))
                     outside.addRect(rect)
-                    context.fill(outside, with: .color(.black.opacity(0.55)), style: FillStyle(eoFill: true))
+                    context.fill(outside, with: .color(.black.opacity(min(max(maskOpacity, 0), 1))),
+                                 style: FillStyle(eoFill: true))
 
-                    // Thirds.
-                    var grid = Path()
-                    for i in 1...2 {
-                        let x = rect.minX + rect.width * CGFloat(i) / 3
-                        let y = rect.minY + rect.height * CGFloat(i) / 3
-                        grid.move(to: CGPoint(x: x, y: rect.minY)); grid.addLine(to: CGPoint(x: x, y: rect.maxY))
-                        grid.move(to: CGPoint(x: rect.minX, y: y)); grid.addLine(to: CGPoint(x: rect.maxX, y: y))
-                    }
+                    // The composition guide.
+                    let grid = guide.path(in: rect, orientation: guideOrientation)
                     context.stroke(grid, with: .color(.white.opacity(0.35)), lineWidth: 1)
                     context.stroke(Path(rect), with: .color(.white.opacity(0.9)), lineWidth: 1)
 
@@ -56,6 +62,14 @@ struct CropOverlay: View {
                         handles.addRect(CGRect(x: x - t / 2, y: y - h / 2, width: t, height: h))
                     }
                     context.fill(handles, with: .color(.white))
+
+                    // The straighten ruler, while it is drawn.
+                    if let ruler {
+                        var line = Path()
+                        line.move(to: ruler.start); line.addLine(to: ruler.end)
+                        context.stroke(line, with: .color(.black.opacity(0.6)), lineWidth: 3)
+                        context.stroke(line, with: .color(.yellow), lineWidth: 1.5)
+                    }
                 }
                 .allowsHitTesting(false)
 
@@ -70,6 +84,7 @@ struct CropOverlay: View {
             .accessibilityValue(accessibilityValue)
             .accessibilityHint("Drag inside the rectangle to move it, or its edges and corners to resize it")
             .accessibilityAction(named: "Reset crop") { model.resetCrop() }
+            .accessibilityAction(named: "Auto straighten") { model.autoStraighten() }
         }
     }
 
@@ -103,6 +118,12 @@ struct CropOverlay: View {
     private func dragGesture(scale: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { value in
+                // A ruler: started with ⌘ held, or with the panel's ruler armed.
+                if ruler != nil || (drag == nil && (model.geometry.straightenLineArmed
+                                                    || NSEvent.modifierFlags.contains(.command))) {
+                    ruler = (ruler?.start ?? value.startLocation, value.location)
+                    return
+                }
                 if drag == nil {
                     let rect = screenRect(model.cropCanvasRect, scale: scale)
                     guard let handle = hitTest(value.startLocation, in: rect) else { return }
@@ -113,7 +134,14 @@ struct CropOverlay: View {
                 let delta = CGSize(width: now.x - drag.startPoint.x, height: now.y - drag.startPoint.y)
                 model.cropCanvasRect = resized(drag.startRect, handle: drag.handle, by: delta)
             }
-            .onEnded { _ in drag = nil }
+            .onEnded { _ in
+                if let line = ruler {
+                    model.straighten(alongCanvasLineFrom: canvasPoint(line.start, scale: scale),
+                                     to: canvasPoint(line.end, scale: scale))
+                }
+                ruler = nil
+                drag = nil
+            }
     }
 
     private func hitTest(_ p: CGPoint, in rect: CGRect) -> Handle? {

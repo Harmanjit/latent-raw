@@ -42,7 +42,7 @@ A photo whose edit names a camera profile this Mac doesn't have (edited on anoth
 
 **Presence.** Texture (fine local contrast, 1–4 px), Clarity (mid-scale, midtone-weighted), Dehaze (dark-channel prior in linear light; negative adds haze), Vibrance (saturation that favours muted colours and spares skin) and **Saturation**, which moves every colour by the same proportion: −1 takes all the colour out, +1 doubles it.
 
-**Crop and Straighten.** R opens the tool: drag inside to move, edges and corners to resize, with aspect presets that follow the image orientation. Straighten runs −45° to 45° and the crop shrinks to avoid empty corners, growing back as the angle returns. Perspective offers vertical and horizontal keystone. The crop is a sampling map, not a pipeline stage, so it costs no re-render.
+**Crop and Straighten.** R opens the tool: drag inside to move, edges and corners to resize, with aspect presets that follow the image orientation (1:1, 3:2, 4:3, 5:4, 5:7, 16:9 and their tall forms, the original's own, or **Custom…**, which takes any width and height, such as 1.85 × 1). Straighten runs −45° to 45° and the crop shrinks to avoid empty corners, growing back as the angle returns. **Auto** levels the picture by the straight lines in it: horizons, rooflines, door frames, the edges of a building. To straighten by a line of your own, hold ⌘ and drag along something that should be level or upright with the crop tool on (or click the ruler button, then drag): when you let go, the picture turns so that line is level, or plumb if it was nearer upright. The crop is a sampling map, not a pipeline stage, so it costs no re-render. **Reset** removes the crop and straighten; the Transform panel has its own Reset. See [Crop guides and the surround](#crop-guides-and-the-surround) and [Transform and Upright](#transform-and-upright) below.
 
 **Spot Removal.** H arms the tool. Click a spot to place a patch with an automatic source; drag from the click to choose the source; drag either circle to move it; ⌫ deletes the selected patch. [ and ] make the next patch, and the selected one, smaller or larger. **Heal** copies the source's texture and takes tone and colour from what surrounds the target on every side, so a gradient or an edge running through the patch carries on. **Clone** copies exactly. Patches apply in order, each seeing the ones before, so a patch next to an earlier one matches it. Up to 32 patches.
 
@@ -86,6 +86,7 @@ A photo whose edit names a camera profile this Mac doesn't have (edited on anoth
 
 **Soft Proof.** Preview the image as sRGB or Display P3, or through an ICC profile, with a gamut warning that paints out-of-range colours grey.
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 ## JPEG, TIFF and other pictures
 
 JPEG, HEIC, TIFF, PNG, WebP and AVIF files open in Develop like raws, and every edit is stored the same way, in the catalog and its sidecar, never in the file.
@@ -103,6 +104,33 @@ JPEG, HEIC, TIFF, PNG, WebP and AVIF files open in Develop like raws, and every 
 - **Photo Merge takes raws only,** so these files can't go into an HDR merge or a panorama.
 
 The status bar shows the file's format and depth when it opens, such as "JPEG · 8-bit · FUJIFILM X-T5 · 6240×4160".
+
+## Crop guides and the surround
+
+While the crop tool is on, a composition guide is drawn inside the rectangle. **Overlay** in the panel picks it, and **O** cycles through them: Thirds, Grid, Golden Ratio (lines at 38% and 62%), Golden Spiral, Diagonal (45° from each corner), Triangle (a diagonal, with the perpendiculars to it from the other two corners) and None. **⇧O** turns the golden spiral through its four placements and swaps the triangle's diagonal. **Surround** sets how dark the picture outside the crop is drawn, from 0% (not darkened, to judge the crop against what you're leaving out) to 100% (black, to see the crop alone); double-click it for the usual 55%. Both are remembered between launches and change nothing in the photo.
+
+## Transform and Upright
+
+The Transform panel, under Crop and Straighten, corrects perspective and places the picture in the frame. Everything here is one geometric correction made in the same pass as the lens corrections, so it adds no rendering time, and it moves spots, red-eye fixes and faces with the picture. Its **Reset** puts Upright, the keystone and every slider back (Constrain Crop stays as you set it).
+
+**Upright** finds the straight lines in the photo and corrects from them:
+
+- **Auto** levels the picture and straightens converging verticals, but only part of the way when they lean strongly, which usually looks more natural than a full correction.
+- **Level** only turns the picture, so the horizontal lines are level.
+- **Vertical** makes the upright lines (walls, columns, trees) parallel and plumb, as if the camera hadn't been tilted up.
+- **Full** does that for the horizontal lines too, as if the camera had faced the subject squarely. Strong corrections can stretch a picture; ease them with Aspect and Scale.
+- **Guided** lets you show it the lines: with **Draw Guides** on, drag along two to four edges in the photo that should be upright or level. Two upright guides straighten converging verticals, two level ones straighten converging horizontals, and a single guide just levels or plumbs the picture by that line. The correction is made when you let go, and each guide is then drawn along its feature as it now stands. Drag a guide's end to move it, ⌥-click a guide to remove it, or **Clear** them all. Esc leaves the tool.
+
+Upright works on the picture after its lens corrections (its lines are straight only then), so after changing the lens profile or distortion, press **Update** to read the lines again. The correction it found is stored with the edit, so the photo looks the same on any Mac and in every export; nothing is sent anywhere. In a photo with few straight lines Upright may find nothing to correct, and says so in the status bar.
+
+**Vertical** and **Horizontal** are manual keystone corrections, on top of Upright. **Rotate** turns the picture up to 10° either way, **Aspect** stretches it wider (positive) or taller (negative) without changing its area, **Scale** enlarges or shrinks it about the centre, and **X Offset** and **Y Offset** move it sideways and up or down. The sliders act on the picture as it looks after Upright and any flip.
+
+**Flip Horizontal** and **Flip Vertical** (the two buttons, or Develop › Transform) mirror the photo, and its crop and masks with it, so what you see is exactly the mirror image of what was there. Flipping twice puts it back.
+
+**Constrain Crop** keeps the crop inside the picture: whenever the transform or the straighten angle changes, the crop becomes the largest of its shape that shows no empty edge, and it grows back as the correction eases. With it off, the transform can show empty (black) areas at the edges, which you can crop by hand.
+
+Develop › Transform has Auto Straighten, the flips, each Upright mode, and the crop guide commands.
+<!-- /RECONCILE -->
 
 ## Presets and clipboard
 

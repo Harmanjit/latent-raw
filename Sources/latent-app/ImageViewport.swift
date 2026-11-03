@@ -23,7 +23,7 @@ struct ImageViewport: View {
     /// A Develop tool owns clicks and drags on the image, so there's no
     /// swipe to another image and no magnifier while one is armed.
     private var toolArmed: Bool {
-        allowsTools && (model.imageToolActive || model.cropToolActive)
+        allowsTools && (model.imageToolActive || model.cropToolActive || model.geometry.guidedToolActive)
     }
 
     var body: some View {
@@ -68,6 +68,9 @@ struct ImageViewport: View {
                                                             : SpokenText.zoom(model.zoomLabel))
                 if allowsTools && model.cropToolActive {
                     CropOverlay(model: model)
+                }
+                if allowsTools && model.geometry.guidedToolActive && !model.cropToolActive && !model.imageToolActive {
+                    GuidedUprightOverlay(model: model)
                 }
                 if allowsTools && model.healToolActive {
                     HealOverlay(model: model)

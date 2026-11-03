@@ -192,6 +192,7 @@ struct CommandState: Equatable {
         case .saveFilterAsSmartCollection: hasCatalog && filterActive
         case .addToTargetCollection: hasCatalog && (hasSelection || selectionCount > 0)
         case .removeFromCollection: showsRegularCollection && (hasSelection || selectionCount > 0)
+        case .geometry(let geometry): isEnabled(geometry)
         }
     }
 
@@ -386,6 +387,7 @@ struct LatentCommands: Commands {
             Divider()
             item("Rotate Left", .rotate(-1))
             item("Rotate Right", .rotate(1))
+            item("Reset to Camera Orientation", .geometry(.resetOrientation))
             Divider()
             item("Create Virtual Copy", .createVirtualCopy)
             item("Set Copy as Master", .setCopyAsMaster)
@@ -411,6 +413,7 @@ struct LatentCommands: Commands {
             Button("Import Camera Profile…") { CameraProfileImport.run() }
             Divider()
             toolToggle("Crop & Straighten", .crop, isOn: state.cropToolActive)
+            TransformMenu { AnyView(item($0, $1)) }
             toolToggle("Spot Removal", .heal, isOn: state.healToolActive)
             toolToggle("Red-Eye Removal", .redEye, isOn: state.redEyeToolActive)
             toolToggle("Sensor Dust", .dust, isOn: state.dustToolActive)

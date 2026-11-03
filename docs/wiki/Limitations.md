@@ -100,6 +100,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Sensor dust has been tested on synthetic dust** and checked on only a few real photos. It looks for round dark shadows: foliage, birds and stars can be taken for dust, and faint spots at wide apertures can be missed; the rings are there to correct it. A dust map is keyed by the camera's make and model, so two bodies of the same model share one.
 - **Touch-up works on faces at least 64 pixels wide** on a render about 4000 pixels across, seen more or less straight on; a turned head, glasses or hair across the face can defeat the landmarks. Smoothing acts on brightness only, so colour blotches stay; the teeth gate can catch a tongue or a lip highlight. Survey panes rebuild the regions when they open, which costs a moment per pane.
 - **Subject masks with BiRefNet take about half a second each** on an M4 and longer on an M1, so a Survey of four such photos takes a few seconds to settle. Added models run on the GPU only.
+- **Upright needs straight lines.** It reads edges on a render about a thousand pixels across, so a photo of nature, a soft or very dark one, or a building seen mostly as curves may give nothing to correct, and busy patterns (tiles, bars, text) can mislead it; Guided Upright is the fallback. Constrain Crop refits the crop when the transform or straighten changes, but a crop dragged by hand afterwards can still reach an empty edge. Flips are part of the edit, not of the photo's orientation like ⌘[ and ⌘], so they travel with Copy Settings when the crop is copied, and Reset to Camera Orientation leaves them alone.
 - **Thumbnails ignore AI denoise**, since running the network in the background for every thumbnail would be too slow.
 - **Limits:** 8 local adjustments, 32 spot patches (a brush stroke counts as one), 32 red-eye spots, 200 dust spots, 16 faces and 64 blemishes per image, 30 history steps.
 - **No process-version pinning.** When a rendering algorithm changes, existing edits render differently rather than being pinned to the old behaviour. This has already happened once: spot healing changed in September 2026, so heal patches made before then now render with the new method.
@@ -109,7 +110,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - Grid cells have no VoiceOver action to open an image; they do have one per rating.
 - The waveform and vectorscope are named for VoiceOver but not described.
 - Compare has no focus highlight.
-- Placing patches, brush strokes, red-eye spots, dust spots, blemishes and masks by hand, moving the crop, arranging a Custom sort and the magnifier need a pointer; Find Spots, Find Faces and Find Blemishes place theirs without one. See [Accessibility](Accessibility).
+- Placing patches, brush strokes, red-eye spots, dust spots, blemishes and masks by hand, moving the crop, drawing a straighten line or Upright guides, arranging a Custom sort and the magnifier need a pointer; Find Spots, Find Faces and Find Blemishes place theirs without one. See [Accessibility](Accessibility).
 
 ## Development
 

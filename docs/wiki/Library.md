@@ -75,6 +75,8 @@ Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to
 Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to open in Develop. With several selected, the image you clicked last (for a ⇧-click, the end you clicked) leads: Loupe, Develop and the left panel show it, and ⌘A keeps it. Rating, flag and rotate keys act on every selected image. Selected images that the filter hides are deselected, so these keys, Paste Settings and Export act only on images the grid shows. Badges show a pencil for edited images and ✓ and ✗ for flags. A virtual copy has a small stacked-squares mark at the bottom-left of its picture (see [Virtual copies](Library#virtual-copies)).
 <!-- /RECONCILE -->
 
+**Reset to Camera Orientation** (Photo menu) takes away the quarter turns you gave the selected images with ⌘[ and ⌘], so each shows the way the camera recorded it. One ⌘Z gives every image its own turns back.
+
 **Stars.** Click the stars under a thumbnail to rate it; the empty ones appear when you point at the cell. Clicking a selected image's stars rates the whole selection, clicking another image's selects it first, and clicking the rating it already has clears it.
 
 **Finder tags** show as coloured dots at the end of the name, up to three per image. See [Finder tags](Library#finder-tags).

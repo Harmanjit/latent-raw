@@ -137,6 +137,8 @@ enum Shortcuts {
         Shortcut(.beforeAfter, "\\"),
         Shortcut(.autoAdjust, "u", .command),
         Shortcut(.crop, "r"),
+        Shortcut(.geometry(.cycleCropGuide), "o", in: .develop),
+        Shortcut(.geometry(.rotateCropGuide), "o", .shift, in: .develop),
         Shortcut(.heal, "h"),
         Shortcut(.redEye, "y"),
         // Lightroom's key for the Black & White treatment.
@@ -309,6 +311,8 @@ extension Shortcuts {
             ShortcutPageRow([.beforeAfter], "Before / after"),
             ShortcutPageRow([.autoAdjust], "Auto adjust"),
             ShortcutPageRow([.crop], "Crop and straighten tool"),
+            ShortcutPageRow([.geometry(.cycleCropGuide), .geometry(.rotateCropGuide)], "While cropping: the next crop guide overlay (thirds, grid, golden ratio, golden spiral, diagonal, triangle, none), and turn the spiral or triangle"),
+            ShortcutPageRow(keys: .gesture("⌘-drag in the crop tool"), "Draw a line along something level or upright to straighten by it"),
             ShortcutPageRow([.heal], "Spot removal tool"),
             ShortcutPageRow([.redEye], "Red-eye tool"),
             ShortcutPageRow([.toggleBlackAndWhite], "Develop: switch the treatment between Color and Black & White"),

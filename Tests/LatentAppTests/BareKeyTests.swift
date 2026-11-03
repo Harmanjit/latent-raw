@@ -75,7 +75,9 @@ final class BareKeyTests: XCTestCase {
         // ⌘Z is undo; a bare Z must stay the zoom toggle, and a bare comma nothing.
         XCTAssertEqual(command("z"), .toggleZoom)
         XCTAssertNil(command(","))
-        XCTAssertNil(command("o"))
+        // ⇧⌘O opens a folder; a bare O is the crop tool's guide overlay.
+        XCTAssertNotEqual(command("o"), .openFolder)
+        XCTAssertEqual(command("o"), .geometry(.cycleCropGuide))
     }
 
     // MARK: Focus

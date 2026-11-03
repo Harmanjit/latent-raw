@@ -34,7 +34,14 @@ extension EditorModel {
         var base = straightenBase ?? parameters.crop
         base.angle = max(-45, min(45, degrees))
         straightenBase = base
-        parameters.crop = base.constrained(sensorSize: sensorSize)
+        var p = parameters
+        p.crop = base.constrained(sensorSize: sensorSize)
+        // With a transform the picture's edge is no longer the sensor's:
+        // Constrain Crop keeps the turned crop on the picture.
+        if p.perspective.constrainCrop && !p.perspective.isIdentity {
+            p.crop = constrainedCrop(for: p)
+        }
+        parameters = p
     }
 
     /// Locks the crop to `ratio` (width:height as displayed, so a
@@ -62,11 +69,12 @@ extension EditorModel {
     /// Output size in pixels after the crop, as displayed.
     var croppedPixelSize: CGSize { cropFrame.canvasSize }
 
+    /// Removes the crop and straighten. The Transform panel has its own
+    /// Reset for Upright, keystone and the Transform sliders.
     func resetCrop() {
         guard hasImage else { return }
         straightenBase = nil
         parameters.crop = .none
-        parameters.perspective = .none
     }
 
     /// The canvas changed size or shape (crop, tool, rotation): re-fit if
