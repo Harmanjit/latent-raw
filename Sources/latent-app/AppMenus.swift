@@ -78,7 +78,7 @@ struct CommandState: Equatable {
     func isEnabled(_ command: KeyCommand) -> Bool {
         switch command {
         case .step: hasVisibleImages
-        case .openSelection, .loupe, .compare, .rate, .pick, .reject, .unflag, .rotate: hasSelection
+        case .openSelection, .loupe, .compare, .rate, .pick, .reject, .unflag, .rotate, .label: hasSelection
         case .library, .openFolder, .disarmTools: true
         case .develop: hasImage || hasSelection
         case .toggleLoupe: (mode == .library && hasSelection) || mode == .loupe
@@ -144,7 +144,8 @@ struct CommandState: Equatable {
         // Files change under the grid only: Loupe, Compare, Survey and
         // Develop have them open. Not while exporting, printing or a
         // contact sheet reads them.
-        case .rename: mode == .library && hasSelection && selectionCount <= 1 && !fileOperationRunning && !exportQueueRunning
+        // Several selected rename from a template (Rename with Template…).
+        case .rename, .renameWithTemplate: mode == .library && hasSelection && !fileOperationRunning && !exportQueueRunning
             && !outputJobRunning
         case .moveToFolder, .copyToFolder: mode == .library && selectionCount > 0 && !fileOperationRunning && !exportQueueRunning
             && !outputJobRunning
@@ -190,6 +191,11 @@ struct CommandState: Equatable {
 
     var exportTitle: String {
         selectionCount > 1 ? "Export \(selectionCount) Images…" : "Export…"
+    }
+
+    /// F2 renames one photo by name, several from a template.
+    var renameTitle: String {
+        selectionCount > 1 ? "Rename \(selectionCount) Images…" : "Rename…"
     }
 
     var beforeAfterTitle: String { showingBefore ? "Show After" : "Show Before" }
@@ -267,7 +273,8 @@ struct LatentCommands: Commands {
             Divider()
             item("Contact Sheet…", .contactSheet)
             item("Print…", .print)
-            item("Rename…", .rename)
+            item(state.renameTitle, .rename)
+            item("Rename with Template…", .renameWithTemplate)
             item("Move to Folder…", .moveToFolder)
             item("Copy to Folder…", .copyToFolder)
         }
@@ -326,6 +333,13 @@ struct LatentCommands: Commands {
             Divider()
             item(state.pickItem.title, state.pickItem.command)
             item(state.rejectItem.title, state.rejectItem.command)
+            Menu("Label") {
+                ForEach(ColorLabel.allCases, id: \.self) { label in
+                    item(label.title, .label(label))
+                }
+                Divider()
+                item("No Label", .label(nil))
+            }
             Divider()
             item("Rotate Left", .rotate(-1))
             item("Rotate Right", .rotate(1))

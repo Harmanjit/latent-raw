@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Catalog
 
 /// A key pressed without Command, Option or Control: the single keys that
 /// step through images, switch modes, rate and flag.
@@ -59,6 +60,12 @@ enum KeyCommand: Equatable {
     case step(Int), openSelection
     case library, develop, loupe, compare, toggleLoupe, toggleZoom
     case rate(Int), pick, reject, unflag
+    /// Photo › Label: a colour label (6-9, as in Lightroom), nil for none.
+    /// Choosing the label the photo already has takes it off.
+    case label(ColorLabel?)
+    /// File › Rename with Template…: the selection named from a filename
+    /// template (F2 opens it too when several photos are selected).
+    case renameWithTemplate
     case beforeAfter, crop, heal, deleteHeal, disarmTools
     case redEye
     /// Develop › Sensor Dust and Touch-up: the dust-spot and blemish tools,

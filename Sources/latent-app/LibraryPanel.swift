@@ -12,6 +12,7 @@ struct LibraryPanel: View {
     @ObservedObject var selectionJobs: SelectionJobQueue
     @ObservedObject var model: EditorModel
     @State private var metadataExpanded = true
+    @AppStorage("latent.panel.descriptionExpanded") private var descriptionExpanded = true
     @State private var historyExpanded = false
     @State private var exportExpanded = true
     @AppStorage(OpenImageExportOptions.includeMetadataKey) private var openImageIncludesMetadata = true
@@ -27,6 +28,8 @@ struct LibraryPanel: View {
     /// Export Open Image offered: not in Survey, whose panes aren't the
     /// editor's image.
     var exportsOpenImage = true
+    /// A colour label chosen in the panel (nil removes it).
+    var onLabel: (ColorLabel?) -> Void = { _ in }
 
     @State private var keywordText = ""
     /// The selected photo's merge recipe, when it is one Photo Merge made;
@@ -84,6 +87,11 @@ struct LibraryPanel: View {
 
             if let selected = library.selectedImage {
                 selectionSection(selected)
+                DisclosureGroup(isExpanded: $descriptionExpanded) {
+                    DescriptiveMetadataSection(library: library).padding(.top, 6)
+                } label: {
+                    sectionLabel("Title & Copyright")
+                }
                 DisclosureGroup(isExpanded: $metadataExpanded) {
                     metadataSection(selected).padding(.top, 6)
                 } label: {
@@ -319,6 +327,7 @@ struct LibraryPanel: View {
             return
         }
         model.export(to: destination, options: options, rating: record.rating,
+                     descriptive: record.exportDescription,
                      readKeywords: { try await catalog.keywords(forImageID: id) })
     }
 
@@ -369,6 +378,8 @@ struct LibraryPanel: View {
                 .frame(width: 80)
                 .accessibilityValue(SpokenText.flag(image.flag))
             }
+
+            ColorLabelPicker(current: image.label, onChoose: onLabel)
 
             TextField("Keywords, comma separated", text: $keywordText)
                 .textFieldStyle(.roundedBorder)

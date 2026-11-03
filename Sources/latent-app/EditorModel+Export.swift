@@ -44,6 +44,7 @@ extension EditorModel {
     /// session is untouched; only the Sendable request and the GPU
     /// context cross over.
     func export(to destination: URL, options: OpenImageExportOptions, rating: Int,
+                descriptive: ExportDescription = ExportDescription(),
                 readKeywords: (@Sendable () async throws -> [String])?) {
         guard let gpuContext, let sourceURL, !isExporting else { return }
         let editStackJSON: String?
@@ -60,7 +61,7 @@ extension EditorModel {
 
         var settings = exportSettings
         settings.watermark = options.watermark
-        let request = ExportWorker.Request(
+        var built = ExportWorker.Request(
             sourceURL: sourceURL, destinationURL: destination,
             editStackJSON: editStackJSON, userRotation: userRotation,
             settings: settings,
@@ -73,6 +74,10 @@ extension EditorModel {
             // The Save panel asked before replacing a file that was there.
             // One that appears under the name during the render is kept.
             replacesExisting: FileManager.default.fileExists(atPath: destination.path))
+        // Title, caption, creator and copyright from the catalog, with the
+        // rest of the metadata or not at all.
+        if options.includeMetadata { built.descriptive = descriptive }
+        let request = built
 
         isExporting = true
         status = "Exporting at full resolution…"

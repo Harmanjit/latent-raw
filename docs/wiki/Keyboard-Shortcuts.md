@@ -38,6 +38,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 |---|---|
 | 0–5 | Stars |
 | P, X, U | Pick, reject, unflag |
+| 6–9 | Red, yellow, green, blue label (the same key again takes it off) |
 | ⌘[, ⌘] | Rotate left, right |
 | ⇧⌘L | Clear the filter bar |
 
@@ -71,7 +72,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 
 | Keys | Action |
 |---|---|
-| F2 | Rename the selected image (its sidecar and thumbnail follow) |
+| F2 | Rename the selected image (its sidecar and thumbnail follow); with several selected, rename them all from a filename template |
 | Drag images onto a sidebar folder | Move them there with their edits (hold ⌥ to copy) |
 
 ## Photo Merge

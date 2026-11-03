@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import Catalog
 @testable import latent_app
 
 @MainActor
@@ -58,7 +59,7 @@ final class BareKeyTests: XCTestCase {
         for stars in 0...5 {
             XCTAssertEqual(command(String(stars)), .rate(stars))
         }
-        XCTAssertNil(command("6"))
+        XCTAssertEqual(command("6"), .label(.red), "6 to 9 are colour labels, as in Lightroom")
         XCTAssertNil(command("٣"), "Only ASCII digits rate")
     }
 

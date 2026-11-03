@@ -119,6 +119,11 @@ enum Shortcuts {
         Shortcut(.pick, "p"),
         Shortcut(.reject, "x"),
         Shortcut(.unflag, "u"),
+        // Lightroom's label keys. Purple has none there either.
+        Shortcut(.label(.red), "6"),
+        Shortcut(.label(.yellow), "7"),
+        Shortcut(.label(.green), "8"),
+        Shortcut(.label(.blue), "9"),
         Shortcut(.rotate(-1), "[", .command),
         Shortcut(.rotate(1), "]", .command),
         Shortcut(.clearFilter, "l", [.shift, .command]),
@@ -281,6 +286,8 @@ extension Shortcuts {
         ("Rating and metadata", [
             ShortcutPageRow([.rate(0), .rate(1), .rate(2), .rate(3), .rate(4), .rate(5)], "Stars"),
             ShortcutPageRow([.pick, .reject, .unflag], "Pick, reject, unflag"),
+            ShortcutPageRow([.label(.red), .label(.yellow), .label(.green), .label(.blue)],
+                            "Red, yellow, green, blue label (the same key again takes it off)"),
             ShortcutPageRow([.rotate(-1), .rotate(1)], "Rotate left, right"),
             ShortcutPageRow([.clearFilter], "Clear the filter bar"),
         ]),
@@ -305,7 +312,7 @@ extension Shortcuts {
             ShortcutPageRow([.editExternally], "Edit in External Editor: a 16-bit TIFF of the open or selected image, opened in the app chosen in Settings"),
         ]),
         ("Files", [
-            ShortcutPageRow([.rename], "Rename the selected image (its sidecar and thumbnail follow)"),
+            ShortcutPageRow([.rename], "Rename the selected image (its sidecar and thumbnail follow); with several selected, rename them all from a filename template"),
             ShortcutPageRow(keys: .gesture("Drag images onto a sidebar folder"), "Move them there with their edits (hold ⌥ to copy)"),
         ]),
         ("Photo Merge", [

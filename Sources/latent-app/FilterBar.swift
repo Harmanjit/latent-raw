@@ -28,6 +28,7 @@ struct FilterBar: View {
         HStack(spacing: 10) {
             ratingThreshold
             flagToggles
+            LabelFilterMenu(selection: $library.filter.labels)
             Toggle("Edited", isOn: $library.filter.editedOnly)
                 .toggleStyle(.button)
                 .accessibilityLabel("Edited only")
@@ -40,6 +41,7 @@ struct FilterBar: View {
             TextField("Search file names", text: $library.filter.text)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel("Search file names")
+                .help("Shows images whose file name, title or caption contains this")
                 .frame(width: 150)
 
             Spacer()
