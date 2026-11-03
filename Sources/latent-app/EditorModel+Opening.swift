@@ -35,6 +35,7 @@ extension EditorModel {
             }
             return
         }
+        resetToolStateForNewImage()
         flushPendingSave()
         // The analysis and the tool belong to the image being left.
         dustImageWillChange()
@@ -95,8 +96,16 @@ extension EditorModel {
             }
             // The last image's encodings, per model, answer nothing here.
             resetPromptSessions()
+            modelMaskGeometryTask?.cancel()
+            modelMaskGeometryTask = nil
+            modelMaskGeometry = [:]
             history = EditHistory(initial: EditStack(parameters: parameters))
             snapshots = []
+            // Nothing of this image's stored history is on hand until
+            // ContentView's read of it arrives (`loadHistory`).
+            storedHistoryLoaded = false
+            undecodableHistorySteps = []
+            undecodableSnapshots = []
             stopAIDenoise()
             aiDenoiseReleasedUnderPressure = false
             dustImageDidOpen()
@@ -111,5 +120,25 @@ extension EditorModel {
             closeImage()
             status = "Could not open: \(error)"
         }
+    }
+
+    /// What the tools hold about the photo being left: the selected patch,
+    /// spot and local (an index into that photo's lists, which would pick
+    /// whatever sits at the same index on the next), a drag or stroke in
+    /// progress (which would be committed onto the next photo at the old
+    /// one's coordinates), the mask tool aimed at the old local, and the
+    /// crop the straighten slider started from. The heal, red-eye and crop
+    /// tools themselves stay armed, as before.
+    func resetToolStateForNewImage() {
+        selectedHealIndex = nil
+        selectedRedEyeIndex = nil
+        if selectedLocalIndex != nil { selectedLocalIndex = nil }
+        maskTool = .none
+        isDraggingMask = false
+        lastDab = nil
+        healDrag = nil
+        redEyeDrag = nil
+        paintingHealStroke = []
+        straightenBase = nil
     }
 }

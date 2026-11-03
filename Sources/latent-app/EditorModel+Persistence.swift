@@ -5,9 +5,10 @@ extension EditorModel {
     // MARK: - Saving
 
     /// Persists ~1s after the last change (DESIGN.md §5.3: nothing is
-    /// written while a slider is being dragged).
+    /// written while a slider is being dragged). Also runs for a file
+    /// opened without a catalog id: the settle is what records the undo
+    /// step, and only the writes are skipped for such a file.
     func scheduleSave() {
-        guard catalogImageID != nil else { return }
         pendingSave?.cancel()
         pendingSave = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
@@ -19,17 +20,19 @@ extension EditorModel {
     /// Saves now if anything is pending. Called before switching images
     /// so an edit made a moment before pressing → isn't lost.
     func flushPendingSave() {
-        guard let id = catalogImageID, let pendingSave else { return }
+        guard let pendingSave else { return }
         pendingSave.cancel()
         self.pendingSave = nil
-        if EditStack.isDefault(parameters, relativeTo: defaultParameters) {
-            onEditSettled?(id, nil)
-        } else {
-            let stack = stackWithProvenance()
-            do {
-                onEditSettled?(id, try stack.encodeJSON())
-            } catch {
-                reportFailure("Encoding the edit", error)
+        if let id = catalogImageID {
+            if EditStack.isDefault(parameters, relativeTo: defaultParameters) {
+                onEditSettled?(id, nil)
+            } else {
+                let stack = stackWithProvenance()
+                do {
+                    onEditSettled?(id, try stack.encodeJSON())
+                } catch {
+                    reportFailure("Encoding the edit", error)
+                }
             }
         }
         recordHistoryStep()
@@ -64,8 +67,14 @@ extension EditorModel {
                      snapshots stored: [(name: String, stackJSON: String)]) {
         // Stored steps are converted like the current edit was when the
         // image opened, so undo never steps back into the old geometry.
+        // A row this version cannot read is kept aside and written back
+        // with the rest, so saving the next step does not delete it.
+        var unreadSteps: [(stackJSON: String, createdAt: Int64)] = []
         var entries: [EditHistory.Step] = steps.compactMap { step in
-            guard let stack = try? onThisImage(EditStack.decode(json: step.stackJSON)) else { return nil }
+            guard let stack = try? onThisImage(EditStack.decode(json: step.stackJSON)) else {
+                unreadSteps.append(step)
+                return nil
+            }
             return EditHistory.Step(stack: stack, label: "", date: Date(timeIntervalSince1970: Double(step.createdAt) / 1000))
         }
         // Labels are derived, not stored.
@@ -78,8 +87,19 @@ extension EditorModel {
         var h = EditHistory(steps: entries, cursor: entries.count - 1)
         h.record(current)
         history = h
+        var unreadSnapshots: [(name: String, stackJSON: String)] = []
         snapshots = stored.compactMap { s in
-            (try? onThisImage(EditStack.decode(json: s.stackJSON))).map { EditSnapshot(name: s.name, stack: $0) }
+            guard let stack = try? onThisImage(EditStack.decode(json: s.stackJSON)) else {
+                unreadSnapshots.append(s)
+                return nil
+            }
+            return EditSnapshot(name: s.name, stack: stack)
+        }
+        undecodableHistorySteps = unreadSteps
+        undecodableSnapshots = unreadSnapshots
+        storedHistoryLoaded = true
+        if !unreadSteps.isEmpty || !unreadSnapshots.isEmpty {
+            status = "Some stored history or snapshots could not be read; they are kept as they are"
         }
     }
 
@@ -91,9 +111,15 @@ extension EditorModel {
 
     private func persistHistory() {
         guard let id = catalogImageID else { return }
-        let steps = history.steps.compactMap { step -> (String, Int64)? in
+        // The stored list was never read (it is still loading, or reading
+        // it failed): writing ours would replace it with a shorter one.
+        guard storedHistoryLoaded else { return }
+        var steps = history.steps.compactMap { step -> (stackJSON: String, createdAt: Int64)? in
             guard let json = try? step.stack.encodeJSON() else { return nil }
             return (json, Int64(step.date.timeIntervalSince1970 * 1000))
+        }
+        if !undecodableHistorySteps.isEmpty {
+            steps = (undecodableHistorySteps + steps).sorted { $0.createdAt < $1.createdAt }
         }
         onHistoryChanged?(id, steps)
     }
@@ -103,8 +129,10 @@ extension EditorModel {
         var next = stack.parameters(defaults: defaultParameters)
         if next.whiteBalance.isAsShot { next.whiteBalance = defaultParameters.whiteBalance }
         let before = parameters
+        let selectedBefore = selectedLocal?.id
         parameters = next
         restoringState = false
+        toolStateDidFollowRestore(selectedBefore: selectedBefore)
         // The session's model-made mask pixels follow the stored shapes.
         syncModelMasks(from: before)
         // The stored edit must follow the cursor, so save without waiting.
@@ -122,27 +150,59 @@ extension EditorModel {
 
     // History belongs to the open image; with none open there is nothing
     // it could be restored onto.
-    func undo() { if hasImage, let stack = history.undo() { restore(stack) } }
-    func redo() { if hasImage, let stack = history.redo() { restore(stack) } }
-    func jumpToHistory(index: Int) { if hasImage, let stack = history.jump(to: index) { restore(stack) } }
+    // An edit still waiting in the save debounce is not a step yet: it is
+    // recorded first, so Undo takes back that edit alone and Redo can
+    // bring it back.
+    func undo() {
+        guard hasImage else { return }
+        flushPendingSave()
+        if let stack = history.undo() { restore(stack) }
+    }
+    func redo() {
+        guard hasImage else { return }
+        flushPendingSave()
+        if let stack = history.redo() { restore(stack) }
+    }
+    func jumpToHistory(index: Int) {
+        guard hasImage else { return }
+        flushPendingSave()
+        if let stack = history.jump(to: index) { restore(stack) }
+    }
+
+    /// After Undo, Redo, a jump or a snapshot. The crop the straighten
+    /// slider started from is gone, and when another local now sits at
+    /// the selected index, an armed mask tool would reshape that one.
+    private func toolStateDidFollowRestore(selectedBefore: UUID?) {
+        straightenBase = nil
+        if selectedLocal?.id != selectedBefore {
+            maskTool = .none
+            isDraggingMask = false
+        }
+    }
 
     func saveSnapshot(named name: String) {
         guard hasImage, !name.isEmpty else { return }
         snapshots.removeAll { $0.name == name }
+        undecodableSnapshots.removeAll { $0.name == name }
         snapshots.append(EditSnapshot(name: name, stack: EditStack(parameters: parameters)))
         snapshots.sort { $0.name.lowercased() < $1.name.lowercased() }
         persistSnapshots()
-        status = "Saved snapshot “\(name)”"
+        status = catalogImageID == nil || storedHistoryLoaded ? "Saved snapshot “\(name)”"
+            : "Snapshot “\(name)” is kept for this session only: the stored snapshots could not be read"
     }
 
     func restoreSnapshot(_ snapshot: EditSnapshot) {
         guard hasImage else { return }
+        // A pending edit becomes its own step, not lost under the snapshot.
+        flushPendingSave()
         restoringState = true
         var next = snapshot.stack.parameters(defaults: defaultParameters)
         if next.whiteBalance.isAsShot { next.whiteBalance = defaultParameters.whiteBalance }
         let before = parameters
+        let selectedBefore = selectedLocal?.id
         parameters = next
         restoringState = false
+        toolStateDidFollowRestore(selectedBefore: selectedBefore)
         syncModelMasks(from: before)
         recordHistoryStep()   // restoring a snapshot is itself a history step
         scheduleSave()
@@ -150,13 +210,20 @@ extension EditorModel {
 
     func deleteSnapshot(_ snapshot: EditSnapshot) {
         snapshots.removeAll { $0.name == snapshot.name }
+        undecodableSnapshots.removeAll { $0.name == snapshot.name }
         persistSnapshots()
     }
 
     private func persistSnapshots() {
         guard let id = catalogImageID else { return }
-        onSnapshotsChanged?(id, snapshots.compactMap { s in
-            (try? s.stack.encodeJSON()).map { (s.name, $0) }
-        })
+        // As for history: the stored list must be read before it is replaced.
+        guard storedHistoryLoaded else { return }
+        var rows = snapshots.compactMap { s in
+            (try? s.stack.encodeJSON()).map { (name: s.name, stackJSON: $0) }
+        }
+        // Unreadable ones stay, unless one of the same name replaced it
+        // or was deleted under that name.
+        rows += undecodableSnapshots.filter { old in !rows.contains { $0.name == old.name } }
+        onSnapshotsChanged?(id, rows)
     }
 }

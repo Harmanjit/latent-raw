@@ -189,7 +189,7 @@ public enum ExportWorker {
         // Model-generated masks are not stored; make them again.
         let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
         let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
-                                              rotation: rotation)
+                                              rotation: rotation, geometry: parameters)
         // Nor are the touch-up region masks: built again the way the
         // editor built them, so the export smooths the same skin.
         try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
@@ -264,8 +264,24 @@ public enum ExportWorker {
                         readMetadata: metadata)
     }
 
+    /// What a model mask is made from, here and in the editor: the
+    /// image's defaults (`defaults`, no locals) with the lens and keystone
+    /// settings of the edit (`geometry`). A mask is sampled on the output
+    /// grid those settings define, so it must be made on it; the look
+    /// stays the camera's, so a mask never depends on the edits it drives.
+    public static func modelMaskInputParameters(defaults: EditParameters, geometry: EditParameters) -> EditParameters {
+        var p = defaults
+        p.locals = []
+        p.lensDistortion = geometry.lensDistortion
+        p.lensTCA = geometry.lensTCA
+        p.manualDistortion = geometry.manualDistortion
+        p.perspective = geometry.perspective
+        return p
+    }
+
     /// Generates pixels for every AI and prompted local, the same way the
-    /// editor does: from a ~1000px unrotated sRGB render of the defaults.
+    /// editor does: from a ~1000px unrotated sRGB render of the defaults
+    /// with the edit's geometry (`modelMaskInputParameters`).
     /// Each local runs the model its stored `modelVersion` names, resolved
     /// through the registry; `rotation` (the turn that makes the render
     /// upright) is passed to the subject models, which need it.
@@ -273,14 +289,16 @@ public enum ExportWorker {
     /// lacks, once each, in the order met (docs/Retouch.md §5).
     static func regenerateMasks(_ locals: [LocalAdjustment], session: ImageSession,
                                 pipeline: RenderPipeline, gpu: GPUContext, rotation: ImageRotation = .none,
+                                geometry: EditParameters? = nil,
                                 registry: ModelRegistry = .shared) async throws -> (count: Int, substituted: [String]) {
         let needed = locals.filter { $0.shape.isModelGenerated }
         guard !needed.isEmpty else { return (0, []) }
         var defaults = EditParameters()
         defaults.whiteBalance = session.asShotWhiteBalance
+        let input = modelMaskInputParameters(defaults: defaults, geometry: geometry ?? defaults)
         let longEdge = max(session.file.summary.rawWidth, session.file.summary.rawHeight)
         let quads = max(1, Int((Double(longEdge) / 2048.0).rounded(.up)))
-        let tex = try pipeline.render(session, scale: .binned(quads: quads), parameters: defaults,
+        let tex = try pipeline.render(session, scale: .binned(quads: quads), parameters: input,
                                       output: .file(.sRGB))
         let image = try Exporter(gpu: gpu).cgImage(from: tex, colorSpace: .sRGB)
 

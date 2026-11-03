@@ -69,7 +69,7 @@ extension ExportWorker {
         }
         let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
         let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
-                                              rotation: rotation)
+                                              rotation: rotation, geometry: parameters)
         try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
                                    name: request.sourceURL.lastPathComponent, logger: pageLogger)
         if request.runsAIDenoise, parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {

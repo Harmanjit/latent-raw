@@ -34,18 +34,38 @@ extension EditorModel {
     /// sized by zoom alone so panning keeps reusing the same textures.
     /// The visible area in *sensor* space: the viewport's visible rect is
     /// in rotated image space, so it's mapped back before asking for a tile.
-    private var visibleSensorRect: CGRect {
+    var visibleSensorRect: CGRect {
         let visibleCanvas = viewport.visibleSensorRect(drawableSize: drawableSize)
         return frame.sensorRect(fromCanvasRect: visibleCanvas)
     }
 
-    /// What the tile is rendered for: the visible area and margin.
+    /// Sensor pixels the neighbourhood stages read past a pixel they
+    /// write: presence's large blur (clarity, dehaze) and touch-up's wide
+    /// one. A region render clamps those reads at its edge, so only the
+    /// part of a tile at least this far inside its edge looks as the full
+    /// frame and the export do. Zero when neither stage runs.
+    static func neighbourhoodReach(of p: EditParameters, sensorSize: CGSize) -> CGFloat {
+        var reach: CGFloat = 0
+        if p.wantsLocalContrast {
+            // As `RenderPipeline.applyLocalContrast` runs it: a sigma of
+            // 1.2% of the short side, on a copy downsampled until the
+            // sigma is at most 10, with at most 32 taps a side, plus the
+            // downsample's own box and the upsample's tap.
+            let sigma = 0.012 * Float(min(sensorSize.width, sensorSize.height))
+            var factor = 1
+            while sigma / Float(factor) > 10, factor < 16 { factor *= 2 }
+            let half = min(Int((3 * max(sigma / Float(factor), 0.3)).rounded(.up)), 32)
+            reach = CGFloat((half + 2) * factor)
+        }
+        return max(reach, p.touchUpTileReach(beyondMargin: 0, sensorSize: sensorSize))
+    }
+
+    /// What the tile is rendered for: the visible area, the margin a pan
+    /// may use without a render, and beyond that the neighbourhood reach,
+    /// so what a pan reveals is never the band the edge clamped.
     private var tileViewRegion: CGRect {
-        var visible = visibleSensorRect.insetBy(dx: -Self.tileMargin, dy: -Self.tileMargin)
-        // The touch-up stage's wide blur reads past the margin for large
-        // faces; a tile that stops short would smooth its edge differently.
-        let reach = parameters.touchUpTileReach(beyondMargin: Self.tileMargin, sensorSize: sensorSize)
-        visible = visible.insetBy(dx: -reach, dy: -reach)
+        let reach = Self.neighbourhoodReach(of: parameters, sensorSize: sensorSize)
+        var visible = visibleSensorRect.insetBy(dx: -(Self.tileMargin + reach), dy: -(Self.tileMargin + reach))
         // Keystone reads pixels from elsewhere in the frame; widen the tile
         // to the source region so the corrected view is complete.
         if !parameters.perspective.isIdentity {
@@ -69,11 +89,13 @@ extension EditorModel {
 
     /// Does the tile on hand still cover what's on screen? If so, a pan
     /// needs no render — the presenter just draws it in the new place.
-    private var tileCoversView: Bool {
+    var tileCoversView: Bool {
         guard let tile, tile.texture.width == Int(tileSize.width),
               tile.texture.height == Int(tileSize.height) else { return false }
         let visible = visibleSensorRect
-        let usable = tileHealedCoverage.insetBy(dx: Self.tileInset, dy: Self.tileInset)
+        // The band the neighbourhood stages clamped is not usable either.
+        let trim = max(Self.tileInset, Self.neighbourhoodReach(of: renderParameters, sensorSize: sensorSize))
+        let usable = tileHealedCoverage.insetBy(dx: trim, dy: trim)
         // Only the part of the view that's actually over the image matters.
         let sensorBounds = CGRect(origin: .zero, size: sensorSize)
         return usable.contains(visible.intersection(sensorBounds))

@@ -76,12 +76,19 @@ extension EditorModel {
         guard hasImage || catalogImageID != nil else { return }
         flushPendingSave()
         disarmTools()
+        resetToolStateForNewImage()
         dustImageWillChange()
         resetTouchUpForNewImage()
         pendingRender?.cancel()
         stopAIDenoise()
         aiDenoiseReleasedUnderPressure = false
         resetPromptSessions()
+        modelMaskGeometryTask?.cancel()
+        modelMaskGeometryTask = nil
+        modelMaskGeometry = [:]
+        storedHistoryLoaded = false
+        undecodableHistorySteps = []
+        undecodableSnapshots = []
         session = nil
         sourceURL = nil
         catalogImageID = nil

@@ -120,20 +120,61 @@ extension EditorModel {
     /// The image as the models see it: ~1000 px on the long edge, encoded
     /// sRGB, unrotated so masks land in sensor coordinates. Rendered from
     /// the pipeline with the image's defaults (no locals, so a mask never
-    /// depends on the edits it will drive).
-    private func modelInputImage() throws -> CGImage {
+    /// depends on the edits it will drive) but the edit's lens and keystone
+    /// settings: the mask is sampled on the output grid those settings
+    /// define, so it has to be made on that grid too, as export does
+    /// (`ExportWorker.modelMaskInputParameters`). Also returns the
+    /// geometry key it was made on.
+    private func modelInputImage() throws -> (image: CGImage, geometry: String) {
         guard let session, let pipeline, let gpu = gpuContext else { throw AIMaskError.noResult }
         let longEdge = max(session.file.summary.rawWidth, session.file.summary.rawHeight)
         let quads = max(1, Int((Double(longEdge) / 2048.0).rounded(.up)))
-        var neutral = defaultParameters
-        neutral.locals = []
+        let input = ExportWorker.modelMaskInputParameters(defaults: defaultParameters, geometry: parameters)
         // Its own pool, as for red-eye detection: never the preview's textures.
         defer { session.releasePooledTextures(in: .analysis) }
-        return try session.withTexturePool(.analysis) {
-            let tex = try pipeline.render(session, scale: .binned(quads: quads), parameters: neutral,
+        let image = try session.withTexturePool(.analysis) {
+            let tex = try pipeline.render(session, scale: .binned(quads: quads), parameters: input,
                                           output: .file(.sRGB))
             return try Exporter(gpu: gpu).cgImage(from: tex, colorSpace: .sRGB)
         }
+        return (image, Self.touchUpGeometryKey(of: parameters))
+    }
+
+    /// Called from `parameters`' didSet. A lens or keystone change moves
+    /// the output grid every model mask is sampled on, so 300 ms after
+    /// the last such change (a drag is not rebuilt on every tick) the
+    /// masks made on another grid are dropped and made again, as the
+    /// touch-up masks are.
+    func modelMaskParametersDidChange(from old: EditParameters) {
+        guard hasImage else { return }
+        let key = Self.touchUpGeometryKey(of: parameters)
+        guard key != Self.touchUpGeometryKey(of: old),
+              parameters.locals.contains(where: { $0.shape.isModelGenerated }) else { return }
+        modelMaskGeometryTask?.cancel()
+        modelMaskGeometryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.touchUpGeometryDebounce)
+            guard let self, !Task.isCancelled else { return }
+            self.modelMaskGeometryTask = nil
+            self.regenerateModelMasksMadeOnAnotherGrid()
+        }
+    }
+
+    /// Makes again every model mask whose pixels were made on another
+    /// lens or keystone setting than the edit's now.
+    func regenerateModelMasksMadeOnAnotherGrid() {
+        guard let session else { return }
+        let key = Self.touchUpGeometryKey(of: parameters)
+        var dropped = false
+        for local in parameters.locals where local.shape.isModelGenerated {
+            // Made, or being made, on another grid. One under way is
+            // thrown away when it lands (its completion checks the key).
+            guard let made = modelMaskGeometry[local.id], made != key else { continue }
+            session.setAIMask(nil, forLocal: local.id)
+            modelMaskGeometry[local.id] = nil
+            dropped = true
+            generateAIMask(for: local)
+        }
+        if dropped { rerender() }
     }
 
     private func generateAIMask(for local: LocalAdjustment) {
@@ -146,13 +187,15 @@ extension EditorModel {
         status = "Generating \(kind.maskNoun) mask with \(runner)…"
 
         let image: CGImage
+        let geometry: String
         do {
-            image = try modelInputImage()
+            (image, geometry) = try modelInputImage()
         } catch {
             generatingMasks.remove(local.id)
             status = "Mask failed: \(error)"
             return
         }
+        modelMaskGeometry[local.id] = geometry
         let input = SendableImage(cgImage: image)
         let localID = local.id
         // The analysis render is unrotated; the subject models turn it
@@ -178,9 +221,12 @@ extension EditorModel {
                 // ran, or Undo may have given the local back its previous
                 // model: pixels for a shape the edit no longer names would
                 // land on top of the ones being made for it.
+                // A lens or keystone change meanwhile moved the grid; the
+                // rebuild it queued makes the mask again on the new one.
                 guard self.session === session,
                       let now = self.parameters.locals.first(where: { $0.id == localID }),
-                      case .ai(_, let current) = now.shape, current == modelVersion else { return }
+                      case .ai(_, let current) = now.shape, current == modelVersion,
+                      Self.touchUpGeometryKey(of: self.parameters) == geometry else { return }
                 session.setAIMask(result.mask, forLocal: localID)
                 let made = result.substitutedModel.map { "\(runner), \($0) is not installed" } ?? runner
                 self.status = String(format: "%@ mask (%@): %.0f ms on device, %.0f%% of the frame",
@@ -230,12 +276,22 @@ extension EditorModel {
     /// Encodes the open image for one click-to-select model, unless it
     /// is encoded or being encoded already.
     private func ensurePromptSession(for id: String) {
+        // An encoding made, or being made, on another lens or keystone
+        // setting answers clicks on a grid the view no longer shows.
+        if let made = promptSessionGeometry[id], made != Self.touchUpGeometryKey(of: parameters) {
+            promptEncoding[id]?.cancel()
+            promptEncoding[id] = nil
+            promptSessions[id] = nil
+            promptSessionGeometry[id] = nil
+        }
         guard promptSessions[id] == nil, promptEncoding[id] == nil, let session else { return }
         let image: CGImage
-        do { image = try modelInputImage() } catch {
+        let geometry: String
+        do { (image, geometry) = try modelInputImage() } catch {
             promptStatus[id] = "Click-to-select unavailable: \(error)"
             return
         }
+        promptSessionGeometry[id] = geometry
         let input = SendableImage(cgImage: image)
         promptStatus[id] = "Encoding image for click-to-select…"
         promptEncoding[id] = Task { @MainActor [weak self] in
@@ -270,6 +326,7 @@ extension EditorModel {
         for (id, task) in promptEncoding where id != kept { task.cancel() }
         promptEncoding = promptEncoding.filter { $0.key == kept }
         promptSessions = promptSessions.filter { $0.key == kept }
+        promptSessionGeometry = promptSessionGeometry.filter { $0.key == kept }
         promptStatus = promptStatus.filter { $0.key == kept }
     }
 
@@ -294,11 +351,13 @@ extension EditorModel {
     private func updatePromptedMask(for local: LocalAdjustment) {
         guard case .prompted(let points, let version) = local.shape, let session else { return }
         guard !points.isEmpty, let id = promptModelID(for: version) else { return }
-        guard let sam = promptSessions[id] else { ensurePromptSession(for: id); return }
+        guard let sam = promptSessions[id], let geometry = promptSessionGeometry[id],
+              geometry == Self.touchUpGeometryKey(of: parameters) else { ensurePromptSession(for: id); return }
         let prompts = points.map { PromptPoint(x: $0.x, y: $0.y, foreground: $0.foreground) }
         let localID = local.id
         let shape = local.shape
         generatingMasks.insert(localID)
+        modelMaskGeometry[localID] = geometry
         Task { @MainActor [weak self] in
             let outcome = await Task.detached(priority: .userInitiated) {
                 Result { try sam.predict(points: prompts) }
@@ -309,7 +368,8 @@ extension EditorModel {
             case .success(let prediction):
                 // Another click or Undo changed the points meanwhile: the
                 // answer to the old ones would land on the new mask.
-                guard self.parameters.locals.first(where: { $0.id == localID })?.shape == shape else { return }
+                guard self.parameters.locals.first(where: { $0.id == localID })?.shape == shape,
+                      Self.touchUpGeometryKey(of: self.parameters) == geometry else { return }
                 session.setAIMask(prediction.mask, forLocal: localID)
                 self.status = String(format: "Selection: %.0f ms, confidence %.2f, %.0f%% of the frame",
                                      prediction.seconds * 1000, prediction.score, prediction.mask.coverage * 100)
@@ -325,6 +385,10 @@ extension EditorModel {
     func removeSelectedLocal() {
         guard let i = selectedLocalIndex, i < parameters.locals.count else { return }
         parameters.locals.remove(at: i)
+        // The next local slides into the same index, so the index's didSet
+        // would not disarm the tool: an armed gradient would reshape it.
+        maskTool = .none
+        isDraggingMask = false
         selectedLocalIndex = parameters.locals.isEmpty ? nil : min(i, parameters.locals.count - 1)
     }
 
@@ -368,10 +432,13 @@ extension EditorModel {
         }
         let p = sensorNormalized(screen)
         isDraggingMask = true
+        // A tool only reshapes a local of its own kind: one left armed over
+        // another local must never turn its strokes or model mask into a
+        // gradient.
         switch (maskTool, parameters.locals[i].shape) {
-        case (.linear, _):
+        case (.linear, .linear):
             parameters.locals[i].shape = .linear(start: p, end: p)
-        case (.radial, _):
+        case (.radial, .radial):
             parameters.locals[i].shape = .radial(centre: p, radii: SIMD2(0.001, 0.001), feather: currentFeather(i))
         case (.brush, .brush(var strokes)), (.erase, .brush(var strokes)):
             strokes.append(BrushStroke(points: [p], radius: brushRadius, feather: brushFeather,
@@ -379,7 +446,7 @@ extension EditorModel {
             parameters.locals[i].shape = .brush(strokes: strokes)
             lastDab = p
         default:
-            break
+            isDraggingMask = false
         }
     }
 

@@ -71,8 +71,10 @@ extension EditorModel {
         guard !needed.isNull, !needed.isEmpty else { return true }
         guard magnifierTile != nil, let session, magnifierState.session === session,
               magnifierState.parameters == renderParameters else { return false }
-        return magnifierState.healedCoverage
-            .insetBy(dx: Self.magnifierInset, dy: Self.magnifierInset).contains(needed)
+        // As the view's tile: the band the neighbourhood stages clamped
+        // at the render's edge is not usable.
+        let trim = max(Self.magnifierInset, Self.neighbourhoodReach(of: renderParameters, sensorSize: sensorSize))
+        return magnifierState.healedCoverage.insetBy(dx: trim, dy: trim).contains(needed)
     }
 
     /// Renders now if the last render was long enough ago, else once when
@@ -105,7 +107,9 @@ extension EditorModel {
         // and a heal patch in view (dust and blemishes included) reads its
         // source and surroundings.
         var view = loupeSensorRect(loupe, clampedToSensor: false)
-        let reach = parameters.touchUpTileReach(beyondMargin: Self.magnifierMargin, sensorSize: sensorSize)
+        // Presence's and touch-up's blurs read past the margin; the loupe
+        // must stay clear of the band they clamp at the render's edge.
+        let reach = Self.neighbourhoodReach(of: parameters, sensorSize: sensorSize)
         view = view.insetBy(dx: -reach, dy: -reach)
         if !parameters.perspective.isIdentity {
             view = parameters.perspective.sourceRect(forSensorRect: view, sensorSize: sensorSize)
