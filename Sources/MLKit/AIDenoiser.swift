@@ -275,46 +275,93 @@ public enum AIDenoiseError: Error, CustomStringConvertible {
 /// Runs the denoiser over a whole image session and stores the result
 /// where the pipeline blends it in. Shared by the editor and the export
 /// worker so both produce identical pixels.
+///
+/// It is three steps rather than one so that the session and the pipeline,
+/// which belong to whichever actor owns them (the main actor in the
+/// editor), are touched only on that actor: `prepare` and `install` are
+/// synchronous and run where they are called; only plain pixels cross to
+/// `denoise`, which runs the network off the caller's actor. `run` strings
+/// the three together for a caller that owns its session outright (the
+/// export worker, the tests).
 public enum AIDenoiseWorker {
-    /// Renders the frame's camera RGB at as-shot white balance, denoises
-    /// it, and hands the texture to the session. Returns the seconds it
-    /// took. Cancellation is honoured between tiles.
+    /// What the network needs from a session: camera RGB at as-shot white
+    /// balance, read back from the GPU, and the white point. Plain values.
+    public struct Prepared: Sendable {
+        public let pixels: [Float16]
+        public let width: Int
+        public let height: Int
+        public let white: Float
+        public let start: Date
+    }
+
+    /// The network's answer, waiting to be installed into the session on
+    /// the actor that owns it.
+    public struct Result: Sendable {
+        public let pixels: [Float16]
+        public let width: Int
+        public let height: Int
+        public let model: String
+        /// Seconds from `prepare` to the last tile.
+        public let seconds: TimeInterval
+    }
+
+    /// Step one: renders the frame's camera RGB at as-shot white balance
+    /// and reads it back. Synchronous, so it runs on the session's actor.
     ///
     /// Throws `AIDenoiseError.linearSource` for a linear source before
     /// doing any work. The network sees values up to white and hands back
     /// anything near or above it unchanged (`denoise`); an HDR merge keeps
     /// much of its picture above 1.0, where the result would be a noisy
     /// image with a denoised patchwork below a hard-to-see threshold.
-    @discardableResult
-    public static func run(session: ImageSession, pipeline: RenderPipeline, gpu: GPUContext,
-                           denoiser: AIDenoiser,
-                           progress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> TimeInterval {
+    public static func prepare(session: ImageSession, pipeline: RenderPipeline, gpu: GPUContext) throws -> Prepared {
         guard session.supportsAIDenoise else { throw AIDenoiseError.linearSource }
         let start = Date()
         var asShot = EditParameters()
         asShot.whiteBalance = session.asShotWhiteBalance
         let camera = try pipeline.renderCameraRGB(session, scale: .full, parameters: asShot)
-        let width = camera.width, height = camera.height
         let pixels = try TextureReadback.float16Pixels(of: camera, gpu: gpu)
-
         let m = session.asShotMultipliers
-        let white = max(m.x, m.y, m.z, 1)
-        let denoised = try await denoiser.denoise(pixels, width: width, height: height, white: white,
-                                                  progress: progress)
-        try Task.checkCancellation()
+        return Prepared(pixels: pixels, width: camera.width, height: camera.height,
+                        white: max(m.x, m.y, m.z, 1), start: start)
+    }
 
+    /// Step two: the network, tile by tile, off the caller's actor.
+    /// Cancellation is honoured between tiles.
+    public static func denoise(_ prepared: Prepared, denoiser: AIDenoiser,
+                               progress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> Result {
+        let denoised = try await denoiser.denoise(prepared.pixels, width: prepared.width, height: prepared.height,
+                                                  white: prepared.white, progress: progress)
+        try Task.checkCancellation()
+        return Result(pixels: denoised, width: prepared.width, height: prepared.height,
+                      model: denoiser.modelName, seconds: Date().timeIntervalSince(prepared.start))
+    }
+
+    /// Step three: wraps the answer in a texture and hands it to the
+    /// session. Synchronous, so it runs on the session's actor.
+    public static func install(_ result: Result, into session: ImageSession, gpu: GPUContext) throws {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba16Float, width: width, height: height, mipmapped: false)
+            pixelFormat: .rgba16Float, width: result.width, height: result.height, mipmapped: false)
         descriptor.storageMode = .shared
         descriptor.usage = [.shaderRead]
         guard let texture = gpu.device.makeTexture(descriptor: descriptor) else {
             throw AIMaskError.noResult
         }
-        denoised.withUnsafeBytes { bytes in
-            texture.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0,
-                            withBytes: bytes.baseAddress!, bytesPerRow: width * 8)
+        result.pixels.withUnsafeBytes { bytes in
+            texture.replace(region: MTLRegionMake2D(0, 0, result.width, result.height), mipmapLevel: 0,
+                            withBytes: bytes.baseAddress!, bytesPerRow: result.width * 8)
         }
-        session.setAIDenoised(texture, model: denoiser.modelName)
-        return Date().timeIntervalSince(start)
+        session.setAIDenoised(texture, model: result.model)
+    }
+
+    /// All three steps, for a caller that owns its session and pipeline.
+    /// Returns the seconds it took.
+    @discardableResult
+    public static func run(session: ImageSession, pipeline: RenderPipeline, gpu: GPUContext,
+                           denoiser: AIDenoiser,
+                           progress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> TimeInterval {
+        let prepared = try prepare(session: session, pipeline: pipeline, gpu: gpu)
+        let result = try await denoise(prepared, denoiser: denoiser, progress: progress)
+        try install(result, into: session, gpu: gpu)
+        return result.seconds
     }
 }

@@ -99,9 +99,14 @@ final class FolderSidebarTests: XCTestCase {
         // menus, which GitHub's runners don't give a test process.
         try XCTSkipIf(ProcessInfo.processInfo.environment["CI"] != nil, "menu tracking needs an interactive session")
         XCTAssertTrue(outline.accessibilityPerformShowMenu())
-        // The menu pops up a turn later and tracks until cancelled.
+        // The menu pops up a turn later and tracks until cancelled. The
+        // timer's block is @Sendable and the menu is main-actor state, so
+        // it travels in a box; the block runs on the main run loop, which
+        // assumeIsolated checks.
+        struct MenuBox: @unchecked Sendable { let menu: NSMenu }
+        let box = MenuBox(menu: menu)
         let cancel = Timer(timeInterval: 0.05, repeats: true) { _ in
-            MainActor.assumeIsolated { menu.cancelTrackingWithoutAnimation() }
+            MainActor.assumeIsolated { box.menu.cancelTrackingWithoutAnimation() }
         }
         RunLoop.current.add(cancel, forMode: .common)
         defer { cancel.invalidate() }

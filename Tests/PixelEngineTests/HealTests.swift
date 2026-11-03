@@ -39,8 +39,12 @@ final class HealTests: XCTestCase {
         let s = CGSize(width: 6000, height: 4000)
         let region = CGRect(x: 1000, y: 1800, width: 400, height: 400)
         // Each spot's source sits where the next spot is.
-        let spots = (0..<6).map { i in
-            HealPatch(target: [Float(1200 + 500 * i) / 6000, 0.5], source: [Float(1700 + 500 * i) / 6000, 0.5], radius: 0.02)
+        let spots = (0..<6).map { i -> HealPatch in
+            // Two named steps: Swift 6.4's type checker gives up on the
+            // arithmetic written inside the array literals.
+            let target = Float(1200 + 500 * i) / 6000
+            let source = Float(1700 + 500 * i) / 6000
+            return HealPatch(target: SIMD2<Float>(target, 0.5), source: SIMD2<Float>(source, 0.5), radius: 0.02)
         }
         let grown = HealPatch.regionIncludingSources(region, patches: spots, sensorSize: s)
         XCTAssertTrue(grown.contains(spots[0].sourceBounds(sensorSize: s)))

@@ -187,8 +187,8 @@ final class ModelSettingsModel: ObservableObject {
         importing = ImportProgress(name: name, stage: "Checking \(url.lastPathComponent)…", fraction: 0)
         message = nil
         do {
-            let manifest = try await ModelImporter.importModel(from: url, into: registry) { progress in
-                Task { @MainActor [weak self] in
+            let manifest = try await ModelImporter.importModel(from: url, into: registry) { [weak self] progress in
+                Task { @MainActor in
                     self?.importing?.stage = progress.stage
                     self?.importing?.fraction = progress.fraction
                 }

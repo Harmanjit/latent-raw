@@ -31,11 +31,21 @@ import Metal
             .appendingPathComponent("latent-shaders-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let sources = try #require(Bundle.latentResources.resourceURL)
-        for file in try FileManager.default.contentsOfDirectory(at: sources, includingPropertiesForKeys: nil)
-        where ["metal", "h"].contains(file.pathExtension) {
-            try FileManager.default.copyItem(at: file, to: folder.appendingPathComponent(file.lastPathComponent))
+        // The sources sit under Shaders/ in the resource bundle (Package.swift
+        // copies the folder as it is) or, in an older bundle, at its root;
+        // the loader looks in both places, so does this. The copy goes flat.
+        let root = try #require(Bundle.latentResources.resourceURL)
+        var copied = 0
+        for dir in [root.appendingPathComponent("Shaders", isDirectory: true), root] {
+            guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
+            for file in files where ["metal", "h"].contains(file.pathExtension) {
+                let target = folder.appendingPathComponent(file.lastPathComponent)
+                guard !FileManager.default.fileExists(atPath: target.path) else { continue }
+                try FileManager.default.copyItem(at: file, to: target)
+                copied += 1
+            }
         }
+        #expect(copied >= 24, "only \(copied) shader sources found in the resource bundle")
         try Data("not a metallib".utf8).write(to: folder.appendingPathComponent("default.metallib"))
 
         let bundle = try #require(Bundle(url: folder))

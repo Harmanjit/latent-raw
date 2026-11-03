@@ -39,15 +39,18 @@ extension EditorModel {
                     denoiser = try await AIDenoiser.load(variant)
                     Self.sharedDenoisers[variant] = denoiser
                 }
-                let seconds = try await AIDenoiseWorker.run(
-                    session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser
-                ) { [weak self] done, total in
+                // The session and the pipeline are main-actor state, so the
+                // steps that touch them run here; only plain pixels go to
+                // the network and come back (`AIDenoiseWorker`).
+                let prepared = try AIDenoiseWorker.prepare(session: session, pipeline: pipeline, gpu: gpu)
+                let result = try await AIDenoiseWorker.denoise(prepared, denoiser: denoiser) { [weak self] done, total in
                     Task { @MainActor in
                         guard self?.aiDenoiseRun == run else { return }
                         self?.aiDenoiseStatus = "Denoising… \(done) of \(total) tiles"
                     }
                 }
-                let summary = String(format: "Denoised in %.1f s (%@)", seconds, denoiser.variant.displayName)
+                try AIDenoiseWorker.install(result, into: session, gpu: gpu)
+                let summary = String(format: "Denoised in %.1f s (%@)", result.seconds, denoiser.variant.displayName)
                 guard let model = self, model.endAIDenoiseRun(run, status: summary) else { return }
                 if model.parameters.aiDenoise == 0 { model.parameters.aiDenoise = 1 } else { model.rerender() }
             } catch is CancellationError {

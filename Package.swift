@@ -55,7 +55,14 @@ let package = Package(
             name: "PixelEngine",
             dependencies: ["RawCore", "ColorKit", "LensKit"],
             path: "Sources/PixelEngine",
-            resources: [.process("Shaders")]
+            // Copied as they are, not processed: a processed .metal file is
+            // compiled by Xcode 27's Swift Build, which needs the Metal
+            // toolchain component (a separate download) and fails without
+            // it. The app compiles the sources at launch, or loads the
+            // default.metallib that scripts/make_app.sh writes beside them
+            // when the toolchain is installed; GPUContext looks in both the
+            // bundle root and Shaders/.
+            resources: [.copy("Shaders")]
         ),
         .target(
             name: "Catalog",

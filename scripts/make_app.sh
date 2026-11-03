@@ -42,23 +42,27 @@ for arg in "$@"; do
   esac
 done
 VERSION="${VERSION:-0.9.0}"
+
 echo "Building release…"
 swift build -c release --product latent-app 2>&1 | tail -1
 swift build -c release --product latent-rawdecoder 2>&1 | tail -1
+# Where the products went (.build/release with SwiftPM's native build
+# system, .build/out/Products/Release with Swift Build): ask, don't assume.
+BIN=$(swift build -c release --show-bin-path)
 
 APP="build/Latent.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/latent-app "$APP/Contents/MacOS/Latent"
+cp "$BIN/latent-app" "$APP/Contents/MacOS/Latent"
 if [ "$DEV" = "1" ]; then
   # Dev builds carry the CLI inside the bundle, so `latent-cli render`
   # exercises the XPC decoder exactly as the app does.
   swift build -c release --product latent-cli 2>&1 | tail -1
-  cp .build/release/latent-cli "$APP/Contents/MacOS/latent-cli"
+  cp "$BIN/latent-cli" "$APP/Contents/MacOS/latent-cli"
 fi
 # Resource bundles: this package's own (latent_*) plus dependencies'.
 # Stale bundles from an earlier package name are skipped.
-for b in .build/release/latent_*.bundle .build/release/GRDB_*.bundle; do
+for b in "$BIN"/latent_*.bundle "$BIN"/GRDB_*.bundle; do
   [ -d "$b" ] && cp -R "$b" "$APP/Contents/Resources/"
 done
 
@@ -82,9 +86,16 @@ precompile_shaders() {
   xcrun metallib "$air"/*.air -o "$dir/default.metallib" || { rm -rf "$air" "$dir/default.metallib"; return 1; }
   rm -rf "$air"
 }
-SHADERS="$APP/Contents/Resources/latent_PixelEngine.bundle"
-if ! xcrun metal --version >/dev/null 2>&1; then
-  echo "Metal toolchain not installed: shaders will compile at first launch (to precompile on Xcode 26: xcodebuild -downloadComponent MetalToolchain)"
+# The sources sit in the PixelEngine resource bundle: at its root with
+# SwiftPM's native build system, under Contents/Resources/Shaders with
+# Swift Build (Xcode 27). GPUContext looks in both places, so the metallib
+# goes beside them. A bundle without them would not start, so stop here.
+BUNDLE="$APP/Contents/Resources/latent_PixelEngine.bundle"
+SHADERS=$(dirname "$(find "$BUNDLE" -name Common.h -print -quit)")
+if [ ! -f "$SHADERS/Common.h" ]; then
+  echo "make_app.sh: shader sources not found in $BUNDLE" >&2; exit 1
+elif ! xcrun metal --version >/dev/null 2>&1; then
+  echo "Metal toolchain not installed: shaders will compile at first launch (to precompile on Xcode 26 and later: xcodebuild -downloadComponent MetalToolchain)"
 elif precompile_shaders "$SHADERS"; then
   echo "Shaders precompiled"
 else
@@ -107,7 +118,7 @@ cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # The raw decoder XPC service: its own bundle, its own (tighter) sandbox.
 XPC="$APP/Contents/XPCServices/LatentRawDecoder.xpc"
 mkdir -p "$XPC/Contents/MacOS"
-cp .build/release/latent-rawdecoder "$XPC/Contents/MacOS/LatentRawDecoder"
+cp "$BIN/latent-rawdecoder" "$XPC/Contents/MacOS/LatentRawDecoder"
 cat > "$XPC/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
