@@ -170,7 +170,7 @@ final class HealCacheTests: XCTestCase {
             dust: [], blemishes: [], heals: [], redEyes: [])
         XCTAssertEqual(Mirror(reflecting: key).children.compactMap(\.label),
                        ["stageKey", "aiDenoise", "aiDenoiseModel", "denoiseLuminance", "denoiseColor",
-                        "dust", "blemishes", "heals", "redEyes"])
+                        "noiseDetail", "dust", "blemishes", "heals", "redEyes"])
     }
 
     // MARK: - The store

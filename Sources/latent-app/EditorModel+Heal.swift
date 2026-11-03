@@ -141,6 +141,7 @@ extension EditorModel {
         maskTool = .none
         pointColourPicking = false
         toneTool = .none
+        defringePickerActive = false
         healDrag = nil
         redEyeDrag = nil
         paintingHealStroke = []

@@ -74,6 +74,10 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// The camera or creative profile. Absent for Latent Standard, so
         /// edits that never chose one encode exactly as before.
         public var profile: ProfileChoice?
+        /// Post-crop vignetting and grain (DetailEffects.swift). Absent
+        /// while off.
+        public var vignette: PostCropVignette?
+        public var grain: Grain?
     }
 
     public struct AIDenoise: Codable, Equatable, Sendable {
@@ -87,7 +91,11 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var texture: Float, clarity: Float, dehaze: Float
     }
     public struct Vibrance: Codable, Equatable, Sendable { public var amount: Float }
-    public struct Defringe: Codable, Equatable, Sendable { public var purple: Float, green: Float }
+    public struct Defringe: Codable, Equatable, Sendable {
+        public var purple: Float, green: Float
+        /// The hue ranges, absent while they are the standard ones.
+        public var hues: DefringeHueRanges?
+    }
     /// Keystone, and since the Transform panel the rest of the geometry
     /// that composes into the same homography. Each newer field is
     /// optional and only written when it differs from its default, so a
@@ -165,6 +173,14 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var manualVignetting: Float = 0
         public var profile: String?
         public var lensfunDb: String?
+        /// Manual vignetting's Midpoint, absent at its default (0.5).
+        public var vignettingMidpoint: Float?
+        /// Measured chromatic aberration, absent while Remove Chromatic
+        /// Aberration is off.
+        public var autoCA: AutoChromaticAberration?
+        /// The Lensfun model picked by hand for this photo, absent for the
+        /// automatic profile. `profile` records which one was used.
+        public var manualProfile: String?
 
         public init(distortion: Bool, tca: Bool, vignetting: Bool,
                     manualDistortion: Float, manualVignetting: Float,
@@ -185,17 +201,25 @@ public struct EditStack: Codable, Equatable, Sendable {
             manualVignetting = try c.decodeIfPresent(Float.self, forKey: .manualVignetting) ?? 0
             profile = try c.decodeIfPresent(String.self, forKey: .profile)
             lensfunDb = try c.decodeIfPresent(String.self, forKey: .lensfunDb)
+            vignettingMidpoint = try c.decodeIfPresent(Float.self, forKey: .vignettingMidpoint)
+            autoCA = try c.decodeIfPresent(AutoChromaticAberration.self, forKey: .autoCA)
+            manualProfile = try c.decodeIfPresent(String.self, forKey: .manualProfile)
         }
     }
 
     public struct Denoise: Codable, Equatable, Sendable {
         public var luminance: Float
         public var color: Float
+        /// Detail, Contrast and Smoothness, absent at their defaults.
+        public var detail: NoiseReductionDetail?
     }
     public struct Sharpen: Codable, Equatable, Sendable {
         public var amount: Float
         public var radius: Float
         public var threshold: Float
+        /// Detail and Masking, each absent at its default.
+        public var detail: Float?
+        public var masking: Float?
     }
 
     public struct WhiteBalance: Codable, Equatable, Sendable {
@@ -255,6 +279,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.crop = (p.crop.isIdentity && p.crop.aspect == nil) ? nil
             : Crop(cx: p.crop.centre.x, cy: p.crop.centre.y, w: p.crop.size.x, h: p.crop.size.y,
                    angle: p.crop.angle, aspect: p.crop.aspect)
+        storeDetailEffects(from: p)
         // Parameters always measure the sensor plane as it is now.
         frame = hasGeometry ? Self.activeAreaFrame : nil
     }
@@ -337,6 +362,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         } else {
             p.crop = .none
         }
+        restoreDetailEffects(into: &p)
         return p
     }
 

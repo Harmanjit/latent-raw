@@ -4,6 +4,7 @@ import simd
 import RawCore
 import ColorKit
 import LensKit
+import Synchronization
 
 /// One image, loaded and ready to render repeatedly.
 ///
@@ -84,8 +85,40 @@ public final class ImageSession {
 
     /// The lens profile for this shot, resolved at its focal length and
     /// aperture (DESIGN.md §9.2). nil when the database has nothing for
-    /// this camera and lens; manual corrections still work then.
-    public let lensCorrection: LensCorrection?
+    /// this camera and lens; manual corrections still work then. A profile
+    /// chosen by hand for this camera and lens (`LensProfileOverrides`)
+    /// wins over the automatic match; `refreshLensProfile()` picks up a
+    /// new choice. Behind a lock because background renders read it while
+    /// the editor may change it.
+    public var lensCorrection: LensCorrection? { lensState.withLock { $0.automatic } }
+    private let lensState: Mutex<LensState>
+
+    private struct LensState: Sendable {
+        var automatic: LensCorrection?
+        /// Profiles picked for this photo alone (`EditParameters.lensProfile`),
+        /// resolved once each; nil for a name the database doesn't have.
+        var manual: [String: LensCorrection?] = [:]
+    }
+
+    /// The profile a render with `p` uses: the one picked for this photo,
+    /// when there is one and the database has it, else `lensCorrection`.
+    /// None for a merge whose corrections are already in its pixels.
+    public func lensCorrection(for p: EditParameters) -> LensCorrection? {
+        guard let model = p.lensProfile, !lensCorrectionAlreadyApplied else { return lensCorrection }
+        let summary = file.summary
+        return lensState.withLock { state -> LensCorrection? in
+            if let known = state.manual[model] { return known ?? state.automatic }
+            let db = LensfunDatabase.shared
+            let resolved = LensProfileOverrides.manualMatch(model: model, cameraMake: summary.cameraMake,
+                                                            cameraModel: summary.cameraModel,
+                                                            identity: summary.lens, in: db)
+                .map { LensCorrection.resolve($0, focal: Float(summary.focalLength), aperture: Float(summary.aperture),
+                                              imageWidth: summary.rawWidth, imageHeight: summary.rawHeight,
+                                              databaseVersion: db.version) }
+            state.manual[model] = resolved
+            return resolved ?? state.automatic
+        }
+    }
 
     /// What a pooled texture is for.
     ///
@@ -129,6 +162,8 @@ public final class ImageSession {
         case visualised, visualisedPreview // the viewport's Visualise Spots pass
         case touchUpPair, touchUpScratch, touchUpFine, touchUpMid, touchUpDownA, touchUpDownB
         case touchUp, touchUpPreview       // output of the touch-up stage
+        case denoiseRefined                // camera RGB after noise reduction's second pass
+        case effects, effectsPreview       // post-crop vignetting and grain
     }
 
     /// Which set of pooled textures a render draws from. Pools never share
@@ -311,6 +346,7 @@ public final class ImageSession {
         let aiDenoiseModel: String?
         let denoiseLuminance: Float
         let denoiseColor: Float
+        var noiseDetail: NoiseReductionDetail = .neutral
         let dust: [HealPatch]
         let blemishes: [HealPatch]
         let heals: [HealPatch]
@@ -371,20 +407,40 @@ public final class ImageSession {
         self.asShotWhiteBalance = cameraProfile?.whiteBalance(fromMultipliers: asShot)
             ?? ColorKit.WhiteBalance()
 
-        let summary = file.summary
+        self.lensState = Mutex(LensState(automatic: Self.resolveLensCorrection(
+            file.summary, alreadyApplied: lensCorrectionAlreadyApplied)))
+    }
+
+    /// The profile for `summary`: none for a merge whose corrections are
+    /// already in its pixels, else the hand-picked or matched one.
+    static func resolveLensCorrection(_ summary: RawSummary, alreadyApplied: Bool) -> LensCorrection? {
+        guard !alreadyApplied else { return nil }
         let db = LensfunDatabase.shared
-        if lensCorrectionAlreadyApplied {
-            self.lensCorrection = nil
-        } else if let match = LensMatcher.match(cameraMake: summary.cameraMake, cameraModel: summary.cameraModel,
-                                         lensName: summary.lensModel, identity: summary.lens,
-                                         focal: summary.focalLength, in: db) {
-            self.lensCorrection = LensCorrection.resolve(
-                match, focal: Float(summary.focalLength), aperture: Float(summary.aperture),
-                imageWidth: summary.rawWidth, imageHeight: summary.rawHeight,
-                databaseVersion: db.version)
-        } else {
-            self.lensCorrection = nil
+        guard let match = LensProfileOverrides.match(cameraMake: summary.cameraMake, cameraModel: summary.cameraModel,
+                                                     lensName: summary.lensModel, identity: summary.lens,
+                                                     focal: summary.focalLength, in: db) else { return nil }
+        return LensCorrection.resolve(match, focal: Float(summary.focalLength), aperture: Float(summary.aperture),
+                                      imageWidth: summary.rawWidth, imageHeight: summary.rawHeight,
+                                      databaseVersion: db.version)
+    }
+
+    /// Resolves the lens profile again, after the choice for this camera
+    /// and lens changed. True when the result differs.
+    @discardableResult
+    public func refreshLensProfile() -> Bool {
+        let fresh = Self.resolveLensCorrection(file.summary, alreadyApplied: lensCorrectionAlreadyApplied)
+        return lensState.withLock { state in
+            defer { state.automatic = fresh }
+            return state.automatic != fresh
         }
+    }
+
+    /// What identifies this photo's camera and lens for a hand-picked
+    /// profile.
+    public var lensProfileKey: LensProfileOverrides.Key {
+        let s = file.summary
+        return LensProfileOverrides.Key(cameraMake: s.cameraMake, cameraModel: s.cameraModel,
+                                        lensName: s.lensModel, identity: s.lens)
     }
 
     /// A stored edit as this image's renders must read it: geometry saved

@@ -57,6 +57,11 @@ extension EditorModel {
             let half = min(Int((3 * max(sigma / Float(factor), 0.3)).rounded(.up)), 32)
             reach = CGFloat((half + 2) * factor)
         }
+        // Noise reduction's Smoothness averages colour this far out, on
+        // top of the bilateral filter's own few pixels.
+        if p.noiseDetail.wantsRefinePass {
+            reach = max(reach, CGFloat(RenderPipeline.colourSmoothnessReach) + 6)
+        }
         return max(reach, p.touchUpTileReach(beyondMargin: 0, sensorSize: sensorSize))
     }
 

@@ -7,6 +7,7 @@ import Foundation
 public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     case whiteBalance, tone, presence, toneCurve, colour, splitToning, calibration, detail, lens, locals, crop, heal, dust, touchUp
     case profile
+    case effects
 
     public var id: String { rawValue }
 
@@ -27,6 +28,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .dust:         return "Sensor Dust"
         case .touchUp:      return "Touch-up (skin, teeth, eyes, blemishes)"
         case .profile:      return "Profile"
+        case .effects:      return "Effects (post-crop vignetting, grain)"
         }
     }
 
@@ -34,7 +36,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     /// masks (drawn for another frame) and not the lens correction
     /// switches (a property of the lens, already right per image).
     public static let lookGroups: Set<EditGroup> = [.whiteBalance, .tone, .presence, .toneCurve, .colour, .splitToning, .calibration, .detail,
-                                                    .profile]
+                                                    .profile, .effects]
 }
 
 extension EditStack {
@@ -97,6 +99,9 @@ extension EditStack {
                 result.modules.touchup = t
             case .profile:
                 result.modules.profile = other.modules.profile
+            case .effects:
+                result.modules.vignette = other.modules.vignette
+                result.modules.grain = other.modules.grain
             }
         }
         // The result's geometry keeps the frame it was written in. When it
@@ -142,6 +147,7 @@ extension EditStack {
         if m.dust != nil { g.insert(.dust) }
         if m.touchup != nil { g.insert(.touchUp) }
         if m.profile != nil { g.insert(.profile) }
+        if m.vignette != nil || m.grain != nil { g.insert(.effects) }
         return g
     }
 }

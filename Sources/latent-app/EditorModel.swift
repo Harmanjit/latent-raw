@@ -4,6 +4,7 @@ import SwiftUI
 import RawCore
 import ColorKit
 import PixelEngine
+import LensKit
 import MLKit
 
 /// The editor's state: which image is open, what the adjustments are, how
@@ -181,6 +182,21 @@ final class EditorModel: ObservableObject {
     @Published var showSkinMask = false {
         didSet { if showSkinMask != oldValue { rerender() } }
     }
+    /// Sharpening's Masking preview, shown while the Masking slider is
+    /// dragged with Option held (viewport only, never part of the edit).
+    @Published var sharpenMaskPreview = false {
+        didSet { if sharpenMaskPreview != oldValue { rerender() } }
+    }
+    /// The defringe eyedropper is armed: the next click on the image picks
+    /// a fringe colour (EditorModel+DetailTools.swift).
+    @Published var defringePickerActive = false
+    /// Remove Chromatic Aberration is measuring the photo.
+    @Published var measuringChromaticAberration = false
+    /// What the last measurement or pick found, for the Lens panel.
+    @Published var lensToolStatus = ""
+    /// Saves or clears the per-lens profile choice in the catalog. Set by
+    /// `LensProfileDefaults`; nil without a catalog.
+    var onRememberLensProfile: ((_ model: String?, _ key: LensProfileOverrides.Key) -> Void)?
     /// A 40 pt upright thumbnail per face, by the face's id, for the panel.
     @Published var faceThumbnails: [UUID: CGImage] = [:]
     /// "Looking for faces…" and the like, for the panel.

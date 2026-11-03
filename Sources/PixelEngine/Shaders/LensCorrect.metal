@@ -70,6 +70,7 @@ kernel void lensCorrect(
     constant float  &manualVignetting        [[buffer(13)]],  // + brightens corners
     constant float3x3 &perspectiveInverse    [[buffer(14)]],  // keystone, output -> source, normalized
     constant float2 &sourceOrigin            [[buffer(15)]],  // sensor px of input (0,0)
+    constant float  &manualVignettingPower   [[buffer(16)]],  // Midpoint: 2 is the plain r²
     uint2 gid                                [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
@@ -124,7 +125,10 @@ kernel void lensCorrect(
                       + vignettingTerms.z * rv2 * rv2 * rv2;
         gain /= max(k, 0.05);
     }
-    if (manualVignetting != 0.0) gain *= max(1.0 + manualVignetting * rv2, 0.05);
+    if (manualVignetting != 0.0) {
+        float falloff = manualVignettingPower == 2.0 ? rv2 : pow(rv, manualVignettingPower);
+        gain *= max(1.0 + manualVignetting * falloff, 0.05);
+    }
 
     output.write(float4(c * gain, 1.0), gid);
 }

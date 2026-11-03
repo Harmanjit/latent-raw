@@ -15,7 +15,7 @@ extension EditorModel {
         if session?.lensCorrectionAlreadyApplied == true {
             return "Lens corrections are already applied in this merged image, so no profile is used. Manual sliders still work."
         }
-        guard let c = session?.lensCorrection else {
+        guard let c = session?.lensCorrection(for: parameters) else {
             let lens = session?.file.summary.lens
             let spec = lens.map { l -> String in
                 l.minFocal > 0 ? String(format: "%.0f-%.0fmm f/%.1f", l.minFocal, l.maxFocal,
@@ -29,7 +29,7 @@ extension EditorModel {
         if c.vignetting != nil { parts.append("vignetting") }
         return "\(c.profileName) · \(parts.joined(separator: ", ")) · lensfun \(c.databaseVersion)"
     }
-    var hasLensProfile: Bool { session?.lensCorrection != nil }
+    var hasLensProfile: Bool { session?.lensCorrection(for: parameters) != nil }
 
     // MARK: - White balance and resets
 
