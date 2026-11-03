@@ -19,9 +19,15 @@ import simd
 /// can't cover: a wire, a hair, a dust streak. The stroke is a path of
 /// points drawn `radius` wide; its source is the same path moved by
 /// `source - target`, so the whole length copies from one offset.
+///
+/// `remove` has no source: it fills the circle or stroke (or, after Detect
+/// Objects, the object's outline, `objectMask`) with texture synthesised
+/// from around it (RemoveFill.swift).
 public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
     public enum Mode: String, Codable, Sendable, CaseIterable {
         case heal, clone
+        /// Content-aware fill (RemoveFill.swift); `source` is unused.
+        case remove
     }
 
     public var id: UUID
@@ -36,10 +42,14 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
     /// coordinates, the first normally zero). Nil for a circle, and absent
     /// from the JSON then, so circles encode exactly as before strokes.
     public var stroke: [SIMD2<Float>]?
+    /// A Remove patch's object outline from Detect Objects, which then
+    /// replaces the brush as the area filled. Nil otherwise, and absent
+    /// from the JSON then, so every other patch encodes as before.
+    public var objectMask: RemoveObjectMask?
 
     public init(id: UUID = UUID(), target: SIMD2<Float>, source: SIMD2<Float>,
                 radius: Float, feather: Float = 0.35, mode: Mode = .heal,
-                stroke: [SIMD2<Float>]? = nil) {
+                stroke: [SIMD2<Float>]? = nil, objectMask: RemoveObjectMask? = nil) {
         self.id = id
         self.target = target
         self.source = source
@@ -47,6 +57,7 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
         self.feather = feather
         self.mode = mode
         self.stroke = stroke
+        self.objectMask = objectMask
     }
 
     /// Patches per image; a stroke counts as one, however long.
@@ -81,6 +92,8 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
                        SIMD2(repeating: Self.coordinateRange.upperBound))
         }
         var p = self
+        // A mask that doesn't add up is dropped: the brush is filled instead.
+        p.objectMask = objectMask?.sanitized
         p.target = clamped(target)
         p.source = clamped(source)
         p.radius = min(max(radius, 0), 0.5)
@@ -110,9 +123,11 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
         CGFloat(radius) * min(s.width, s.height)
     }
 
-    /// Sensor-pixel bounding boxes of the two circles.
+    /// Sensor-pixel bounding boxes of the two circles. A Remove patch's
+    /// target is what it fills: the object outline once detected.
     public func targetBounds(sensorSize s: CGSize) -> CGRect {
-        circleBounds(target, sensorSize: s)
+        if mode == .remove, let objectMask { return objectMask.bounds(target: target, sensorSize: s) }
+        return circleBounds(target, sensorSize: s)
     }
     public func sourceBounds(sensorSize s: CGSize) -> CGRect {
         circleBounds(source, sensorSize: s)
@@ -140,6 +155,7 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
         switch mode {
         case .clone: return r + 2
         case .heal: return max(r + 2, CGFloat(HealFieldLayout(radius: Float(r)).reach))
+        case .remove: return r + removeContextMarginPixels(sensorSize: s)
         }
     }
 
@@ -171,6 +187,13 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
                                               sensorSize s: CGSize) -> CGRect {
         var needed = [region]
         for p in patches.reversed() {
+            // A Remove patch fills as one piece from the region around it.
+            if p.mode == .remove {
+                if needed.contains(where: { $0.intersects(p.targetBounds(sensorSize: s)) }) {
+                    needed.append(clampedToSensor(p.removeContextBounds(sensorSize: s), s))
+                }
+                continue
+            }
             let margin = p.readRadiusPixels(sensorSize: s) - p.radiusPixels(sensorSize: s)
             // Pieces that count one after another share a rectangle at each
             // end, so a stroke adds a few rectangles, not one per piece.
@@ -237,7 +260,7 @@ struct HealPatchGPU {
 
     init(_ p: HealPatch) {
         geometry = SIMD4(p.target.x, p.target.y, p.source.x, p.source.y)
-        params = SIMD4(p.radius, p.feather, p.mode == .clone ? 1 : 0, 0)
+        params = SIMD4(p.radius, p.feather, p.mode == .clone ? 1 : p.mode == .remove ? 2 : 0, 0)
     }
 }
 

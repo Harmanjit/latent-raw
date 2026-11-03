@@ -74,6 +74,26 @@ enum HealStage {
                        input: MTLTexture, output: MTLTexture,
                        sensorSize: SIMD2<Float>, tileOrigin: SIMD2<Float>, binSpan: Float,
                        gpu: GPUContext, commandBuffer: MTLCommandBuffer) throws {
+        // Remove patches synthesise fill (RemoveFill.swift); without any,
+        // the heal path below runs exactly as it always has.
+        if patches.contains(where: { $0.mode == .remove }) {
+            try RemoveStage.encodeWithRemovals(
+                patches: patches, redEyes: redEyes, cameraToWorking: cameraToWorking,
+                input: input, output: output, sensorSize: sensorSize, tileOrigin: tileOrigin,
+                binSpan: binSpan, gpu: gpu, commandBuffer: commandBuffer)
+            return
+        }
+        try encodeSpots(patches: patches, redEyes: redEyes, cameraToWorking: cameraToWorking,
+                        input: input, output: output, sensorSize: sensorSize, tileOrigin: tileOrigin,
+                        binSpan: binSpan, gpu: gpu, commandBuffer: commandBuffer)
+    }
+
+    /// Heal and clone patches, then red eyes: everything but Remove.
+    static func encodeSpots(patches: [HealPatch], redEyes: [RedEyeSpot],
+                            cameraToWorking: simd_float3x3,
+                            input: MTLTexture, output: MTLTexture,
+                            sensorSize: SIMD2<Float>, tileOrigin: SIMD2<Float>, binSpan: Float,
+                            gpu: GPUContext, commandBuffer: MTLCommandBuffer) throws {
         guard input.width == output.width, input.height == output.height,
               input.pixelFormat == output.pixelFormat,
               let blit = commandBuffer.makeBlitCommandEncoder() else {
