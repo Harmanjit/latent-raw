@@ -7,7 +7,7 @@ import XCTest
 final class ResetOrientationTests: XCTestCase {
     nonisolated(unsafe) var folder: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         let sample = try TestAssets.d750Path()
         let fm = FileManager.default
         folder = fm.temporaryDirectory.appendingPathComponent("latent-orient-\(UUID().uuidString)", isDirectory: true)
@@ -17,7 +17,7 @@ final class ResetOrientationTests: XCTestCase {
         }
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         if let folder { try? FileManager.default.removeItem(at: folder) }
     }
 

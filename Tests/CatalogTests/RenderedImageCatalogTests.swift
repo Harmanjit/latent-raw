@@ -14,14 +14,14 @@ final class RenderedImageCatalogTests: XCTestCase {
     nonisolated(unsafe) var root: URL!
     let fm = FileManager.default
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         base = FileManager.default.temporaryDirectory
             .appendingPathComponent("latent-formats-\(UUID().uuidString)", isDirectory: true)
         root = base.appendingPathComponent("Shoot", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         if let base { try? FileManager.default.removeItem(at: base) }
     }
 

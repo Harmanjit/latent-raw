@@ -9,7 +9,7 @@ import XCTest
 final class HierarchicalKeywordTests: XCTestCase {
     nonisolated(unsafe) var folder: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         let fm = FileManager.default
         folder = fm.temporaryDirectory.appendingPathComponent("latent-keywords-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -18,7 +18,7 @@ final class HierarchicalKeywordTests: XCTestCase {
         }
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         if let folder { try? FileManager.default.removeItem(at: folder) }
     }
 

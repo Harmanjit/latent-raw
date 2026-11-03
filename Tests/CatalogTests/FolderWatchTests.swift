@@ -95,14 +95,14 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
 final class LibraryFolderWatchTests: XCTestCase {
     var folder: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("latent-libwatch-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try TestAssets.copyD750(to: folder.appendingPathComponent("A.NEF"))
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         if let folder { try? FileManager.default.removeItem(at: folder) }
     }
 

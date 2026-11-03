@@ -79,7 +79,7 @@ final class RenamePlanTests: XCTestCase {
 
     nonisolated(unsafe) var folder: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         let fm = FileManager.default
         folder = fm.temporaryDirectory.appendingPathComponent("latent-rename-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -88,7 +88,7 @@ final class RenamePlanTests: XCTestCase {
         try TestAssets.copyD750(to: folder.appendingPathComponent("C.NEF"), variant: 2)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         if let folder { try? FileManager.default.removeItem(at: folder) }
     }
 

@@ -122,7 +122,7 @@ final class SmartCollectionRulesTests: XCTestCase {
 final class LibraryCollectionsTests: XCTestCase {
     nonisolated(unsafe) var folder: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         let fm = FileManager.default
         folder = fm.temporaryDirectory.appendingPathComponent("latent-collections-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -131,7 +131,7 @@ final class LibraryCollectionsTests: XCTestCase {
         }
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         if let folder { try? FileManager.default.removeItem(at: folder) }
     }
 

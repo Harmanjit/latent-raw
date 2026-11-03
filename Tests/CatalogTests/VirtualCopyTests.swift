@@ -8,7 +8,7 @@ import GRDB
 final class VirtualCopyTests: XCTestCase {
     nonisolated(unsafe) var folder: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         let fm = FileManager.default
         folder = fm.temporaryDirectory.appendingPathComponent("latent-vcopies-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -16,7 +16,7 @@ final class VirtualCopyTests: XCTestCase {
         try TestAssets.copyD750(to: folder.appendingPathComponent("B.NEF"), variant: 1)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         if let folder { try? FileManager.default.removeItem(at: folder) }
     }
 
