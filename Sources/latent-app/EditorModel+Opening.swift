@@ -149,6 +149,8 @@ extension EditorModel {
     func resetToolStateForNewImage() {
         selectedHealIndex = nil
         selectedRedEyeIndex = nil
+        selectedPointColour = nil
+        pointColourPicking = false
         if selectedLocalIndex != nil { selectedLocalIndex = nil }
         maskTool = .none
         isDraggingMask = false
