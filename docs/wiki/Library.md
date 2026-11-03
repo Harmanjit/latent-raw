@@ -14,7 +14,15 @@ Dragging thumbnails from the grid onto a folder in the sidebar moves them there;
 
 Opening a subfolder that an enclosing catalog already includes opens that enclosing catalog instead, with a note in the status bar, so the catalog isn't split in two.
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 Under the folders, the **Collections** section lists the open folder's collections, smart collections and collection sets. Click one to show its photos; drag thumbnails onto one to add them. See [Collections and Keywords](Collections-and-Keywords).
+
+**Add Parent Folder…** on a favourite's right-click menu shows its enclosing folder in Favourites instead, with the favourite inside its tree. An open panel comes up showing that folder; click **Add Parent** to give Latent permission to read it (the sandbox needs you to choose it once). Any other favourites inside it are folded into it too.
+
+**Recently Added**, at the top of the sidebar, narrows the grid to the photos the latest scan of the open folder found new: files copied in from Finder, brought in by Auto Import, or everything, the first time a folder is opened. The number beside it says how many. Click it again, or press ⇧⌘L to clear the filters, to see every photo. A scan that finds nothing new keeps the last batch, so you can come back to it, and it is remembered when the folder is opened again. The filter bar still applies on top of it.
+
+**Volumes**, at the foot of the sidebar, shows a meter for each disk that holds a favourite or the open folder: how full it is and how much is free, counting space macOS can free up the way Finder does. The meter turns orange when a disk has less than a tenth of its space, or under 5 GB, left. It updates every minute and when a disk is connected or ejected.
+<!-- /RECONCILE -->
 
 ## The catalog
 
@@ -29,7 +37,7 @@ _latent/
   collections.json   a copy of your collections, once you make one
 ```
 
-**Reconciliation** runs each time a folder opens; to re-scan the open folder, open it again from the sidebar or with Open Folder. Files are matched by name, size and modification time. A renamed file is recognised by its content hash and keeps its sidecar. Sidecars newer than the database are re-read, so editing a sidecar in another tool is picked up, and Finder tags are read again. There is no live file watching; the app never touches the folder while you are not looking. After a move, copy or rename made in Latent, the open folder is re-read by itself.
+**Reconciliation** runs each time a folder opens, when the open folder changes on disk (see [Watching folders](Library#watching-folders)), and on **File › Refresh Folder** (⌘R). Files are matched by name, size and modification time. A renamed file is recognised by its content hash and keeps its sidecar. Sidecars newer than the database are re-read, so editing a sidecar in another tool is picked up (on the next refresh), and Finder tags are read again. After a move, copy or rename made in Latent, the open folder is re-read by itself.
 
 <!-- RECONCILE: two branches edited this; merge into one text -->
 **Sidecars** are standard XMP. Rating, label and keywords are written in the fields Lightroom and others read, keyword hierarchies included (`lr:hierarchicalSubject`). The edit, history and snapshots are under Latent's own namespace. A sidecar written by another application is read for whatever standard fields it has.
@@ -71,6 +79,7 @@ Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to
 
 **Custom sort.** Choose Custom, then drag thumbnails to arrange them. The arrangement is saved per folder in `_latent/custom-order.json`, so it survives a rebuilt catalog and moves with the folder. New files appear after your arrangement, by name. Images hidden by a filter keep their places. An image renamed or moved within the folder with Latent's own commands keeps its place, and so does a file renamed in Finder, the next time the folder is opened. ⌘Z undoes a rearrangement.
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 ## Colour labels
 
 Give photos a colour label to sort a shoot beyond stars and flags: red for the client's choices, green for the portfolio, whatever you like. The keys are Lightroom's: **6** red, **7** yellow, **8** green, **9** blue. Purple has no key; use **Photo › Label** or the right-click **Label** menu. Pressing the key of the label a photo already has takes it off. With several photos selected in the grid, the key labels all of them, or takes the label off all of them when the photo the panel shows already has it. In Loupe, Compare and Develop the key labels the photo shown.
@@ -92,9 +101,20 @@ Press Return or click away to save a field. With several photos selected, each f
 
 They go into the sidecar as Dublin Core (`dc:title`, `dc:description`, `dc:creator` and `dc:rights`), where Lightroom, Bridge and Capture One look for them, and Latent reads them from sidecars those applications wrote. Exports carry them too (see [Export](Export)). The filter bar's search finds words in titles and captions.
 
+## Watching folders
+
+**The open folder.** Photos copied into the open folder or into a subfolder it includes, deleted, or renamed in Finder appear and go from the grid by themselves, a second or so after the copying stops: a whole card copied in is one refresh, not hundreds. A renamed photo keeps its rating and edits, as when the folder is opened. Latent doesn't read the folder to notice; macOS tells it what changed, so a quiet folder costs nothing. Changes to Latent's own `_latent` folder, and to files Latent doesn't catalog (JPEGs, text files), are ignored. Turn it off under **Settings › Folders › Watch the open folder for changes**. On a network share, changes made from another computer may not be noticed.
+
+**Refresh Folder** (File menu, ⌘R) scans the open folder again at any time, watched or not.
+
+**Auto Import.** Under **Settings › Folders › Auto Import**, choose a **watched folder** (the one your tethering software, card reader or another computer saves into) and a **destination**, and turn on **Import new photos from a watched folder**. Raw files that appear directly in the watched folder (not in its subfolders) are moved into the destination, or copied with **Bring photos in by: Copying them**, which leaves the originals and remembers what it has copied so nothing is copied twice. Latent waits until a file has stopped changing for a couple of seconds, so a photo still being written isn't taken half done. If the destination already has a file of that name, the newcomer gets a number ("DSC_0107 2.NEF"); nothing is overwritten. Pick a **Develop preset** and each imported photo starts with it, as if you had applied the preset yourself (a photo that arrives with settings of its own keeps them). When the destination is the open folder, or inside it, the photos appear in the grid at once and **Recently Added** shows them. The watched folder can't be the destination, or inside it, or contain it. Settings shows what the last import did, and problems also show in the status bar. An import isn't on the Undo list, since undoing it would hand the files straight back to the watcher; use Move to Folder to put a photo elsewhere.
+
+**A photo that disappears.** When a photo is deleted or moved out of the folder outside Latent, it leaves the grid, but its sidecar stays in `_latent/xmp`. Put the file back (under the same name or any other) and its rating, keywords and edit come back with it. Latent has no Locate Missing Photo command: the folder is the catalog, so a photo that isn't in the folder isn't kept as a placeholder.
+<!-- /RECONCILE -->
+
 ## Finder tags
 
-Latent shows the tags you set in Finder as coloured dots on thumbnails (up to three) and lists them under the selected image in the left panel, and VoiceOver reads them with the image. The filter bar's Tag menu shows only images with one tag. Latent only reads tags, never writes them. A tag changed in Finder shows the next time the folder is opened.
+Latent shows the tags you set in Finder as coloured dots on thumbnails (up to three) and lists them under the selected image in the left panel, and VoiceOver reads them with the image. The filter bar's Tag menu shows only images with one tag. Latent only reads tags, never writes them. A tag changed in Finder shows within a moment while the open folder is watched, or after **File › Refresh Folder** (⌘R).
 
 ## Filmstrip
 

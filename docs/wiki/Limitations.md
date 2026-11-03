@@ -21,16 +21,24 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 ## Workflow
 
-- **No import from memory cards, no tethering, no folder watching.** Copy files yourself, then open the folder. There is no Refresh command either; open the folder again to re-scan it. Latent re-reads the open folder by itself only after its own moves, copies and renames.
+- **No import from memory cards, no tethering.** Copy files yourself, or let **Auto Import** move them in from a watched folder that another app saves into. Auto Import takes only the files directly in the watched folder, not its subfolders, and can't be undone.
+- **Folder watching misses some changes on network shares.** Changes made from another computer may not be noticed; use File › Refresh Folder (⌘R). The sidebar's folder tree isn't watched: a folder made in Finder appears when its parent is expanded again.
+- **No Locate Missing Photo.** A photo deleted or moved out of the folder leaves the catalog; its sidecar stays, so putting the file back restores its rating and edits.
 - **Folders on read-only volumes can't be opened,** because the catalog lives inside the folder. A locked memory card has to be copied first.
 - **Collections belong to one folder; no search across folders.** Each folder is its own catalog with its own collections, and a collection can't hold photos from another folder. The sidebar finds folders by name and moves between them, but doesn't search photos across folders or combine them. A photo moved out of the folder leaves its collections, and undoing the move doesn't put it back in them.
 - **The sandbox limits the sidebar** to folders inside a favourite. Anything else needs Open Folder, or adding a folder that contains it.
 - **Subfolder include/independent choices are not stored in sidecars.** They live only in the catalog database, so rebuilding the catalog, including the automatic rebuild of a damaged database, resets them and asks again. Changing the choice moves no existing sidecars or thumbnails.
 - **No video, no plugins.**
 <!-- RECONCILE: two branches edited this; merge into one text -->
+<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Metadata editing** is limited to rating, flag and keywords. Colour labels, title, caption and copyright can't be set. Keywords have no synonyms, no keyword sets, no import or export of keyword lists, and the Keyword List shows only keywords some photo carries: there is no keeping an empty keyword for later.
 - **Finder tags are read, never written,** and a tag changed in Finder while the folder is open shows only when the folder is opened again.
 - **Undo in the Library has edges.** It covers ratings, flags, rotation, keywords, collections, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export, print, contact sheet or Photo Merge is running.
+
+- **Metadata editing** is limited to rating, flag and keywords. Colour labels, title, caption and copyright can't be set. Keywords apply to one image at a time, not to a multiple selection.
+- **Finder tags are read, never written.** A tag changed in Finder shows when the folder is next scanned: at once while it is watched, otherwise after Refresh Folder.
+- **Undo in the Library has edges.** It covers ratings, flags, rotation, keywords, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export, print, contact sheet or Photo Merge is running.
+<!-- /RECONCILE -->
 - **Rename is one image at a time.** There is no batch rename.
 
 - **Metadata editing** covers rating, flag, colour label, keywords, title, caption, creator and copyright. Other IPTC fields (headline, location, contact details, usage terms) and capture time can't be edited, and there are no metadata presets. Keywords apply to one image at a time, not to a multiple selection. Colour labels use the five standard names; there are no label sets.

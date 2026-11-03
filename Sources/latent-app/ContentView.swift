@@ -283,6 +283,8 @@ struct ContentView: View {
             LensfunDatabase.warmUp()
             wireEditSaving()
             wireFileOperations()
+            // The open folder's watch and the watched-folder import.
+            FolderWatching.shared.start(library: library)
             // Quitting flushes and waits for these (AppDelegate).
             AppDelegate.register(model: model, library: library, exportQueue: exportQueue)
             if let gpu = model.gpu {
@@ -1300,6 +1302,8 @@ struct ContentView: View {
             fileCommands.transferSelection(.move, to: nil)
         case .copyToFolder:
             fileCommands.transferSelection(.copy, to: nil)
+        case .refreshFolder:
+            library.refreshFromDisk()
         case .back:
             stepFolderHistory(-1)
         case .forward:
@@ -1387,6 +1391,7 @@ struct ContentView: View {
         state.showsRegularCollection = library.collections.activeCollection?.kind == .regular
         state.targetCollectionTitle = CollectionCommands.targetTitle(library)
         state.hasCompareSelect = compareRecord != nil
+        state.hasFolder = library.folderURL != nil
         state.canGoBack = navigator.history.canGoBack
         state.canGoForward = navigator.history.canGoForward
         state.fileOperationRunning = fileOperations.isBusy

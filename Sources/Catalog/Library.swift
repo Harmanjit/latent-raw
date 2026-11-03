@@ -81,6 +81,9 @@ public final class Library: ObservableObject {
     @Published public private(set) var thumbnailsTotal = 0
     /// Subfolders Latent found but has no decision for (DESIGN.md §5.2).
     @Published public private(set) var undecidedSubfolders: [String] = []
+    /// The photos the latest scan that found anything new added, for the
+    /// Recently Added view (Library+Folders.swift). Nil when there are none.
+    @Published public internal(set) var recentlyAdded: RecentlyAdded?
     /// Bumped whenever thumbnails land, so a grid knows to refresh cells.
     @Published public private(set) var thumbnailVersion = 0
     /// The most recent failure of a catalog operation, for the status bar.
@@ -383,10 +386,11 @@ public final class Library: ObservableObject {
         }
     }
 
-    /// Re-reconciles the open folder after Latent changes it: a move, copy,
-    /// rename or merge, or a subfolder decision (DESIGN.md §5.3, "No live
-    /// watching"; the app has no Refresh command). Its result is dropped if
-    /// another folder opened, or another refresh started, while it ran.
+    /// Re-reconciles the open folder: after Latent changes it (a move, copy,
+    /// rename or merge, or a subfolder decision), on File › Refresh Folder,
+    /// and when the folder watcher sees files come and go (DESIGN.md §5.3).
+    /// Its result is dropped if another folder opened, or another refresh
+    /// started, while it ran.
     public func refresh() async throws {
         guard let catalog else { return }
         refreshGeneration += 1
@@ -409,6 +413,7 @@ public final class Library: ObservableObject {
         var keywordIndex: [Int64: Set<String>]
         var customOrder: [String]
         var collections: CollectionsState
+        var recentlyAdded: RecentlyAdded?
     }
 
     /// Reconciles `catalog` and reads its list, touching nothing shown:
@@ -422,7 +427,8 @@ public final class Library: ObservableObject {
                               editedImageIDs: try await catalog.editedImageIDs(),
                               keywordIndex: try await catalog.allImageKeywords(),
                               customOrder: await catalog.customOrder(),
-                              collections: try await catalog.loadCollections())
+                              collections: try await catalog.loadCollections(),
+                              recentlyAdded: try await catalog.recentlyAdded())
         try await willPublishList?(catalog)
         return list
     }
@@ -458,6 +464,7 @@ public final class Library: ObservableObject {
         customOrder = list.customOrder
         isPatchingRecords = false
         collections.catalogDidLoad(list.collections, isNewCatalog: isNewCatalog)
+        followRecentlyAdded(list.recentlyAdded)
         recomputeVisible()
         if let selected = selectedImageID, !images.contains(where: { $0.id == selected }) {
             selectedImageID = nil

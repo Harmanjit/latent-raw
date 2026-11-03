@@ -718,7 +718,7 @@ public enum ImageTransfer {
 
     /// Makes the destination's `_latent` as `Catalog.open` would, renaming
     /// an old `_rawhead` one, so opening the folder later finds it ready.
-    private static func ensureContainer(for location: CatalogLocation) throws {
+    static func ensureContainer(for location: CatalogLocation) throws {
         let fm = FileManager.default
         let container = location.root.appendingPathComponent(Catalog.containerName, isDirectory: true)
         if FileOperations.isDirectory(container) { return }

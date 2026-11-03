@@ -29,7 +29,8 @@ struct FolderSidebar: View {
     /// Back and Forward, when given.
     var navigator: FolderNavigator?
     var onStepHistory: ((Int) -> Void)?
-    /// The open catalog, whose collections are listed under the folders.
+    /// The open catalog: its collections are listed under the folders, and
+    /// it feeds the Recently Added row (SidebarExtras.swift).
     var library: Library?
     /// What the Find folder field holds; the tree shows while it is empty.
     @State private var folderQuery = ""
@@ -41,6 +42,11 @@ struct FolderSidebar: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
             }
+            if let library {
+                RecentlyAddedRow(library: library)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 4)
+            }
             if !favourites.folders.isEmpty {
                 FolderSearchField(query: $folderQuery)
                     .padding(.horizontal, 8)
@@ -50,6 +56,7 @@ struct FolderSidebar: View {
                 FolderOutline(folders: favourites.folders, currentFolder: currentFolder,
                               onOpen: open, onAdd: { urls in urls.forEach { favourites.add($0) } },
                               onRemove: { favourites.remove($0) }, onChooseFolder: onChooseFolder,
+                              onAddParent: { chooseParent(of: $0, favourites: favourites) },
                               onDropImages: onDropImages, areLibraryImages: areLibraryImages)
             } else {
                 // Folders found by name (FolderSearchViews.swift).
@@ -61,6 +68,7 @@ struct FolderSidebar: View {
                 CollectionsSection(library: library)
             }
             Divider()
+            VolumeSpaceList(favourites: favourites, currentFolder: currentFolder)
             footer
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -120,6 +128,7 @@ private struct FolderOutline: NSViewControllerRepresentable {
     let onAdd: ([URL]) -> Void
     let onRemove: (URL) -> Void
     let onChooseFolder: () -> Void
+    let onAddParent: (URL) -> Void
     let onDropImages: (([URL], URL, TransferMode) -> Void)?
     let areLibraryImages: (([URL]) -> Bool)?
 
@@ -138,6 +147,7 @@ private struct FolderOutline: NSViewControllerRepresentable {
         controller.onAdd = onAdd
         controller.onRemove = onRemove
         controller.onChooseFolder = onChooseFolder
+        controller.onAddParent = onAddParent
         controller.onDropImages = onDropImages
         controller.areLibraryImages = areLibraryImages
         controller.setFavourites(folders)
@@ -313,6 +323,8 @@ final class FolderOutlineController: NSViewController, NSOutlineViewDataSource, 
     var onAdd: (([URL]) -> Void)?
     var onRemove: ((URL) -> Void)?
     var onChooseFolder: (() -> Void)?
+    /// Add Parent Folder… on a favourite.
+    var onAddParent: ((URL) -> Void)?
     var onDropImages: (([URL], URL, TransferMode) -> Void)?
     var areLibraryImages: (([URL]) -> Bool)?
     /// Finder's name for a folder. It reads the file system, so it is only
@@ -429,7 +441,8 @@ final class FolderOutlineController: NSViewController, NSOutlineViewDataSource, 
     /// Lists a row's subfolders off the main thread: the first time it's
     /// expanded, and again (`refresh`) on every later expansion or reveal,
     /// since folders made or deleted in Finder meanwhile should appear and
-    /// go. There is no live watching (DESIGN.md §5.3).
+    /// go. The tree isn't watched; only the open folder's photos are
+    /// (LibraryFolderWatch).
     private func listChildren(of node: FolderNode, refresh: Bool = false) {
         guard let url = node.url, node.isAvailable, !node.isDetached, !node.isListing,
               refresh || node.children == nil else { return }
@@ -775,6 +788,11 @@ final class FolderOutlineController: NSViewController, NSOutlineViewDataSource, 
         }
         menu.addItem(.separator())
         if node.kind == .favourite {
+            if node.isAvailable, url.deletingLastPathComponent().path != url.path {
+                let parent = item("Add Parent Folder…", #selector(addParentClicked(_:)), url)
+                parent.toolTip = "Show “\(url.deletingLastPathComponent().lastPathComponent)” here instead, with this folder inside it."
+                menu.addItem(parent)
+            }
             menu.addItem(item("Remove from Favourites", #selector(removeClicked(_:)), url))
         } else {
             menu.addItem(item("Add to Favourites", #selector(addClicked(_:)), url))
@@ -806,6 +824,11 @@ final class FolderOutlineController: NSViewController, NSOutlineViewDataSource, 
     @objc private func addClicked(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
         onAdd?([url])
+    }
+
+    @objc private func addParentClicked(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        onAddParent?(url)
     }
 
     @objc private func chooseFolderClicked(_ sender: NSMenuItem) {

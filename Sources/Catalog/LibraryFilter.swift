@@ -21,18 +21,23 @@ public struct LibraryFilter: Equatable, Sendable {
     /// Show only images with one of these colour labels (or none, or a
     /// custom one); empty = any.
     public var labels: Set<LabelFilterChoice> = []
+    /// The Recently Added view: only these rows, the photos the last scan
+    /// that found anything new added (`Library.showRecentlyAdded`). Nil
+    /// shows every photo.
+    public var recentlyAddedIDs: Set<Int64>?
 
     public init() {}
 
     public var isActive: Bool {
         minRating > 0 || !flags.isEmpty || editedOnly || camera != nil
             || lens != nil || keyword != nil || !text.trimmingCharacters(in: .whitespaces).isEmpty
-            || finderTag != nil || !labels.isEmpty
+            || finderTag != nil || !labels.isEmpty || recentlyAddedIDs != nil
     }
 
     /// Whether `record` passes every active criterion. Keywords and the
     /// edited flag live outside the record, so the caller supplies them.
     public func matches(_ record: ImageRecord, isEdited: Bool, keywords: Set<String>) -> Bool {
+        if let recentlyAddedIDs, !(record.id.map(recentlyAddedIDs.contains) ?? false) { return false }
         if record.rating < minRating { return false }
         if !flags.isEmpty, !flags.contains(ImageFlag(rawValue: record.flag) ?? .none) { return false }
         if editedOnly, !isEdited { return false }

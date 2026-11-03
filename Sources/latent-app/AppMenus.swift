@@ -53,6 +53,8 @@ struct CommandState: Equatable {
     var showMaskOverlay = false
     var filterActive = false
     var hasCompareSelect = false
+    /// A folder is open, for Refresh Folder.
+    var hasFolder = false
     /// Back and Forward have a folder to go to (FolderNavigator).
     var canGoBack = false
     var canGoForward = false
@@ -156,6 +158,7 @@ struct CommandState: Equatable {
         case .moveToFolder, .copyToFolder: mode == .library && selectionCount > 0 && !fileOperationRunning && !exportQueueRunning
             && !outputJobRunning
         case .back: canGoBack
+        case .refreshFolder: hasFolder
         case .forward: canGoForward
         // The grid goes to Loupe first, which needs a selection.
         case .fullScreenImage: fullScreenImage || hasSelection || (mode == .develop && hasImage)
@@ -275,6 +278,7 @@ struct LatentCommands: Commands {
         CommandGroup(replacing: .newItem) {
             item("Open Folder…", .openFolder)
             item("Open File…", .openFile)
+            item("Refresh Folder", .refreshFolder)
             Divider()
             item(state.exportTitle, .export)
             item("Export Open Image…", .exportOpenImage)

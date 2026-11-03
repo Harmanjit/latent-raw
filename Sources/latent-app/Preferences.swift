@@ -152,6 +152,7 @@ struct PreferencesView: View {
             appearanceTab.tabItem { Label("Appearance", systemImage: "paintpalette") }
             exportTab.tabItem { Label("Export", systemImage: "square.and.arrow.up") }
             libraryTab.tabItem { Label("Library", systemImage: "photo.on.rectangle") }
+            FolderSettingsTab().tabItem { Label("Folders", systemImage: "folder.badge.gearshape") }
             aiTab.tabItem { Label("AI", systemImage: "cpu") }
             SlideshowSettingsTab().tabItem { Label("Slideshow", systemImage: "play.rectangle") }
             ExternalEditorSettingsTab().tabItem { Label("External Editor", systemImage: "arrow.up.forward.app") }
