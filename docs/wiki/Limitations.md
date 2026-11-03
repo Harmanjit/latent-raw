@@ -21,14 +21,16 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 ## Workflow
 
-- **No import from memory cards, no tethering, no folder watching.** Copy files yourself, then open the folder. There is no Refresh command either; open the folder again to re-scan it. Latent re-reads the open folder by itself only after its own moves, copies and renames.
+- **No import from memory cards, no tethering.** Copy files yourself, or let **Auto Import** move them in from a watched folder that another app saves into. Auto Import takes only the files directly in the watched folder, not its subfolders, and can't be undone.
+- **Folder watching misses some changes on network shares.** Changes made from another computer may not be noticed; use File › Refresh Folder (⌘R). The sidebar's folder tree isn't watched: a folder made in Finder appears when its parent is expanded again.
+- **No Locate Missing Photo.** A photo deleted or moved out of the folder leaves the catalog; its sidecar stays, so putting the file back restores its rating and edits.
 - **Folders on read-only volumes can't be opened,** because the catalog lives inside the folder. A locked memory card has to be copied first.
 - **No collections, no search across folders.** Each folder is its own catalog; the sidebar moves between folders but doesn't search or combine them.
 - **The sandbox limits the sidebar** to folders inside a favourite. Anything else needs Open Folder, or adding a folder that contains it.
 - **Subfolder include/independent choices are not stored in sidecars.** They live only in the catalog database, so rebuilding the catalog, including the automatic rebuild of a damaged database, resets them and asks again. Changing the choice moves no existing sidecars or thumbnails.
 - **No video, no plugins.**
 - **Metadata editing** is limited to rating, flag and keywords. Colour labels, title, caption and copyright can't be set. Keywords apply to one image at a time, not to a multiple selection.
-- **Finder tags are read, never written,** and a tag changed in Finder while the folder is open shows only when the folder is opened again.
+- **Finder tags are read, never written.** A tag changed in Finder shows when the folder is next scanned: at once while it is watched, otherwise after Refresh Folder.
 - **Undo in the Library has edges.** It covers ratings, flags, rotation, keywords, pasted settings and presets, Custom sort rearrangements, and moves, copies and renames. Exports can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export, print, contact sheet or Photo Merge is running.
 - **Rename is one image at a time.** There is no batch rename.
 - **Rename, Move and Copy work only in the Library grid,** and not while an export, print, contact sheet or Photo Merge is running.
