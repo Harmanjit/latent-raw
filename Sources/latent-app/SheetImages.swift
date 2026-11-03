@@ -139,8 +139,8 @@ final class SheetRenderer: @unchecked Sendable {
     }
 
     /// Renders through ExportWorker in `colorSpace` at `bitsPerComponent`;
-    /// with `profile`, the result is converted into it (perceptual, as the
-    /// soft proof shows it) and tagged with it. AI denoise, which takes
+    /// with `profile`, the result is converted into it with the profile's
+    /// intent (as the soft proof shows it) and tagged with it. AI denoise, which takes
     /// seconds per photo, runs for renders at least `aiDenoiseFrom` pixels
     /// on the long edge (0 always, `Int.max` never): a small cell can't show it.
     convenience init(gpu: GPUContext, colorSpace: ColorKit.OutputSpace, bitsPerComponent: Int, aiDenoiseFrom: Int,
@@ -168,7 +168,8 @@ final class SheetRenderer: @unchecked Sendable {
             }
             substitutions.record(item.name, missing: rendered.maskSubstitutions)
             guard let profile else { return rendered.cgImage }
-            return SheetColorConversion.convert(rendered.cgImage, to: profile.colorSpace) ?? rendered.cgImage
+            return SheetColorConversion.convert(rendered.cgImage, to: profile.colorSpace, intent: profile.intent)
+                ?? rendered.cgImage
         }, substitutions: substitutions)
     }
 
@@ -236,6 +237,8 @@ final class MaskSubstitutionLog: @unchecked Sendable {
 struct SheetProfile: @unchecked Sendable {
     let url: URL
     let colorSpace: CGColorSpace
+    /// The intent pictures are converted into it with.
+    var intent: RenderingIntent = .perceptual
 
     init?(url: URL) {
         guard let data = try? Data(contentsOf: url), let space = CGColorSpace(iccData: data as CFData) else { return nil }
@@ -244,13 +247,27 @@ struct SheetProfile: @unchecked Sendable {
     }
 
     var name: String { url.deletingPathExtension().lastPathComponent }
+
+    /// Whether renders made for one profile print correctly for another:
+    /// the same file, converted the same way.
+    func rendersLike(_ other: SheetProfile?) -> Bool {
+        guard let other else { return false }
+        return url == other.url && intent == other.intent
+    }
 }
 
 enum SheetColorConversion {
-    /// `image` converted into `space` by ColorSync, perceptual intent: 16
-    /// bits for RGB and grey profiles, 8 for CMYK (all Core Graphics draws
-    /// CMYK at). Nil for a space a bitmap can't use.
-    static func convert(_ image: CGImage, to space: CGColorSpace) -> CGImage? {
+    /// `image` converted into `space` by ColorSync with `intent`
+    /// (`ICCImageConversion`, which does black point compensation for
+    /// relative colorimetric). Should that fail, perceptual through Core
+    /// Graphics, as Latent always printed: 16 bits for RGB and grey
+    /// profiles, 8 for CMYK. Nil for a space a bitmap can't use.
+    static func convert(_ image: CGImage, to space: CGColorSpace, intent: RenderingIntent = .perceptual) -> CGImage? {
+        if let converted = ICCImageConversion.convert(image, to: space, intent: intent) { return converted }
+        return drawConverted(image, to: space)
+    }
+
+    static func drawConverted(_ image: CGImage, to space: CGColorSpace) -> CGImage? {
         let bits: Int
         let info: CGBitmapInfo
         switch space.model {

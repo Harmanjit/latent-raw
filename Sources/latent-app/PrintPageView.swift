@@ -62,7 +62,10 @@ final class PrintJob: @unchecked Sendable {
 
     func update(settings newValue: PrintLayoutSettings) {
         let newValue = newValue.validated
-        let profileChanged = lock.withLock { newValue.profile(proof: proofProfile)?.url != settings.profile(proof: proofProfile)?.url }
+        let profileChanged = lock.withLock {
+            let before = settings.profile(proof: proofProfile), after = newValue.profile(proof: proofProfile)
+            return before == nil ? after != nil : !before!.rendersLike(after)
+        }
         // Renders made for one colour choice mustn't print for another.
         let fresh = profileChanged ? makeRenderer(newValue.profile(proof: proofProfile)) : nil
         lock.withLock {

@@ -57,6 +57,7 @@ extension EditStack {
                 result.modules.tone = other.modules.tone
                 result.modules.highlights = other.modules.highlights
                 result.modules.toneranges = other.modules.toneranges
+                result.modules.hdr = other.modules.hdr
             case .presence:
                 result.modules.presence = other.modules.presence
             case .toneCurve:
@@ -137,7 +138,8 @@ extension EditStack {
         var g: Set<EditGroup> = []
         let m = modules
         if m.whitebalance != nil { g.insert(.whiteBalance) }
-        if m.exposure != nil || m.tone != nil || m.highlights != nil || m.toneranges != nil { g.insert(.tone) }
+        if m.exposure != nil || m.tone != nil || m.highlights != nil || m.toneranges != nil
+            || m.hdr != nil { g.insert(.tone) }
         if m.presence != nil { g.insert(.presence) }
         if m.curve != nil { g.insert(.toneCurve) }
         if m.hsl != nil || m.vibrance != nil || m.saturation != nil || m.blackwhite != nil || m.pointcolor != nil {

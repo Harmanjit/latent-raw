@@ -331,6 +331,15 @@ final class EditorModel: ObservableObject {
     @Published var gamutWarning = false { didSet { if gamutWarning != oldValue { rerender() } } }
     @Published var proofStatus = ""
     var proofLUT: SoftProofLUT?
+    /// Intent and paper simulation (EditorModel+SoftProof.swift),
+    /// remembered between launches.
+    @Published var proofOptions = SoftProofOptionsStore().options {
+        didSet { if proofOptions != oldValue { SoftProofOptionsStore().options = proofOptions; rebuildProof() } }
+    }
+    @Published var monitorGamutWarning = false {
+        didSet { if monitorGamutWarning != oldValue { rebuildMonitorGamut() } }
+    }
+    var monitorGamutLUT: SoftProofLUT?
 
     // MARK: - Tone tools (EditorModel+ToneTools.swift)
 

@@ -15,6 +15,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 <!-- /RECONCILE -->
 - **Lens profiles** cover the bundled Lensfun subset; a lens the matcher cannot identify gets manual sliders only.
 <!-- RECONCILE: two branches edited this; merge into one text -->
+<!-- RECONCILE: two branches edited this; merge into one text -->
 
 - **Lens profiles** cover the bundled Lensfun subset. A lens the matcher cannot identify gets no profile automatically; pick one by hand from the Lens Corrections panel, or rely on the manual sliders and Remove chromatic aberration. Profiles remembered for a lens are kept per catalog, and `latent-cli` doesn't read them.
 - **Golden-image tests don't yet pin the new detail and effects stages** (grain, post-crop vignetting, sharpening Detail and Masking, noise reduction Detail, Contrast and Smoothness); they have render tests that check each control's effect and that off renders exactly as before.
@@ -24,8 +25,12 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **HDR in exports is a gain map only.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is fixed at two stops. PNG, TIFF, AVIF and JPEG XL are SDR only, and a gain map is written only in sRGB or Display P3.
 - **DNG export bakes the corrections, not the look.** A DNG holds white balance, exposure, noise reduction, lens corrections, healing and masks; tone, colour grading, presence and sharpening are left out, so it opens with the default look. Keep its white balance at As Shot: the pixels are already balanced. AVIF and JPEG XL appear only when this Mac's system can write them; there is no PSD.
 <!-- /RECONCILE -->
+
+- **No DNG export.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is the photo's HDR Limit (at most three stops); there are no separate settings for the SDR rendition. PNG and TIFF are SDR only.
+<!-- /RECONCILE -->
 - **Optional interop XMP beside the image is not implemented.** Latent's sidecars live in `_latent/xmp/`, where Lightroom and darktable do not look.
 - **HDR display** has been verified on a MacBook Pro's XDR screen, and sRGB and Display P3 output on the same machine. Other HDR displays are untested.
+- **Soft proofing has two intents,** Perceptual and Relative Colorimetric (always with black point compensation); Saturation isn't offered. Black point compensation treats the paper's black as neutral. The monitor gamut warning reads the profile of the screen the window was on when the warning was switched on; move the window to another screen and switch it off and on again. Proof copies are snapshots, not virtual copies, so only one version shows and exports at a time.
 
 ## Platform and distribution
 

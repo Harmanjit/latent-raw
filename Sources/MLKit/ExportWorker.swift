@@ -296,7 +296,7 @@ public enum ExportWorker {
         // which the exporter asks for when it's ready.
         let image = try Exporter(gpu: gpu).encodableImage(
             texture, settings: settings, colorSpace: renderSpace, rotation: rotation,
-            crop: parameters.crop, maxLongEdge: maxLongEdge,
+            crop: parameters.crop, maxLongEdge: maxLongEdge, hdrHeadroom: parameters.hdrHeadroom,
             hdrRender: { output in
                 try pipeline.render(session, scale: scale, parameters: parameters, output: output)
             })

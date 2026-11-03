@@ -11,7 +11,7 @@ extension EditorModel {
     /// brightness changes.
     var effectiveHeadroom: Float {
         DisplayHeadroom.rendered(potential: SecondaryPreview.renderPotential(main: displayHeadroom, secondary: secondaryDisplayHeadroom),
-                                 hdrDisplayEnabled: hdrDisplayEnabled)
+                                 hdrDisplayEnabled: hdrDisplayEnabled, limit: parameters.hdrHeadroom)
     }
     /// Whether the viewport is rendered with room above SDR white, so the
     /// histogram's "above SDR white" readout means something.
@@ -37,6 +37,7 @@ extension EditorModel {
         }
         output.proof = proofLUT
         output.gamutWarning = gamutWarning
+        output.monitorGamut = monitorGamutWarning ? monitorGamutLUT : nil
         output.spotVisualisation = dustVisualisation
         output.touchUpOverlay = touchUpOverlayWanted
         output.sharpenMaskPreview = sharpenMaskPreview
@@ -69,10 +70,11 @@ extension EditorModel {
             proofLUT = nil; proofStatus = ""; rerender(); return
         }
         do {
-            let lut = try SoftProofLUT.build(proofTarget)
+            let lut = try SoftProofLUT.build(proofTarget, options: proofOptions)
             proofLUT = lut
             proofStatus = String(format: "%@ · %.1f%% of colours out of gamut",
                                  proofTarget.displayName, lut.outOfGamutFraction * 100)
+            if monitorGamutWarning && monitorGamutLUT == nil { rebuildMonitorGamut(rendering: false) }
         } catch {
             proofLUT = nil
             proofStatus = "Proof failed: \(error)"

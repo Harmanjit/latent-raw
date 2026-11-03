@@ -71,9 +71,11 @@ public enum DisplayHeadroom {
     /// The headroom the pipeline renders the viewport to. Soft proofing
     /// overrides it with 1, since an EDR highlight can't be in the file
     /// being proofed.
-    public static func rendered(potential: CGFloat, hdrDisplayEnabled: Bool) -> Float {
+    /// `limit` is the photo's HDR Limit as a multiple of SDR white
+    /// (`EditParameters.hdrHeadroom`); it may raise or lower the ceiling.
+    public static func rendered(potential: CGFloat, hdrDisplayEnabled: Bool, limit: Float = renderCeiling) -> Float {
         guard hdrDisplayEnabled else { return 1 }
-        return min(max(1, Float(potential)), renderCeiling)
+        return min(max(1, Float(potential)), max(1, limit))
     }
 
     /// Whether the layer should ask for EDR. EDR makes the display raise

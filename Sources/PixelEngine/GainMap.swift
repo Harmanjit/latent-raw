@@ -22,9 +22,9 @@ import ColorKit
 /// which would not match Latent's SDR export. Here both renditions are
 /// Latent's, and ImageIO only stores the map it is given.
 public struct GainMap: Sendable {
-    /// Headroom of the HDR rendition, relative to SDR white. The editor
-    /// caps its display at the same 4x (two stops): brighter reads as a
-    /// searchlight rather than a highlight.
+    /// Headroom of the HDR rendition, relative to SDR white, for a photo
+    /// whose HDR Limit is the default; the limit (`HDRLimit`) replaces it
+    /// per photo. The editor caps its display the same way.
     public static let exportHeadroom: Float = 4
 
     /// Added to both renditions before the ratio, so near-black pixels
@@ -131,7 +131,8 @@ extension RenderOutput {
 
 extension Exporter {
     /// `encodableImage` for a JPEG or HEIC with a gain map. `texture` is the
-    /// SDR render; `hdrRender` renders the same edit for another output.
+    /// SDR render; `hdrRender` renders the same edit for another output;
+    /// `headroom` is the photo's HDR Limit as a multiple of SDR white.
     ///
     /// Order matters. The pipeline pools its output textures by role, so
     /// the HDR render reuses, and overwrites, the SDR one. Everything the
@@ -139,9 +140,8 @@ extension Exporter {
     /// read before the HDR render runs.
     func gainMapImage(_ texture: MTLTexture, settings: ExportSettings,
                       colorSpace: ColorKit.OutputSpace, rotation: ImageRotation, crop: CropParameters,
-                      maxLongEdge: Int?,
+                      maxLongEdge: Int?, headroom: Float = GainMap.exportHeadroom,
                       hdrRender: (RenderOutput) throws -> MTLTexture) throws -> EncodableImage {
-        let headroom = GainMap.exportHeadroom
         let finish = PackFinish(settings: settings)
         let base = try linearTexture(from: texture, rotation: rotation, crop: crop,
                                      maxLongEdge: maxLongEdge, sourceIsEncoded: true, enlarge: finish.enlarge)

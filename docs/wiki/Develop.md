@@ -106,7 +106,35 @@ The blur works in linear light after the local adjustments, so a brightened back
 
 **AI Noise Reduction.** NAFNet, trained on real sensor noise, run once per image on the GPU (about 11 s for 24 MP) and then blended at any strength instantly. It runs in camera space before colour, so white balance and every later module see clean data. Exports run it again; thumbnails skip it. If macOS runs critically short of memory the result is let go, and it runs again once memory recovers.
 
-**Soft Proof.** Preview the image as sRGB or Display P3, or through an ICC profile, with a gamut warning that paints out-of-range colours grey.
+**Soft Proof.** Preview the image as it will look as an sRGB or Display P3 file, or printed through a printer or paper ICC profile (see [Soft proofing](#soft-proofing) below).
+
+## Soft proofing
+
+Soft proofing shows on screen what a file or a print will look like before you make it. Open **Soft Proof** at the bottom of the adjustments and switch it on, then pick the target: **sRGB**, **Display P3**, or **ICC profile…** to choose a printer or paper profile (they live in /Library/ColorSync/Profiles, or wherever your printer's installer put them). HDR highlights are switched off while proofing, since neither a print nor an SDR file can hold them.
+
+**Intent** decides what happens to colours the target can't reproduce:
+
+- **Perceptual** squeezes the whole image into the target's gamut, so colours keep their relationships but even the ones that would have fitted move a little. Best for photos with many saturated colours.
+- **Relative Colorimetric** keeps every colour that fits exactly and clips the rest to the nearest one the target can make, with black point compensation, so the deepest black in the photo lands on the paper's deepest black and shadow detail isn't lost. Best when only a few colours are out of gamut.
+
+Try both and keep the one that looks better; there is no rule. The intent only matters for ICC profiles: sRGB and Display P3 clip the same way either way.
+
+**Simulate Paper & Ink** (ICC profiles only) shows the paper's white and the ink's black as they really are, instead of mapping them to the screen's white and black. The proof goes duller and slightly tinted: that is what a print looks like next to a bright screen. Judge contrast and shadows with it on.
+
+Two gamut warnings can paint over the proof:
+
+- **Destination gamut warning** paints **red** the colours the target can't reproduce. Which colours are red doesn't depend on the intent.
+- **Monitor gamut warning** paints **blue** the colours of the proof your screen itself can't show, so you know which parts of the proof can't be judged on this display. It uses the profile of the screen the window is on.
+
+Where both apply, red wins. The line under the warnings says what share of all colours the target can't reproduce.
+
+**Create Proof Copy** keeps the edit as it is now as a snapshot named "Proof — " and the target's name, such as "Proof — Canson Rag Photographique". Latent has no virtual copies, so a proof copy is a snapshot: the version adjusted for that paper, kept with the photo in the History panel's snapshot list, to restore before printing. A typical session: save a snapshot of your screen version, switch on Soft Proof, adjust the photo until the proof looks right, then Create Proof Copy. Pressing it again for the same target replaces that proof copy (the button then reads **Update Proof Copy**). Like other snapshots, saving one isn't a step in History.
+
+The target, intent, paper simulation and warnings are view settings, never part of the edit, and the intent and paper simulation are remembered between launches. Printing starts from the intent chosen here; see [Export](Export#print).
+
+## HDR Limit
+
+On an HDR screen, the **HDR Limit** slider under the **HDR display** switch sets how far above white this photo's highlights may go, from half a stop to three stops. The default is two stops, which is what Latent always used. Lower it for a portrait or a quiet scene whose highlights shouldn't glare; raise it for a sunset or specular light that deserves the sparkle. It is part of the edit: it is undoable, named "HDR Limit" in History, copied and pasted with the **Tone** group, and it sets the headroom of an exported HDR gain map, so the file looks on an HDR screen the way the photo looked while you edited it. It changes nothing in an SDR file or on an SDR screen. The slider only shows on a screen with HDR headroom; an edit's limit is kept and exported either way.
 
 <!-- RECONCILE: two branches edited this; merge into one text -->
 <!-- RECONCILE: two branches edited this; merge into one text -->
@@ -198,6 +226,7 @@ Presets and Clipboard holds a menu of presets, five built in and any you save, a
 
 ## History and snapshots
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 The left panel lists every settled edit newest first; click one to jump, ⌘Z and ⇧⌘Z step. Thirty steps are kept per image, in the sidecar as well as the catalog. Snapshots are named copies of the whole edit; restoring one is itself a history step. Steps are named by what changed, such as Tone, Saturation, Treatment, B&W Mix, Colour Grading, Calibration, Point Colour, Spot Removal, Red-Eye, Sensor Dust or Touch-up; Find Spots, Find Faces and Find Blemishes are each one step.
 
 Presets and Clipboard holds a menu of presets, five built in and any you save, and a checklist of which module groups copy and paste carry. Spot removal patches and red-eye spots travel together, as **Spot Removal & Red-Eye**; **Sensor Dust**, **Touch-up** and **Lens Blur** are groups of their own, off by default like the masks, and Touch-up carries its sliders and Remove blemishes switch but never the faces or blemishes found on another photo. ⇧⌘C copies the current edit; ⇧⌘V pastes into the open image or onto the whole Library selection. Presets are JSON files in Application Support and can be shared.
@@ -207,11 +236,14 @@ Presets and Clipboard holds a menu of presets, five built in and any you save, a
 The left panel lists every settled edit newest first; click one to jump, ⌘Z and ⇧⌘Z step. Thirty steps are kept per image, in the sidecar as well as the catalog. Snapshots are named copies of the whole edit; restoring one is itself a history step. Steps are named by what changed, such as Tone, Spot Removal, Red-Eye, Sensor Dust, Touch-up or Lens Blur; Find Spots, Find Faces and Find Blemishes are each one step.
 <!-- /RECONCILE -->
 
+The left panel lists every settled edit newest first; click one to jump, ⌘Z and ⇧⌘Z step. Thirty steps are kept per image, in the sidecar as well as the catalog. Snapshots are named copies of the whole edit; restoring one is itself a history step. Steps are named by what changed, such as Tone, Spot Removal, Red-Eye, Sensor Dust, Touch-up or HDR Limit; Find Spots, Find Faces and Find Blemishes are each one step.
+<!-- /RECONCILE -->
+
 ## The viewport
 
 Pinch, or scroll with ⌥ or ⌘, to zoom about the pointer; scroll or drag to pan a zoomed-in image; double-click, or double-tap with two fingers, to toggle fit and 100%. ⌘0 fits, ⌘1 is 100%, ⌘= and ⌘- step. At fit, a two-finger swipe steps to the next or previous image, and holding the mouse button shows a magnifier at 100% under the pointer; past 200% pixels are drawn as squares. F shows the image full screen, with the adjustments coming in from the right edge. See [Library](Library#looking-closely). The image surround grey is set in Settings. The filmstrip along the bottom opens another image with one click; see [Library](Library#filmstrip).
 
-On an HDR display, highlights above paper white are shown using the display's headroom, up to two stops, with the HDR display switch to preview the SDR result. The image follows the screen's brightness without re-rendering, and the screen's extended range (which raises the backlight) is only switched on while the image needs it.
+On an HDR display, highlights above paper white are shown using the display's headroom, up to the photo's [HDR Limit](#hdr-limit) (two stops unless you change it), with the HDR display switch to preview the SDR result. The image follows the screen's brightness without re-rendering, and the screen's extended range (which raises the backlight) is only switched on while the image needs it.
 
 At the top of the right panel, a switch picks the scope: **Histogram**, **Waveform** (each channel's brightness against position across the image) or **Vectorscope** (colour, with neutral in the centre). Only the one shown is computed. The histogram draws red, green and blue with a luminance outline. Below it, the share of pixels clipped in the highlights and in the shadows per channel, and, with HDR display on, the share of the image above SDR white, which an SDR screen or file can't show. While a slider is dragged, the scopes update up to ten times a second.
 

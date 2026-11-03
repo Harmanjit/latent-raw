@@ -687,7 +687,7 @@ kernel void colorAndTone(
     constant float2 &tileOrigin                  [[buffer(19)]],
     constant float &binSpan                      [[buffer(20)]],
     constant int &maskOverlayIndex               [[buffer(21)]],  // -1 = none
-    constant uint &proofMode                     [[buffer(22)]],  // 0 off, 1 proof, 2 proof + warning
+    constant uint &proofMode                     [[buffer(22)]],  // bits: 1 proof, 2 destination warning, 4 monitor warning
     constant float &vibrance                     [[buffer(23)]],  // −1…1
     constant float *toneRangeLUT                 [[buffer(24)]],  // 256 shifts in t
     constant float *channelCurveLUT              [[buffer(25)]],  // 3 x 256: red, green, blue
@@ -703,6 +703,7 @@ kernel void colorAndTone(
     texture3d<float, access::sample> profileHueSat [[texture(14)]],
     texture3d<float, access::sample> profileLookTable [[texture(15)]],
     texture1d<float, access::sample> profileTone [[texture(16)]],
+    texture3d<float, access::sample> monitorGamutLUT [[texture(6)]],
     uint2 gid                                    [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
@@ -828,9 +829,15 @@ kernel void colorAndTone(
         float3 uvw = d * (32.0 / 33.0) + (0.5 / 33.0);
         float4 proofed = proofLUT.sample(s3, uvw);
         display = proofed.rgb * headroom;
-        // Warning: paint clipped colours mid-grey, the convention every
-        // editor uses, so they stand out against anything photographic.
-        if (proofMode == 2 && proofed.a > 0.5) display = float3(0.5 * headroom);
+        // Warnings, in Lightroom's colours so they read the same: blue for
+        // what the screen can't show of the proof, red for what the target
+        // can't reproduce (red wins where both apply). The colours are the
+        // sRGB primaries in linear Rec.2020, so every screen shows them.
+        if ((proofMode & 4) != 0) {
+            float3 shown = clamp(proofed.rgb, 0.0, 1.0) * (32.0 / 33.0) + (0.5 / 33.0);
+            if (monitorGamutLUT.sample(s3, shown).a > 0.5) display = float3(0.0433, 0.0113, 0.8956) * headroom;
+        }
+        if ((proofMode & 2) != 0 && proofed.a > 0.5) display = float3(0.6274, 0.0691, 0.0164) * headroom;
     }
 
     // Stage 15: working space -> output space, then encode — or not.

@@ -34,7 +34,7 @@ final class SoftProofTests: XCTestCase {
         XCTAssertEqual(lut.outOfGamutFraction, matrix.outOfGamutFraction, accuracy: 0.15)
     }
 
-    func testProofRendersAndWarningPaintsGrey() throws {
+    func testProofRendersAndWarningPaintsRed() throws {
         let path = TestAssets.path("HSB_6548.NEF")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: path))
         let gpu = try GPUContext()
@@ -60,12 +60,12 @@ final class SoftProofTests: XCTestCase {
 
         plain.gamutWarning = true
         let c = try render(plain)
-        var greys = 0
+        var reds = 0
         for i in stride(from: 0, to: c.count, by: 4) {
             let r = Float(c[i]), g = Float(c[i + 1]), bl = Float(c[i + 2])
-            // sRGB-encoded 0.5 linear is ~0.735.
-            if abs(r - 0.735) < 0.01 && abs(g - 0.735) < 0.01 && abs(bl - 0.735) < 0.01 { greys += 1 }
+            // The warning colour is the sRGB red primary.
+            if r > 0.99 && g < 0.02 && bl < 0.02 { reds += 1 }
         }
-        XCTAssertGreaterThan(greys, 100, "warning should paint clipped pixels grey")
+        XCTAssertGreaterThan(reds, 100, "warning should paint clipped pixels red")
     }
 }
