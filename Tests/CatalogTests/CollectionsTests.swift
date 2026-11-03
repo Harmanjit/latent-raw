@@ -185,7 +185,7 @@ final class LibraryCollectionsTests: XCTestCase {
         let set = try XCTUnwrap(collections.create(name: "Travel", kind: .set))
         let trip = try XCTUnwrap(collections.create(name: "Trip", kind: .regular, in: set))
         collections.add([a, b], to: trip)
-        XCTAssertEqual(manager.undoActionName, "Add to Collection (2 Photos)")
+        XCTAssertEqual(manager.undoActionName, "Add to Collection (2 Images)")
         collections.rename(trip, to: "Porto")
         collections.delete(set)
         XCTAssertTrue(collections.state.collections.isEmpty, "deleting a set deletes what is inside it")

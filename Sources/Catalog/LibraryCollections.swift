@@ -322,7 +322,7 @@ public final class LibraryCollections: ObservableObject {
     }
 
     static func photosAction(_ action: String, count: Int) -> String {
-        count > 1 ? "\(action) (\(count) Photos)" : action
+        count > 1 ? "\(action) (\(count) Images)" : action
     }
 
     static func photoCount(_ count: Int) -> String {
