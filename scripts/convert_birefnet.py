@@ -42,8 +42,8 @@ What it does, step by step:
 6. Writes the .mlpackage and metadata, then verifies it against PyTorch (the
    unpatched torchvision model) on a test photo: max abs diff, IoU at 0.5,
    and timing at CPU_AND_GPU and CPU_ONLY. The plan's exit criteria (IoU on
-   the GPU path >= 0.97, weight.bin under GitHub's 100 MiB file limit) fail
-   the run.
+   the GPU path >= 0.97, and for the bundled package weight.bin under
+   GitHub's 100 MiB file limit) fail the run.
 7. Writes `<id>.model.json` last, through scripts/latent_manifest.py, with
    the package content hash and feature names read from the package.
 
@@ -65,8 +65,10 @@ IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 LICENCE_URL = "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE"
 # The largest weight.bin GitHub accepts as an ordinary blob; the bundled
-# package must stay under it (docs/Retouch.md §5).
-WEIGHT_LIMIT = 100 * 1024 * 1024
+# package must stay under it (docs/Retouch.md §5). It applies only when the
+# package is written into the bundled Models folder: general and portrait
+# (~446 MB) are converted into a folder for Add Model… and never committed.
+WEIGHT_LIMIT = latent_manifest.GIT_FILE_LIMIT
 
 # Each variant is pinned to the Hugging Face repository revision that was
 # vetted (git commit of the HF repo) and the SHA-256 of model.safetensors at
@@ -500,8 +502,12 @@ if not args.verify_only:
 # ------------------------------------------------------------------- 6. verify
 weight_bin = os.path.join(package, "Data", "com.apple.CoreML", "weights", "weight.bin")
 weight_bytes = os.path.getsize(weight_bin)
-print(f"  weight.bin {weight_bytes:,} bytes = {weight_bytes / (1 << 20):.1f} MiB (limit {WEIGHT_LIMIT >> 20} MiB)")
-failed = weight_bytes >= WEIGHT_LIMIT
+bundled = os.path.realpath(out_dir) == os.path.realpath(latent_manifest.BUNDLED_MODELS)
+print(f"  weight.bin {weight_bytes:,} bytes = {weight_bytes / (1 << 20):.1f} MiB"
+      + (f" (limit {WEIGHT_LIMIT >> 20} MiB for the bundled folder)" if bundled else ""))
+failed = latent_manifest.over_bundled_limit(out_dir, weight_bytes)
+if failed:
+    print(f"  FAILED: weight.bin is over GitHub's {WEIGHT_LIMIT >> 20} MiB file limit and cannot be committed")
 if not args.skip_verify:
     print("Verifying …")
 
