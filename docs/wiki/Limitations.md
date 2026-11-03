@@ -23,7 +23,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 - **No import from memory cards, no tethering, no folder watching.** Copy files yourself, then open the folder. There is no Refresh command either; open the folder again to re-scan it. Latent re-reads the open folder by itself only after its own moves, copies and renames.
 - **Folders on read-only volumes can't be opened,** because the catalog lives inside the folder. A locked memory card has to be copied first.
-- **Collections belong to one folder; no search across folders.** Each folder is its own catalog with its own collections, and a collection can't hold photos from another folder. The sidebar moves between folders but doesn't search or combine them. A photo moved out of the folder leaves its collections, and undoing the move doesn't put it back in them.
+- **Collections belong to one folder; no search across folders.** Each folder is its own catalog with its own collections, and a collection can't hold photos from another folder. The sidebar finds folders by name and moves between them, but doesn't search photos across folders or combine them. A photo moved out of the folder leaves its collections, and undoing the move doesn't put it back in them.
 - **The sandbox limits the sidebar** to folders inside a favourite. Anything else needs Open Folder, or adding a folder that contains it.
 - **Subfolder include/independent choices are not stored in sidecars.** They live only in the catalog database, so rebuilding the catalog, including the automatic rebuild of a damaged database, resets them and asks again. Changing the choice moves no existing sidecars or thumbnails.
 - **No video, no plugins.**

@@ -31,6 +31,8 @@ struct FolderSidebar: View {
     var onStepHistory: ((Int) -> Void)?
     /// The open catalog, whose collections are listed under the folders.
     var library: Library?
+    /// What the Find folder field holds; the tree shows while it is empty.
+    @State private var folderQuery = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -39,10 +41,21 @@ struct FolderSidebar: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
             }
-            FolderOutline(folders: favourites.folders, currentFolder: currentFolder,
-                          onOpen: open, onAdd: { urls in urls.forEach { favourites.add($0) } },
-                          onRemove: { favourites.remove($0) }, onChooseFolder: onChooseFolder,
-                          onDropImages: onDropImages, areLibraryImages: areLibraryImages)
+            if !favourites.folders.isEmpty {
+                FolderSearchField(query: $folderQuery)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 4)
+            }
+            if folderQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                FolderOutline(folders: favourites.folders, currentFolder: currentFolder,
+                              onOpen: open, onAdd: { urls in urls.forEach { favourites.add($0) } },
+                              onRemove: { favourites.remove($0) }, onChooseFolder: onChooseFolder,
+                              onDropImages: onDropImages, areLibraryImages: areLibraryImages)
+            } else {
+                // Folders found by name (FolderSearchViews.swift).
+                FolderSearchResults(query: folderQuery, roots: favourites.folders.filter(\.isAvailable).map(\.url),
+                                    currentFolder: currentFolder, onOpen: open)
+            }
             if let library {
                 Divider()
                 CollectionsSection(library: library)

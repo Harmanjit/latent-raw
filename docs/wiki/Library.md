@@ -6,6 +6,8 @@ The column on the far left lists favourite folders. Add one with **Add Folder…
 
 The app is sandboxed, so it can read inside favourites and folders you chose in an open panel, and nowhere else. A folder outside every favourite still opens with ⇧⌘O, and the sidebar then offers to add it. A favourite on a disk or network share that isn't mounted shows as not connected and comes back when the volume does; Latent never mounts anything on its own. The sidebar can be collapsed, and stays shown or hidden as you left it.
 
+**Find folder.** Type part of a folder's name in the field above the tree to list every folder inside your favourites whose name contains it, however deep, nearest first, each with the folders above it. Click one to open it. Clear the field (the × or deleting the text) to get the tree back. Disks that aren't connected aren't searched.
+
 **Back and Forward** (the chevrons at the top of the sidebar, or ⌥⌘← and ⌥⌘→) step through the folders you opened in this window and reselect the images you had selected in each.
 
 Dragging thumbnails from the grid onto a folder in the sidebar moves them there; hold ⌥ to copy. See [Moving, copying and renaming](Library#moving-copying-and-renaming).
