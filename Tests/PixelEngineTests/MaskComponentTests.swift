@@ -289,14 +289,24 @@ final class MaskComponentTests: XCTestCase {
             XCTAssertEqual(r.pixel(at: left), base.pixel(at: left), "and nothing outside")
         }
         // Highlights and Whites move bright tones: brighten the middle
-        // first, then pull them down.
-        var bright = EditParameters()
-        bright.locals = [LocalAdjustment(name: "r", shape: radial(centre, 0.25), exposureEV: 3)]
-        let lifted = try render(f, bright)
-        for edit in [{ (l: inout LocalAdjustment) in l.highlights = -1 }, { $0.whites = -1 }] {
+        // into each one's band first, then pull it down. How far to lift
+        // depends on the raw (the private sample's centre is ~2.5 stops
+        // brighter than the golden raw's), so lift until the centre is as
+        // bright as the band needs: Highlights peaks just above mid grey
+        // (display ~0.96), Whites near white (~0.99).
+        for (edit, target) in [({ (l: inout LocalAdjustment) in l.highlights = -1 }, 0.95), ({ $0.whites = -1 }, 0.99)] {
+            var bright = EditParameters()
+            var ev: Float = 2
+            var lifted: Image
+            repeat {
+                ev += 0.5
+                bright.locals = [LocalAdjustment(name: "r", shape: radial(centre, 0.25), exposureEV: ev)]
+                lifted = try render(f, bright)
+            } while lifted.luma(at: centre) < target && ev < 10
             var p = bright
             edit(&p.locals[0])
-            XCTAssertLessThan(try render(f, p).luma(at: centre), lifted.luma(at: centre) - 0.01)
+            let r = try render(f, p)
+            XCTAssertLessThan(r.luma(at: centre), lifted.luma(at: centre) - 0.01, "at +\(ev) EV")
         }
     }
 

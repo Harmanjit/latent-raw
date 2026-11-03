@@ -426,10 +426,20 @@ final class CameraProfileTests: XCTestCase {
 
         var vivid = EditParameters()
         vivid.profile = ProfileChoice(id: "latent:vivid", name: "Vivid")
-        let vivid100 = Self.meanChroma(try r.pixels(vivid))
+        let vivid100Pixels = try r.pixels(vivid)
+        let vivid100 = Self.meanChroma(vivid100Pixels)
         XCTAssertGreaterThan(vivid100, Self.meanChroma(plain) * 1.08)
+        // Amount scales the look: less of it, less colour. Past 100% the
+        // extra contrast clips an already colourful picture (most of the
+        // golden raw's pixels hit 0 or 1 at 200%), so the mean chroma of
+        // the sRGB output need not keep rising; 200% must still change
+        // the image and stay well above no look at all.
+        vivid.profile?.amount = 0.5
+        XCTAssertLessThan(Self.meanChroma(try r.pixels(vivid)), vivid100, "less Amount, less look")
         vivid.profile?.amount = 2
-        XCTAssertGreaterThan(Self.meanChroma(try r.pixels(vivid)), vivid100, "more Amount, more look")
+        let vivid200 = try r.pixels(vivid)
+        XCTAssertGreaterThan(Self.meanChroma(vivid200), Self.meanChroma(plain) * 1.08, "200% is still a look")
+        XCTAssertGreaterThan(Self.worst(vivid200, vivid100Pixels), 0.02, "200% differs from 100%")
 
         var flat = EditParameters()
         flat.profile = ProfileChoice(id: "latent:flat", name: "Latent Flat")

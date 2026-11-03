@@ -260,8 +260,11 @@ final class ColourControlsTests: XCTestCase {
         let blueish = mid.map { $0.z - $0.x }.reduce(0, +) / Float(mid.count)
         XCTAssertGreaterThan(blueish, 0, "hue 200 tints towards cyan-blue")
 
-        // Calibration: the shadow tint goes magenta in the shadows, the
-        // primaries change colour but not the image's overall brightness much.
+        // Calibration: the shadow tint goes magenta in the shadows; the
+        // primaries change colour but keep greys where they were (the
+        // matrix maps equal parts of all three to grey). Coloured pixels
+        // may get lighter or darker (red turned towards yellow is
+        // brighter), so the whole image's mean luma depends on the file.
         var magenta = EditParameters(); magenta.colour.calibration.shadowTint = 1
         let m = try pixels(magenta)
         let shadowGreen = zip(m, plain).filter { meanLuma([$0.1]) < 0.2 }.map { $0.0.y - $0.1.y }
@@ -269,7 +272,9 @@ final class ColourControlsTests: XCTestCase {
         var calibrated = EditParameters(); calibrated.colour.calibration.redHue = 1
         let c = try pixels(calibrated)
         XCTAssertNotEqual(c, plain)
-        XCTAssertEqual(meanLuma(c), meanLuma(plain), accuracy: 0.03)
+        let greys = plain.indices.filter { plain[$0].max() - plain[$0].min() < 0.03 }
+        XCTAssertGreaterThan(greys.count, 1000)
+        XCTAssertEqual(meanLuma(greys.map { c[$0] }), meanLuma(greys.map { plain[$0] }), accuracy: 0.01)
 
         // Point Colour: a swatch at the image's own commonest colour with
         // saturation -1 takes colour out of the image; the same swatch
