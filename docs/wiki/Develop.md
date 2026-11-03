@@ -42,6 +42,24 @@ The right panel holds the modules in pipeline order. All controls are live at fu
 
 **Soft Proof.** Preview the image as sRGB or Display P3, or through an ICC profile, with a gamut warning that paints out-of-range colours grey.
 
+## JPEG, TIFF and other pictures
+
+JPEG, HEIC, TIFF, PNG, WebP and AVIF files open in Develop like raws, and every edit is stored the same way, in the catalog and its sidecar, never in the file.
+
+**They open looking exactly as they are.** Such a file was already developed by a camera, phone, scanner or another editor, so its colours and tones are finished. Latent converts it from its own colour profile (sRGB when it has none) into its working space and works out the light that its default tone curve would turn into those pixels, so the unedited picture shows as the file does and every slider moves from there. Exposure brightens in light rather than lifting a grey veil, and highlights roll off softly, as they do on a raw. White Balance starts at about 6500 K, meaning "as the file is": lower values cool the picture and higher ones warm it, relative to that.
+
+**What is different from a raw:**
+
+- **There is less to recover.** A JPEG keeps 8 bits per colour and its highlights are clipped where the camera clipped them, so big exposure or shadow pushes band and blow out sooner than on a raw. A 16-bit TIFF holds up much better.
+- **Highlight Reconstruction is hidden.** It rebuilds clipped sensor channels, which a finished picture no longer has.
+- **Lens Corrections has no profile toggles.** Profiles describe a raw's optics; a JPEG has usually been corrected by the camera or app that made it, and may be cropped. The manual distortion and vignetting sliders and Defringe still work.
+- **Detail has no demosaic choice,** since there is no sensor mosaic. Sharpening and noise reduction work as usual.
+- **AI Noise Reduction is not available.** The model is trained on raw sensor noise, which these files have already had processed away.
+- **The view is SDR.** On an HDR screen the picture isn't stretched above paper white, and exports never get an HDR gain map. An HDR photo from a phone (a HEIC or JPEG with a gain map) opens as its ordinary SDR picture.
+- **Photo Merge takes raws only,** so these files can't go into an HDR merge or a panorama.
+
+The status bar shows the file's format and depth when it opens, such as "JPEG · 8-bit · FUJIFILM X-T5 · 6240×4160".
+
 ## Presets and clipboard
 
 Presets and Clipboard holds a menu of presets, five built in and any you save, and a checklist of which module groups copy and paste carry. Spot removal patches and red-eye spots travel together, as **Spot Removal & Red-Eye**; **Sensor Dust** and **Touch-up** are groups of their own, off by default like the masks, and Touch-up carries its sliders and Remove blemishes switch but never the faces or blemishes found on another photo. ⇧⌘C copies the current edit; ⇧⌘V pastes into the open image or onto the whole Library selection. Presets are JSON files in Application Support and can be shared.

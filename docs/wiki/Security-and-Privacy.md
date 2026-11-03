@@ -18,6 +18,8 @@ Besides files and bookmarks, the app has one entitlement: `com.apple.security.pr
 
 Raw files are parsed by LibRaw, a large C++ library that processes files you did not create. Latent runs it in a separate XPC service, `LatentRawDecoder.xpc`, sandboxed with no file access and no network. The app hands it an open file descriptor per file and receives pixels back. A crafted file that exploits the decoder gets a process that can do nothing, and the app shows an error instead of crashing.
 
+JPEG, HEIC, TIFF, PNG, WebP and AVIF files are not raws and don't go to the service. They are read in the app by ImageIO, the same system decoder Finder, Preview and Quick Look use on them, so opening one in Latent exposes nothing those don't.
+
 The service answers one more question, for exports: the photo's own metadata. It reads that with ImageIO and returns two size-capped property lists of plain values. The app checks their shape and rebuilds any XMP through ImageIO's tag interface, so it never parses an XMP document the service produced.
 
 ## Location in exports

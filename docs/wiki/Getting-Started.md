@@ -2,7 +2,7 @@
 
 ## Open a folder
 
-⇧⌘O (File > Open Folder…), or the Open Folder button in the left panel. Choose a folder of raw files. Latent creates a `_latent/` directory inside it holding the catalog, one sidecar per image and thumbnails, then shows the grid. Thumbnails come from the cameras' embedded previews and appear within seconds even for thousands of files.
+⇧⌘O (File > Open Folder…), or the Open Folder button in the left panel. Choose a folder of raw files; JPEG, HEIC, TIFF and PNG pictures in it are catalogued too, and the JPEG of a RAW+JPEG pair stays tucked behind its raw (see [Library](Library#rawjpeg-pairs)). Latent creates a `_latent/` directory inside it holding the catalog, one sidecar per image and thumbnails, then shows the grid. Thumbnails come from the cameras' embedded previews and appear within seconds even for thousands of files.
 
 For folders you come back to, add a parent folder to the sidebar on the far left: click **Add Folder…**, or drag folders in from Finder. Every folder inside a favourite then opens with one click, with no open panel. See [Library](Library#the-sidebar).
 
