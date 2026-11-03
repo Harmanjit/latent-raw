@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Catalog
+import ColorKit
 import PixelEngine
 import MLKit
 
@@ -17,6 +18,7 @@ enum PrintPresenter {
     static func present(openImage: Bool, model: EditorModel, library: Library) {
         guard let gpu = model.gpu, let window = NSApp.mainWindow, window.attachedSheet == nil else { return }
         let proof = proofProfile(for: model)
+        let intent = model.proofOptions.intent
         Task {
             do {
                 let items: [SheetItem]
@@ -45,7 +47,7 @@ enum PrintPresenter {
                     // sRGB; they are never printed.
                     previewRenderer: SheetRenderer(gpu: gpu, colorSpace: .sRGB, bitsPerComponent: 8,
                                                    aiDenoiseFrom: .max, profile: nil, cacheBudget: 32 << 20),
-                    proofProfile: proof)
+                    proofProfile: proof, intent: intent)
                 sessions.append(session)
                 session.run(on: window) { finished, success in
                     sessions.removeAll { $0 === finished }
@@ -99,7 +101,7 @@ final class PrintSession: NSObject {
     /// what has no thumbnail.
     init(items: [SheetItem], thumbnails: @escaping SheetThumbnailSource,
          makeRenderer: @escaping @Sendable (SheetProfile?) -> SheetRenderer, previewRenderer: SheetRenderer?,
-         proofProfile: SheetProfile?, store: PrintLayoutStore = PrintLayoutStore(),
+         proofProfile: SheetProfile?, intent: RenderingIntent? = nil, store: PrintLayoutStore = PrintLayoutStore(),
          printInfo shared: NSPrintInfo = .shared, jobs: OutputJobs = .shared) {
         // A copy of the shared print info, so Page Setup's paper, scale and
         // printer apply, with its margins cleared: the layout keeps its own
@@ -111,7 +113,11 @@ final class PrintSession: NSObject {
         info.rightMargin = 0
         info.isHorizontallyCentered = false
         info.isVerticallyCentered = false
-        job = PrintJob(items: items, settings: store.settings, paper: PrintPaper(printInfo: info),
+        // A print starts from the intent Soft Proof shows, so it matches
+        // the proof; the panel can still change it for this print.
+        var settings = store.settings
+        if let intent { settings.intent = intent }
+        job = PrintJob(items: items, settings: settings, paper: PrintPaper(printInfo: info),
                        proofProfile: proofProfile, makeRenderer: makeRenderer,
                        makePreview: { job in
                            SheetPreviewImages(renderer: previewRenderer, thumbnail: thumbnails,
@@ -289,7 +295,8 @@ final class PrintAccessoryController: NSViewController, NSPrintPanelAccessorizin
             ("Auto-Rotate", settings.autoRotate ? "On" : "Off"),
             ("Colour", colorTitle(settings.color == .proofProfile && proofProfileName != nil ? .proofProfile : .displayP3,
                                   proofProfileName: proofProfileName)),
-        ]
+        ] + (settings.color == .proofProfile && proofProfileName != nil
+             ? [("Rendering Intent", settings.intent.displayName)] : [])
     }
 
     static func colorTitle(_ choice: PrintLayoutSettings.ColorChoice, proofProfileName: String?) -> String {
@@ -341,6 +348,13 @@ struct PrintAccessoryView: View {
             .fixedSize()
             .disabled(model.proofProfileName == nil)
             .accessibilityHint("Photos are rendered in this colour space before the printer's colour matching")
+            Picker("Rendering intent", selection: $model.settings.intent) {
+                ForEach(RenderingIntent.allCases) { Text($0.displayName).tag($0) }
+            }
+            .fixedSize()
+            .disabled(model.proofProfileName == nil || model.settings.color != .proofProfile)
+            .help(model.settings.intent.help)
+            .accessibilityHint("How colours the printer profile can't reproduce are brought into its gamut")
         }
         .formStyle(.columns)
         .padding(.vertical, 16)

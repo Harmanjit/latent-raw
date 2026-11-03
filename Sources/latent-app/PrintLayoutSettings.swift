@@ -1,4 +1,5 @@
 import AppKit
+import ColorKit
 import PixelEngine
 
 /// The print layout set in the print panel's Latent section: how many
@@ -29,6 +30,10 @@ struct PrintLayoutSettings: Codable, Equatable, Sendable {
     var caption: CaptionContent = .none
     var autoRotate = true
     var color: ColorChoice = .proofProfile
+    /// How colours outside the printer profile's gamut are mapped, when
+    /// printing into it. Each print starts from Soft Proof's intent, so the
+    /// print matches what was proofed (`PrintPresenter`).
+    var intent: RenderingIntent = .perceptual
 
     static let marginRange = 0.0...72.0
     static let spacingRange = 0.0...36.0
@@ -49,6 +54,7 @@ struct PrintLayoutSettings: Codable, Equatable, Sendable {
         caption = (try? c.decode(CaptionContent.self, forKey: .caption)) ?? defaults.caption
         autoRotate = (try? c.decode(Bool.self, forKey: .autoRotate)) ?? defaults.autoRotate
         color = (try? c.decode(ColorChoice.self, forKey: .color)) ?? defaults.color
+        intent = (try? c.decode(RenderingIntent.self, forKey: .intent)) ?? defaults.intent
         self = validated
     }
 
@@ -64,10 +70,13 @@ struct PrintLayoutSettings: Codable, Equatable, Sendable {
         PageStyle(background: nil, caption: caption, captionFontSize: Self.captionFontSize)
     }
 
-    /// The profile pictures are converted into: the proof profile when
-    /// that is the choice and one is set, else none (Display P3).
+    /// The profile pictures are converted into, with the intent to use:
+    /// the proof profile when that is the choice and one is set, else none
+    /// (Display P3).
     func profile(proof: SheetProfile?) -> SheetProfile? {
-        color == .proofProfile ? proof : nil
+        guard color == .proofProfile, var profile = proof else { return nil }
+        profile.intent = intent
+        return profile
     }
 }
 
