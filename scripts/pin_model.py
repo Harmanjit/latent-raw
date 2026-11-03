@@ -63,6 +63,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import latent_manifest
@@ -621,21 +622,26 @@ def main(argv=None):
 
     # ----------------------------------------------- 2. download and hash
     edits = [(pin["revision"], None, revision)]
+    # The packages are copied into a staging folder inside out_dir and
+    # hashed there; they replace any copies already in out_dir only once
+    # the pin is written. A refused run so leaves an earlier vetted copy
+    # alone, as its message says, and the staging folder is removed either way.
+    staging, staged = None, []
     if pin["source"] == "packages":
         snapshot = download(repo, revision, pin.get("patterns"))
         import convert_sam2                                   # its rules for which package is which
         prefix = convert_sam2.SIZES[pin["size_key"]]["prefix"]
         found = convert_sam2.find_packages(snapshot, prefix)
         os.makedirs(out_dir, exist_ok=True)
+        staging = tempfile.mkdtemp(prefix=".pin_model-", dir=out_dir)
         print("Copying and hashing …")
         for role, package in found.items():
-            target = os.path.join(out_dir, os.path.basename(package))
-            if os.path.exists(target):
-                shutil.rmtree(target)
-            shutil.copytree(package, target, symlinks=False)  # the cache holds links into its blob store
-            digest = latent_manifest.package_hash(target)
-            print(f"  {os.path.basename(target):48} {digest}")
+            copy = os.path.join(staging, os.path.basename(package))
+            shutil.copytree(package, copy, symlinks=False)    # the cache holds links into its blob store
+            digest = latent_manifest.package_hash(copy)
+            print(f"  {os.path.basename(copy):48} {digest}")
             edits.append((pin["packages"], role, digest))
+            staged.append((copy, os.path.join(out_dir, os.path.basename(package))))
     elif pin["source"] == "weights":
         snapshot = download(repo, revision, pin.get("patterns"))
         weights = os.path.join(snapshot, pin["weights_file"])
@@ -655,20 +661,28 @@ def main(argv=None):
     # the same pin (a changed upload, another --from-file) are refused rather
     # than silently becoming the new pin; --repin is the way to move it.
     try:
-        moved = moved_hashes(pin["script"], edits)
-    except PinShapeError as e:
-        sys.exit(f"the pin in scripts/{pin['script']} is not the shape this expects ({e}); "
-                 f"record it by hand. Nothing has been changed.")
-    if moved and not args.repin:
-        lines = "\n".join(f"  {subkey or (where if isinstance(where, str) else where[-1])}: recorded {recorded}, "
-                          f"found {found}" for where, subkey, recorded, found in moved)
-        sys.exit(f"what was hashed does not match the pin in scripts/{pin['script']}:\n{lines}\n"
-                 f"Nothing has been changed. If the new bytes are the ones you vetted, pass --repin.")
-    try:
-        write_pins(pin["script"], edits)
-    except PinShapeError as e:
-        sys.exit(f"the pin in scripts/{pin['script']} is not the shape this expects ({e}); "
-                 f"record it by hand. Nothing has been changed.")
+        try:
+            moved = moved_hashes(pin["script"], edits)
+        except PinShapeError as e:
+            sys.exit(f"the pin in scripts/{pin['script']} is not the shape this expects ({e}); "
+                     f"record it by hand. Nothing has been changed.")
+        if moved and not args.repin:
+            lines = "\n".join(f"  {subkey or (where if isinstance(where, str) else where[-1])}: recorded {recorded}, "
+                              f"found {found}" for where, subkey, recorded, found in moved)
+            sys.exit(f"what was hashed does not match the pin in scripts/{pin['script']}:\n{lines}\n"
+                     f"Nothing has been changed. If the new bytes are the ones you vetted, pass --repin.")
+        try:
+            write_pins(pin["script"], edits)
+        except PinShapeError as e:
+            sys.exit(f"the pin in scripts/{pin['script']} is not the shape this expects ({e}); "
+                     f"record it by hand. Nothing has been changed.")
+        for copy, target in staged:
+            if os.path.exists(target):
+                shutil.rmtree(target)
+            os.replace(copy, target)
+    finally:
+        if staging:
+            shutil.rmtree(staging, ignore_errors=True)
     print(f"Pinned scripts/{pin['script']} at {revision[:12]}")
     if args.no_convert:
         print(f"Stopping before the conversion (--no-convert). Run it with:\n"

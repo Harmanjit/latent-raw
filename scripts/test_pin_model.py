@@ -219,6 +219,41 @@ def main():
     finally:
         pin_model.resolve, pin_model.download = real_resolve, real_download
 
+    print("a refused SAM run leaves the vetted packages in --out alone")
+    fresh(work, "sam")
+    sam_snapshot = os.path.join(work, "sam-snapshot")
+
+    def sam_upload(content):
+        shutil.rmtree(sam_snapshot, ignore_errors=True)
+        for marker in ("ImageEncoder", "PromptEncoder", "MaskDecoder"):
+            for relative in latent_manifest.HASHED_FILES:
+                path = os.path.join(sam_snapshot, f"SAM2_1Tiny{marker}FLOAT16.mlpackage", relative)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as f:
+                    f.write(content + relative.encode())
+
+    sam_out = os.path.join(work, "sam-out")
+    encoder = os.path.join(sam_out, "SAM2_1TinyImageEncoderFLOAT16.mlpackage", "Manifest.json")
+    Info.sha = resolved
+    pin_model.resolve = lambda repo, revision=None: Info
+    pin_model.download = lambda repo, revision, patterns: sam_snapshot
+    try:
+        sam_upload(b"vetted ")
+        code, _ = run(["sam2.1-tiny", "--yes", "--no-convert", "--out", sam_out])
+        check("the first run pins and copies", code == 0 and os.path.isfile(encoder), True)
+        sam_upload(b"changed ")
+        code, _ = run(["sam2.1-tiny", "--yes", "--no-convert", "--out", sam_out])
+        check("changed packages are refused without --repin", isinstance(code, str) and "--repin" in code, True)
+        check("the copy in --out is still the vetted one", open(encoder, "rb").read(), b"vetted Manifest.json")
+        check("nothing is left staged in --out",
+              sorted(os.listdir(sam_out)), sorted(f"SAM2_1Tiny{m}FLOAT16.mlpackage"
+                                                  for m in ("ImageEncoder", "PromptEncoder", "MaskDecoder")))
+        code, _ = run(["sam2.1-tiny", "--yes", "--no-convert", "--repin", "--out", sam_out])
+        check("with --repin the new packages replace them", code == 0 and open(encoder, "rb").read(),
+              b"changed Manifest.json")
+    finally:
+        pin_model.resolve, pin_model.download = real_resolve, real_download
+
     print("--resolve writes nothing, even for a model with no revision to resolve")
     before = open(os.path.join(pin_model.SCRIPTS, "convert_u2net.py"), "rb").read()
     code, text = run(["u2net", "--resolve", "--from-file", weights, "--code-revision", "bbbbbbb", "--out", out])
