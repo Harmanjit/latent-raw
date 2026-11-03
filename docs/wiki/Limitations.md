@@ -8,9 +8,10 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Colour checked on one camera.** The golden-image tests, which compare renders with reference images, use a Nikon D750 NEF. The Photo Merge tests also read raws from a Canon EOS 5D Mark II and a Nikon D200, but don't check their colour. LibRaw supports hundreds of cameras and the pipeline is generic, but colour and exposure on other cameras have not been checked against a reference.
 - **Camera matrix colour only.** Colour comes from the camera's characterisation matrix. There are no camera-matching profiles, so the default rendering will not match the in-camera JPEG look.
 - **Lens profiles** cover the bundled Lensfun subset; a lens the matcher cannot identify gets manual sliders only.
-- **No DNG export.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is fixed at two stops. PNG and TIFF are SDR only.
+- **No DNG export.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is the photo's HDR Limit (at most three stops); there are no separate settings for the SDR rendition. PNG and TIFF are SDR only.
 - **Optional interop XMP beside the image is not implemented.** Latent's sidecars live in `_latent/xmp/`, where Lightroom and darktable do not look.
 - **HDR display** has been verified on a MacBook Pro's XDR screen, and sRGB and Display P3 output on the same machine. Other HDR displays are untested.
+- **Soft proofing has two intents,** Perceptual and Relative Colorimetric (always with black point compensation); Saturation isn't offered. Black point compensation treats the paper's black as neutral. The monitor gamut warning reads the profile of the screen the window was on when the warning was switched on; move the window to another screen and switch it off and on again. Proof copies are snapshots, not virtual copies, so only one version shows and exports at a time.
 
 ## Platform and distribution
 
