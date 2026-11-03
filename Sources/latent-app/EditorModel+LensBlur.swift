@@ -121,13 +121,17 @@ extension EditorModel {
             state.building = false
             return
         }
+        // Only Sendable values cross into the detached task (the image in
+        // its wrapper, as the model masks pass it); the result comes back
+        // as a value and is applied here, on the main actor.
+        let input = SendableImage(cgImage: image)
         let rotation = self.rotation
         state.building = true
         state.status = "Making the depth map…"
         let builder = Self.depthBuilder
         state.task = Task { @MainActor [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
-                await builder(image, rotation, stored)
+                await builder(input, rotation, stored)
             }.value
             guard let self, !Task.isCancelled, self.session === session else { return }
             let state = self.lensBlurState
@@ -157,11 +161,11 @@ extension EditorModel {
 
     /// The depth builder, replaceable so tests can stand a drawn depth map
     /// in for the models.
-    typealias DepthBuilder = @Sendable (CGImage, ImageRotation, String?) async -> Result<LensBlurDepth.Result, Error>
+    typealias DepthBuilder = @Sendable (SendableImage, ImageRotation, String?) async -> Result<LensBlurDepth.Result, Error>
 
     static let liveDepthBuilder: DepthBuilder = { image, rotation, stored in
         do {
-            return .success(try await LensBlurDepth.make(from: image, rotation: rotation, stored: stored))
+            return .success(try await LensBlurDepth.make(from: image.cgImage, rotation: rotation, stored: stored))
         } catch {
             return .failure(error)
         }
