@@ -61,6 +61,9 @@ struct ToneToolDrag {
 @MainActor
 final class PixelProbe: ObservableObject {
     @Published var readout: PixelReadout?
+    /// The texture pixel last read, by layer generation, and its colour:
+    /// pointer moves within one pixel don't read the GPU again.
+    var last: (generation: UInt64, x: Int, y: Int, colour: SIMD3<Float>)?
 }
 
 extension EditorModel {
@@ -97,9 +100,14 @@ extension EditorModel {
         let c = layer.coverage
         let x = Int((sensor.x - c.minX) / c.width * CGFloat(layer.texture.width))
         let y = Int((sensor.y - c.minY) / c.height * CGFloat(layer.texture.height))
+        if let last = pixelProbe.last, last.generation == layer.generation, last.x == x, last.y == y {
+            return last.colour
+        }
         guard let px = try? TextureReadback.float16Pixels(of: layer.texture, x: x, y: y, width: 1, height: 1, gpu: gpu),
               px.count >= 3 else { return nil }
-        return SIMD3(Float(px[0]), Float(px[1]), Float(px[2]))
+        let colour = SIMD3(Float(px[0]), Float(px[1]), Float(px[2]))
+        pixelProbe.last = (layer.generation, x, y, colour)
+        return colour
     }
 
     /// The pointer moved over the image (nil: it left).
