@@ -58,8 +58,11 @@ struct DescriptiveMetadataSection: View {
             }
             if focused == nil, targets.count == 1, let record = targets.first,
                record.copyright == nil, let creator = record.creator {
-                Button("Copyright © \(Self.year) \(creator)") {
-                    save(.copyright, "© \(Self.year) \(creator)", ids: targets.compactMap(\.id))
+                // Built as a plain String: a localized title would print the
+                // year with a thousands separator ("2,026").
+                let notice = "© \(Self.year) \(creator)"
+                Button("Copyright " + notice) {
+                    save(.copyright, notice, ids: targets.compactMap(\.id))
                 }
                 .buttonStyle(.link)
                 .font(.caption2)
