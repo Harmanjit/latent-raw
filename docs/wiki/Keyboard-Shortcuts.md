@@ -63,6 +63,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | Keys | Action |
 |---|---|
 | ⇧⌘E | Export the selection |
+| ⌥⇧⌘E | Export with Previous: the selection, with the last export's settings and folder, without the sheet |
 | ⌥⌘R | Reveal the selection in Finder |
 | ⌘P | Print the selection (in Library) or the image shown |
 | ⌘E | Edit in External Editor: a 16-bit TIFF of the open or selected image, opened in the app chosen in Settings |

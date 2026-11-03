@@ -13,7 +13,7 @@ extension ExportPreset {
     /// sheet measures is what the export writes.
     func workerRequest(for record: ImageRecord, root: URL, destination: URL, editStackJSON: String?,
                        keywords: [String]) -> ExportWorker.Request {
-        ExportWorker.Request(
+        var request = ExportWorker.Request(
             sourceURL: root.appendingPathComponent(record.relPath),
             destinationURL: destination,
             editStackJSON: editStackJSON, userRotation: record.userRotation,
@@ -24,5 +24,9 @@ extension ExportPreset {
             includeMetadata: includeMetadata,
             includeLocation: includeMetadata && includeLocation,
             replacesExisting: collision == .replace)
+        request.sizing = sizing
+        request.sizeLimitBytes = sizeLimitBytes
+        request.metadataLevel = metadataLevel
+        return request
     }
 }
