@@ -140,6 +140,11 @@ public struct ExportMetadata: Sendable, Equatable {
     /// Off unless asked for: a file shared online would otherwise say where
     /// it was taken (often the photographer's home) and which camera took it.
     public var includeLocation = false
+    /// The title, caption, creator and copyright the photographer gave the
+    /// photo in Latent. Unlike the summary fields these replace the raw's
+    /// own: they are what the user typed, and a camera's stock artist and
+    /// copyright strings are exactly what they mean to override.
+    public var descriptive = ExportDescription()
 
     public init() {}
 
@@ -198,13 +203,19 @@ public struct ExportMetadata: Sendable, Equatable {
         let allKeywords = fileKeywords + keywords.filter { !fileKeywords.contains($0) }
         if !allKeywords.isEmpty { iptc[kCGImagePropertyIPTCKeywords as String] = allKeywords }
         if rating > 0 { iptc[kCGImagePropertyIPTCStarRating as String] = rating }
+        descriptive.apply(tiff: &tiff, iptc: &iptc)
 
         props[tiffKey] = tiff
         props[exifKey] = exif
         props[iptcKey] = iptc.isEmpty ? nil : iptc
 
-        let xmp = source?.xmpMetadata(includingLocation: includeLocation)
+        var xmp = source?.xmpMetadata(includingLocation: includeLocation)
+        // A raw ImageIO can't read has no XMP to add to; the descriptive
+        // fields get one of their own, so dc:title and the rest are where
+        // every catalog looks for them, not only in the IPTC block.
+        if xmp == nil, !descriptive.isEmpty { xmp = CGImageMetadataCreateMutable() }
         if let xmp {
+            descriptive.apply(xmp: xmp)
             CGImageMetadataSetValueMatchingImageProperty(xmp, kCGImagePropertyTIFFDictionary,
                                                          kCGImagePropertyTIFFSoftware, software as CFString)
             if !allKeywords.isEmpty {

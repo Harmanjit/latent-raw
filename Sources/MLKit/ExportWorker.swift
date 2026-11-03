@@ -45,6 +45,9 @@ public enum ExportWorker {
         /// appeared during the render: the export throws
         /// `SafeFileWriter.DestinationExists` instead.
         public var replacesExisting: Bool
+        /// Title, caption, creator and copyright from the catalog; written
+        /// only with `includeMetadata`.
+        public var descriptive = ExportDescription()
 
         public init(sourceURL: URL, destinationURL: URL, editStackJSON: String?, userRotation: Int,
                     settings: ExportSettings, colorSpace: ColorKit.OutputSpace, maxLongEdge: Int?,
@@ -226,6 +229,7 @@ public enum ExportWorker {
         metadata.focalLength = s.focalLength > 0 ? s.focalLength : nil
         metadata.captureDate = s.captureTime.timeIntervalSince1970 > 0 ? s.captureTime : nil
         metadata.keywords = request.keywords
+        metadata.descriptive = request.descriptive
         metadata.rating = request.rating
         metadata.includeLocation = request.includeLocation
         if request.includeMetadata {
