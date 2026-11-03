@@ -5,9 +5,35 @@ import RawCore
 public struct LensProfileMatch: Sendable, Equatable {
     public var camera: LensfunCamera
     public var lens: LensfunLens
-    /// Calibration crop factor over the camera's: scales database radii
-    /// onto this sensor.
-    public var cropRatio: Float { lens.cropFactor / max(camera.cropFactor, 0.01) }
+    /// The crop factor the file was actually shot at, when the camera
+    /// recorded an in-camera crop mode (DX on an FX body, a 1.6x or 16:9
+    /// mode): the stored frame is then smaller than the body's full format
+    /// that Lensfun lists. Nil when the frame is the body's full format.
+    public var shotCropFactor: Float? = nil
+
+    public init(camera: LensfunCamera, lens: LensfunLens, shotCropFactor: Float? = nil) {
+        self.camera = camera
+        self.lens = lens
+        self.shotCropFactor = shotCropFactor
+    }
+
+    /// Calibration crop factor over the frame's: scales database radii
+    /// onto this sensor. The render measures radii on the stored frame, so
+    /// a crop-mode file must use the crop it was shot at, not the body's.
+    public var cropRatio: Float { lens.cropFactor / max(shotCropFactor ?? camera.cropFactor, 0.01) }
+
+    /// The crop factor to use for a file whose EXIF works out to
+    /// `exifCropFactor` (35 mm equivalent focal length over focal length,
+    /// 0 when unknown), on a body Lensfun lists at `bodyCropFactor`. Only a
+    /// clearly larger crop counts: an in-camera crop mode only ever narrows
+    /// the frame, the EXIF figure is rounded to whole millimetres (so a few
+    /// percent either way is noise), and some cameras wrongly record the
+    /// real focal length as the 35 mm one, which reads as a crop of 1.
+    static func shotCropFactor(exifCropFactor: Double, bodyCropFactor: Float) -> Float? {
+        let exif = Float(exifCropFactor)
+        guard exif.isFinite, exif > 0, bodyCropFactor > 0, exif > bodyCropFactor * 1.03 else { return nil }
+        return exif
+    }
 }
 
 /// Finds the database entries for a camera and lens (DESIGN.md §9.2).
@@ -276,6 +302,8 @@ public enum LensMatcher {
         guard let camera = findCamera(make: cameraMake, model: cameraModel, in: db),
               let lens = findLens(camera: camera, identity: identity, name: lensName,
                                   focal: focal, in: db) else { return nil }
-        return LensProfileMatch(camera: camera, lens: lens)
+        return LensProfileMatch(camera: camera, lens: lens,
+                                shotCropFactor: LensProfileMatch.shotCropFactor(
+                                    exifCropFactor: identity.cropFactor, bodyCropFactor: camera.cropFactor))
     }
 }

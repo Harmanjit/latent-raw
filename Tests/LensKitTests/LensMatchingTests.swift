@@ -9,10 +9,10 @@ final class LensMatchingTests: XCTestCase {
     static let db = LensfunDatabase.shared
 
     private func nikon(id: UInt8, lensID: UInt64 = 0, _ lo: Double, _ hi: Double,
-                       _ apShort: Double, _ apLong: Double? = nil) -> LensIdentity {
+                       _ apShort: Double, _ apLong: Double? = nil, cropFactor: Double = 0) -> LensIdentity {
         LensIdentity(make: "", makerNotesName: "", makerLensID: lensID, nikonLensID: id, nikonLensType: 0,
                      minFocal: lo, maxFocal: hi, maxApertureAtMinFocal: apShort,
-                     maxApertureAtMaxFocal: apLong ?? apShort, cropFactor: 0)
+                     maxApertureAtMaxFocal: apLong ?? apShort, cropFactor: cropFactor)
     }
 
     private func lens(_ model: String) throws -> LensfunLens {
@@ -107,6 +107,35 @@ final class LensMatchingTests: XCTestCase {
                 identity: nikon(id: id, lensID: lensID, 35.6, 35.6, 1.78), focal: 35, in: Self.db), model)
             XCTAssertEqual(match.lens.model, model)
         }
+    }
+
+    /// An FX body shooting in its DX crop mode stores a 1.5x smaller frame.
+    /// The profile's radii must be scaled to that frame (EXIF's 35 mm
+    /// equivalent says 1.5), not to the body's full format, or distortion,
+    /// TCA and vignetting are all applied at the wrong radius.
+    func testInCameraCropModeScalesTheProfileToTheStoredFrame() throws {
+        let lensID: UInt64 = 0xA54C_4444_1414_C006   // AF-S Nikkor 35mm f/1.8G ED, an FX calibration
+        func match(_ crop: Double) throws -> LensProfileMatch {
+            try XCTUnwrap(LensMatcher.match(cameraMake: "Nikon", cameraModel: "D750", lensName: "",
+                                            identity: nikon(id: UInt8(lensID >> 56), lensID: lensID, 35.6, 35.6, 1.78,
+                                                            cropFactor: crop),
+                                            focal: 35, in: Self.db))
+        }
+        let full = try match(1.0), dx = try match(52.0 / 35.0)
+        XCTAssertEqual(full.camera.cropFactor, 1, accuracy: 0.01)
+        XCTAssertEqual(dx.cropRatio, full.cropRatio / Float(52.0 / 35.0), accuracy: 1e-4)
+        let a = LensCorrection.resolve(full, focal: 35, aperture: 4, imageWidth: 6016, imageHeight: 4016,
+                                       databaseVersion: "t")
+        let b = LensCorrection.resolve(dx, focal: 35, aperture: 4, imageWidth: 3936, imageHeight: 2624,
+                                       databaseVersion: "t")
+        XCTAssertEqual(b.cropRatio, dx.cropRatio)
+        if a.distortion != nil { XCTAssertNotEqual(a.autoScale, b.autoScale, "autoscale follows the frame") }
+
+        // Unknown, within EXIF's rounding, or smaller than the body (a
+        // camera recording the real focal length as the 35 mm one) changes nothing.
+        XCTAssertNil(try match(0).shotCropFactor)
+        XCTAssertNil(try match(1.02).shotCropFactor)
+        XCTAssertNil(LensProfileMatch.shotCropFactor(exifCropFactor: 1.0, bodyCropFactor: 1.5))
     }
 
     func testAnIDOrNameTheDatabaseLacksMatchesNothing() {
