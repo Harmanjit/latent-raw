@@ -471,6 +471,68 @@ inline float3 applyLocal(float3 working, constant LocalAdjust &l, float m, float
     return working;
 }
 
+// ---------------------------------------------------------------------
+// Camera and creative profiles (ProfileStage.swift). A DCP's HueSatMap
+// and LookTable, and Latent's own looks, are DNG hue/saturation/value
+// tables: looked up by a colour's HSV in linear ProPhoto RGB, they shift
+// its hue and scale its saturation and value. The tone curve is applied
+// to the display-referred image keeping each pixel's hue, as Adobe's
+// "RGB tone" method does. All of it is skipped when `flags` is 0, which
+// is every edit made with Latent Standard.
+// ---------------------------------------------------------------------
+
+struct ProfileLook {
+    float3x3 workingToProPhoto;
+    float3x3 proPhotoToWorking;
+    uint4 hueSatDims;      // hue, saturation, value divisions; sRGB-encoded value
+    uint4 lookDims;
+    uint flags;            // 1 HueSatMap, 2 look table, 4 tone curve
+    float amount;          // how much of the look table to mix in
+    float2 padding;
+};
+
+/// One hue/sat/value table applied to a working-space colour. The table
+/// texture is saturation x hue x value; hue wraps, so its axis repeats and
+/// its samples sit at texel centres offset by half a division.
+inline float3 applyProfileTable(float3 working, constant ProfileLook &p, uint4 dims,
+                                texture3d<float, access::sample> table) {
+    constexpr sampler s(coord::normalized, s_address::clamp_to_edge, t_address::repeat,
+                        r_address::clamp_to_edge, filter::linear);
+    float3 hsv = rgbToHSV(max(p.workingToProPhoto * working, 0.0));
+    float w = 0.5;
+    if (dims.z > 1) {
+        float v = clamp(hsv.z, 0.0, 1.0);
+        if (dims.w != 0) v = encodeSRGB(float3(v)).x;
+        w = (v * float(dims.z - 1) + 0.5) / float(dims.z);
+    }
+    float3 uvw = float3((hsv.y * float(dims.y - 1) + 0.5) / float(dims.y),
+                        hsv.x / 360.0 + 0.5 / float(dims.x),
+                        w);
+    float4 e = table.sample(s, uvw);
+    hsv.x += e.x;
+    hsv.y = min(hsv.y * e.y, 1.0);
+    hsv.z *= e.z;
+    return p.proPhotoToWorking * hsvToRGB(hsv);
+}
+
+/// The tone curve, sampled at 256 points over display values in a 2.2
+/// gamma domain (dense where the eye needs it, in the shadows).
+inline float profileToneValue(float x, texture1d<float, access::sample> curve) {
+    constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);
+    float p = pow(clamp(x, 0.0, 1.0), 1.0 / 2.2);
+    return curve.sample(s, (p * 255.0 + 0.5) / 256.0).r;
+}
+
+/// Adobe's hue-preserving RGB tone: the curve sets the largest and
+/// smallest channel, and the middle one keeps its place between them.
+inline float3 applyProfileTone(float3 c, texture1d<float, access::sample> curve) {
+    c = clamp(c, 0.0, 1.0);
+    float hi = max(c.r, max(c.g, c.b)), lo = min(c.r, min(c.g, c.b));
+    float hiT = profileToneValue(hi, curve), loT = profileToneValue(lo, curve);
+    float3 t = (hi - lo > 1e-6) ? (c - lo) / (hi - lo) : float3(0.0);
+    return loT + (hiT - loT) * t;
+}
+
 kernel void colorAndTone(
     texture2d<float, access::read>  input        [[texture(0)]],
     texture2d<float, access::write> output       [[texture(1)]],
@@ -501,9 +563,13 @@ kernel void colorAndTone(
     constant float *toneRangeLUT                 [[buffer(24)]],  // 256 shifts in t
     constant float *channelCurveLUT              [[buffer(25)]],  // 3 x 256: red, green, blue
     constant uint  &toneRangesOn                 [[buffer(26)]],
+    constant ProfileLook &profile                [[buffer(29)]],
     constant ColourExtras &extras                [[buffer(30)]],
     texture2d_array<float, access::sample> brushMasks [[texture(2)]],
     texture3d<float, access::sample> proofLUT    [[texture(3)]],
+    texture3d<float, access::sample> profileHueSat [[texture(14)]],
+    texture3d<float, access::sample> profileLookTable [[texture(15)]],
+    texture1d<float, access::sample> profileTone [[texture(16)]],
     uint2 gid                                    [[thread_position_in_grid]])
 {
     if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
@@ -520,8 +586,22 @@ kernel void colorAndTone(
     // Stage 9: camera response -> linear Rec.2020 working space.
     float3 working = cameraToWorking * camera;
 
+    // Stage 9, continued: a camera profile's HueSatMap, part of the
+    // profile's colour as the matrix is.
+    if ((profile.flags & 1) != 0) {
+        working = applyProfileTable(working, profile, profile.hueSatDims, profileHueSat);
+    }
+
     // Stage 10: exposure, in linear light (the only place it's meaningful).
     working *= exposureScale;
+
+    // Stage 10, continued: the profile's look table, after exposure as the
+    // DNG specification orders it, mixed in by the Amount slider.
+    if ((profile.flags & 2) != 0) {
+        float3 looked = applyProfileTable(working, profile, profile.lookDims, profileLookTable);
+        working = mix(working, looked, profile.amount);
+        if (profile.amount > 1.0) working = max(working, 0.0);
+    }
 
     // Stage 10, continued: Highlights, Shadows, Whites, Blacks. Before the
     // local adjustments, so their range masks see the tones the user sees;
@@ -551,6 +631,12 @@ kernel void colorAndTone(
     float3 display = (applyToneMap != 0)
         ? toneMapSigmoid(working, contrast, greyPoint, headroom)
         : working;
+
+    // Stage 12, continued: a DCP's own tone curve, when the user asks for
+    // it, on top of the sigmoid in display-referred light.
+    if (applyToneMap != 0 && (profile.flags & 4) != 0) {
+        display = applyProfileTone(display / headroom, profileTone) * headroom;
+    }
 
     // Stage 13: colour grading, in a perceptual domain, on the display-
     // referred image scaled to [0,1] by the headroom so nothing clips in

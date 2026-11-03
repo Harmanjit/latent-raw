@@ -406,6 +406,9 @@ struct LatentCommands: Commands {
         CommandMenu("Develop") {
             item("Auto Adjust", .autoAdjust)
             toolToggle("Black & White", .toggleBlackAndWhite, isOn: state.blackAndWhite)
+            // No key and no window state needed: it only copies files into
+            // Latent's profile folder (EditorModel+Profiles.swift).
+            Button("Import Camera Profile…") { CameraProfileImport.run() }
             Divider()
             toolToggle("Crop & Straighten", .crop, isOn: state.cropToolActive)
             toolToggle("Spot Removal", .heal, isOn: state.healToolActive)

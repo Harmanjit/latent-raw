@@ -288,8 +288,9 @@ public enum ColorKit {
         /// convention, defined against a D50 white point, while the space
         /// primaries above are D65. dcraw and LibRaw both compose them
         /// directly without chromatic adaptation, and the row normalization
-        /// absorbs most of the discrepancy. Proper Bradford adaptation
-        /// belongs here when DCP profile support lands.
+        /// absorbs most of the discrepancy. This stays as it is so Latent
+        /// Standard keeps its look; an imported DCP goes through
+        /// `CameraProfileMath`, which adapts properly (Bradford).
         public init?(cameraToXYZRowMajor m: [Float]) {
             guard m.count >= 9 else { return nil }
 

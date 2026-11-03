@@ -10,11 +10,33 @@ The right panel holds the modules in pipeline order. All controls are live at fu
 
 ## Modules
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 **White Balance.** Temperature and tint, starting from the camera's own setting. As Shot returns to it. Click the Kelvin number beside Temperature to type one (2000–12000 K).
 
 The menu above the sliders offers Lightroom's starting points: **As Shot** (the camera's setting), **Auto** (an estimate from the picture, the same one Auto Adjust makes, without touching exposure or contrast), and the light sources **Daylight** (5500 K), **Cloudy** (6500 K), **Shade** (7500 K), **Tungsten** (2850 K), **Fluorescent** (3800 K, leaning a little magenta to cancel the green of the tubes) and **Flash** (5500 K). Moving a slider afterwards makes the setting **Custom**. Latent's tint scale is its own, so the numbers don't match Lightroom's.
 
 **White Balance Selector.** Click the eyedropper, or press W, then click something in the photo that ought to be neutral: a grey card, a white wall, a cloud in shade. Temperature and tint change to make that spot grey, and the selector puts itself away. It reads a small patch of the raw data under the click, so it ignores the tone curve and every colour adjustment. A spot that is clipped, or too dark to have a reliable colour, is refused with a message in the status bar and the selector stays on for another try. Esc leaves it.
+
+**Profile.** The row above White Balance sets the photo's starting colour and contrast, before any slider. Click the profile's name for the menu:
+
+- **Latent Standard** is Latent's own rendering from the camera's colour matrix, the look every photo had before profiles existed. A photo that never had a profile chosen uses it, and always will.
+- **Latent Neutral** has a little less contrast and gentler colour, a quiet starting point that leaves room to edit. **Latent Flat** goes further: very low contrast and muted colour, holding the most shadow and highlight detail, for grading.
+- **Creative**: **Vivid** (more saturation and contrast, strongest on muted colours and a little easier on skin), **Portrait** (softer contrast, skin tones drawn together and a touch lighter and less red) and **Landscape** (richer foliage, deeper skies, a little more contrast).
+- **Black & White**: **Monochrome** turns each colour into its brightness. The **Yellow**, **Red** and **Green Filter** versions work like a coloured filter on black and white film: yellow darkens blue skies a little, red darkens them a lot and pales skin, green lightens foliage and darkens reds and lips.
+- **Camera Profiles for** your camera lists the DNG camera profiles (.dcp files) you have imported for it, and **Other Cameras** the rest, each with the camera it was made for. A profile made for another camera still works, but its colour is meant for that camera's sensor.
+
+Creative and black and white profiles have an **Amount** slider, 0 to 200% (black and white to 100%): 0 is Latent Standard, 100% the look as designed, and above that the look is pushed further. Basic profiles and camera profiles have no Amount. Choosing a profile is an edit like any other: it lands in history, ⌘Z undoes it, and `\` shows the photo without it. Your sliders stay where they are when you switch, and work on top of the profile.
+
+**Camera profiles (DCP).** A .dcp file describes how one camera model sees colour. You can get them from Adobe's free DNG Converter (which installs Adobe's profiles on your Mac), from some camera makers, or make your own from a colour chart with a tool such as dcamprof. Latent includes none and never downloads any. To add them, choose **Develop › Import Camera Profile…**, or **Import Profile…** at the bottom of the Profile menu, and pick one or more .dcp files; Latent checks that each is a readable profile and keeps a copy in its own profiles folder in Application Support, so the original can move or go. Importing the same file twice does nothing; a different file with the same name is kept as "Name 2".
+
+Latent reads what makes a profile's colour: its colour matrices and forward matrices for one or two calibration lights, mixed for your white balance the way the DNG specification describes; its hue, saturation and value tables (including three-dimensional ones); its look table; and its exposure offset. With a camera profile chosen, its matrices replace the camera matrix Latent otherwise uses. White Balance still sets the camera's multipliers the way it always does, so a temperature can read a few kelvin differently from Adobe's for the same light.
+
+A profile's own **tone curve** is off to start with: Latent keeps its own tone mapping (the sigmoid behind Contrast and Mid Grey, which holds highlights well past white) and takes only the profile's colour. A profile that carries a curve shows **Use profile's tone curve**; tick it to apply the curve on top of Latent's tone mapping, which is closer to the camera maker's contrast but usually stronger than in other editors, because those use the curve *instead* of a curve of their own.
+
+A photo whose edit names a camera profile this Mac doesn't have (edited on another Mac, say) shows in Latent Standard, and the Profile row says which profile is missing. Import that profile and the photo looks as it was made. Copy and paste, presets and snapshots carry the profile as the **Profile** group.
+
+**White Balance.** Temperature and tint, starting from the camera's own setting. As Shot returns to it.
+<!-- /RECONCILE -->
 
 **Tone.** Exposure in stops, contrast and mid-grey for the sigmoid tone curve. **Highlights, Shadows, Whites and Blacks** each brighten or darken one band of tones without moving mid grey. They change exposure per pixel by its brightness, so colours keep their hue, there are no halos, and tones never swap order. **Auto** (⌘U) sets exposure, contrast and white balance from the image itself, backing exposure off if it would blow the brightest highlights. On an HDR screen, **HDR display** shows highlights above paper white using the screen's headroom.
 
@@ -84,7 +106,7 @@ The status bar shows the file's format and depth when it opens, such as "JPEG ·
 
 ## Presets and clipboard
 
-Presets and Clipboard holds a menu of presets, five built in and any you save, and a checklist of which module groups copy and paste carry. Spot removal patches and red-eye spots travel together, as **Spot Removal & Red-Eye**; **Sensor Dust** and **Touch-up** are groups of their own, off by default like the masks, and Touch-up carries its sliders and Remove blemishes switch but never the faces or blemishes found on another photo. ⇧⌘C copies the current edit; ⇧⌘V pastes into the open image or onto the whole Library selection. Presets are JSON files in Application Support and can be shared.
+Presets and Clipboard holds a menu of presets, five built in and any you save, and a checklist of which module groups copy and paste carry. The **Profile** group carries the chosen profile and its Amount, and is on by default. Spot removal patches and red-eye spots travel together, as **Spot Removal & Red-Eye**; **Sensor Dust** and **Touch-up** are groups of their own, off by default like the masks, and Touch-up carries its sliders and Remove blemishes switch but never the faces or blemishes found on another photo. ⇧⌘C copies the current edit; ⇧⌘V pastes into the open image or onto the whole Library selection. Presets are JSON files in Application Support and can be shared.
 
 ## History and snapshots
 

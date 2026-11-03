@@ -6,8 +6,12 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 
 - **Bayer sensors only.** Fujifilm X-Trans, Sigma Foveon, monochrome and four-colour sensors are read for metadata but do not render.
 - **Colour checked on one camera.** The golden-image tests, which compare renders with reference images, use a Nikon D750 NEF. The Photo Merge tests also read raws from a Canon EOS 5D Mark II and a Nikon D200, but don't check their colour. LibRaw supports hundreds of cameras and the pipeline is generic, but colour and exposure on other cameras have not been checked against a reference.
+<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Camera matrix colour only.** Colour comes from the camera's characterisation matrix. There are no camera-matching profiles, so the default rendering will not match the in-camera JPEG look.
 - **JPEG, HEIC, TIFF and other pictures are SDR and flattened.** An HDR gain map in a phone's HEIC or JPEG is ignored and the SDR picture opens; a floating-point or HDR TIFF is clipped at white. Layers, PSD and PSB files, multi-page TIFFs beyond the first page, and JPEG XL aren't read. A picture's edits are Latent's own and live in its sidecar; they are not written into the file, and other applications won't see them.
+
+- **No built-in camera-matching profiles.** Latent Standard renders from the camera's characterisation matrix, so it will not match the in-camera JPEG look. Camera-matching looks come from DNG camera profiles (.dcp) you import yourself: Latent bundles none and downloads none. Triple-illuminant profiles (DNG 1.6) are read as dual-illuminant ones, a profile's tone curve is applied on top of Latent's tone mapping rather than instead of it, and there is no Adaptive profile, Profile Browser with previews, favourites or LUT-based creative profiles.
+<!-- /RECONCILE -->
 - **Lens profiles** cover the bundled Lensfun subset; a lens the matcher cannot identify gets manual sliders only.
 - **No DNG export.** JPEG and HEIC can carry an optional HDR gain map, but the main image is always SDR, and the map's headroom is fixed at two stops. PNG and TIFF are SDR only.
 - **Optional interop XMP beside the image is not implemented.** Latent's sidecars live in `_latent/xmp/`, where Lightroom and darktable do not look.

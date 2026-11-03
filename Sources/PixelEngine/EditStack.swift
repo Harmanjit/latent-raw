@@ -71,6 +71,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var colorgrading: ColourGrading?
         public var calibration: Calibration?
         public var pointcolor: [PointColour]?
+        /// The camera or creative profile. Absent for Latent Standard, so
+        /// edits that never chose one encode exactly as before.
+        public var profile: ProfileChoice?
     }
 
     public struct AIDenoise: Codable, Equatable, Sendable {
@@ -222,6 +225,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.dust = p.dust.isEmpty ? nil : p.dust
         modules.touchup = p.touchUp.isNeutral ? nil : p.touchUp
         setColourControls(p.colour)
+        modules.profile = p.profile?.sanitized
         modules.presence = (p.texture == 0 && p.clarity == 0 && p.dehaze == 0) ? nil
             : Presence(texture: p.texture, clarity: p.clarity, dehaze: p.dehaze)
         modules.vibrance = p.vibrance == 0 ? nil : Vibrance(amount: p.vibrance)
@@ -297,6 +301,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         p.redEyes = (modules.redeye ?? []).prefix(RedEyeSpot.maximumCount).compactMap(\.sanitized)
         p.dust = (modules.dust ?? []).prefix(HealPatch.maximumDustCount).compactMap(\.sanitized)
         p.touchUp = (modules.touchup ?? .neutral).sanitized
+        p.profile = modules.profile?.sanitized
         if let pr = modules.presence { p.texture = pr.texture; p.clarity = pr.clarity; p.dehaze = pr.dehaze }
         else { p.texture = 0; p.clarity = 0; p.dehaze = 0 }
         p.vibrance = modules.vibrance?.amount ?? 0

@@ -154,6 +154,9 @@ public struct EditParameters: Sendable, Equatable {
     /// Saturation, Black & White, Colour Grading, Calibration and Point
     /// Colour (ColourControls.swift). Neutral by default.
     public var colour: ColourControls = .neutral
+    /// The camera or creative profile (ProfileStage.swift); nil is Latent
+    /// Standard, the rendering every edit had before profiles.
+    public var profile: ProfileChoice? = nil
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -272,6 +275,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.defringePurple == b.defringePurple && a.defringeGreen == b.defringeGreen
             && a.perspective == b.perspective && a.aiDenoise == b.aiDenoise
             && a.colour == b.colour
+            && a.profile == b.profile
     }
 }
 
@@ -418,6 +422,9 @@ public final class RenderPipeline {
     /// doesn't rebuild 143K texels every frame.
     private var proofTexture: (id: UUID, texture: MTLTexture)?
     private var placeholder3D: MTLTexture?
+    /// Where imported DCPs are looked up; tests point it at their own folder.
+    public var profileLibrary: CameraProfileLibrary = .shared
+    let profileTextures = ProfileTextureCache()
 
     public init(gpu: GPUContext) {
         self.gpu = gpu
@@ -481,11 +488,14 @@ public final class RenderPipeline {
         case .linearRGB: bayerOrder = nil
         default: throw RenderError.unsupportedCFAForV1
         }
-        guard let cameraToWorking = session.cameraToWorkingMatrix else {
+        guard let cameraMatrix = session.cameraToWorkingMatrix else {
             throw RenderError.noCameraProfile(camera: summary.cameraModel)
         }
 
         let multipliers = session.multipliers(for: parameters.whiteBalance)
+        // A DCP brings its own camera matrix for this white balance.
+        let profile = profileState(session: session, parameters: parameters, multipliers: multipliers)
+        let cameraToWorking = profile?.cameraToWorking ?? cameraMatrix
         let rawW = summary.rawWidth
         let rawH = summary.rawHeight
         let plan = Self.plan(rawWidth: rawW, rawHeight: rawH, scale: scale)
@@ -685,7 +695,8 @@ public final class RenderPipeline {
                                           multipliers: multipliers,
                                           parameters: parameters,
                                           output: output,
-                                          renderInfo: renderInfo, binSpan: binSpan)
+                                          renderInfo: renderInfo, binSpan: binSpan,
+                                          profile: profile)
 
         // Stage 16: touch-up (skin, teeth, eyes), display-referred, on the
         // faces' region masks. Only with masks to work on: the session
@@ -1317,7 +1328,8 @@ public final class RenderPipeline {
                                     multipliers: SIMD4<Float>,
                                     parameters: EditParameters,
                                     output: RenderOutput,
-                                    renderInfo: RenderInfo, binSpan: Float) throws -> MTLTexture {
+                                    renderInfo: RenderInfo, binSpan: Float,
+                                    profile: ProfileRenderState? = nil) throws -> MTLTexture {
         let outputTexture = try session.texture(width: input.width, height: input.height,
                                                  pixelFormat: .rgba16Float, role: outputRole)
         // Brush masks are rasterized (if needed) before encoding begins.
@@ -1336,6 +1348,10 @@ public final class RenderPipeline {
         var workingToOut = ColorKit.workingToOutput(output.space)
         var exposureScale = powf(2.0, parameters.exposureEV)
         var contrast = parameters.contrast
+        if let profile {
+            exposureScale = powf(2.0, parameters.exposureEV + profile.exposureOffset)
+            contrast *= profile.contrastScale
+        }
         var greyPoint = parameters.greyPoint
 
         // Each channel saturates at its white balance multiplier, so these
@@ -1411,6 +1427,7 @@ public final class RenderPipeline {
         encodeToneRangesAndChannelCurves(encoder, parameters: parameters)
         encodeColourControls(encoder, parameters: parameters)
         encoder.setTexture(proofTexture(for: output.proof), index: 3)
+        encodeProfile(encoder, state: profile)
 
         dispatch(encoder, pso: gpu.colorAndTonePSO, width: input.width, height: input.height)
         encoder.endEncoding()

@@ -1656,6 +1656,8 @@ struct ContentView: View {
                         .truncationMode(.middle)
                 }
 
+                ProfilePicker(model: model)
+
                 DisclosureGroup(isExpanded: $whiteBalanceExpanded) {
                     whiteBalanceSection.padding(.top, 8)
                 } label: {
