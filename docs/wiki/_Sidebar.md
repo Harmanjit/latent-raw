@@ -5,6 +5,7 @@
 - [Installation](Installation)
 - [Getting Started](Getting-Started)
 - [Library](Library)
+- [Collections and Keywords](Collections-and-Keywords)
 - [Develop](Develop)
 - [Models](Models)
 - [Converting Models](Converting-Models)
