@@ -13,6 +13,8 @@ final class FolderWatcherFilterTests: XCTestCase {
         XCTAssertTrue(FolderWatcher.isRelevant(path: "\(root)/A.NEF", flags: file, root: root))
         XCTAssertTrue(FolderWatcher.isRelevant(path: "\(root)/Day 2/b.cr3", flags: file, root: root))
         XCTAssertTrue(FolderWatcher.isRelevant(path: "\(root)/Day 2", flags: dir, root: root))
+        XCTAssertTrue(FolderWatcher.isRelevant(path: "\(root)/A.jpg", flags: file, root: root),
+                      "JPEG, HEIC, TIFF and PNG files are photos in the library too")
     }
 
     func testLatentsOwnFilesAndOtherFilesDont() {
@@ -23,7 +25,7 @@ final class FolderWatcherFilterTests: XCTestCase {
         XCTAssertFalse(FolderWatcher.isRelevant(path: "\(root)/.latent-rename-1234", flags: file, root: root),
                        "hidden temporary names of Latent's own moves")
         XCTAssertFalse(FolderWatcher.isRelevant(path: "\(root)/.DS_Store", flags: file, root: root))
-        XCTAssertFalse(FolderWatcher.isRelevant(path: "\(root)/A.jpg", flags: file, root: root))
+        XCTAssertFalse(FolderWatcher.isRelevant(path: "\(root)/notes.txt", flags: file, root: root))
         XCTAssertFalse(FolderWatcher.isRelevant(path: "/Volumes/Photos/Other/A.NEF", flags: file, root: root))
         XCTAssertFalse(FolderWatcher.isRelevant(path: "/Volumes/Photos/Shoot2/A.NEF", flags: file, root: root))
     }

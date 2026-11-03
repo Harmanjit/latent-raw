@@ -57,6 +57,8 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | H | Spot removal tool |
 | Y | Red-eye tool |
 | V | Develop: switch the treatment between Color and Black & White |
+| W | White Balance Selector: click something neutral in the photo |
+| J | Show or hide clipping on the image: highlights red, crushed shadows blue |
 | [, ] | Smaller, larger brush or spot (while the mask brush, spot removal or red-eye is on) |
 | ⌫ | Delete the selected spot patch or red-eye spot |
 | Esc | Leave any on-image tool; with none on, leave the full-screen image |
@@ -80,6 +82,8 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | Keys | Action |
 |---|---|
 | F2 | Rename the selected image (its sidecar and thumbnail follow); with several selected, rename them all from a filename template |
+| ⌘R | Refresh the open folder: scan it again for photos added, removed or renamed outside Latent |
+| ⌘' | Create a virtual copy of each selected image (in Loupe and Develop, of the image shown): another version of the photo with its own edit, rating and keywords, sharing the file |
 | Drag images onto a sidebar folder | Move them there with their edits (hold ⌥ to copy) |
 
 ## Photo Merge

@@ -56,8 +56,8 @@ extension EditorModel {
     var hasProofCopy: Bool { snapshots.contains { $0.name == Self.proofCopyName(for: proofTarget) } }
 
     /// Keeps the edit as it is now as a named snapshot for this target,
-    /// "Proof — <profile>". Latent has no virtual copies yet; a snapshot is
-    /// the edit kept beside the photo under a name, which is what a proof
+    /// "Proof — <profile>". A snapshot rather than a virtual copy: the
+    /// edit kept beside the photo under a name, which is what a proof
     /// copy is for: the version adjusted for this paper, to come back to.
     /// Saving again for the same target replaces it, like any snapshot.
     func createProofCopy() {
