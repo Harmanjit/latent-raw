@@ -85,6 +85,7 @@ final class AppPreferences: ObservableObject {
     @Published var defaultSubfolderMode: SubfolderMode { didSet { defaults.set(defaultSubfolderMode.rawValue, forKey: "latent.defaultSubfolderMode") } }
     @Published var defaultExportFolder: URL? {
         didSet {
+            guard !restoringExportFolder else { return }
             if let url = defaultExportFolder { BookmarkStore.save(url, key: BookmarkStore.defaultExportFolder) }
             else { BookmarkStore.clear(key: BookmarkStore.defaultExportFolder) }
         }
@@ -104,19 +105,32 @@ final class AppPreferences: ObservableObject {
     /// Lightroom-style culling steps with the arrows at any zoom.
     @Published var arrowKeysPanImage: Bool { didSet { defaults.set(arrowKeysPanImage, forKey: "latent.arrowKeysPanImage") } }
 
+    /// Set while the stored default export folder is put back, which must
+    /// not save its bookmark again.
+    private var restoringExportFolder = false
+
     private init() {
         appearance = Appearance(rawValue: defaults.string(forKey: "latent.appearance") ?? "") ?? .system
         accent = Accent(rawValue: defaults.string(forKey: "latent.accent") ?? "") ?? .system
         surround = Surround(rawValue: defaults.string(forKey: "latent.surround") ?? "") ?? .dark
         showRenderTimings = defaults.object(forKey: "latent.showRenderTimings") as? Bool ?? true
         defaultSubfolderMode = SubfolderMode(rawValue: defaults.string(forKey: "latent.defaultSubfolderMode") ?? "") ?? .ask
-        defaultExportFolder = BookmarkStore.resolve(key: BookmarkStore.defaultExportFolder)
+        defaultExportFolder = nil
         mlCompute = MLCompute(rawValue: defaults.string(forKey: CoreMLStore.computePreferenceKey) ?? "") ?? .gpu
         subjectModel = defaults.string(forKey: ModelRegistry.subjectPreferenceKey) ?? ModelRegistry.defaultSubjectID
         promptedModel = defaults.string(forKey: ModelRegistry.promptedPreferenceKey) ?? ModelRegistry.defaultPromptedID
         thumbnailSize = ThumbnailGridLayout.clamped(defaults.object(forKey: "latent.thumbnailSize") as? Double
                                                     ?? ThumbnailGridLayout.defaultSide)
         arrowKeysPanImage = defaults.bool(forKey: "latent.arrowKeysPanImage")
+        // Resolved off the main thread (a share that stopped answering
+        // would hold launch); nil until then, as when its disk is away.
+        Task { [weak self] in
+            let url = await BookmarkStore.resolveInBackground(key: BookmarkStore.defaultExportFolder)
+            guard let self, let url, self.defaultExportFolder == nil else { return }
+            self.restoringExportFolder = true
+            self.defaultExportFolder = url
+            self.restoringExportFolder = false
+        }
     }
 
     func applyAppearance() {

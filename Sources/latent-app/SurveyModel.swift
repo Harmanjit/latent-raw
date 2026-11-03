@@ -58,6 +58,10 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
 
     private var focusObservation: AnyCancellable?
     private var renderObservations: [ObjectIdentifier: AnyCancellable] = [:]
+    private var problemObservations: [ObjectIdentifier: AnyCancellable] = [:]
+    /// Where a pane's failures go: the status bar reads only the main
+    /// editor's error, so a pane's own would never be seen. Set by `begin`.
+    var onPaneProblem: (@MainActor (String) -> Void)?
     /// Panes waiting for their turn to run AI denoise.
     private var denoiseWaiting: Set<ObjectIdentifier> = []
     /// Starts a pane's AI denoise run; tests watch the turns instead.
@@ -210,6 +214,9 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
             // Published before the render assigns it: act once it has.
             Task { @MainActor in self.paneRendered(model) }
         }
+        problemObservations[ObjectIdentifier(model)] = model.paneProblems.sink { [weak self] problem in
+            MainActor.assumeIsolated { self?.onPaneProblem?(problem) }
+        }
         return model
     }
 
@@ -218,6 +225,7 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
         model.closeImage()
         model.linkedGroup = nil
         renderObservations[ObjectIdentifier(model)] = nil
+        problemObservations[ObjectIdentifier(model)] = nil
     }
 
     /// After each of a pane's renders: on a small Mac its pooled textures
@@ -280,7 +288,9 @@ extension SurveyModel {
     /// Surveys the library's selection, opening each pane's image with its
     /// stored edit, and makes the focused pane the primary selection. False,
     /// with nothing changed, unless two to four images are selected.
-    func begin(library: Library, onFailure: @escaping @MainActor (String, any Error) -> Void) -> Bool {
+    func begin(library: Library, onFailure: @escaping @MainActor (String, any Error) -> Void,
+               onPaneProblem: (@MainActor (String) -> Void)? = nil) -> Bool {
+        if let onPaneProblem { self.onPaneProblem = onPaneProblem }
         guard let panes = SurveyPanes(selected: library.selectedImageIDs, primary: library.selectedImageID,
                                       order: library.visibleImages.compactMap(\.id)) else { return false }
         let catalog = library.catalog
@@ -350,6 +360,21 @@ extension SurveyModel {
 }
 
 extension EditorModel {
+    /// What a view-only pane (a Survey pane, Compare's Select pane) failed
+    /// at: a stored edit it couldn't read or apply (its `lastError`), or an
+    /// image it couldn't open (its status). The status bar shows only the
+    /// main editor's, so the owner passes these on to it.
+    var paneProblems: AnyPublisher<String, Never> {
+        Publishers.Merge(
+            $lastError.compactMap { $0 },
+            $status.filter { $0.hasPrefix(Self.couldNotOpenPrefix) }
+        )
+        .eraseToAnyPublisher()
+    }
+
+    /// How `open(url:)` starts the status of an image it couldn't open.
+    static let couldNotOpenPrefix = "Could not open"
+
     /// For a view-only pane that kept its image while away: the stored
     /// edit and rotation as they are now, which Develop, a paste, a
     /// rotation in the grid or an undo may have changed.

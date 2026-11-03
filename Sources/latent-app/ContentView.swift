@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import Metal
 import PixelEngine
 import MLKit
@@ -56,6 +57,13 @@ struct ContentView: View {
     /// The second display's Loupe waiting to load a grid selection.
     @State private var secondDisplayLoad: Task<Void, Never>?
     @State private var mode: AppMode = .library
+    /// Set by Open File… as it switches to Develop, so the switch keeps the
+    /// file it opened rather than loading the grid selection over it.
+    @State private var keepOpenedFileOnModeChange = false
+    /// What the grid's own actions report (paste, presets, copy, Export
+    /// open image), for the Library's status bar, which otherwise shows
+    /// only the folder's own status.
+    @StateObject private var gridNotice = GridNotice()
     @State private var showingExportSheet = false
     /// The HDR Merge dialog's state, while it is up (Photo › Photo Merge › HDR…).
     @State private var hdrMergeSheet: HDRMergeSheetModel?
@@ -71,6 +79,7 @@ struct ContentView: View {
     /// time Compare opens. The right pane ("Candidate") is the main model,
     /// which follows the selection as arrow keys move it.
     @State private var compareModel: EditorModel?
+    @State private var compareProblemForwarding: AnyCancellable?
     @State private var whiteBalanceExpanded = true
     @State private var toneExpanded = true
     @State private var cropExpanded = false
@@ -197,7 +206,11 @@ struct ContentView: View {
             Announcement.post(exportQueue.summary + (failed == 0 ? "" : ", \(failed) failed"))
         }
         .onChange(of: model.isExporting) { wasExporting, exporting in
-            if wasExporting, !exporting { Announcement.post(model.status) }
+            guard wasExporting, !exporting else { return }
+            Announcement.post(model.status)
+            // Export open image… from the grid: its outcome, a failure
+            // among them, is the editor's status, which the grid doesn't show.
+            if mode == .library { gridNotice.post(model.status) }
         }
         // Find Spots and the Remove Dust sheet arm the tool themselves, from
         // wherever the panel happens to be; the rings' controls open with it.
@@ -209,7 +222,8 @@ struct ContentView: View {
                         sample: library.selectedImages.first ?? library.selectedImage,
                         records: library.selectedImages,
                         catalogName: library.folderURL?.lastPathComponent ?? "",
-                        preview: ExportPreviewSource(library: library, gpu: model.gpu)) { preset, destination in
+                        preview: ExportPreviewSource(library: library, gpu: model.gpu),
+                        canExport: !exportQueue.isGPUBusy) { preset, destination in
                 guard let gpu = model.gpu else { return }
                 // Flush the editor's pending edit so the export sees it.
                 model.flushPendingSave()
@@ -279,18 +293,28 @@ struct ContentView: View {
                     model.open(url: URL(fileURLWithPath: path))
                     mode = .develop
                 }
-            } else if let last = BookmarkStore.resolve(key: BookmarkStore.lastFolder) {
-                // Reopen where the user left off; the bookmark carries the
-                // sandbox permission the open panel granted last time. A
-                // folder that has gone says so rather than leaving an empty
-                // window.
-                openFolder(last)
-            } else if let stored = BookmarkStore.storedPath(key: BookmarkStore.lastFolder) {
-                // The bookmark didn't resolve: its disk isn't mounted (it is
-                // never mounted for this), or the folder was deleted.
-                let trouble: FolderAccess.Trouble = FolderAccess.isOnDisconnectedVolume(stored.path) ? .notConnected : .missing
-                model.lastError = FolderAccess.message(for: trouble, folder: stored)
+            } else {
+                // Off the main thread: resolving the bookmark and looking
+                // for its volume ask the file system there, and a share that
+                // has stopped answering would hold the window until it times out.
+                Task { await reopenLastFolder() }
             }
+        }
+    }
+
+    /// Reopen where the user left off; the bookmark carries the sandbox
+    /// permission the open panel granted last time. A folder that has gone
+    /// says so rather than leaving an empty window.
+    private func reopenLastFolder() async {
+        if let last = await BookmarkStore.resolveInBackground(key: BookmarkStore.lastFolder) {
+            // Unless a folder was opened meanwhile.
+            if library.folderURL == nil, openingFolder == nil { openFolder(last) }
+        } else if let stored = BookmarkStore.storedPath(key: BookmarkStore.lastFolder) {
+            // The bookmark didn't resolve: its disk isn't mounted (it is
+            // never mounted for this), or the folder was deleted.
+            let path = stored.path
+            let away = await Task.detached(priority: .userInitiated) { FolderAccess.isOnDisconnectedVolume(path) }.value
+            model.lastError = FolderAccess.message(for: away ? .notConnected : .missing, folder: stored)
         }
     }
 
@@ -411,7 +435,23 @@ struct ContentView: View {
     // MARK: - Files
 
     private var fileCommands: LibraryFileCommands {
-        LibraryFileCommands(library: library, canChangeFiles: { !fileOperations.isBusy && !exportQueue.isRunning })
+        LibraryFileCommands(library: library, canChangeFiles: canChangeFiles)
+    }
+
+    /// Whether files may be moved, copied or renamed now. One rule for the
+    /// grid's menu, the sidebar drop and the menu bar alike: not during
+    /// another file operation, an export, or a print, contact sheet, Photo
+    /// Merge or dust job, all of which read the files at the paths they
+    /// started with.
+    private var canChangeFiles: @MainActor () -> Bool {
+        {
+            Self.canChangeFiles(fileOperationBusy: fileOperations.isBusy, exportRunning: exportQueue.isRunning,
+                                outputJobRunning: OutputJobs.shared.isRunning)
+        }
+    }
+
+    static func canChangeFiles(fileOperationBusy: Bool, exportRunning: Bool, outputJobRunning: Bool) -> Bool {
+        !fileOperationBusy && !exportRunning && !outputJobRunning
     }
 
     /// Once: undoing a copy uses the Trash, and an image about to move or be
@@ -508,9 +548,11 @@ struct ContentView: View {
             canPasteSettings: { EditorModel.clipboardStack() != nil },
             presets: { model.presets }, applyPreset: applyPresetToSelection,
             export: { showingExportSheet = true },
-            canExport: { !exportQueue.isRunning },
+            // Not while a merge or dust job holds the GPU slot either: the
+            // queue would refuse to start.
+            canExport: { !exportQueue.isGPUBusy },
             rename: beginRename,
-            canChangeFiles: { !fileOperations.isBusy && !exportQueue.isRunning && !OutputJobs.shared.isRunning },
+            canChangeFiles: { canChangeFiles() },
             transfer: { fileCommands.transferSelection($0, to: $1) },
             recentDestinations: { RecentDestinations.shared.availableFolders })
     }
@@ -534,8 +576,11 @@ struct ContentView: View {
             }
             // Another folder may have opened meanwhile. The record and its
             // id belong to the old catalog; opened now, its edits would be
-            // saved onto whatever photo has that id in the new one.
-            guard library.catalog === catalog else { return }
+            // saved onto whatever photo has that id in the new one. And the
+            // selection may have moved on: a held arrow key starts a load
+            // per image passed, and each would decode its image in turn.
+            guard Self.loadIsCurrent(recordID: record.id, selectedImageID: library.selectedImageID,
+                                     catalogUnchanged: library.catalog === catalog) else { return }
             model.open(url: url, userRotation: record.userRotation,
                        catalogImageID: record.id, editStackJSON: stack)
             // History and snapshots follow, from the catalog.
@@ -551,12 +596,24 @@ struct ContentView: View {
         }
     }
 
+    /// Whether a load whose edit read has just finished should still open
+    /// its record: only while it is still the selection, in the catalog it
+    /// came from. The newest load is the one the user is looking at.
+    static func loadIsCurrent(recordID: Int64?, selectedImageID: Int64?, catalogUnchanged: Bool) -> Bool {
+        catalogUnchanged && recordID != nil && recordID == selectedImageID
+    }
+
     /// Loads a record into Compare's left pane. No catalog id is passed,
     /// so that model never writes edits; it's a viewer.
     private func loadCompareSelect(_ record: ImageRecord) {
         guard let url = library.fileURL(for: record) else { return }
         if compareModel == nil {
-            compareModel = EditorModel()
+            let select = EditorModel()
+            compareModel = select
+            // Its failures are shown as the editor's; the status bar reads no other.
+            compareProblemForwarding = select.paneProblems.sink { problem in
+                MainActor.assumeIsolated { model.lastError = problem }
+            }
             updateCompareLink()
         }
         compareRecord = record
@@ -579,6 +636,8 @@ struct ContentView: View {
     /// arrow keys then walk the Candidate.
     private func modeDidChange(from old: AppMode) {
         defer { secondDisplay.follow(viewedModel) }
+        let keepingOpenedFile = keepOpenedFileOnModeChange
+        keepOpenedFileOnModeChange = false
         updateCompareLink()
         if fullScreen.isActive, !FullScreenImagePolicy.keepsFullScreen(in: mode) { fullScreen.leave() }
         if old == .develop {
@@ -589,11 +648,32 @@ struct ContentView: View {
         }
         guard surveyModeDidChange(from: old) else { return }
         guard mode != .library, let selected = library.selectedImage else { return }
-        if model.catalogImageID != selected.id { load(selected) }
+        if Self.modeChangeLoadsSelection(editorImageID: model.catalogImageID, selectedImageID: selected.id,
+                                         keepingOpenedFile: keepingOpenedFile) {
+            load(selected)
+        }
         if mode == .compare {
             let other = library.selectedImages.first { $0.id != selected.id }
             loadCompareSelect(other ?? compareRecord ?? selected)
         }
+    }
+
+    /// Whether entering an image mode loads the grid selection into the
+    /// editor: when the editor holds something else, unless that is a file
+    /// just chosen with Open File…, which must not be replaced a moment
+    /// after it opened.
+    static func modeChangeLoadsSelection(editorImageID: Int64?, selectedImageID: Int64?,
+                                         keepingOpenedFile: Bool) -> Bool {
+        !keepingOpenedFile && editorImageID != selectedImageID
+    }
+
+    /// File › Open File… and the status bar's button: a raw file on its
+    /// own, in Develop. Cancelling the panel changes nothing, so the window
+    /// stays in the mode it was in.
+    private func openFileOnItsOwn() {
+        guard model.showOpenPanel(), mode != .develop else { return }
+        keepOpenedFileOnModeChange = true
+        mode = .develop
     }
 
     /// Links the two panes' views while Compare shows and Sync is on, and
@@ -687,7 +767,8 @@ struct ContentView: View {
     private func surveyModeDidChange(from old: AppMode) -> Bool {
         if old == .survey { survey.end() }
         guard mode == .survey else { return true }
-        guard survey.begin(library: library, onFailure: model.reportFailure) else {
+        guard survey.begin(library: library, onFailure: model.reportFailure,
+                           onPaneProblem: { model.lastError = $0 }) else {
             NSSound.beep()
             mode = old
             return false
@@ -974,13 +1055,22 @@ struct ContentView: View {
         library.perform("Rotating") {
             try await library.rotateSelected(by: quarterTurns, onlyPrimary: mode != .library)
             if let selected = library.selectedImage,
-               model.imageTitle == selected.fileName {
+               Self.editorHolds(selected, catalogImageID: model.catalogImageID, imageTitle: model.imageTitle) {
                 model.setUserRotation(selected.userRotation)
             }
             if let selected = library.selectedImage {
                 survey.model(for: selected.id)?.setUserRotation(selected.userRotation)
             }
         }
+    }
+
+    /// Whether the editor holds `record`. By catalog id: with included
+    /// subfolders two photos can share a file name, and the other one must
+    /// not take (and save) the change. A file opened on its own has no id,
+    /// and only then does the name decide.
+    static func editorHolds(_ record: ImageRecord, catalogImageID: Int64?, imageTitle: String?) -> Bool {
+        if let catalogImageID { return catalogImageID == record.id }
+        return imageTitle == record.fileName
     }
 
     /// Left/right arrows step through the catalog; in Develop that also
@@ -1082,7 +1172,7 @@ struct ContentView: View {
         case .openFolder:
             showOpenFolderPanel()
         case .openFile:
-            model.showOpenPanel(); mode = .develop
+            openFileOnItsOwn()
         case .export:
             showingExportSheet = true
         case .exportOpenImage:
@@ -1265,14 +1355,14 @@ struct ContentView: View {
             Task {
                 do {
                     guard let json = try await library.editStack(for: first) else {
-                        model.reportError("\(first.fileName) has no edits to copy"); return
+                        reportOutcome("\(first.fileName) has no edits to copy"); return
                     }
                     let stack = try EditStack.decode(json: json)
                     let text = try stack.restricted(to: model.pasteGroups).encodeJSON()
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: EditorModel.pasteboardType)
                     NSPasteboard.general.setString(text, forType: .string)
-                    model.reportError("Copied settings from \(first.fileName)")
+                    reportOutcome("Copied settings from \(first.fileName)")
                 } catch {
                     model.reportFailure("Copying settings from \(first.fileName)", error)
                 }
@@ -1281,7 +1371,7 @@ struct ContentView: View {
     }
 
     private func pasteSettings() {
-        guard let stack = EditorModel.clipboardStack() else { model.reportError("Nothing to paste"); return }
+        guard let stack = EditorModel.clipboardStack() else { reportOutcome("Nothing to paste"); return }
         applyToSelectionOrEditor(stack, groups: model.pasteGroups, what: "Pasted", undoName: "Paste Settings")
     }
 
@@ -1340,13 +1430,14 @@ struct ContentView: View {
             if !outcome.skipped.isEmpty {
                 message += " · skipped \(outcome.skipped.count) with unreadable edits: " + outcome.skipped.joined(separator: ", ")
             }
-            model.reportError(message)
+            reportOutcome(message)
             // If the open image was among them, reload its sliders. The
             // editor then finds its faces itself when a pasted touch-up
             // wants them, so the job below leaves that photo out: one
             // search, not two, and no note that it was edited meanwhile.
             var handledByEditor: Int64?
-            if let selected = library.selectedImage, model.imageTitle == selected.fileName,
+            if let selected = library.selectedImage,
+               Self.editorHolds(selected, catalogImageID: model.catalogImageID, imageTitle: model.imageTitle),
                target == .primary || library.selectedImageIDs.contains(selected.id ?? -1) {
                 model.apply(stack, groups: groups)
                 handledByEditor = selected.id
@@ -2023,6 +2114,21 @@ struct ContentView: View {
         })
     }
 
+    /// The Library's status-bar text: a hand-off to an external editor or
+    /// the outcome of a grid action while either is fresh, else the folder's
+    /// own status.
+    static func libraryStatusText(handOffNotice: String?, gridNotice: String?, folderStatus: String) -> String {
+        handOffNotice ?? gridNotice ?? folderStatus
+    }
+
+    /// Reports the outcome of a settings action. The editor's status shows
+    /// it in Loupe, Develop and Compare; the grid's status bar doesn't read
+    /// that, so in Library it is posted there as well.
+    private func reportOutcome(_ message: String) {
+        model.reportError(message)
+        if mode == .library { gridNotice.post(message) }
+    }
+
     /// The failure the status bar shows in red, if any.
     private var currentProblem: String? { model.setupError ?? library.lastError ?? model.lastError }
 
@@ -2036,7 +2142,7 @@ struct ContentView: View {
             .controlSize(.small)
             .frame(width: 340)
 
-            Button("Open File…") { model.showOpenPanel(); mode = .develop }
+            Button("Open File…") { openFileOnItsOwn() }
                 .controlSize(.small)
                 .disabled(!model.isReady)
 
@@ -2081,7 +2187,10 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(Color.red)
             } else {
-                Text(mode == .library ? handOff.notice ?? library.statusText : viewedModel.status)
+                Text(mode == .library
+                     ? Self.libraryStatusText(handOffNotice: handOff.notice, gridNotice: gridNotice.text,
+                                              folderStatus: library.statusText)
+                     : viewedModel.status)
                     .font(.caption)
                     .foregroundStyle(Color.secondary)
                     .lineLimit(1)
@@ -2174,5 +2283,29 @@ enum CropAspectOption: String, CaseIterable, Identifiable {
             guard let r = option.ratio(original: original) else { return false }
             return abs(r - ratio) < 0.002
         } ?? .free
+    }
+}
+
+/// The outcome of the grid's own actions, shown in the Library's status bar
+/// for a while (as an external editor hand-off is), then the folder's
+/// status again.
+@MainActor
+final class GridNotice: ObservableObject {
+    @Published private(set) var text: String?
+    private var clearing: Task<Void, Never>?
+    private let shownFor: Duration
+
+    init(shownFor: Duration = .seconds(12)) {
+        self.shownFor = shownFor
+    }
+
+    func post(_ message: String) {
+        text = message
+        clearing?.cancel()
+        clearing = Task { [weak self, shownFor] in
+            try? await Task.sleep(for: shownFor)
+            guard !Task.isCancelled else { return }
+            self?.text = nil
+        }
     }
 }

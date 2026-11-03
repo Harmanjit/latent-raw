@@ -117,6 +117,13 @@ struct LibraryPanel: View {
         .onChange(of: library.selectedKeywords, initial: true) { _, keywords in
             keywordText = keywords.joined(separator: ", ")
         }
+        // And whenever another image becomes the selection: its keywords may
+        // be the same as the last one's (both none, often), which the change
+        // above doesn't see, and an unsubmitted draft typed for that image
+        // would then stay under this one's name and be saved onto it.
+        .onChange(of: library.selectedImageID) {
+            keywordText = library.selectedKeywords.joined(separator: ", ")
+        }
     }
 
     /// Export the selection, and how the current batch is going.
