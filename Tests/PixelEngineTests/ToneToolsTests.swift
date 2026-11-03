@@ -336,7 +336,18 @@ final class ToneToolsTests: XCTestCase {
         var lifted = EditParameters(); lifted.parametricCurve.shadows = 1
         XCTAssertGreaterThan(meanLuma(try pixels(lifted)), meanLuma(plain) + 0.01, "Shadows +100 lightens")
         var darkened = EditParameters(); darkened.parametricCurve.lights = -1
-        XCTAssertLessThan(meanLuma(try pixels(darkened)), meanLuma(plain) - 0.005, "Lights −100 darkens")
+        // Judged on the light tones Lights works on: how much of a picture
+        // they are depends on the raw (CI's golden raw is mostly darker).
+        let dark = try pixels(darkened)
+        var lightsDrop: Float = 0, lightsCount = 0
+        for i in stride(from: 0, to: plain.count, by: 4) {
+            let before = meanLuma(Array(plain[i..<i + 4]))
+            guard before > 0.5, before < 0.9 else { continue }
+            lightsDrop += before - meanLuma(Array(dark[i..<i + 4])); lightsCount += 1
+        }
+        XCTAssertGreaterThan(lightsCount, 500)
+        XCTAssertGreaterThan(lightsDrop / Float(max(lightsCount, 1)), 0.01, "Lights −100 darkens the light tones")
+        XCTAssertLessThan(meanLuma(dark), meanLuma(plain), "and the picture as a whole")
 
         var muted = contrast; muted.curveSaturation = -1
         var boosted = contrast; boosted.curveSaturation = 1

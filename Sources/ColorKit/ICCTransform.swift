@@ -178,24 +178,16 @@ public enum ICCImageConversion {
     public static func convert(_ image: CGImage, to space: CGColorSpace, intent: RenderingIntent) -> CGImage? {
         let bits: Int
         let info: CGBitmapInfo
-        let depth: ColorSyncDataDepth
-        let layout: ColorSyncDataLayout
         switch space.model {
         case .rgb:
             bits = 16
             info = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)
-            depth = kColorSync16BitInteger
-            layout = kColorSyncAlphaNoneSkipLast.rawValue | UInt32(kColorSyncByteOrder16Little)
         case .monochrome:
             bits = 16
             info = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)
-            depth = kColorSync16BitInteger
-            layout = kColorSyncAlphaNone.rawValue | UInt32(kColorSyncByteOrder16Little)
         case .cmyk:
             bits = 8
             info = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
-            depth = kColorSync8BitInteger
-            layout = kColorSyncAlphaNone.rawValue | UInt32(kColorSyncByteOrderDefault)
         default:
             return nil
         }
@@ -210,6 +202,10 @@ public enum ICCImageConversion {
                                      bytesPerRow: 0, space: space, bitmapInfo: info.rawValue),
               let outputBase = output.data else { return nil }
         let outputRowBytes = output.bytesPerRow
+        // The slots each output pixel takes in the bitmap: RGB keeps a
+        // fourth, skipped, as Core Graphics wants for 16-bit RGB.
+        let channels = destination.channels
+        let slots = space.model == .rgb ? 4 : channels
         let stripInfo = CGBitmapInfo(rawValue: CGBitmapInfo.floatComponents.rawValue
                                      | CGImageAlphaInfo.noneSkipLast.rawValue
                                      | CGBitmapInfo.byteOrder32Little.rawValue)
@@ -221,7 +217,13 @@ public enum ICCImageConversion {
         strip.interpolationQuality = .none
         let blackPoint = intent.usesBlackPointCompensation ? ICCTransform.blackPoint(of: destination) : 0
         let floats = stripBase.bindMemory(to: Float.self, capacity: width * rows * 4)
-        let floatLayout = kColorSyncAlphaNoneSkipLast.rawValue | UInt32(kColorSyncByteOrderDefault)
+        // ColorSync converts packed floats with no alpha, the one layout
+        // whose handling is the same on every macOS Latent runs on; the
+        // padded integer layouts came out scrambled on macOS 15. Packing
+        // into the bitmap's integers is done here instead.
+        let packedLayout = kColorSyncAlphaNone.rawValue | UInt32(kColorSyncByteOrderDefault)
+        var input = [Float](repeating: 0, count: width * rows * 3)
+        var converted = [Float](repeating: 0, count: width * rows * channels)
 
         var top = 0
         while top < height {
@@ -231,16 +233,43 @@ public enum ICCImageConversion {
             // row `top` lands there.
             strip.draw(image, in: CGRect(x: 0, y: CGFloat(rows - (height - top)), width: CGFloat(width),
                                          height: CGFloat(height)))
-            if blackPoint > 0 {
-                for i in 0..<(width * count * 4) where i % 4 != 3 {
-                    floats[i] = ICCTransform.compressBlack(max(floats[i], 0), blackPoint: blackPoint)
+            let pixels = width * count
+            for i in 0..<pixels {
+                for c in 0..<3 {
+                    let v = floats[i * 4 + c]
+                    input[i * 3 + c] = blackPoint > 0 ? ICCTransform.compressBlack(max(v, 0), blackPoint: blackPoint) : v
                 }
             }
-            let ok = ColorSyncTransformConvert(transform, width, count,
-                                               outputBase.advanced(by: top * outputRowBytes), depth, layout,
-                                               outputRowBytes,
-                                               stripBase, kColorSync32BitFloat, floatLayout, width * 16, nil)
+            let ok = input.withUnsafeMutableBytes { inBytes in
+                converted.withUnsafeMutableBytes { outBytes in
+                    ColorSyncTransformConvert(transform, pixels, 1,
+                                              outBytes.baseAddress!, kColorSync32BitFloat, packedLayout,
+                                              pixels * channels * 4,
+                                              inBytes.baseAddress!, kColorSync32BitFloat, packedLayout,
+                                              pixels * 3 * 4, nil)
+                }
+            }
             guard ok else { return nil }
+            for row in 0..<count {
+                let rowBase = outputBase.advanced(by: (top + row) * outputRowBytes)
+                if bits == 16 {
+                    let words = rowBase.bindMemory(to: UInt16.self, capacity: width * slots)
+                    for x in 0..<width {
+                        for c in 0..<channels {
+                            let v = min(max(converted[(row * width + x) * channels + c], 0), 1)
+                            words[x * slots + c] = UInt16(littleEndian: UInt16((v * 65535).rounded()))
+                        }
+                    }
+                } else {
+                    let bytes = rowBase.bindMemory(to: UInt8.self, capacity: width * slots)
+                    for x in 0..<width {
+                        for c in 0..<channels {
+                            let v = min(max(converted[(row * width + x) * channels + c], 0), 1)
+                            bytes[x * slots + c] = UInt8((v * 255).rounded())
+                        }
+                    }
+                }
+            }
             top += count
         }
         return output.makeImage()
