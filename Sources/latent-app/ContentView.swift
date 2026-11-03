@@ -111,7 +111,7 @@ struct ContentView: View {
                           onOpen: { openFolder($0) }, onChooseFolder: chooseFavouriteFolder,
                           onDropImages: { fileCommands.dropImages($0, on: $1, mode: $2) },
                           areLibraryImages: { fileCommands.areLibraryImages($0) },
-                          navigator: navigator, onStepHistory: stepFolderHistory)
+                          navigator: navigator, onStepHistory: stepFolderHistory, library: library)
                 .navigationSplitViewColumnWidth(min: 170, ideal: 220, max: 360)
         } detail: {
             mainArea
@@ -269,6 +269,8 @@ struct ContentView: View {
             LensfunDatabase.warmUp()
             wireEditSaving()
             wireFileOperations()
+            // The open folder's watch and the watched-folder import.
+            FolderWatching.shared.start(library: library)
             // Quitting flushes and waits for these (AppDelegate).
             AppDelegate.register(model: model, library: library, exportQueue: exportQueue)
             if let gpu = model.gpu {
@@ -1258,6 +1260,8 @@ struct ContentView: View {
             fileCommands.transferSelection(.move, to: nil)
         case .copyToFolder:
             fileCommands.transferSelection(.copy, to: nil)
+        case .refreshFolder:
+            library.refreshFromDisk()
         case .back:
             stepFolderHistory(-1)
         case .forward:
@@ -1339,6 +1343,7 @@ struct ContentView: View {
         state.showMaskOverlay = model.showMaskOverlay
         state.filterActive = library.filter.isActive
         state.hasCompareSelect = compareRecord != nil
+        state.hasFolder = library.folderURL != nil
         state.canGoBack = navigator.history.canGoBack
         state.canGoForward = navigator.history.canGoForward
         state.fileOperationRunning = fileOperations.isBusy

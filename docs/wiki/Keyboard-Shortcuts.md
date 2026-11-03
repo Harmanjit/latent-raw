@@ -72,6 +72,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | Keys | Action |
 |---|---|
 | F2 | Rename the selected image (its sidecar and thumbnail follow) |
+| ⌘R | Refresh the open folder: scan it again for photos added, removed or renamed outside Latent |
 | Drag images onto a sidebar folder | Move them there with their edits (hold ⌥ to copy) |
 
 ## Photo Merge

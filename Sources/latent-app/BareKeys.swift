@@ -94,6 +94,9 @@ enum KeyCommand: Equatable {
     /// Files: rename the selected image, move or copy the selection to a
     /// folder, and Back / Forward between the folders opened.
     case rename, moveToFolder, copyToFolder, back, forward
+    /// File › Refresh Folder: scan the open folder again for files added,
+    /// removed or renamed outside Latent.
+    case refreshFolder
     /// F: the image alone, full screen. The second display's Loupe is menu only.
     case fullScreenImage, secondaryDisplay
     /// Arrow keys on a zoomed-in image, when Settings has them pan.

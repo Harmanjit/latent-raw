@@ -183,6 +183,35 @@ final class FavouriteFolders: ObservableObject {
         return true
     }
 
+    /// Add Parent Folder: `parent` (chosen in an open panel, which is what
+    /// grants access to it) takes the place of the first favourite inside
+    /// it, and every favourite inside it goes, since each now shows in its
+    /// tree. A parent that holds no favourite is simply added. Returns
+    /// false if no bookmark could be made for it.
+    @discardableResult
+    func addParent(_ parent: URL) -> Bool {
+        guard let data = BookmarkStore.bookmark(for: parent) else { return false }
+        startAccessing(parent)
+        let favourite = FavouriteFolder(url: parent.standardizedFileURL, bookmark: data, isAvailable: true)
+        folders = Self.adoptingParent(favourite, in: folders)
+        persist()
+        return true
+    }
+
+    /// The list with `parent` in place of the favourites inside it (at the
+    /// first one's place), or added at the end when none is.
+    static func adoptingParent(_ parent: FavouriteFolder, in folders: [FavouriteFolder]) -> [FavouriteFolder] {
+        let isInside = { (folder: FavouriteFolder) in
+            FolderAccess.chain(from: parent.url, to: folder.url) != nil
+        }
+        guard let first = folders.firstIndex(where: isInside) else {
+            return folders.contains { $0.id == parent.id } ? folders : folders + [parent]
+        }
+        var result = folders
+        result[first] = parent
+        return result.enumerated().filter { $0.offset == first || !isInside($0.element) }.map(\.element)
+    }
+
     /// Forgets the bookmark. Its access is left open until quit: the open
     /// catalog may be this folder or inside it.
     func remove(_ url: URL) {
