@@ -225,7 +225,7 @@ public enum AIMaskGenerator {
         case kCVPixelFormatType_OneComponent32Float:
             for y in 0..<h {
                 let row = base.advanced(by: y * stride).assumingMemoryBound(to: Float.self)
-                for x in 0..<w { out[y * w + x] = UInt8(min(max(row[x], 0), 1) * 255) }
+                for x in 0..<w { out[y * w + x] = MLImage.maskByte(row[x]) }
             }
         default:
             throw AIMaskError.unsupportedPixelFormat

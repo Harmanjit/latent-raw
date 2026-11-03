@@ -79,14 +79,19 @@ public final class SegmentationModel: @unchecked Sendable {
         public let probabilities: [Float]   // [class][y][x]
 
         /// A soft mask for the union of `classIndices`: the summed
-        /// probability of those classes at each pixel.
+        /// probability of those classes at each pixel. Indices with no
+        /// plane in `probabilities` are skipped rather than read past the
+        /// end; an imported labels file can name more classes than its
+        /// model has planes.
         public func mask(classIndices: [Int]) -> MaskBitmap {
             let n = size * size
+            let planes = n > 0 ? probabilities.count / n : 0
+            let classes = classIndices.filter { $0 >= 0 && $0 < planes }
             var out = [UInt8](repeating: 0, count: n)
             for i in 0..<n {
                 var p: Float = 0
-                for c in classIndices { p += probabilities[c * n + i] }
-                out[i] = UInt8(min(max(p, 0), 1) * 255)
+                for c in classes { p += probabilities[c * n + i] }
+                out[i] = MLImage.maskByte(p)
             }
             return MaskBitmap(width: size, height: size, data: out)
         }
@@ -101,8 +106,17 @@ public final class SegmentationModel: @unchecked Sendable {
         guard let array = output.featureValue(for: outputName)?.multiArrayValue else { throw AIMaskError.noResult }
         // Output is (1, classes, H, W) at the network's native resolution —
         // a quarter of the input. The chosen mask is upsampled later.
-        let size = array.shape.count >= 4 ? array.shape[2].intValue : inputSize
-        return ClassMap(size: size, classCount: labels.count, probabilities: array.floats())
+        // An imported model's labels file is trusted as the index space of
+        // that output, so check it matches: one plane per label, square.
+        let shape = array.shape.map(\.intValue)
+        guard shape.count == 4, shape[0] == 1, shape[1] == labels.count, shape[2] == shape[3], shape[2] > 0 else {
+            throw SegmentationModelError.unexpectedOutput("shape \(shape) for \(labels.count) labels")
+        }
+        let probabilities = array.floats()
+        guard probabilities.count == labels.count * shape[2] * shape[3] else {
+            throw SegmentationModelError.unexpectedOutput("\(probabilities.count) values for shape \(shape)")
+        }
+        return ClassMap(size: shape[2], classCount: labels.count, probabilities: probabilities)
     }
 
     public func indices(forLabels names: [String]) -> [Int] {
@@ -111,12 +125,13 @@ public final class SegmentationModel: @unchecked Sendable {
 }
 
 public enum SegmentationModelError: Error, Equatable, CustomStringConvertible {
-    case wrongKind(String), noPackage(String), noLabels(String)
+    case wrongKind(String), noPackage(String), noLabels(String), unexpectedOutput(String)
     public var description: String {
         switch self {
         case .wrongKind(let id): return "'\(id)' is not a class model"
         case .noPackage(let id): return "'\(id)' names no package to load"
         case .noLabels(let id): return "'\(id)' has no readable labels file beside its package"
+        case .unexpectedOutput(let what): return "The class model's output does not match its labels file (\(what))"
         }
     }
 }

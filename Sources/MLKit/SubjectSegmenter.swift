@@ -113,7 +113,7 @@ public final class SubjectSegmenter: @unchecked Sendable {
         for i in 0..<data.count {
             var v = values[i]
             if logits { v = 1 / (1 + exp(-v)) }
-            data[i] = UInt8(min(max(v, 0), 1) * 255)
+            data[i] = MLImage.maskByte(v)
         }
         var mask = MaskBitmap(width: width, height: height, data: data)
         if entry.manifest.refine == .guided {

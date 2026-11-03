@@ -95,4 +95,73 @@ final class CoreMLStoreTests: XCTestCase {
             XCTAssertEqual(CoreMLStore.packageURL("NAFNet_SIDD_width32")?.lastPathComponent, "NAFNet_SIDD_width32.mlpackage")
         }
     }
+
+    // MARK: - The name-keyed cache
+
+    /// Entries made under a temporary cache, so the installed app's are untouched.
+    func withTemporaryCache(_ body: (URL) async throws -> Void) async throws {
+        let cache = root.appendingPathComponent("cache")
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        CoreMLStore.overrideCacheDirectory(cache)
+        defer { CoreMLStore.overrideCacheDirectory(nil) }
+        try await body(cache)
+    }
+
+    func testNameKeyedEntryNames() {
+        XCTAssertEqual(CoreMLStore.nameKeyedName(of: "NAFNet_SIDD_width32-58326976-1758000000.mlmodelc"), "NAFNet_SIDD_width32")
+        XCTAssertEqual(CoreMLStore.nameKeyedName(of: "SegFormer_segformer_b2_finetuned_ade_512_512-1-2.mlmodelc"),
+                       "SegFormer_segformer_b2_finetuned_ade_512_512")
+        XCTAssertNil(CoreMLStore.nameKeyedName(of: "sam2.1-small-SAM2_1SmallPromptEncoderFLOAT16.mlpackage-0123456789012345.mlmodelc"))
+        XCTAssertNil(CoreMLStore.nameKeyedName(of: "store-test-12345678-Prompt.mlpackage-0123456789abcdef.mlmodelc"))
+        XCTAssertNil(CoreMLStore.nameKeyedName(of: "NAFNet_SIDD_width32-58326976-1758000000"))
+        XCTAssertNil(CoreMLStore.nameKeyedName(of: "-1-2.mlmodelc"))
+        XCTAssertNil(CoreMLStore.nameKeyedName(of: "x-1-a2.mlmodelc"))
+    }
+
+    /// Each build or reinstall gives the bundled denoiser a new mtime and
+    /// so a new key. Loading prunes that name's older entries and the
+    /// entries of names no longer loaded by name, and leaves the other
+    /// denoiser variant and the manifest-keyed entries alone.
+    func testNameKeyedLoadPrunesStaleEntries() async throws {
+        let name = AIDenoiser.Variant.standard.packageName
+        try XCTSkipUnless(CoreMLStore.isAvailable(name), "NAFNet package not bundled")
+        try await withTemporaryCache { cache in
+            let fm = FileManager.default
+            let stale = ["\(name)-58326976-1700000000.mlmodelc", "\(name)-58326976-1700000001.mlmodelc",
+                         "SAM2_1SmallImageEncoderFLOAT16-1-2.mlmodelc", "SegFormer_segformer_b2_finetuned_ade_512_512-3-4.mlmodelc"]
+            let kept = ["NAFNet_SIDD_width64-5-6.mlmodelc",
+                        "sam2.1-small-SAM2_1SmallPromptEncoderFLOAT16.mlpackage-0123456789abcdef.mlmodelc"]
+            for entry in stale + kept {
+                try fm.createDirectory(at: cache.appendingPathComponent(entry), withIntermediateDirectories: true)
+            }
+            _ = try await CoreMLStore.load(name, computeUnits: .cpuOnly)
+            let after = try fm.contentsOfDirectory(atPath: cache.path).sorted()
+            let fresh = after.filter { $0.hasPrefix(name + "-") }
+            XCTAssertEqual(fresh.count, 1, "one compiled copy of \(name): \(after)")
+            XCTAssertFalse(stale.contains(fresh.first ?? ""))
+            XCTAssertEqual(Set(after), Set(kept + fresh))
+
+            // A second load reuses that one copy.
+            _ = try await CoreMLStore.load(name, computeUnits: .cpuOnly)
+            XCTAssertEqual(try fm.contentsOfDirectory(atPath: cache.path).sorted(), after)
+        }
+    }
+
+    /// The prune alone, with no compile: same-name siblings and retired
+    /// names go, the key being kept and everything else stays.
+    func testPruneNameKeyedWithoutLoading() async throws {
+        try await withTemporaryCache { cache in
+            let fm = FileManager.default
+            let entries = ["NAFNet_SIDD_width32-1-1.mlmodelc", "NAFNet_SIDD_width32-1-2.mlmodelc",
+                           "NAFNet_SIDD_width64-1-1.mlmodelc", "SAM2_1SmallMaskDecoderFLOAT16-1-1.mlmodelc",
+                           "birefnet-lite-BiRefNet_lite.mlpackage-0123456789abcdef.mlmodelc", "notes.txt"]
+            for entry in entries {
+                try fm.createDirectory(at: cache.appendingPathComponent(entry), withIntermediateDirectories: true)
+            }
+            CoreMLStore.pruneNameKeyed(keeping: "NAFNet_SIDD_width32-1-2.mlmodelc", name: "NAFNet_SIDD_width32")
+            XCTAssertEqual(try fm.contentsOfDirectory(atPath: cache.path).sorted(),
+                           ["NAFNet_SIDD_width32-1-2.mlmodelc", "NAFNet_SIDD_width64-1-1.mlmodelc",
+                            "birefnet-lite-BiRefNet_lite.mlpackage-0123456789abcdef.mlmodelc", "notes.txt"])
+        }
+    }
 }
