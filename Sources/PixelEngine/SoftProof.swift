@@ -11,13 +11,52 @@ public enum SoftProofTarget: Equatable, Sendable {
     case displayP3
     /// A profile file: a printer/paper profile, or any ICC.
     case icc(URL)
+    /// A profile held in memory, such as the screen's own (the monitor
+    /// gamut warning), with a name to show for it.
+    case profile(name: String, data: Data)
 
     public var displayName: String {
         switch self {
         case .sRGB: return "sRGB"
         case .displayP3: return "Display P3"
         case .icc(let url): return url.deletingPathExtension().lastPathComponent
+        case .profile(let name, _): return name
         }
+    }
+
+    /// Whether the target is a profile file or held profile, where the
+    /// rendering intent and paper simulation mean something. The two
+    /// display spaces are plain matrices: every intent clips them the
+    /// same way and their white is the screen's.
+    public var isICC: Bool {
+        switch self {
+        case .sRGB, .displayP3: return false
+        case .icc, .profile: return true
+        }
+    }
+}
+
+/// How a soft proof converts into its target and back to the screen. A
+/// view setting, like the target: never part of the edit.
+public struct SoftProofOptions: Codable, Equatable, Sendable {
+    /// The intent used into the target, as printing or a profile
+    /// conversion on export would use it.
+    public var intent: RenderingIntent = .perceptual
+    /// Show the paper's white and the ink's black as they are, rather than
+    /// mapped to the screen's white and black: the proof then looks as dull
+    /// as a print beside the screen honestly does.
+    public var simulatePaperAndInk = false
+
+    public init(intent: RenderingIntent = .perceptual, simulatePaperAndInk: Bool = false) {
+        self.intent = intent
+        self.simulatePaperAndInk = simulatePaperAndInk
+    }
+
+    /// Fields missing from an older store keep their defaults.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        intent = (try? c.decode(RenderingIntent.self, forKey: .intent)) ?? .perceptual
+        simulatePaperAndInk = (try? c.decode(Bool.self, forKey: .simulatePaperAndInk)) ?? false
     }
 }
 
@@ -42,6 +81,7 @@ public final class SoftProofLUT: @unchecked Sendable {
     public static let size = 33
     public let id = UUID()
     public let target: SoftProofTarget
+    public let options: SoftProofOptions
     /// RGBA float16, index ((b * size + g) * size + r) * 4.
     public let entries: [Float16]
 
@@ -49,8 +89,9 @@ public final class SoftProofLUT: @unchecked Sendable {
     /// how much the two gamuts differ.
     public let outOfGamutFraction: Double
 
-    private init(target: SoftProofTarget, entries: [Float16], outOfGamutFraction: Double) {
+    private init(target: SoftProofTarget, options: SoftProofOptions, entries: [Float16], outOfGamutFraction: Double) {
         self.target = target
+        self.options = options
         self.entries = entries
         self.outOfGamutFraction = outOfGamutFraction
     }
@@ -70,7 +111,48 @@ public final class SoftProofLUT: @unchecked Sendable {
     /// a component by less than this (in gamma-2.2 units) is invisible.
     static let clipThreshold: Float = 0.02
 
-    public static func build(_ target: SoftProofTarget) throws -> SoftProofLUT {
+    public static func build(_ target: SoftProofTarget, options: SoftProofOptions = SoftProofOptions()) throws -> SoftProofLUT {
+        let grid = makeGrid()
+        let proofed: [Float]
+        // Which colours get flagged is a question about the target's gamut
+        // alone, so it is answered the same way whatever the intent or
+        // paper setting: a relative colorimetric round trip.
+        let reference: [Float]
+        switch target {
+        case .sRGB, .displayP3:
+            proofed = try matrixRoundTrip(grid, space: target == .sRGB ? .sRGB : .displayP3)
+            reference = proofed
+        case .icc(let url):
+            guard let profile = ICCProfile(url: url) else { throw ProofError.profileUnreadable(url) }
+            (proofed, reference) = try iccRoundTrip(grid, profile: profile, options: options)
+        case .profile(_, let data):
+            guard let profile = ICCProfile(data: data) else { throw ProofError.conversionFailed }
+            (proofed, reference) = try iccRoundTrip(grid, profile: profile, options: options)
+        }
+        return assemble(target: target, options: options, grid: grid, proofed: proofed, reference: reference)
+    }
+
+    /// A table that only flags: colours `target` can't show get alpha 1,
+    /// and the colour itself passes through untouched. The monitor gamut
+    /// warning samples one of these after the proof.
+    public static func gamutCheck(_ target: SoftProofTarget) throws -> SoftProofLUT {
+        let grid = makeGrid()
+        let reference: [Float]
+        switch target {
+        case .sRGB, .displayP3:
+            reference = try matrixRoundTrip(grid, space: target == .sRGB ? .sRGB : .displayP3)
+        case .icc(let url):
+            guard let profile = ICCProfile(url: url) else { throw ProofError.profileUnreadable(url) }
+            reference = try iccRoundTrip(grid, profile: profile, options: SoftProofOptions(intent: .relativeColorimetric)).reference
+        case .profile(_, let data):
+            guard let profile = ICCProfile(data: data) else { throw ProofError.conversionFailed }
+            reference = try iccRoundTrip(grid, profile: profile, options: SoftProofOptions(intent: .relativeColorimetric)).reference
+        }
+        return assemble(target: target, options: SoftProofOptions(), grid: grid, proofed: grid, reference: reference)
+    }
+
+    /// Grid of working-space (linear Rec.2020) display-referred colours.
+    private static func makeGrid() -> [Float] {
         let n = size
         // Grid of working-space (linear Rec.2020) display-referred colours.
         var grid = [Float](repeating: 0, count: n * n * n * 4)
@@ -81,28 +163,27 @@ public final class SoftProofLUT: @unchecked Sendable {
             grid[i + 2] = Float(b) / Float(n - 1)
             grid[i + 3] = 1
         } } }
+        return grid
+    }
 
-        let proofed: [Float]
-        switch target {
-        case .sRGB, .displayP3:
-            proofed = try matrixRoundTrip(grid, space: target == .sRGB ? .sRGB : .displayP3)
-        case .icc(let url):
-            proofed = try iccRoundTrip(grid, profile: url)
-        }
-
+    /// The table from the grid, what each grid colour shows as, and the
+    /// colorimetric round trip that decides which ones are flagged.
+    private static func assemble(target: SoftProofTarget, options: SoftProofOptions, grid: [Float],
+                                 proofed: [Float], reference: [Float]) -> SoftProofLUT {
+        let n = size
         var entries = [Float16](repeating: 0, count: n * n * n * 4)
         var flagged = 0
         for i in stride(from: 0, to: grid.count, by: 4) {
             var clipped = false
             for c in 0..<3 {
-                let a = pow(max(grid[i + c], 0), 1 / 2.2), b = pow(max(proofed[i + c], 0), 1 / 2.2)
+                let a = pow(max(grid[i + c], 0), 1 / 2.2), b = pow(max(reference[i + c], 0), 1 / 2.2)
                 if abs(a - b) > clipThreshold { clipped = true }
                 entries[i + c] = Float16(min(max(proofed[i + c], 0), 1))
             }
             entries[i + 3] = clipped ? 1 : 0
             if clipped { flagged += 1 }
         }
-        return SoftProofLUT(target: target, entries: entries,
+        return SoftProofLUT(target: target, options: options, entries: entries,
                             outOfGamutFraction: Double(flagged) / Double(n * n * n))
     }
 
@@ -121,56 +202,56 @@ public final class SoftProofLUT: @unchecked Sendable {
         return out
     }
 
-    /// ICC profiles: ColorSync does the conversion, through vImage so it's
-    /// one call per direction rather than per colour.
-    static func iccRoundTrip(_ grid: [Float], profile url: URL) throws -> [Float] {
-        guard let data = try? Data(contentsOf: url),
-              let targetSpace = CGColorSpace(iccData: data as CFData) else {
-            throw ProofError.profileUnreadable(url)
-        }
-        guard let working = CGColorSpace(name: CGColorSpace.extendedLinearITUR_2020) else {
-            throw ProofError.conversionFailed
-        }
+    /// ICC profiles: ColorSync does each leg, one call per leg for the
+    /// whole grid. Returns what the proof shows and the colorimetric round
+    /// trip the gamut warning is judged on.
+    ///
+    /// Into the target: the chosen intent, with black point compensation
+    /// for relative colorimetric (`ICCTransform`). Clipping to [0,1] there
+    /// is the gamut limit a file or print imposes; ColorSync keeps
+    /// out-of-range values in float pixels.
+    ///
+    /// Back to the screen: relative colorimetric with the target's black
+    /// mapped to screen black, so the proof shows the gamut and the tonal
+    /// squeeze but not the paper; or, simulating paper and ink, absolute
+    /// colorimetric with no black point compensation, so the paper's white
+    /// and the ink's black show as the colours they are.
+    static func iccRoundTrip(_ grid: [Float], profile: ICCProfile,
+                             options: SoftProofOptions) throws -> (proofed: [Float], reference: [Float]) {
+        guard let working = ICCProfile.linearRec2020 else { throw ProofError.conversionFailed }
         let count = grid.count / 4
-        var inTarget = try convert(grid, count: count, from: working, to: targetSpace)
-        // ColorSync keeps out-of-range values in float pixels; a file
-        // can't. Clipping here is the gamut limit the file would impose.
-        for i in 0..<inTarget.count { inTarget[i] = min(max(inTarget[i], 0), 1) }
-        return try convert(inTarget, count: count, from: targetSpace, to: working)
-    }
+        var rgb = [Float](repeating: 0, count: count * 3)
+        for i in 0..<count { for c in 0..<3 { rgb[i * 3 + c] = grid[i * 4 + c] } }
+        let black = ICCTransform.blackPoint(of: profile)
 
-    private static func convert(_ pixels: [Float], count: Int, from src: CGColorSpace,
-                                to dst: CGColorSpace) throws -> [Float] {
-        let floatInfo = CGBitmapInfo(rawValue: CGBitmapInfo.floatComponents.rawValue
-                                     | CGImageAlphaInfo.noneSkipLast.rawValue
-                                     | CGBitmapInfo.byteOrder32Little.rawValue)
-        var srcFormat = vImage_CGImageFormat(bitsPerComponent: 32, bitsPerPixel: 128,
-                                             colorSpace: Unmanaged.passUnretained(src),
-                                             bitmapInfo: floatInfo, version: 0, decode: nil,
-                                             renderingIntent: .perceptual)
-        var dstFormat = vImage_CGImageFormat(bitsPerComponent: 32, bitsPerPixel: 128,
-                                             colorSpace: Unmanaged.passUnretained(dst),
-                                             bitmapInfo: floatInfo, version: 0, decode: nil,
-                                             renderingIntent: .perceptual)
-        var error = vImage_Error(kvImageNoError)
-        guard let converter = vImageConverter_CreateWithCGImageFormat(&srcFormat, &dstFormat, nil,
-                                                                      vImage_Flags(kvImageNoFlags), &error)?
-                .takeRetainedValue(), error == kvImageNoError else {
+        func into(_ intent: ICCTransform.Intent, compensate: Bool) throws -> [Float] {
+            let source = compensate ? rgb.map { ICCTransform.compressBlack($0, blackPoint: black) } : rgb
+            return try ICCTransform.convert(source, from: working, to: profile, intent: intent).map { min(max($0, 0), 1) }
+        }
+        func back(_ device: [Float], intent: ICCTransform.Intent, expand: Bool) throws -> [Float] {
+            let w = try ICCTransform.convert(device, from: profile, to: working, intent: intent)
+            var out = grid
+            for i in 0..<count {
+                for c in 0..<3 {
+                    let v = w[i * 3 + c]
+                    out[i * 4 + c] = expand ? ICCTransform.expandBlack(v, blackPoint: black) : v
+                }
+            }
+            return out
+        }
+
+        do {
+            let relative = try into(.relativeColorimetric, compensate: true)
+            let reference = try back(relative, intent: .relativeColorimetric, expand: true)
+            let device = options.intent == .relativeColorimetric ? relative : try into(.perceptual, compensate: false)
+            let proofed = options.simulatePaperAndInk
+                ? try back(device, intent: .absoluteColorimetric, expand: false)
+                : (options.intent == .relativeColorimetric ? reference
+                   : try back(device, intent: .relativeColorimetric, expand: true))
+            return (proofed, reference)
+        } catch {
             throw ProofError.conversionFailed
         }
-        var input = pixels
-        var output = [Float](repeating: 0, count: pixels.count)
-        let result: vImage_Error = input.withUnsafeMutableBytes { inBytes in
-            output.withUnsafeMutableBytes { outBytes in
-                var srcBuf = vImage_Buffer(data: inBytes.baseAddress, height: 1, width: vImagePixelCount(count),
-                                           rowBytes: count * 16)
-                var dstBuf = vImage_Buffer(data: outBytes.baseAddress, height: 1, width: vImagePixelCount(count),
-                                           rowBytes: count * 16)
-                return vImageConvert_AnyToAny(converter, &srcBuf, &dstBuf, nil, vImage_Flags(kvImageNoFlags))
-            }
-        }
-        guard result == kvImageNoError else { throw ProofError.conversionFailed }
-        return output
     }
 
     /// The table as a 3D texture for the colour kernel.

@@ -63,7 +63,12 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var dust: [HealPatch]?
         /// Touch-up (docs/Retouch.md §7). Absent when neutral.
         public var touchup: TouchUp?
+        /// HDR Limit (`HDRLimit`). Absent at the default two stops, so
+        /// edits that never touched it encode exactly as before.
+        public var hdr: HDR?
     }
+
+    public struct HDR: Codable, Equatable, Sendable { public var limit: Float }
 
     public struct AIDenoise: Codable, Equatable, Sendable {
         public var strength: Float
@@ -206,6 +211,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.presence = (p.texture == 0 && p.clarity == 0 && p.dehaze == 0) ? nil
             : Presence(texture: p.texture, clarity: p.clarity, dehaze: p.dehaze)
         modules.vibrance = p.vibrance == 0 ? nil : Vibrance(amount: p.vibrance)
+        modules.hdr = p.hdrLimitStops == HDRLimit.defaultStops ? nil : HDR(limit: p.hdrLimitStops)
         modules.defringe = (p.defringePurple == 0 && p.defringeGreen == 0) ? nil
             : Defringe(purple: p.defringePurple, green: p.defringeGreen)
         modules.aidenoise = p.aiDenoise == 0 ? nil : AIDenoise(strength: p.aiDenoise, model: Self.aiDenoiseModelName)
@@ -279,6 +285,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         if let pr = modules.presence { p.texture = pr.texture; p.clarity = pr.clarity; p.dehaze = pr.dehaze }
         else { p.texture = 0; p.clarity = 0; p.dehaze = 0 }
         p.vibrance = modules.vibrance?.amount ?? 0
+        p.hdrLimitStops = HDRLimit.clamped(modules.hdr?.limit ?? HDRLimit.defaultStops)
         if let d = modules.defringe { p.defringePurple = d.purple; p.defringeGreen = d.green }
         else { p.defringePurple = 0; p.defringeGreen = 0 }
         p.aiDenoise = modules.aidenoise?.strength ?? 0

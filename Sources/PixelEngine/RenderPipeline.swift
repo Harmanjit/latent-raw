@@ -131,6 +131,10 @@ public struct EditParameters: Sendable, Equatable {
     public var dust: [HealPatch] = []
     /// Touch-up: faces, sliders and the automatic blemishes (§7).
     public var touchUp: TouchUp = .neutral
+    /// HDR Limit: how far above SDR white, in stops, the HDR rendition may
+    /// reach, on an HDR screen and in a gain-map export. The default is the
+    /// two stops Latent always used (`HDRLimit.defaultStops`).
+    public var hdrLimitStops: Float = HDRLimit.defaultStops
     /// Presence: local contrast at two scales and haze removal, −1…1.
     public var texture: Float
     public var clarity: Float
@@ -261,6 +265,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.vibrance == b.vibrance
             && a.defringePurple == b.defringePurple && a.defringeGreen == b.defringeGreen
             && a.perspective == b.perspective && a.aiDenoise == b.aiDenoise
+            && a.hdrLimitStops == b.hdrLimitStops
     }
 }
 
@@ -306,6 +311,10 @@ public struct RenderOutput: Sendable, Equatable {
     /// Soft-proof table to apply, and whether to flag clipped colours.
     public var proof: SoftProofLUT? = nil
     public var gamutWarning = false
+    /// While proofing: a table flagging colours the screen itself can't
+    /// show (`SoftProofLUT.gamutCheck`), painted blue. nil = no monitor
+    /// gamut warning.
+    public var monitorGamut: SoftProofLUT? = nil
     /// Visualise Spots, drawn over the viewport after sharpening. Never
     /// set for a file, like `maskOverlay`.
     public var spotVisualisation: SpotVisualisation? = nil
@@ -341,6 +350,7 @@ public struct RenderOutput: Sendable, Equatable {
             && a.headroom == b.headroom && a.encoded == b.encoded
             && a.toneMapped == b.toneMapped && a.maskOverlay == b.maskOverlay
             && a.proof?.id == b.proof?.id && a.gamutWarning == b.gamutWarning
+            && a.monitorGamut?.id == b.monitorGamut?.id
             && a.spotVisualisation == b.spotVisualisation && a.touchUpOverlay == b.touchUpOverlay
     }
 }
@@ -406,17 +416,21 @@ public final class RenderPipeline {
     /// The most recent proof table as a texture, so a proofed render
     /// doesn't rebuild 143K texels every frame.
     private var proofTexture: (id: UUID, texture: MTLTexture)?
+    /// The monitor gamut table's, kept apart so the two don't evict each
+    /// other on every frame.
+    private var monitorGamutTexture: (id: UUID, texture: MTLTexture)?
     private var placeholder3D: MTLTexture?
 
     public init(gpu: GPUContext) {
         self.gpu = gpu
     }
 
-    private func proofTexture(for lut: SoftProofLUT?) -> MTLTexture? {
+    private func proofTexture(for lut: SoftProofLUT?, monitor: Bool = false) -> MTLTexture? {
         if let lut {
-            if let cached = proofTexture, cached.id == lut.id { return cached.texture }
+            let cached = monitor ? monitorGamutTexture : proofTexture
+            if let cached, cached.id == lut.id { return cached.texture }
             guard let texture = lut.makeTexture(device: gpu.device) else { return nil }
-            proofTexture = (lut.id, texture)
+            if monitor { monitorGamutTexture = (lut.id, texture) } else { proofTexture = (lut.id, texture) }
             return texture
         }
         if placeholder3D == nil {
@@ -1387,12 +1401,17 @@ public final class RenderPipeline {
         encoder.setBytes(&overlay, length: 4, index: 21)
         encoder.setTexture(maskTexture, index: 2)
 
-        var proofMode: UInt32 = output.proof == nil ? 0 : (output.gamutWarning ? 2 : 1)
+        // Bits: 1 proof, 2 destination gamut warning, 4 monitor gamut
+        // warning. Both warnings belong to proofing, so neither is set
+        // without a proof table.
+        var proofMode: UInt32 = output.proof == nil ? 0
+            : 1 | (output.gamutWarning ? 2 : 0) | (output.monitorGamut != nil ? 4 : 0)
         encoder.setBytes(&proofMode, length: 4, index: 22)
         var vibrance = parameters.vibrance
         encoder.setBytes(&vibrance, length: 4, index: 23)
         encodeToneRangesAndChannelCurves(encoder, parameters: parameters)
         encoder.setTexture(proofTexture(for: output.proof), index: 3)
+        encoder.setTexture(proofTexture(for: output.proof == nil ? nil : output.monitorGamut, monitor: true), index: 4)
 
         dispatch(encoder, pso: gpu.colorAndTonePSO, width: input.width, height: input.height)
         encoder.endEncoding()

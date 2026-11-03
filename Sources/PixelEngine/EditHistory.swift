@@ -93,6 +93,7 @@ public struct EditHistory: Equatable, Sendable, Codable {
         if a.modules.redeye != b.modules.redeye { names.append("Red-Eye") }
         if a.modules.dust != b.modules.dust { names.append("Sensor Dust") }
         if a.modules.touchup != b.modules.touchup { names.append("Touch-up") }
+        if a.modules.hdr != b.modules.hdr { names.append("HDR Limit") }
         return names.isEmpty ? "Edit" : names.joined(separator: ", ")
     }
 

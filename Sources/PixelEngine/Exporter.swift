@@ -273,9 +273,11 @@ public final class Exporter {
                        metadata: ExportMetadata? = nil,
                        maxLongEdge: Int? = nil,
                        replacingExisting: Bool = true,
+                       hdrHeadroom: Float = GainMap.exportHeadroom,
                        hdrRender: ((RenderOutput) throws -> MTLTexture)? = nil) throws -> (width: Int, height: Int) {
         let prepared = try encodableImage(texture, settings: settings, colorSpace: colorSpace, rotation: rotation,
-                                          crop: crop, maxLongEdge: maxLongEdge, hdrRender: hdrRender)
+                                          crop: crop, maxLongEdge: maxLongEdge, hdrHeadroom: hdrHeadroom,
+                                          hdrRender: hdrRender)
         try Self.write(cgImage: prepared.image, to: url, settings: settings, metadata: metadata,
                        gainMap: prepared.gainMap, replacingExisting: replacingExisting)
         return (prepared.image.width, prepared.image.height)
@@ -299,10 +301,11 @@ public final class Exporter {
     public func encodableImage(_ texture: MTLTexture, settings: ExportSettings, colorSpace: ColorKit.OutputSpace,
                                rotation: ImageRotation = .none, crop: CropParameters = .none,
                                maxLongEdge: Int? = nil,
+                               hdrHeadroom: Float = GainMap.exportHeadroom,
                                hdrRender: ((RenderOutput) throws -> MTLTexture)? = nil) throws -> EncodableImage {
         if settings.writesGainMap, let hdrRender {
             return try gainMapImage(texture, settings: settings, colorSpace: colorSpace, rotation: rotation,
-                                    crop: crop, maxLongEdge: maxLongEdge, hdrRender: hdrRender)
+                                    crop: crop, maxLongEdge: maxLongEdge, headroom: hdrHeadroom, hdrRender: hdrRender)
         }
         return EncodableImage(image: try cgImage(from: texture, colorSpace: colorSpace, rotation: rotation, crop: crop,
                                                  bitsPerComponent: settings.format.bitsPerComponent,
