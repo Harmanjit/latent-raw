@@ -48,6 +48,8 @@ extension ExportWorker {
         }
         try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
                                    name: sourceURL.lastPathComponent, logger: slideLogger)
+        try await regenerateDepth(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
+                                  name: sourceURL.lastPathComponent)
         try Task.checkCancellation()
 
         let sensor = CGSize(width: summary.rawWidth, height: summary.rawHeight)

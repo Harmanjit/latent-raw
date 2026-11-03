@@ -455,7 +455,7 @@ public enum ModelImporter {
                 throw ModelImportError.unusableManifest(
                     "a click-to-select model needs one package each with the roles \(needed.joined(separator: ", "))")
             }
-        case .subjectSegmentation, .semanticSegmentation, .denoise:
+        case .subjectSegmentation, .semanticSegmentation, .denoise, .depth:
             guard manifest.packages.count == 1 else {
                 throw ModelImportError.unusableManifest("this kind of model is one package, not \(manifest.packages.count)")
             }

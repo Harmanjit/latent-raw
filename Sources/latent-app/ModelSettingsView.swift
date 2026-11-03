@@ -67,6 +67,7 @@ final class ModelSettingsModel: ObservableObject {
     func reload() {
         let subjectDefault = registry.defaultSubject().id
         let promptedDefault = registry.defaultPrompted()?.id
+        let depthDefault = registry.defaultDepth()?.id
         // The denoiser keeps its own loading and its picker stays hidden
         // (docs/Retouch.md §2 A), so its row would offer nothing.
         rows = registry.entries().filter { $0.manifest.kind != .denoise }.map { entry in
@@ -74,6 +75,7 @@ final class ModelSettingsModel: ObservableObject {
             switch entry.manifest.kind {
             case .subjectSegmentation: isDefault = entry.id == subjectDefault
             case .promptedSegmentation: isDefault = entry.id == promptedDefault
+            case .depth: isDefault = entry.id == depthDefault
             default: isDefault = false
             }
             return Row(entry: entry, isDefault: isDefault)
@@ -89,6 +91,7 @@ final class ModelSettingsModel: ObservableObject {
         case .promptedSegmentation: "Click to select"
         case .semanticSegmentation: "Classes"
         case .denoise: "Denoise"
+        case .depth: "Depth"
         }
     }
 

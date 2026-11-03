@@ -839,6 +839,9 @@ enum MaskSubstitutions {
             return fallback.manifest.displayName
         case .semanticSegmentation:
             return registry.installed(ModelRef(id: SegmentationModel.modelID, version: 1))?.manifest.displayName
+        case .depth:
+            // Lens Blur's depth falls back to the subject mask's two planes.
+            return LensBlurDepth.displayName(of: LensBlur.subjectDepthVersion, registry: registry)
         case .denoise:
             return nil
         }

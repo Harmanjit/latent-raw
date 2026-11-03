@@ -194,6 +194,9 @@ public enum ExportWorker {
         // editor built them, so the export smooths the same skin.
         try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
                                    name: request.sourceURL.lastPathComponent, logger: exportLogger)
+        // And Lens Blur's depth map (LensBlurDepth.swift).
+        let depthStandIn = try await regenerateDepth(parameters, session: session, pipeline: pipeline, gpu: gpu,
+                                                     rotation: rotation, name: request.sourceURL.lastPathComponent)
         lap("masks")
         try Task.checkCancellation()
 
@@ -260,7 +263,8 @@ public enum ExportWorker {
             })
         lap("pack")
         return Rendered(image: image, metadata: request.includeMetadata ? metadata : nil, settings: settings,
-                        masksGenerated: masks.count, maskSubstitutions: masks.substituted, phases: phases,
+                        masksGenerated: masks.count, maskSubstitutions: masks.substituted + (depthStandIn.map { [$0] } ?? []),
+                        phases: phases,
                         start: start, colorSpace: request.colorSpace,
                         sourceName: request.sourceURL.deletingPathExtension().lastPathComponent,
                         readMetadata: metadata)
