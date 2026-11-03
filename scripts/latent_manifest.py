@@ -278,6 +278,12 @@ def check_manifest(path, features=True):
     return problems
 
 
+def same_bytes(a, b):
+    """Whether two files hold the same bytes."""
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        return fa.read() == fb.read()
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -346,18 +352,26 @@ def main(argv=None):
     # The labels file is named in the manifest by its bare name and read
     # from where the manifest sits: the package's root for --inside, which
     # Add Model… reads, else the --out folder. --inside copies it in from
-    # the path given, as the docs promise; either way a manifest naming a
-    # labels file that is not there is never written.
+    # the path given, as the docs promise, replacing one of the same name
+    # already there: on a rewrite with updated labels, keeping the old file
+    # would write a manifest for labels the package does not carry. Without
+    # --inside nothing is copied, so a given file that differs from the one
+    # the manifest will name is refused rather than silently ignored. Either
+    # way a manifest naming a labels file that is not there is never written.
     first = os.path.abspath(args.paths[0].partition("@")[0])
     out_dir = first if args.inside else (args.out or os.path.dirname(first))
     if args.labels_file:
         labels_name = os.path.basename(args.labels_file)
         target = os.path.join(out_dir, labels_name)
-        if not os.path.isfile(target):
-            if args.inside and os.path.isfile(args.labels_file):
-                shutil.copyfile(args.labels_file, target)
-            else:
-                p.error(f"the labels file {labels_name} is not in {out_dir}, where the manifest says it is")
+        given = args.labels_file
+        elsewhere = os.path.isfile(given) and not (os.path.isfile(target) and os.path.samefile(given, target))
+        if args.inside and elsewhere:
+            shutil.copyfile(given, target)
+        elif not os.path.isfile(target):
+            p.error(f"the labels file {labels_name} is not in {out_dir}, where the manifest says it is")
+        elif elsewhere and not same_bytes(given, target):
+            p.error(f"{given} differs from {target}, the labels file the manifest would name; "
+                    "copy it there first")
         args.labels_file = labels_name
 
     rows = []

@@ -99,6 +99,26 @@ def main():
     check("--check agrees", latent_manifest.check_manifest(os.path.join(package, "m.model.json"),
                                                            features=False), [])
 
+    print("a rewrite with updated labels from elsewhere replaces the old copy")
+    with open(outside, "w", encoding="utf-8") as f:
+        json.dump(["sky", "person", "tree"], f)
+    code, _ = run([package] + WRITE + [outside])
+    check("the manifest is written", code, 0)
+    with open(os.path.join(package, "b-labels.json"), encoding="utf-8") as f:
+        check("the package now carries the new labels", json.load(f), ["sky", "person", "tree"])
+
+    print("without --inside, labels that differ from the ones beside the manifest are refused")
+    package = fake_package(os.path.join(work, "d"))
+    out = os.path.join(work, "d-out")
+    os.makedirs(out)
+    write_labels(os.path.join(out, "d-labels.json"))
+    newer = os.path.join(work, "d-labels.json")
+    with open(newer, "w", encoding="utf-8") as f:
+        json.dump(["sky"], f)
+    code, text = run([package, "--out", out] + WRITE[1:] + [newer])
+    check("no manifest written", os.path.exists(os.path.join(out, "m.model.json")), False)
+    check("it says why", code != 0 and "differs from" in text, True)
+
     print("a labels file that is nowhere is refused")
     package = fake_package(os.path.join(work, "c"))
     code, text = run([package] + WRITE + ["nowhere.json"])
