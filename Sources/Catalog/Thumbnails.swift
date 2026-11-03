@@ -64,7 +64,15 @@ extension Catalog {
 
     /// Generates every missing thumbnail. The file work runs off the actor
     /// at utility priority — efficiency cores, per DESIGN.md §11 — a few
-    /// files at a time, then the keys are recorded in one transaction.
+    /// files at a time, and the keys are recorded every few files.
+    ///
+    /// One pass runs at a time: a pass started while another runs (every
+    /// settled edit starts one) waits for it, then lists only what is still
+    /// stale. Cancelling a pass stops it taking new files; those already
+    /// under way finish and their keys are recorded, so the next pass
+    /// doesn't make them again. Before this, overlapping passes each made
+    /// every file the others hadn't yet recorded, and keys were written
+    /// only when a whole pass ended.
     ///
     /// `progress` is called on each completion with (done, total).
     /// `editedRenderer` makes thumbnails for images with edits; without
@@ -74,8 +82,11 @@ extension Catalog {
         editedRenderer: (any EditedThumbnailRenderer)? = nil,
         progress: (@Sendable (Int, Int) -> Void)? = nil
     ) async throws -> ThumbnailReport {
+        await beginThumbnailPass()
+        defer { endThumbnailPass() }
         let start = Date()
         var report = ThumbnailReport()
+        guard !Task.isCancelled else { return report }
         let needed = try thumbnailJobs().filter { $0.editStackJSON == nil || editedRenderer != nil }
         guard !needed.isEmpty else { return report }
 
@@ -97,17 +108,19 @@ extension Catalog {
                  key: job.expectedKey,
                  replaces: FileManager.default.fileExists(atPath: thumbnailURL(forRelPath: job.record.relPath).path))
         }
+        let byPath = Dictionary(jobs.map { ($0.relPath, $0) }, uniquingKeysWith: { first, _ in first })
         let total = jobs.count
+        // Keys go to the database this many files at a time.
+        let batchSize = 16
 
-        let results: [(relPath: String, error: String?)] = await withTaskGroup(
-            of: (String, String?).self
-        ) { group in
-            var results: [(String, String?)] = []
+        try await withThrowingTaskGroup(of: (String, String?).self) { group in
             var next = 0
             var done = 0
+            var unrecorded: [Work] = []
 
             func enqueue() {
-                guard next < jobs.count else { return }
+                // A cancelled pass takes no more files.
+                guard next < jobs.count, !Task.isCancelled else { return }
                 let job = jobs[next]
                 next += 1
                 group.addTask(priority: .utility) {
@@ -126,31 +139,61 @@ extension Catalog {
                     }
                 }
             }
+            func record() async throws {
+                guard !unrecorded.isEmpty else { return }
+                let keys = unrecorded.map { ($0.relPath, $0.key) }
+                unrecorded = []
+                try await recordThumbnailKeys(keys)
+            }
+
             for _ in 0..<min(concurrency, jobs.count) { enqueue() }
-            for await result in group {
-                results.append(result)
+            while let (relPath, error) = try await group.next() {
                 done += 1
+                if let error {
+                    report.failures.append((relPath, error))
+                } else if let job = byPath[relPath] {
+                    unrecorded.append(job)
+                    report.generated += 1
+                    report.regeneratedRelPaths.append(relPath)
+                    if job.replaces { report.replacedRelPaths.append(relPath) }
+                }
                 progress?(done, total)
+                if unrecorded.count >= batchSize { try await record() }
                 enqueue()
             }
-            return results
+            try await record()
         }
+        report.duration = Date().timeIntervalSince(start)
+        return report
+    }
 
-        let succeeded = Set(results.filter { $0.error == nil }.map(\.relPath))
-        report.failures = results.compactMap { r in r.error.map { (r.relPath, $0) } }
-        let keys = jobs.filter { succeeded.contains($0.relPath) }.map { ($0.relPath, $0.key) }
-
-        // In an async context GRDB resolves to its async write overload.
-        try await dbQueue.write { db in
+    /// Synchronous on purpose: GRDB's async write gives up when the task is
+    /// cancelled, and a cancelled pass must still record the files it made.
+    private func recordThumbnailKeys(_ keys: [(String, Data)]) throws {
+        try dbQueue.write { db in
             for (relPath, key) in keys {
                 try db.execute(sql: "UPDATE images SET thumb_key = ? WHERE rel_path = ?",
                                arguments: [key, relPath])
             }
         }
-        report.generated = succeeded.count
-        report.regeneratedRelPaths = keys.map(\.0)
-        report.replacedRelPaths = jobs.filter { $0.replaces && succeeded.contains($0.relPath) }.map(\.relPath)
-        report.duration = Date().timeIntervalSince(start)
-        return report
+    }
+
+    /// Waits until no other thumbnail pass runs, then counts this one as
+    /// running. The waiter is handed the turn directly, so a pass starting
+    /// meanwhile can't slip in between.
+    private func beginThumbnailPass() async {
+        if thumbnailPassRunning {
+            await withCheckedContinuation { thumbnailPassWaiters.append($0) }
+        } else {
+            thumbnailPassRunning = true
+        }
+    }
+
+    private func endThumbnailPass() {
+        if thumbnailPassWaiters.isEmpty {
+            thumbnailPassRunning = false
+        } else {
+            thumbnailPassWaiters.removeFirst().resume()
+        }
     }
 }
