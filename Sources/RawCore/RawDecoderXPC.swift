@@ -71,12 +71,38 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
         self.planeSampleCount = planeSampleCount
     }
 
+    /// The largest side the shim can report: its size fields are uint16.
+    static let maxSide = Int(UInt16.max)
+
+    /// Refuses a reply whose shape the app would otherwise trust: four
+    /// camera multipliers, and every size and margin within what LibRaw
+    /// can report, with the active area inside the readout. The sizes are
+    /// range-checked before anything adds or multiplies them, so a
+    /// compromised service gets an error back rather than an overflow trap
+    /// in the app, and no negative size reaches the render pipeline.
+    func validate() throws {
+        guard cameraMultipliers.count == 4 else {
+            throw RawDecoderClient.ClientError.serviceFailed("reply has \(cameraMultipliers.count) camera multipliers")
+        }
+        let sides = [width, height, leftMargin, topMargin, rawWidth, rawHeight]
+        guard sides.allSatisfy({ (0...Self.maxSide).contains($0) }),
+              SensorActiveArea(left: leftMargin, top: topMargin, width: width, height: height,
+                               fullWidth: rawWidth, fullHeight: rawHeight).isValid else {
+            throw RawDecoderClient.ClientError.serviceFailed(
+                "reply has an impossible size: \(width)x\(height) at (\(leftMargin), \(topMargin)) in \(rawWidth)x\(rawHeight)")
+        }
+    }
+
     public var summary: RawSummary {
         RawSummary(
             activeArea: SensorActiveArea(left: leftMargin, top: topMargin, width: width, height: height,
                                          fullWidth: rawWidth, fullHeight: rawHeight),
             cfaPattern: CFAPattern(rawValue: cfaCode),
-            cameraMultipliers: (cameraMultipliers[0], cameraMultipliers[1], cameraMultipliers[2], cameraMultipliers[3]),
+            // `validate` refuses any other count; this keeps the property
+            // itself from trapping on one that wasn't validated.
+            cameraMultipliers: cameraMultipliers.count == 4
+                ? (cameraMultipliers[0], cameraMultipliers[1], cameraMultipliers[2], cameraMultipliers[3])
+                : (0, 0, 0, 0),
             blackLevel: blackLevel, whiteLevel: whiteLevel,
             // Four values from a well-behaved service; anything else is
             // read as "no per-channel offsets" rather than trusted.
@@ -113,6 +139,12 @@ public enum RawDecoderXPC {
     public static let serviceName = "com.latent.app.rawdecoder"
     public static let bundleName = "LatentRawDecoder.xpc"
     static let logger = Logger(subsystem: "com.latent.app", category: "rawdecoder")
+    /// The largest embedded preview that crosses into the app. A camera's
+    /// own JPEG is a few megabytes, tens for the biggest sensors; a file
+    /// can carry far more (LibRaw allows 512 MB), which would otherwise be
+    /// copied into the app's heap per thumbnail job. The service keeps a
+    /// larger one back and the app refuses one that arrives anyway.
+    static let maxPreviewBytes = 64 << 20
 
     /// The interface both ends use. The reply's plane argument is
     /// allowed to decode as an IOSurface and nothing else.
@@ -144,12 +176,35 @@ public enum RawDecoderXPC {
 
 /// Host-side client. One connection, made lazily and remade after the
 /// service exits (which XPC does on its own after idle time, and which a
-/// crash on a malicious file also causes). Calls are synchronous because
-/// every caller of `RawFile.init` already blocks on the decode.
+/// crash on a malicious file also causes). Calls block their caller, as
+/// every caller of `RawFile.init` already expects, but never for longer
+/// than `timeout`: a file that sends LibRaw into an endless loop would
+/// otherwise hold its caller (the main actor, for an open in Develop) for
+/// good, and every later request on the connection with it. On expiry the
+/// connection is dropped, which ends the service and the stuck decode
+/// with it (the service exits when its last connection goes), and the
+/// next call starts a fresh one.
 public final class RawDecoderClient: @unchecked Sendable {
-    public static let shared = RawDecoderClient()
+    public static let shared = RawDecoderClient(timeout: 60) {
+        NSXPCConnection(serviceName: RawDecoderXPC.serviceName)
+    }
     private let lock = NSLock()
     private var connection: NSXPCConnection?
+    private let makeConnection: @Sendable () -> NSXPCConnection
+    /// The longest wait for one reply. A full decode of a large raw read
+    /// from a slow network volume takes seconds; this is far beyond that.
+    let timeout: TimeInterval
+
+    /// The reply's metadata is a few kilobytes of JSON; more is refused
+    /// before parsing, like `SourceMetadata.maxPayloadBytes`.
+    static let maxMetadataBytes = 1 << 20
+
+    /// `makeConnection` lets tests talk to a service of their own on an
+    /// anonymous listener.
+    init(timeout: TimeInterval, makeConnection: @escaping @Sendable () -> NSXPCConnection) {
+        self.timeout = timeout
+        self.makeConnection = makeConnection
+    }
 
     public enum ClientError: Error, CustomStringConvertible {
         case serviceFailed(String)
@@ -162,61 +217,80 @@ public final class RawDecoderClient: @unchecked Sendable {
         }
     }
 
-    private func proxy(errorHandler: @escaping (Error) -> Void) -> RawDecoderProtocol? {
+    private func currentConnection() -> NSXPCConnection {
         lock.lock(); defer { lock.unlock() }
-        if connection == nil {
-            let c = NSXPCConnection(serviceName: RawDecoderXPC.serviceName)
-            c.remoteObjectInterface = RawDecoderXPC.makeInterface()
-            c.invalidationHandler = { [weak self] in
-                self?.lock.lock(); self?.connection = nil; self?.lock.unlock()
-            }
-            c.resume()
-            connection = c
-        }
-        return connection?.synchronousRemoteObjectProxyWithErrorHandler(errorHandler) as? RawDecoderProtocol
+        if let connection { return connection }
+        let c = makeConnection()
+        c.remoteObjectInterface = RawDecoderXPC.makeInterface()
+        // Only this connection's own invalidation clears the slot: an old
+        // connection's, arriving late, must not drop its replacement.
+        let id = ObjectIdentifier(c)
+        c.invalidationHandler = { [weak self] in self?.forget(id) }
+        c.resume()
+        connection = c
+        return c
     }
 
-    /// Decodes synchronously. `plane` is nil for metadata-only opens.
+    private func forget(_ id: ObjectIdentifier) {
+        lock.lock(); defer { lock.unlock() }
+        if let connection, ObjectIdentifier(connection) == id { self.connection = nil }
+    }
+
+    /// Sends one request and waits for whichever comes first: its reply,
+    /// the transport error, or the deadline.
+    private func call<Reply>(_ send: (RawDecoderProtocol, @escaping (Reply) -> Void) -> Void) throws -> Reply {
+        let c = currentConnection()
+        let outcome = ReplyOutcome<Reply>()
+        guard let proxy = c.remoteObjectProxyWithErrorHandler({ outcome.finish(.failure($0)) })
+                as? RawDecoderProtocol else {
+            throw ClientError.connectionLost("no proxy")
+        }
+        send(proxy) { outcome.finish(.success($0)) }
+        guard let result = outcome.wait(timeout: timeout) else {
+            RawDecoderXPC.logger.error("raw decoder gave no reply in \(Int(self.timeout)) s; dropping the connection")
+            forget(ObjectIdentifier(c))
+            c.invalidate()
+            throw ClientError.connectionLost("no reply in \(Int(timeout)) s")
+        }
+        switch result {
+        case .success(let reply):
+            return reply
+        case .failure(let transportError):
+            RawDecoderXPC.logger.error("raw decoder transport error: \(String(describing: transportError), privacy: .public)")
+            throw ClientError.connectionLost(String(describing: transportError))
+        }
+    }
+
+    /// Decodes, blocking the caller. `plane` is nil for metadata-only opens.
     public func decode(fileDescriptor fd: Int32, metadataOnly: Bool) throws
         -> (metadata: RawSnapshotMetadata, plane: IOSurface?, preview: Data?) {
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
-        var result: (Data?, IOSurface?, Data?, String?) = (nil, nil, nil, nil)
-        var transportError: Error?
-        guard let proxy = proxy(errorHandler: { transportError = $0 }) else {
-            throw ClientError.connectionLost("no proxy")
-        }
         let start = Date()
-        proxy.decode(handle, metadataOnly: metadataOnly) { meta, plane, preview, error in
-            result = (meta, plane, preview, error)
-        }
-        if let transportError {
-            RawDecoderXPC.logger.error("raw decoder transport error: \(String(describing: transportError), privacy: .public)")
-            throw ClientError.connectionLost(String(describing: transportError))
+        let result: (Data?, IOSurface?, Data?, String?) = try call { proxy, done in
+            proxy.decode(handle, metadataOnly: metadataOnly) { meta, plane, preview, error in
+                done((meta, plane, preview, error))
+            }
         }
         if let error = result.3 {
             RawDecoderXPC.logger.error("raw decoder service error: \(error, privacy: .public)")
             throw ClientError.serviceFailed(error)
         }
         guard let metaData = result.0 else { throw ClientError.serviceFailed("empty reply") }
+        guard metaData.count <= Self.maxMetadataBytes else {
+            throw ClientError.serviceFailed("metadata of \(metaData.count) bytes refused")
+        }
         let metadata = try JSONDecoder().decode(RawSnapshotMetadata.self, from: metaData)
         RawDecoderXPC.logger.notice("decoded \(metadata.cameraModel, privacy: .public) in service, \(Int(Date().timeIntervalSince(start) * 1000)) ms, plane \(result.1?.allocationSize ?? 0) bytes shared")
         return (metadata, result.1, result.2)
     }
 
-    /// Reads a file's metadata for export, synchronously.
+    /// Reads a file's metadata for export, blocking the caller.
     public func readMetadata(fileDescriptor fd: Int32) throws -> SourceMetadata {
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
-        var result: (Data?, Data?, String?) = (nil, nil, nil)
-        var transportError: Error?
-        guard let proxy = proxy(errorHandler: { transportError = $0 }) else {
-            throw ClientError.connectionLost("no proxy")
-        }
-        proxy.readMetadata(handle) { properties, xmpTags, error in
-            result = (properties, xmpTags, error)
-        }
-        if let transportError {
-            RawDecoderXPC.logger.error("raw decoder transport error: \(String(describing: transportError), privacy: .public)")
-            throw ClientError.connectionLost(String(describing: transportError))
+        let result: (Data?, Data?, String?) = try call { proxy, done in
+            proxy.readMetadata(handle) { properties, xmpTags, error in
+                done((properties, xmpTags, error))
+            }
         }
         if let error = result.2 {
             RawDecoderXPC.logger.error("raw decoder service error: \(error, privacy: .public)")
@@ -224,5 +298,28 @@ public final class RawDecoderClient: @unchecked Sendable {
         }
         guard let properties = result.0 else { throw ClientError.serviceFailed("empty reply") }
         return try SourceMetadata(properties: properties, xmpTags: result.1)
+    }
+}
+
+/// One request's outcome: the reply or the transport error, whichever
+/// XPC delivers (it delivers exactly one), on the connection's queue.
+private final class ReplyOutcome<Reply>: @unchecked Sendable {
+    private let lock = NSLock()
+    private let done = DispatchSemaphore(value: 0)
+    private var result: Result<Reply, Error>?
+
+    func finish(_ value: Result<Reply, Error>) {
+        lock.lock()
+        let first = result == nil
+        if first { result = value }
+        lock.unlock()
+        if first { done.signal() }
+    }
+
+    /// nil when nothing arrived in time.
+    func wait(timeout: TimeInterval) -> Result<Reply, Error>? {
+        guard done.wait(timeout: .now() + timeout) == .success else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        return result
     }
 }

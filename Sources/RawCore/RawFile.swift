@@ -346,6 +346,9 @@ public final class RawFile {
     /// the connection so tests can hand it a reply of their own.
     init(serviceReply meta: RawSnapshotMetadata, plane surface: IOSurface?, preview: Data?,
          metadataOnly: Bool) throws {
+        // Sizes and counts are checked before anything below multiplies
+        // or indexes them.
+        try meta.validate()
         let summary = meta.summary
         if metadataOnly {
             sensorPlane = nil
@@ -369,7 +372,14 @@ public final class RawFile {
             sensorPlane = plane
             linearPlane = nil
         }
-        self.preview = preview
+        // An oversized preview is dropped, not parsed: the service keeps
+        // such a preview back, so only a misbehaving one sends it.
+        if let preview, preview.count > RawDecoderXPC.maxPreviewBytes {
+            RawDecoderXPC.logger.error("raw decoder sent a preview of \(preview.count) bytes; ignored")
+            self.preview = nil
+        } else {
+            self.preview = preview
+        }
         lastThumbnailError = meta.thumbnailError
         isMetadataOnly = metadataOnly
         decodedInService = true
