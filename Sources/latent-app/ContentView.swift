@@ -1770,6 +1770,12 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
+                    LensBlurSection(model: model).padding(.top, 8)
+                } label: {
+                    disclosureLabel("Lens Blur")
+                }
+
+                DisclosureGroup {
                     ToneCurveControls(model: model)
                         .padding(.top, 8)
                 } label: {

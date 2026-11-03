@@ -178,6 +178,7 @@ extension EditorModel {
         pointColourPicking = false
         toneTool = .none
         defringePickerActive = false
+        lensBlurState.pickingFocus = false
         healDrag = nil
         redEyeDrag = nil
         paintingHealStroke = []
@@ -190,6 +191,7 @@ extension EditorModel {
         maskToolActive || healToolActive || redEyeToolActive || dustToolActive || touchUpToolActive
             || pointColourPicking
             || toneTool != .none
+            || lensBlurState.pickingFocus
     }
 
     func imageToolBegan(at screen: CGPoint, exclude: Bool) {
@@ -201,6 +203,7 @@ extension EditorModel {
         // Clicks only: a ring is removed or a spot added on the press.
         if dustToolActive { dustToolBegan(at: screen); return }
         if touchUpToolActive { touchUpToolBegan(at: screen); return }
+        if lensBlurState.pickingFocus, !maskToolActive { lensBlurFocusPicked(at: screen); return }
         promptModifierExclude = exclude
         maskToolBegan(at: screen)
     }
@@ -210,6 +213,7 @@ extension EditorModel {
         else if healToolActive { healToolMoved(to: screen) }
         else if redEyeToolActive { redEyeToolMoved(to: screen) }
         else if dustToolActive || touchUpToolActive { return }
+        else if !maskToolActive && lensBlurState.pickingFocus { return }
         else { maskToolMoved(to: screen) }
     }
     func imageToolEnded() {
@@ -218,6 +222,7 @@ extension EditorModel {
         else if healToolActive { healToolEnded() }
         else if redEyeToolActive { redEyeToolEnded() }
         else if dustToolActive || touchUpToolActive { return }
+        else if !maskToolActive && lensBlurState.pickingFocus { return }
         else { maskToolEnded() }
     }
 }

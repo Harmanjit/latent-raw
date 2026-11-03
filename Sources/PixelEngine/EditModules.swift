@@ -8,6 +8,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     case whiteBalance, tone, presence, toneCurve, colour, splitToning, calibration, detail, lens, locals, crop, heal, dust, touchUp
     case profile
     case effects
+    case lensBlur
 
     public var id: String { rawValue }
 
@@ -29,6 +30,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .touchUp:      return "Touch-up (skin, teeth, eyes, blemishes)"
         case .profile:      return "Profile"
         case .effects:      return "Effects (post-crop vignetting, grain)"
+        case .lensBlur:     return "Lens Blur (amount, bokeh, focus range)"
         }
     }
 
@@ -102,6 +104,10 @@ extension EditStack {
             case .effects:
                 result.modules.vignette = other.modules.vignette
                 result.modules.grain = other.modules.grain
+            case .lensBlur:
+                // The sliders and the focus range travel; the depth map is
+                // made again for the photo they land on.
+                result.modules.lensblur = other.modules.lensblur
             }
         }
         // The result's geometry keeps the frame it was written in. When it
@@ -148,6 +154,7 @@ extension EditStack {
         if m.touchup != nil { g.insert(.touchUp) }
         if m.profile != nil { g.insert(.profile) }
         if m.vignette != nil || m.grain != nil { g.insert(.effects) }
+        if m.lensblur != nil { g.insert(.lensBlur) }
         return g
     }
 }

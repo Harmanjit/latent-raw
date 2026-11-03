@@ -42,6 +42,7 @@ final class EditorModel: ObservableObject {
                 scheduleSave()
                 touchUpParametersDidChange(from: oldValue)
                 modelMaskParametersDidChange(from: oldValue)
+                lensBlurParametersDidChange(from: oldValue)
             }
         }
     }
@@ -216,6 +217,11 @@ final class EditorModel: ObservableObject {
     var touchUpReleasedUnderPressure = false
     /// The geometry the masks were built for; a change regenerates them.
     var touchUpGeometryKey: String?
+
+    // MARK: - Lens Blur (EditorModel+LensBlur.swift)
+
+    /// The depth map's job and source, Show Depth and Pick Focus.
+    let lensBlurState = LensBlurState()
 
     // MARK: - Crop and straighten
 

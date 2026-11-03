@@ -29,6 +29,7 @@ public enum LoadedModel: Sendable {
     case subject(SubjectSegmenter)
     case prompted(SAM2Models)
     case semantic(SegmentationModel)
+    case depth(DepthEstimator)
 }
 
 /// Every model the app knows: the manifests bundled beside the packages,
@@ -225,6 +226,13 @@ public final class ModelRegistry: @unchecked Sendable {
         return entries(kind: .promptedSegmentation).first { $0.status == .bundled }
     }
 
+    /// The depth model Lens Blur uses for a NEW blur: the first installed
+    /// one (bundled before added, then by id); nil with none, when the
+    /// blur falls back to two planes from the subject mask.
+    public func defaultDepth() -> ModelEntry? {
+        entries(kind: .depth).first(where: \.isInstalled)
+    }
+
     // MARK: - Compute policy
 
     /// Lowest rank of {preference, manifest.computeUnits ?? .all,
@@ -274,6 +282,11 @@ public final class ModelRegistry: @unchecked Sendable {
         return nil
     }
 
+    public func depth(id: String) async -> DepthEstimator? {
+        if case .depth(let model)? = await loadedModel(id: id, kind: .depth) { return model }
+        return nil
+    }
+
     /// What is loaded for `id` right now, without loading.
     func loaded(id: String) -> LoadedModel? {
         state.withLock { $0.loaded[id] }
@@ -319,6 +332,8 @@ public final class ModelRegistry: @unchecked Sendable {
                 return .prompted(try await SAM2Models.load(entry, computeUnits: computeUnits))
             case .semanticSegmentation:
                 return .semantic(try await SegmentationModel.load(entry, computeUnits: computeUnits))
+            case .depth:
+                return .depth(try await DepthEstimator.load(entry, computeUnits: computeUnits))
             case .denoise:
                 // AIDenoiser keeps its own loading (docs/Retouch.md §2 A).
                 return nil

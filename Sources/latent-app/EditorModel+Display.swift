@@ -40,6 +40,7 @@ extension EditorModel {
         output.spotVisualisation = dustVisualisation
         output.touchUpOverlay = touchUpOverlayWanted
         output.sharpenMaskPreview = sharpenMaskPreview
+        output.depthVisualisation = lensBlurState.showDepth
         return output
     }
 

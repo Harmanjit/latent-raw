@@ -78,6 +78,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// while off.
         public var vignette: PostCropVignette?
         public var grain: Grain?
+        /// Lens Blur (LensBlur.swift). Absent when neutral, so an edit
+        /// that never used it encodes exactly as before.
+        public var lensblur: LensBlur?
     }
 
     public struct AIDenoise: Codable, Equatable, Sendable {
@@ -269,6 +272,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.touchup = p.touchUp.isNeutral ? nil : p.touchUp
         setColourControls(p.colour)
         modules.profile = p.profile?.sanitized
+        modules.lensblur = p.lensBlur.isNeutral ? nil : p.lensBlur
         modules.presence = (p.texture == 0 && p.clarity == 0 && p.dehaze == 0) ? nil
             : Presence(texture: p.texture, clarity: p.clarity, dehaze: p.dehaze)
         modules.vibrance = p.vibrance == 0 ? nil : Vibrance(amount: p.vibrance)
@@ -345,6 +349,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         p.dust = (modules.dust ?? []).prefix(HealPatch.maximumDustCount).compactMap(\.sanitized)
         p.touchUp = (modules.touchup ?? .neutral).sanitized
         p.profile = modules.profile?.sanitized
+        p.lensBlur = (modules.lensblur ?? .neutral).sanitized
         if let pr = modules.presence { p.texture = pr.texture; p.clarity = pr.clarity; p.dehaze = pr.dehaze }
         else { p.texture = 0; p.clarity = 0; p.dehaze = 0 }
         p.vibrance = modules.vibrance?.amount ?? 0

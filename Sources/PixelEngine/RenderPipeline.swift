@@ -137,6 +137,8 @@ public struct EditParameters: Sendable, Equatable {
     public var dust: [HealPatch] = []
     /// Touch-up: faces, sliders and the automatic blemishes (§7).
     public var touchUp: TouchUp = .neutral
+    /// Lens Blur over the session's depth map (LensBlur.swift). Off by default.
+    public var lensBlur: LensBlur = .neutral
     /// Presence: local contrast at two scales and haze removal, −1…1.
     public var texture: Float
     public var clarity: Float
@@ -297,6 +299,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.manualVignettingMidpoint == b.manualVignettingMidpoint && a.autoCA == b.autoCA
             && a.postCropVignette == b.postCropVignette && a.grain == b.grain
             && a.lensProfile == b.lensProfile
+            && a.lensBlur == b.lensBlur
     }
 }
 
@@ -352,6 +355,9 @@ public struct RenderOutput: Sendable, Equatable {
     /// Show sharpening's edge mask instead of the picture (Option-drag on
     /// the Masking slider). Viewport only.
     public var sharpenMaskPreview = false
+    /// Show Depth: the depth map in colour with the focus range marked,
+    /// in place of the picture (viewport only; LensBlurStage).
+    public var depthVisualisation = false
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -384,6 +390,7 @@ public struct RenderOutput: Sendable, Equatable {
             && a.proof?.id == b.proof?.id && a.gamutWarning == b.gamutWarning
             && a.spotVisualisation == b.spotVisualisation && a.touchUpOverlay == b.touchUpOverlay
             && a.sharpenMaskPreview == b.sharpenMaskPreview
+            && a.depthVisualisation == b.depthVisualisation
     }
 }
 
@@ -725,6 +732,18 @@ public final class RenderPipeline {
                                           renderInfo: renderInfo, binSpan: binSpan,
                                           profile: profile)
 
+        // Stage 15b: lens blur, on the graded image after the local
+        // adjustments, over the session's depth map (LensBlurStage.swift).
+        // Skipped outright while the amount is 0 or there is no depth
+        // map yet (a thumbnail, the CLI), so it costs nothing then.
+        if parameters.lensBlur.isActive, output.toneMapped, let depth = session.depthTexture() {
+            final = try LensBlurStage.encode(input: final, depth: depth, blur: parameters.lensBlur,
+                                             geometry: lensBlurGeometry(session: session, output: output,
+                                                                        renderInfo: renderInfo, binSpan: binSpan),
+                                             session: session, preview: displayRole != .display,
+                                             gpu: gpu, commandBuffer: cmdBuffer)
+        }
+
         // Stage 16: touch-up (skin, teeth, eyes), display-referred, on the
         // faces' region masks. Only with masks to work on: the session
         // holds them once MLKit has built them (docs/Retouch.md §7), and a
@@ -778,6 +797,16 @@ public final class RenderPipeline {
             final = try applyDustVisualise(session: session, cmdBuffer: cmdBuffer, input: final,
                                            outputRole: displayRole == .display ? .visualised : .visualisedPreview,
                                            visualisation: visualisation, binSpan: binSpan)
+        }
+
+        // Display pass: Show Depth, for the viewport only, last so it
+        // replaces the picture whatever ran before it.
+        if output.depthVisualisation, let depth = session.depthTexture() {
+            final = try LensBlurStage.encodeDepthView(input: final, depth: depth, blur: parameters.lensBlur,
+                                                      geometry: lensBlurGeometry(session: session, output: output,
+                                                                                 renderInfo: renderInfo, binSpan: binSpan),
+                                                      session: session, preview: displayRole != .display,
+                                                      gpu: gpu, commandBuffer: cmdBuffer)
         }
 
         cmdBuffer.commit()

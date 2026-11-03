@@ -12,7 +12,12 @@ import CryptoKit
 /// the id is checked against `idPattern` (it names a folder and a cache
 /// entry) and the two URLs must be http(s) (they open in a browser).
 public struct ModelManifest: Codable, Sendable, Identifiable, Equatable {
-    public enum Kind: String, Codable, Sendable { case promptedSegmentation, subjectSegmentation, semanticSegmentation, denoise }
+    public enum Kind: String, Codable, Sendable {
+        case promptedSegmentation, subjectSegmentation, semanticSegmentation, denoise
+        /// Image in, relative inverse depth out (larger nearer): Lens Blur's
+        /// depth map (`DepthEstimator`).
+        case depth
+    }
 
     public enum ComputeUnits: String, Codable, Sendable {
         case cpuOnly, cpuAndGPU, cpuAndNeuralEngine, all

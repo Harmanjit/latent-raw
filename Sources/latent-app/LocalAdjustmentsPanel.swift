@@ -466,7 +466,7 @@ enum ModelMenus {
         case .subjectSegmentation: return registry.defaultSubject()
         case .promptedSegmentation: return registry.defaultPrompted()
         case .semanticSegmentation: return registry.entries(kind: kind).first(where: \.isInstalled)
-        case .denoise: return nil
+        case .denoise, .depth: return nil
         }
     }
 

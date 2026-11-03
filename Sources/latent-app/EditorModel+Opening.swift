@@ -131,6 +131,7 @@ extension EditorModel {
             rerender()
             regenerateMissingAIMasks()
             regenerateTouchUpMasksIfNeeded()
+            regenerateDepthMapIfNeeded()
             regenerateAIDenoiseIfNeeded()
         } catch {
             // Nothing of the previous photo may outlive a failed open: with

@@ -72,6 +72,8 @@ extension ExportWorker {
                                               rotation: rotation, geometry: parameters)
         try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
                                    name: request.sourceURL.lastPathComponent, logger: pageLogger)
+        try await regenerateDepth(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
+                                  name: request.sourceURL.lastPathComponent)
         if request.runsAIDenoise, parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
             let denoiser = try await AIDenoiser.shared()
             try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)

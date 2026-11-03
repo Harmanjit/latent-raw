@@ -62,7 +62,7 @@ extension EditorModel {
         if p.noiseDetail.wantsRefinePass {
             reach = max(reach, CGFloat(RenderPipeline.colourSmoothnessReach) + 6)
         }
-        return max(reach, p.touchUpTileReach(beyondMargin: 0, sensorSize: sensorSize))
+        return max(reach, p.touchUpTileReach(beyondMargin: 0, sensorSize: sensorSize), p.lensBlurTileReach(sensorSize: sensorSize))
     }
 
     /// The part of a render's coverage that looks as the full frame does:

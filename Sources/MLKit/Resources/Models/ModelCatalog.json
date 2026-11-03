@@ -273,5 +273,29 @@
     "outputActivation": "probabilities",
     "refine": "none",
     "converter": { "script": "scripts/convert_isnet.py" }
+  },
+  {
+    "id": "depth-anything-v2-small",
+    "displayName": "Depth Anything V2 Small",
+    "purpose": "Depth for Lens Blur: how near or far each part of the photo is",
+    "version": 1,
+    "kind": "depth",
+    "licence": {
+      "name": "Apache-2.0",
+      "url": "https://huggingface.co/depth-anything/Depth-Anything-V2-Small/blob/main/LICENSE",
+      "commercialUse": true
+    },
+    "sourceURL": "https://huggingface.co/depth-anything/Depth-Anything-V2-Small",
+    "sizeMB": 50,
+    "inputSize": 518,
+    "packages": [
+      {
+        "name": "DepthAnythingV2Small.mlpackage",
+        "sha256": null,
+        "inputNames": ["image"],
+        "outputNames": ["depth"]
+      }
+    ],
+    "converter": { "script": "scripts/convert_depth_anything.py" }
   }
 ]

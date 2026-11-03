@@ -74,7 +74,7 @@ CATALOGUE = os.path.join(REPO_ROOT, "Sources", "MLKit", "Resources", "Models", "
 PLACEHOLDER = latent_manifest.PLACEHOLDER
 # What Settings > AI > Models calls each kind in its "For" column.
 KIND_WORDS = {"promptedSegmentation": "Click to select", "subjectSegmentation": "Subject",
-              "semanticSegmentation": "Classes", "denoise": "Noise reduction"}
+              "semanticSegmentation": "Classes", "denoise": "Noise reduction", "depth": "Depth"}
 # Every convert_*.py verifies on one of these two unless --test-image names
 # another, and stops when neither is there. Looked for here as well, so a
 # fresh clone finds out before the download rather than after it.
@@ -125,6 +125,9 @@ PINS = {
     "isnet": dict(script="convert_isnet.py", args=[], source="file", weights_arg="--weights",
                   code_url="https://github.com/xuebinqin/DIS",
                   revision="CODE_REVISION", weights="WEIGHTS_SHA256"),
+    "depth-anything-v2-small": dict(script="convert_depth_anything.py", args=[], source="file", weights_arg="--weights",
+                                    code_url="https://github.com/DepthAnything/Depth-Anything-V2",
+                                    revision="CODE_REVISION", weights="WEIGHTS_SHA256"),
 }
 
 
