@@ -164,7 +164,8 @@ final class Keymap: @unchecked Sendable {
         if let system = Shortcuts.system.first(where: { $0.key == key && $0.modifiers == modifiers }) {
             return .system(system.title)
         }
-        if let holder = table.first(where: { $0.key == key && $0.modifiers == modifiers && $0.command != info.command }),
+        if let holder = table.first(where: { $0.key == key && $0.modifiers == modifiers && $0.command != info.command
+                                              && $0.scope.overlaps(info.scope) }),
            let holderInfo = Self.info(for: holder.command) {
             return .taken(by: holderInfo)
         }
@@ -176,7 +177,7 @@ final class Keymap: @unchecked Sendable {
     static func clashes(in table: [Shortcut]) -> [(Shortcut, Shortcut)] {
         var result: [(Shortcut, Shortcut)] = []
         for (i, a) in table.enumerated() {
-            for b in table[(i + 1)...] where a.key == b.key && a.modifiers == b.modifiers {
+            for b in table[(i + 1)...] where a.key == b.key && a.modifiers == b.modifiers && a.scope.overlaps(b.scope) {
                 result.append((a, b))
             }
         }
@@ -442,6 +443,22 @@ extension Keymap {
             c("setCopyAsMaster", .setCopyAsMaster, "Set Copy as Master", files),
             c("removeVirtualCopy", .removeVirtualCopy, "Remove Virtual Copy", files),
             c("removeDust", .removeDust, "Remove Dust…", develop),
+            c("matchTotalExposures", .matchTotalExposures, "Match Total Exposures", develop),
+            c("pasteFromPrevious", .pasteFromPrevious, "Paste Settings From Previous", editing),
+            c("toggleSoftProof", .toggleSoftProof, "Soft Proofing", develop, in: .develop),
+            c("selectNone", .select(.none), "Select None", views),
+            c("selectPicked", .select(.flag(.picked)), "Select Flagged Photos", views),
+            c("deselectUnflagged", .select(.deselectUnflagged), "Deselect Unflagged Photos", views),
+            c("groupIntoStack", .stack(.group), "Group into Stack", files),
+            c("unstack", .stack(.unstack), "Unstack", files),
+            c("toggleStack", .stack(.toggleExpanded), "Expand or Collapse Stack", files, in: .library),
+            c("moveToTopOfStack", .stack(.moveToTop), "Move to Top of Stack", files, in: .library),
+            c("loupeOverlay", .view(.toggleOverlay), "Show Loupe Overlay", views),
+            c("cycleBeforeAfter", .view(.cycleBeforeAfter), "Cycle Before/After Views", views, in: .develop),
+            c("referenceView", .view(.referenceView), "Reference View", views, in: .develop),
+            c("copyAfterToBefore", .view(.copyAfterToBefore), "Copy After's Settings to Before", develop, in: .develop),
+            c("copyBeforeToAfter", .view(.copyBeforeToAfter), "Copy Before's Settings to After", develop, in: .develop),
+            c("swapBeforeAfter", .view(.swapBeforeAfter), "Swap Before and After Settings", develop, in: .develop),
         ]
         return list
     }()
@@ -482,7 +499,8 @@ final class KeyboardSettings: ObservableObject {
     /// a later default can cause.
     func clash(for info: ShortcutCommandInfo) -> ShortcutCommandInfo? {
         guard let mine = shortcut(for: info) else { return nil }
-        return table.first { $0.command != info.command && $0.key == mine.key && $0.modifiers == mine.modifiers }
+        return table.first { $0.command != info.command && $0.key == mine.key && $0.modifiers == mine.modifiers
+                             && $0.scope.overlaps(mine.scope) }
             .flatMap { Keymap.info(for: $0.command) }
     }
 

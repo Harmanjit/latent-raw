@@ -20,7 +20,8 @@ final class StackCommandTests: XCTestCase {
     func testLightroomKeys() {
         XCTAssertEqual(Shortcuts.shortcut(for: .stack(.group))?.glyphs, "⌘G")
         XCTAssertEqual(Shortcuts.shortcut(for: .stack(.unstack))?.glyphs, "⇧⌘G")
-        XCTAssertEqual(Shortcuts.command(for: BareKeyPress(.character("s"))), .stack(.toggleExpanded))
+        // S is shared with Develop's Soft Proofing; the Library's is the stack's.
+        XCTAssertTrue(Shortcuts.commands(for: BareKeyPress(.character("s"))).contains(.stack(.toggleExpanded)))
         XCTAssertEqual(Shortcuts.command(for: BareKeyPress(.character("s"), shift: true)), .stack(.moveToTop))
     }
 

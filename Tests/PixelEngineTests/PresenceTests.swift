@@ -40,15 +40,16 @@ final class PresenceTests: XCTestCase {
 
         let stack = EditStack(parameters: p)
         XCTAssertTrue(EditGroup.lookGroups.contains(.presence))
-        XCTAssertEqual(stack.presentGroups.intersection([.presence, .colour, .lens, .crop]),
-                       [.presence, .colour, .lens, .crop])
-        // Vibrance rides with colour; perspective with crop; defringe with lens.
+        XCTAssertEqual(stack.presentGroups.intersection([.presence, .colour, .lens, .transformSliders]),
+                       [.presence, .colour, .lens, .transformSliders])
+        // Vibrance rides with colour; perspective with Transform
+        // Adjustments (TransformCopyGroups.swift); defringe with lens.
         let onlyColour = EditStack().merged(with: stack, groups: [.colour]).parameters()
         XCTAssertEqual(onlyColour.vibrance, 0.4)
         XCTAssertEqual(onlyColour.texture, 0)
         XCTAssertTrue(onlyColour.perspective.isIdentity)
-        let onlyCrop = EditStack().merged(with: stack, groups: [.crop]).parameters()
-        XCTAssertEqual(onlyCrop.perspective.vertical, 0.25)
+        let onlyTransform = EditStack().merged(with: stack, groups: [.transformSliders]).parameters()
+        XCTAssertEqual(onlyTransform.perspective.vertical, 0.25)
     }
 
     /// GPU, on the sample NEF: each control moves the statistic it is
