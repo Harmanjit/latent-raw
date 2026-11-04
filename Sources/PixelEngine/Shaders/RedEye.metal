@@ -21,6 +21,13 @@ using namespace metal;
 // otherwise stay as a pink ring. The pupil becomes grey at the level of
 // its green and blue, which the flash's red reflection doesn't reach, so
 // it keeps its shading and reads as a pupil with depth, not a black disc.
+//
+// Pet Eye (pet = 1) skips the colour tests: an animal's eye glows green,
+// yellow or white from the tapetum, and a dog's or cat's iris can share
+// those colours. The circle is the pupil; inside it, with a softer edge,
+// the picture becomes a near-black pupil that keeps a trace of its own
+// shading, and optionally a small round catchlight placed off-centre
+// along `catchlight` (a unit direction the app points up-left on screen).
 
 struct RedEyeSpotGPU {
     float2 centre;     // texture pixels
@@ -28,6 +35,9 @@ struct RedEyeSpotGPU {
     float strength;    // 0...1
     int2 boxOrigin;    // texel at the scratch's top-left
     int2 boxSize;      // texels
+    float2 catchlight; // unit direction from the centre; zero for none
+    float pet;         // 1 for Pet Eye
+    float catchlightOn;
 };
 
 // Must match RedEyeTuning in RedEye.swift.
@@ -64,6 +74,28 @@ inline float redEyeRadial(float2 p, constant RedEyeSpotGPU &e) {
     return 1.0 - smoothstep((1.0 - redEyeFeather) * e.radius, e.radius, length(p - e.centre));
 }
 
+constant float petEyeFeather = 0.3;       // a softer edge: the circle is the pupil itself
+constant float petEyeShading = 0.06;      // the pupil keeps this fraction of its own brightness…
+constant float petEyeCeiling = 0.012;     // …up to this, so a white glow still ends near black
+constant float petEyeGlintOffset = 0.38;  // the catchlight's centre, in radii from the pupil's
+constant float petEyeGlintRadius = 0.16;  // and its size, in radii
+
+// Pet Eye in linear P3: the dark pupil, and the catchlight on top. The
+// catchlight is as bright as the glow under it (clamped to a visible
+// range), so it sits in the photo's own exposure.
+inline float3 petEyeCorrect(float3 p, float2 here, constant RedEyeSpotGPU &e) {
+    float luma = max(dot(p, float3(0.2290, 0.6917, 0.0793)), 0.0);
+    float3 target = float3(min(luma * petEyeShading, petEyeCeiling));
+    if (e.catchlightOn > 0.5) {
+        float2 c = e.centre + e.catchlight * (petEyeGlintOffset * e.radius);
+        float r = max(petEyeGlintRadius * e.radius, 0.75);
+        float glint = 1.0 - smoothstep(0.45 * r, r, length(here - c));
+        target = mix(target, float3(clamp(luma, 0.35, 1.0)), glint);
+    }
+    float m = (1.0 - smoothstep((1.0 - petEyeFeather) * e.radius, e.radius, length(here - e.centre))) * e.strength;
+    return mix(p, target, clamp(m, 0.0, 1.0));
+}
+
 kernel void redEyeApply(
     texture2d<float, access::sample> state   [[texture(0)]],
     texture2d<float, access::write>  scratch [[texture(1)]],
@@ -81,6 +113,11 @@ kernel void redEyeApply(
     if (radial <= 0.0) { scratch.write(c, gid); return; }
 
     float3 p = toP3 * c.rgb;
+    if (e.pet > 0.5) {
+        c.rgb = fromP3 * petEyeCorrect(p, here, e);
+        scratch.write(c, gid);
+        return;
+    }
     float pupil = redEyePupilRed(p);
     float greenBlue = max(max(p.g, p.b), 1e-6);
     float pink = smoothstep(1.03, 1.35, redEyeRedness(p)) * smoothstep(0.75, 0.9, min(p.g, p.b) / greenBlue);

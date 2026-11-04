@@ -12,23 +12,55 @@ import ColorKit
 /// crop, straighten, rotation and zoom. Only red pixels change: the iris,
 /// the catchlight and the skin inside the circle keep their colour, so a
 /// generous circle is harmless.
+///
+/// A Pet Eye spot (`kind == .pet`) works differently: an animal's eye
+/// glows green, yellow or white from the tapetum behind the retina, not
+/// red, so no colour test can find it. The circle is the pupil, and
+/// everything inside it becomes a dark pupil, with an optional catchlight.
 public struct RedEyeSpot: Equatable, Sendable, Codable, Identifiable {
+    /// A person's red eye, or an animal's glowing one.
+    public enum Kind: String, Codable, Sendable, CaseIterable {
+        case human, pet
+    }
+
     public var id: UUID
     public var centre: SIMD2<Float>
     /// Fraction of the sensor's short side.
     public var radius: Float
     /// 0 (no change) … 1.
     public var strength: Float
+    /// Nil for a person's red eye, which is every spot an older build
+    /// wrote, so those encode exactly as before.
+    public var kind: Kind?
+    /// Pet Eye's added catchlight: the direction from the pupil's centre
+    /// to the highlight, a unit vector in sensor pixels (the app points it
+    /// up and to the left on screen, whatever the camera's orientation).
+    /// Nil for none, and always nil on a red-eye spot.
+    public var catchlight: SIMD2<Float>?
 
     public static let defaultRadius: Float = 0.006
     /// Like heal patches: more is never a real photo's need.
     public static let maximumCount = 32
 
-    public init(id: UUID = UUID(), centre: SIMD2<Float>, radius: Float = defaultRadius, strength: Float = 1) {
+    public init(id: UUID = UUID(), centre: SIMD2<Float>, radius: Float = defaultRadius, strength: Float = 1,
+                kind: Kind? = nil, catchlight: SIMD2<Float>? = nil) {
         self.id = id
         self.centre = centre
         self.radius = radius
         self.strength = strength
+        self.kind = kind == .human ? nil : kind
+        self.catchlight = kind == .pet ? catchlight : nil
+    }
+
+    public var isPet: Bool { kind == .pet }
+
+    /// The catchlight direction a render can use: unit length, or nil when
+    /// there is none, the spot is a red-eye one, or the vector is unusable.
+    public var catchlightDirection: SIMD2<Float>? {
+        guard isPet, let v = catchlight, v.x.isFinite, v.y.isFinite else { return nil }
+        let length = simd_length(v)
+        guard length > 1e-6 else { return nil }
+        return v / length
     }
 
     /// Nothing to do: no size, no strength, or a non-finite centre.
@@ -47,6 +79,8 @@ public struct RedEyeSpot: Equatable, Sendable, Codable, Identifiable {
                                  SIMD2(repeating: HealPatch.coordinateRange.upperBound))
         spot.radius = min(max(radius, 0), 0.5)
         spot.strength = min(max(strength, 0), 1)
+        if spot.kind == .human { spot.kind = nil }
+        spot.catchlight = spot.catchlightDirection
         return spot
     }
 
@@ -61,7 +95,7 @@ public struct RedEyeSpot: Equatable, Sendable, Codable, Identifiable {
                       width: 2 * r, height: 2 * r)
     }
 
-    private enum CodingKeys: String, CodingKey { case id, centre, radius, strength }
+    private enum CodingKeys: String, CodingKey { case id, centre, radius, strength, kind, catchlight }
 
     /// Lenient, like the lens block: a spot missing a key (another build's,
     /// or a hand-edited sidecar) loads with that key's default.
@@ -71,6 +105,10 @@ public struct RedEyeSpot: Equatable, Sendable, Codable, Identifiable {
         centre = try c.decodeIfPresent(SIMD2<Float>.self, forKey: .centre) ?? SIMD2(0.5, 0.5)
         radius = try c.decodeIfPresent(Float.self, forKey: .radius) ?? Self.defaultRadius
         strength = try c.decodeIfPresent(Float.self, forKey: .strength) ?? 1
+        // A kind this build doesn't know reads as red-eye, not as a failure
+        // to load the whole edit.
+        kind = (try? c.decodeIfPresent(Kind.self, forKey: .kind)) ?? nil
+        catchlight = try c.decodeIfPresent(SIMD2<Float>.self, forKey: .catchlight)
     }
 }
 
@@ -118,6 +156,9 @@ struct RedEyeSpotGPU {
     var strength: Float
     var boxOrigin: SIMD2<Int32>
     var boxSize: SIMD2<Int32>
+    var catchlight: SIMD2<Float> = .zero  // unit direction; zero for none
+    var pet: Float = 0                    // 1 for Pet Eye
+    var catchlightOn: Float = 0
 }
 
 enum RedEyeStage {
@@ -133,8 +174,12 @@ enum RedEyeStage {
         let reach = radius + 2
         let lo = (centre - reach).rounded(.down), hi = (centre + reach).rounded(.up)
         guard case let (x0, y0, x1, y1)? = HealStage.box(lo, hi, width, height), radius > 0 else { return nil }
+        // Binning is the same on both axes, so the catchlight's direction
+        // in sensor pixels is its direction in texture pixels.
+        let glint = spot.catchlightDirection
         return RedEyeSpotGPU(centre: centre, radius: radius, strength: min(max(spot.strength, 0), 1),
-                             boxOrigin: SIMD2(Int32(x0), Int32(y0)), boxSize: SIMD2(Int32(x1 - x0), Int32(y1 - y0)))
+                             boxOrigin: SIMD2(Int32(x0), Int32(y0)), boxSize: SIMD2(Int32(x1 - x0), Int32(y1 - y0)),
+                             catchlight: glint ?? .zero, pet: spot.isPet ? 1 : 0, catchlightOn: glint == nil ? 0 : 1)
     }
 
     /// Corrects `spots`, in order, in `state` (the heal stage's working
