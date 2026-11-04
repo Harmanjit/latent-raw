@@ -353,7 +353,7 @@ final class ExportOutputTests: XCTestCase {
             XCTAssertEqual(format.isAvailable, encodable.contains(format.contentType.identifier), format.displayName)
             XCTAssertEqual(ExportSettings.Format.available.contains(format), format.isAvailable)
             XCTAssertTrue(format.supportsQuality)
-            XCTAssertFalse(format.supportsGainMap)
+            XCTAssertEqual(format.supportsGainMap, format == .avif)
         }
         let image = try ExportMetadataTests.image(width: 64, height: 48, space: CGColorSpace.sRGB)
         for format in ExportSettings.Format.available where !ExportSettings.Format.allCases.contains(format) {

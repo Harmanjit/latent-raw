@@ -4,7 +4,7 @@ Select images in the Library and press ⇧⌘E (File > Export), or right-click t
 
 ## The sheet
 
-**Format.** JPEG, HEIC, PNG or TIFF on every Mac; AVIF and JPEG XL as well when the Mac's system can write them (the menu only lists what works). Two more choices don't render an image file at all: **DNG** and **Original + XMP sidecar** (below). Quality for the lossy formats; **Compare…** beside it opens the quality comparison (below) for JPEG and HEIC.
+**Format.** JPEG, HEIC, PNG or TIFF on every Mac; AVIF and JPEG XL as well when the Mac's system can write them. A format this Mac can't write is listed greyed out as "(not on this Mac)", and its tooltip says why: macOS 27.2, for one, reads JPEG XL but has no encoder for it, so JPEG XL turns on by itself only on a macOS that has one, with a quality slider like JPEG's. Two more choices don't render an image file at all: **DNG** and **Original + XMP sidecar** (below). Quality for the lossy formats; **Compare…** beside it opens the quality comparison (below) for JPEG and HEIC.
 
 **Limit file size.** For the lossy formats: the quality is lowered, photo by photo, until the file is no bigger than the size given (in KB). A photo that doesn't fit even at the lowest quality is reported and not written; export it smaller.
 
@@ -12,7 +12,10 @@ Select images in the Library and press ⇧⌘E (File > Export), or right-click t
 
 **Colour space.** sRGB (safe for the web and anyone's screen), Display P3 (wider, for modern Apple screens), **Adobe RGB (1998)** (what print labs usually ask for), **ProPhoto RGB** (the widest, for 16-bit files going on to another editor), any RGB profile installed on the Mac (a printer or paper profile, listed from the ColorSync folders), or **Other…** to pick a profile file. Every file embeds its profile. Adobe RGB, ProPhoto and installed profiles are made by rendering the photo in Latent's wide working space at 16 bits and converting it with macOS's ColorSync, so nothing bands on the way; a printer or paper profile converts with perceptual intent. ProPhoto in an 8-bit file can band in smooth skies, and the sheet says so. A gain map is written only in sRGB or Display P3.
 
-**HDR gain map** (JPEG and HEIC, off by default). Adds a gain map so HDR screens show highlights above white up to the photo's HDR Limit (two stops unless changed in Develop, see [HDR Limit](Develop#hdr-limit)), as the editor's HDR display shows them. Every other viewer, and the file's main image, shows the normal SDR export. It costs a second render of the image. PNG and TIFF have nowhere to put one.
+**HDR Output** (JPEG, HEIC and AVIF, off by default). Writes highlights above white for HDR screens, up to the photo's HDR Limit (two stops unless changed in Develop, see [HDR Limit](Develop#hdr-limit)), as the editor's HDR display shows them. It costs a second render of the image. PNG and TIFF are SDR only.
+
+- **Maximize compatibility** (on by default; HEIC and AVIF show the switch, JPEG is always this). The file is the normal SDR export with an ISO gain map: every viewer shows the SDR picture, and HDR screens brighten the highlights.
+- With it **off**, a HEIC or AVIF is a full HDR file instead: 10 bits, Rec. 2100 PQ, with SDR white at 203 cd/m² (the BT.2408 reference) and highlights up to the HDR Limit above it. HDR-aware apps show it directly; older ones tone-map it themselves, sometimes flatly. A watermark, output sharpening or a converted colour space (Adobe RGB, ProPhoto, a profile) need SDR pixels, so such an export gets a gain map instead, and the sheet says so.
 
 **Image sizing.** Off, the file is the photo's full cropped size. **Resize to fit** by:
 
@@ -80,9 +83,13 @@ Every file name is planned before anything is written. A line shows the first fi
 
 ## DNG export (Render to DNG)
 
-Choosing **DNG** as the format writes a linear DNG of each photo at full size, cropped, straightened and upright. It keeps raw editing room: the pixels are 16-bit floating point linear light, with highlights above white kept. What is **baked in**: white balance, exposure, highlight recovery, noise reduction (classic and AI), lens and perspective corrections, spot healing, dust spots, red eye, blemishes and masks. What is **left out**: the look (contrast and the tone curve, Highlights to Blacks, colour grading, vibrance, texture, clarity, dehaze, defringe, skin smoothing, sharpening), since those work on finished, display-ready values a raw file doesn't hold. The DNG opens in Latent, Lightroom, Apple Photos and other raw converters with their default look, ready to be graded again; its preview shows that default look.
+Choosing **DNG** as the format writes a DNG of each photo. **DNG contents** says what goes in it:
 
-The DNG keeps the camera's name, its colour matrix, the lens, exposure details and capture time, and records the original it came from. Its white balance is already set, so keep it at **As Shot** when you edit it; Latent doesn't apply lens corrections to it again. Image sizing, colour space, sharpening, metadata choices and the watermark don't apply to DNG. Like merged DNGs it is large, about 6 bytes per pixel.
+- **Edits baked in, look editable** (the default) writes a linear DNG at full size, cropped, straightened and upright. It keeps raw editing room: the pixels are 16-bit floating point linear light, with highlights above white kept. What is **baked in**: white balance, exposure, highlight recovery, noise reduction (classic and AI), lens and perspective corrections, spot healing, dust spots, red eye, blemishes and masks. What is **left out**: the look (contrast and the tone curve, Highlights to Blacks, colour grading, vibrance, texture, clarity, dehaze, defringe, skin smoothing, sharpening), since those work on finished, display-ready values a raw file doesn't hold. The DNG opens in Latent, Lightroom, Apple Photos and other raw converters with their default look, ready to be graded again; its preview shows that default look.
+- **Full look baked in** renders the whole edit, tone and colour included, and stores it under the inverse of Latent's default tone curve, so Latent opens the DNG looking like the edit (within a few levels). Other raw converters apply their own curves, so there it opens close to the edit, not exactly. Highlights clipped in the edit stay clipped, and there is less room to regrade than with the default. Its preview shows the edit.
+- **Original raw as DNG** writes the photo unedited. A DNG original is copied byte for byte. Any other raw is demosaiced and written as a linear DNG at Latent's defaults (uncropped, in the camera's orientation): it is **not** a lossless conversion that keeps the sensor mosaic, as Adobe's DNG Converter makes, and it is larger than the raw.
+
+The DNG keeps the camera's name, its colour matrix, the lens, exposure details and capture time, and records the original it came from. Its white balance is already set, so keep it at **As Shot** when you edit it; Latent doesn't apply lens corrections to it again. Image sizing, colour space, sharpening, metadata choices and the watermark don't apply to DNG. Like merged DNGs it is large, about 6 bytes per pixel. There is no "Embed fast load data" or "Embed original raw" option.
 
 ## Exporting originals
 

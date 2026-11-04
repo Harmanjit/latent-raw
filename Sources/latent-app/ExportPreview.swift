@@ -39,6 +39,7 @@ final class ExportPreviewRenderer {
         var relPath: String
         var bitsPerComponent: Int
         var gainMap: Bool
+        var fullHDR: Bool
         var colorSpaceIsP3: Bool
         var maxLongEdge: Int?
         /// The colour space beyond sRGB and P3, the sizing mode, output
@@ -53,6 +54,7 @@ final class ExportPreviewRenderer {
             let settings = preset.settings
             bitsPerComponent = settings.bitsPerComponent
             gainMap = settings.writesGainMap
+            fullHDR = settings.writesFullHDR
             colorSpaceIsP3 = preset.colorSpaceIsP3
             maxLongEdge = preset.resize ? preset.maxLongEdge : nil
             profile = preset.profile
@@ -110,6 +112,9 @@ final class ExportPreviewRenderer {
         // Made once for every watermark and metadata choice.
         var plain = preset
         plain.watermarkEnabled = false
+        // With the watermark gone the plain render could turn full HDR;
+        // keep it to what the export writes (a gain map, with a watermark).
+        if !preset.settings.writesFullHDR { plain.hdrMaximizeCompatibility = true }
         plain.includeMetadata = true
         plain.includeLocation = true
         plain.metadataLevel = .all

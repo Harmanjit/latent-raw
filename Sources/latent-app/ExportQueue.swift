@@ -32,8 +32,15 @@ struct ExportPreset: Codable, Equatable {
     /// as "camera metadata, keywords and rating", not location.
     var includeLocation = false
     var revealWhenDone = true
-    /// JPEG/HEIC: add an HDR gain map. Off by default, and in older presets.
+    /// HDR Output (JPEG, HEIC, AVIF): add an HDR gain map, or with
+    /// Maximize Compatibility off write full HDR. Off by default, and in
+    /// older presets. The key keeps its old name so saved presets load.
     var hdrGainMap = false
+    /// With HDR Output: SDR plus a gain map (on, the default) rather than a
+    /// full HDR PQ file (HEIC and AVIF only).
+    var hdrMaximizeCompatibility = true
+    /// What a DNG export holds (DNG (edits baked in) is the default).
+    var dngContent: DNGExportContent = .sceneReferred
     /// Stamp `watermark` into each file. Off by default, and in older
     /// presets; the text and look are kept while it's off.
     var watermarkEnabled = false
@@ -74,6 +81,7 @@ struct ExportPreset: Codable, Equatable {
     var settings: ExportSettings {
         var s = ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap,
                                watermark: watermarkEnabled && !watermark.isEmpty ? watermark : nil)
+        s.hdrFull = !hdrMaximizeCompatibility
         applyOutputSettings(to: &s)
         return s
     }
@@ -107,6 +115,8 @@ struct ExportPreset: Codable, Equatable {
         includeLocation = try c.decodeIfPresent(Bool.self, forKey: .includeLocation) ?? false
         revealWhenDone = try c.decodeIfPresent(Bool.self, forKey: .revealWhenDone) ?? true
         hdrGainMap = try c.decodeIfPresent(Bool.self, forKey: .hdrGainMap) ?? false
+        hdrMaximizeCompatibility = (try? c.decodeIfPresent(Bool.self, forKey: .hdrMaximizeCompatibility)) ?? true
+        dngContent = (try? c.decodeIfPresent(DNGExportContent.self, forKey: .dngContent)) ?? .sceneReferred
         watermarkEnabled = try c.decodeIfPresent(Bool.self, forKey: .watermarkEnabled) ?? false
         watermark = (try? c.decodeIfPresent(ExportWatermark.self, forKey: .watermark)) ?? ExportWatermark()
         fileKind = (try? c.decodeIfPresent(ExportFileKind.self, forKey: .fileKind)) ?? .image
@@ -391,9 +401,10 @@ final class ExportQueue: ObservableObject {
                 while true {
                     let request = preset.workerRequest(for: record, root: root, destination: target,
                                                        editStackJSON: json, keywords: keywords)
-                    let job = ExportFileJob(kind: preset.fileKind, request: request, sourceHash: record.hashString,
+                    var job = ExportFileJob(kind: preset.fileKind, request: request, sourceHash: record.hashString,
                                             captureTime: record.captureTime ?? 0,
                                             sidecar: sidecar)
+                    job.dngContent = preset.dngContent
                     outcome = await Task.detached(priority: .userInitiated) {
                         do { return .success(try await job.run(gpu: gpu)) }
                         catch { return .failure(error) }
@@ -595,12 +606,7 @@ struct ExportSheet: View {
                     }
                 }
                 ExportFileOptionsSection(preset: $preset)
-                if preset.format.supportsGainMap {
-                    Toggle("HDR gain map", isOn: $preset.hdrGainMap)
-                        .accessibilityLabel("HDR gain map")
-                        .accessibilityHint("Adds a gain map so HDR screens show highlights brighter than white. Other screens show the normal image.")
-                        .help("Highlights up to two stops brighter on HDR screens, as the editor shows them. Every other viewer shows the normal image.")
-                }
+                ExportHDRSection(preset: $preset)
                 ExportColorSpacePicker(preset: $preset)
 
                 groupLabel("Image Sizing")
@@ -609,7 +615,8 @@ struct ExportSheet: View {
                 ExportWatermarkSection(preset: $preset)
                 ExportMetadataSection(preset: $preset)
             } else {
-                ExportKindNote(kind: preset.fileKind)
+                if preset.fileKind == .dng { ExportDNGSection(preset: $preset) }
+                ExportKindNote(kind: preset.fileKind, dngContent: preset.dngContent)
             }
 
             groupLabel("Naming")

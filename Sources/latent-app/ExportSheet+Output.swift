@@ -3,6 +3,7 @@ import AppKit
 import UniformTypeIdentifiers
 import PixelEngine
 import Catalog
+import MLKit
 
 /// The export sheet's format menu: the image formats this Mac can write,
 /// then DNG and the original with its sidecar.
@@ -14,21 +15,35 @@ struct ExportFormatPicker: View {
             ForEach(ExportSettings.Format.available, id: \.self) { format in
                 Text(format.displayName).tag("image." + format.rawValue)
             }
+            // Formats this Mac can't encode, shown greyed out so their
+            // absence is explained rather than a mystery.
+            ForEach(ExportSettings.Format.unavailable, id: \.self) { format in
+                Text("\(format.displayName) (not on this Mac)").tag("unavailable." + format.rawValue)
+                    .disabled(true)
+            }
             Divider()
-            Text("DNG (edits baked in)").tag(ExportFileKind.dng.rawValue)
+            Text("DNG").tag(ExportFileKind.dng.rawValue)
             Text("Original + XMP sidecar").tag(ExportFileKind.original.rawValue)
         }
-        .help("JPEG, HEIC, PNG and TIFF everywhere; AVIF and JPEG XL when this Mac can write them. "
-              + "DNG keeps raw editing room with the edit's corrections baked in. Original copies the raw file "
-              + "itself, with an XMP sidecar holding its rating, keywords and edit.")
+        .help("JPEG, HEIC, PNG and TIFF everywhere; AVIF and JPEG XL when this Mac can write them"
+              + unavailableNote + ". DNG keeps raw editing room, with the edit baked in. Original copies the raw "
+              + "file itself, with an XMP sidecar holding its rating, keywords and edit.")
         .accessibilityLabel("Format")
+    }
+
+    /// Which formats this Mac can't write, and why, for the tooltip.
+    private var unavailableNote: String {
+        let names = ExportSettings.Format.unavailable.map(\.displayName)
+        guard !names.isEmpty else { return "" }
+        return " (this version of macOS has no encoder for " + names.joined(separator: " or ") + ")"
     }
 
     private var selection: Binding<String> {
         Binding {
             preset.fileKind == .image ? "image." + preset.format.rawValue : preset.fileKind.rawValue
         } set: { tag in
-            if tag.hasPrefix("image."), let format = ExportSettings.Format(rawValue: String(tag.dropFirst(6))) {
+            if tag.hasPrefix("image."), let format = ExportSettings.Format(rawValue: String(tag.dropFirst(6))),
+               format.isAvailable {
                 preset.fileKind = .image
                 preset.format = format
             } else if let kind = ExportFileKind(rawValue: tag) {
@@ -42,6 +57,7 @@ struct ExportFormatPicker: View {
 /// they don't use.
 struct ExportKindNote: View {
     let kind: ExportFileKind
+    var dngContent: DNGExportContent = .sceneReferred
 
     var body: some View {
         Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -52,9 +68,21 @@ struct ExportKindNote: View {
         case .image:
             ""
         case .dng:
-            "A linear DNG at full size, cropped and upright: white balance, exposure, noise reduction, lens "
-                + "corrections, healing and masks are baked in. The look (tone, colour, presence, sharpening) "
-                + "is left for the DNG's own edit, so it opens with Latent's default look."
+            switch dngContent {
+            case .sceneReferred:
+                "A linear DNG at full size, cropped and upright: white balance, exposure, noise reduction, lens "
+                    + "corrections, healing and masks are baked in. The look (tone, colour, presence, sharpening) "
+                    + "is left for the DNG's own edit, so it opens with Latent's default look."
+            case .fullLook:
+                "A linear DNG at full size with the whole edit baked in, tone and colour included, stored under "
+                    + "the inverse of Latent's default tone curve: Latent opens it looking like the edit. Other "
+                    + "raw converters apply their own curves, so there it opens close to the edit, not exactly. "
+                    + "Highlights clipped in the edit stay clipped."
+            case .original:
+                "The photo unedited. A DNG original is copied as it is. Any other raw is demosaiced and written "
+                    + "as a linear DNG at Latent's defaults: not a lossless conversion of the sensor mosaic, "
+                    + "and the file is larger than the raw."
+            }
         case .original:
             "The raw file itself, unchanged, with an .xmp sidecar beside it holding the rating, label, "
                 + "keywords and Latent's edit. Other apps read the rating, label and keywords."
@@ -446,5 +474,49 @@ struct ExportMultiBatchSection: View {
             batches.append(ExportBatch(preset: saved.preset, destination: folder, name: saved.name))
         }
         return batches
+    }
+}
+
+/// What a DNG export holds: the scene-referred edit (the default), the
+/// full look, or the original unedited.
+struct ExportDNGSection: View {
+    @Binding var preset: ExportPreset
+
+    var body: some View {
+        Picker("DNG contents", selection: $preset.dngContent) {
+            ForEach(DNGExportContent.allCases, id: \.self) { Text($0.title).tag($0) }
+        }
+        .frame(width: 330)
+        .help("Edits baked in keeps the look editable in the DNG. Full look bakes the whole edit in. "
+              + "Original raw as DNG writes the photo unedited.")
+    }
+}
+
+/// HDR Output: a gain map (Maximize Compatibility, every viewer shows the
+/// SDR picture) or, for HEIC and AVIF, a full HDR PQ file. The HDR
+/// rendition's headroom is each photo's HDR Limit.
+struct ExportHDRSection: View {
+    @Binding var preset: ExportPreset
+
+    var body: some View {
+        if preset.format.supportsGainMap || preset.format.supportsFullHDR {
+            Toggle("HDR Output", isOn: $preset.hdrGainMap)
+                .accessibilityHint("Writes highlights brighter than white for HDR screens, up to each photo's HDR Limit.")
+                .help("Highlights brighter than white on HDR screens, up to each photo's HDR Limit (Develop › HDR), "
+                      + "as the editor shows them. Off writes an ordinary SDR file.")
+            if preset.hdrGainMap, preset.format.supportsFullHDR {
+                Toggle("Maximize compatibility", isOn: $preset.hdrMaximizeCompatibility)
+                    .padding(.leading, 18)
+                    .accessibilityHint("On writes an SDR image with a gain map; off writes a full HDR file.")
+                    .help("On: an SDR picture with an HDR gain map, so every viewer shows it correctly and HDR screens "
+                          + "brighten the highlights. Off: a 10-bit HDR file (Rec. 2100 PQ), which HDR-aware apps "
+                          + "show directly and older ones tone-map themselves.")
+                if !preset.hdrMaximizeCompatibility, preset.settings.writesFullHDR == false {
+                    Text("A watermark, output sharpening or a converted colour space needs SDR pixels, so this "
+                         + "export gets a gain map instead.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 }

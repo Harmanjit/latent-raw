@@ -93,6 +93,8 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Graphic watermarks**, fonts and rotation, as well as text. See [The sheet](Export#the-sheet).
 - **AVIF and JPEG XL** where macOS can write them, 8-bit and compressed TIFF, and **Limit file size**. See [The sheet](Export#the-sheet).
 - **DNG export** writes a linear DNG with the corrections baked in and the look left open. See [DNG export](Export#dng-export-render-to-dng).
+- **DNG contents**: the full look baked in, or the original raw as a DNG, as well as the corrections alone. See [DNG export](Export#dng-export-render-to-dng).
+- **HDR Output** on export: a gain map in JPEG, HEIC and now AVIF, or with **Maximize compatibility** off a full 10-bit PQ HEIC or AVIF, up to each photo's HDR Limit. Formats this Mac can't write, such as JPEG XL on macOS 27.2, are shown greyed out with the reason. See [The sheet](Export#the-sheet).
 - **Original + XMP sidecar** copies the raw with a sidecar other applications read. See [Exporting originals](Export#exporting-originals).
 - **Export with Previous** (⌥⇧⌘E), **several presets in one run**, and new destinations: beside the original, or chosen when the export starts. See [Export with Previous](Export#export-with-previous).
 - **Soft proofing** with Perceptual and Relative Colorimetric intents, **Simulate Paper & Ink**, a monitor gamut warning and **proof copies**. See [Soft proofing](Develop#soft-proofing).

@@ -109,8 +109,28 @@ public struct ExportSettings: Sendable {
         public var supportsQuality: Bool { self == .jpeg || self == .heic || self == .avif || self == .jxl }
 
         /// Formats ImageIO writes an ISO 21496-1 gain map into on macOS 15.
-        /// PNG and TIFF have no place for one.
-        public var supportsGainMap: Bool { self == .jpeg || self == .heic }
+        /// PNG and TIFF have no place for one. AVIF takes one as HEIC does
+        /// (measured on macOS 27: the map reads back from the file). JPEG
+        /// XL is left out until a Mac that writes it can be checked.
+        public var supportsGainMap: Bool { self == .jpeg || self == .heic || self == .avif }
+
+        /// Formats that can hold a full HDR image (10-bit, Rec. 2100 PQ)
+        /// rather than an SDR image with a gain map: HEIC and AVIF, which
+        /// ImageIO encodes at 10 bits from a 16-bit PQ image
+        /// (ExportFullHDR.swift).
+        public var supportsFullHDR: Bool { self == .heic || self == .avif }
+
+        /// Why a format this build knows can't be chosen on this Mac; nil
+        /// when it can. The format menu shows such formats greyed out with
+        /// this as the explanation, rather than leaving them out silently.
+        public var unavailableReason: String? {
+            guard !isAvailable else { return nil }
+            return "This version of macOS has no \(displayName) encoder, so Latent can't write \(displayName) "
+                + "files on this Mac. The option turns on by itself on a macOS that can."
+        }
+
+        /// The formats this build knows that this Mac can't write.
+        public static var unavailable: [Format] { [.avif, .jxl].filter { !$0.isAvailable } }
     }
 
     public var format: Format
@@ -142,6 +162,10 @@ public struct ExportSettings: Sendable {
     /// Allow the long edge asked for to be larger than the picture
     /// (Don't Enlarge off). Off, the default, never enlarges.
     public var enlarges = false
+    /// With `hdrGainMap` (the sheet's HDR Output), write a full HDR file
+    /// instead of SDR with a gain map: 10-bit Rec. 2100 PQ, HEIC or AVIF
+    /// (ExportFullHDR.swift). Off, the default, is Maximize Compatibility.
+    public var hdrFull = false
 
     public init(format: Format = .jpeg, quality: Float = 0.92, hdrGainMap: Bool = false,
                 watermark: ExportWatermark? = nil) {
@@ -153,9 +177,18 @@ public struct ExportSettings: Sendable {
 
     /// Whether this export gets a gain map: asked for, and possible. Not
     /// with a converted colour space: the map describes the render's own
-    /// primaries.
+    /// primaries. Not when the file is full HDR instead.
     public var writesGainMap: Bool {
-        hdrGainMap && format.supportsGainMap && !(colorProfile?.needsConversion ?? false)
+        hdrGainMap && format.supportsGainMap && !(colorProfile?.needsConversion ?? false) && !writesFullHDR
+    }
+
+    /// Whether this export is a full HDR (PQ) file: HDR Output on with
+    /// Maximize Compatibility off, in HEIC or AVIF. Not with a converted
+    /// colour space, a watermark or output sharpening, which are made for
+    /// SDR pixels; those exports get a gain map instead.
+    public var writesFullHDR: Bool {
+        hdrGainMap && hdrFull && format.supportsFullHDR && !(colorProfile?.needsConversion ?? false)
+            && watermark == nil && outputSharpening == nil
     }
 
     /// Bits per channel of the file's pixels: 16 for a 16-bit TIFF, else 8.
@@ -397,6 +430,10 @@ public final class Exporter {
                                maxLongEdge: Int? = nil,
                                hdrHeadroom: Float = GainMap.exportHeadroom,
                                hdrRender: ((RenderOutput) throws -> MTLTexture)? = nil) throws -> EncodableImage {
+        if settings.writesFullHDR, let hdrRender {
+            return try fullHDRImage(settings: settings, colorSpace: colorSpace, rotation: rotation, crop: crop,
+                                    maxLongEdge: maxLongEdge, headroom: hdrHeadroom, hdrRender: hdrRender)
+        }
         if settings.writesGainMap, let hdrRender {
             return try gainMapImage(texture, settings: settings, colorSpace: colorSpace, rotation: rotation,
                                     crop: crop, maxLongEdge: maxLongEdge, headroom: hdrHeadroom, hdrRender: hdrRender)
