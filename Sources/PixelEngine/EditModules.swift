@@ -5,7 +5,13 @@ import Foundation
 /// (DESIGN.md §5.6), so choosing "Tone" carries exposure, the curve's
 /// inputs and highlight recovery together, the way a person thinks of it.
 public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
-    case whiteBalance, tone, presence, toneCurve, colour, splitToning, calibration, detail, lens, locals, crop, heal, dust, touchUp
+    case whiteBalance, tone, presence, toneCurve, colour, splitToning, calibration, detail, lens, locals, crop
+    /// Upright and the Transform panel, as Lightroom's Copy Settings splits
+    /// them (TransformCopyGroups.swift): the Upright mode alone, analysed
+    /// again on each photo it lands on; the exact Upright correction; the
+    /// Transform sliders and flips; Constrain Crop.
+    case uprightMode, uprightTransforms, transformSliders, constrainCrop
+    case heal, dust, touchUp
     case profile
     case effects
     case lensBlur
@@ -24,7 +30,11 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .detail:       return "Detail (sharpening, noise, AI denoise)"
         case .lens:         return "Lens Corrections & Defringe"
         case .locals:       return "Local Adjustments"
-        case .crop:         return "Crop, Straighten & Perspective"
+        case .crop:         return "Crop & Straighten"
+        case .uprightMode:  return "Upright Mode (analysed again on each photo)"
+        case .uprightTransforms: return "Upright Transforms (the exact correction)"
+        case .transformSliders: return "Transform Adjustments (sliders and flips)"
+        case .constrainCrop: return "Constrain Crop"
         case .heal:         return "Spot Removal & Red-Eye"
         case .dust:         return "Sensor Dust"
         case .touchUp:      return "Touch-up (skin, teeth, eyes, blemishes)"
@@ -85,7 +95,9 @@ extension EditStack {
                 result.modules.locals = other.modules.locals
             case .crop:
                 result.modules.crop = other.modules.crop
-                result.modules.perspective = other.modules.perspective
+            case .uprightMode, .uprightTransforms, .transformSliders, .constrainCrop:
+                // Together, after the loop: they share one module.
+                break
             case .heal:
                 result.modules.heal = other.modules.heal
                 result.modules.redeye = other.modules.redeye
@@ -111,6 +123,8 @@ extension EditStack {
                 result.modules.lensblur = other.modules.lensblur
             }
         }
+        result.modules.perspective = Self.mergedPerspective(modules.perspective, other.modules.perspective,
+                                                            groups: groups)
         // The result's geometry keeps the frame it was written in. When it
         // mixes both sides and they disagree (only possible while an image
         // still holds an edit from before the active-area change and is
@@ -150,7 +164,8 @@ extension EditStack {
         if m.denoise != nil || m.sharpen != nil || m.demosaic != nil || m.aidenoise != nil { g.insert(.detail) }
         if m.lens != nil || m.defringe != nil { g.insert(.lens) }
         if m.locals != nil { g.insert(.locals) }
-        if m.crop != nil || m.perspective != nil { g.insert(.crop) }
+        if m.crop != nil { g.insert(.crop) }
+        g.formUnion(Self.presentTransformGroups(m.perspective))
         if m.heal != nil || m.redeye != nil { g.insert(.heal) }
         if m.dust != nil { g.insert(.dust) }
         if m.touchup != nil { g.insert(.touchUp) }
@@ -177,7 +192,16 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
         self.isBuiltIn = isBuiltIn
     }
 
-    private enum CodingKeys: String, CodingKey { case name, groups, stack, isBuiltIn }
+    private enum CodingKeys: String, CodingKey { case name, groups, stack, isBuiltIn, groupsVersion }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(groups.map(\.rawValue).sorted(), forKey: .groups)
+        try c.encode(stack, forKey: .stack)
+        try c.encode(isBuiltIn, forKey: .isBuiltIn)
+        try c.encode(2, forKey: .groupsVersion)
+    }
 
     /// `groups` decodes leniently: a group this build doesn't know (a
     /// preset saved by a later one) is dropped rather than losing the
@@ -186,7 +210,11 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
         let raw = try c.decodeIfPresent([String].self, forKey: .groups) ?? []
-        groups = Set(raw.compactMap(EditGroup.init(rawValue:)))
+        let known = Set(raw.compactMap(EditGroup.init(rawValue:)))
+        // A preset saved before the transform groups were split from Crop
+        // meant all of the transform by it.
+        let split = try c.decodeIfPresent(Int.self, forKey: .groupsVersion) ?? 1
+        groups = split >= 2 ? known : EditGroup.upgradingLegacy(known)
         stack = try c.decode(EditStack.self, forKey: .stack)
         isBuiltIn = try c.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
     }
