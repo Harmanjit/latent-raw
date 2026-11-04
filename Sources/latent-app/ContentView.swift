@@ -1324,6 +1324,9 @@ struct ContentView: View {
             model.toggleBlackAndWhite()
         case .toggleClipping:
             model.toggleClipping()
+        case .toggleSoftProof:
+            guard mode == .develop, model.hasImage else { break }
+            model.proofEnabled.toggle()
         case .whiteBalanceSelector:
             guard mode == .develop, model.hasImage else { break }
             model.toggleWhiteBalanceSelector()
@@ -1426,6 +1429,7 @@ struct ContentView: View {
         state.hasSelectedMask = model.selectedLocal != nil
         state.showMaskOverlay = model.showMaskOverlay
         state.clippingShown = !model.clipping.isEmpty
+        state.softProofing = model.proofEnabled
         state.whiteBalanceSelectorActive = model.toneTool == .whiteBalance
         state.filterActive = library.filter.isActive
         state.hasCatalog = library.folderURL != nil

@@ -55,6 +55,8 @@ struct CommandState: Equatable {
     var showMaskOverlay = false
     /// The clipping overlay is on (J), and the White Balance Selector armed (W).
     var clippingShown = false
+    /// Soft Proofing is on in Develop (S).
+    var softProofing = false
     var whiteBalanceSelectorActive = false
     var filterActive = false
     var hasCompareSelect = false
@@ -111,6 +113,7 @@ struct CommandState: Equatable {
         case .toggleMaskOverlay: mode == .develop && hasSelectedMask
         case .toggleBlackAndWhite: mode == .develop && hasImage
         case .toggleClipping, .whiteBalanceSelector: mode == .develop && hasImage
+        case .toggleSoftProof: mode == .develop && hasImage
         case .makeSelect: mode == .compare && hasSelection
         case .survey: mode == .survey || (hasSelection && SurveyPanes.canSurvey(selectionCount: selectionCount))
         case .removeFromSurvey: mode == .survey && hasSelection
@@ -365,6 +368,7 @@ struct LatentCommands: Commands {
             Divider()
             item(state.beforeAfterTitle, .beforeAfter)
             item(state.clippingTitle, .toggleClipping)
+            toolToggle("Soft Proofing", .toggleSoftProof, isOn: state.softProofing)
             item("Make Select", .makeSelect)
             item("Swap Select and Candidate", .swapCompare)
             item("Remove from Survey", .removeFromSurvey)

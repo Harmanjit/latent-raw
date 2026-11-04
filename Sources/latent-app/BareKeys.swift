@@ -103,6 +103,8 @@ enum KeyCommand: Equatable {
     case toggleBlackAndWhite
     /// J: the clipping overlay. W: the White Balance Selector.
     case toggleClipping, whiteBalanceSelector
+    /// S in Develop: Soft Proofing on or off, as in Lightroom.
+    case toggleSoftProof
     /// [ and ]: the armed brush or spot patch, a step smaller or larger.
     case toolSize(Int)
     /// Files: rename the selected image, move or copy the selection to a
