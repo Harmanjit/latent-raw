@@ -175,7 +175,11 @@ public enum ICCImageConversion {
     /// that loses nothing: the working space contains any render), where
     /// black point compensation is a rescale; ColorSync then makes the
     /// one conversion that applies the intent.
-    public static func convert(_ image: CGImage, to space: CGColorSpace, intent: RenderingIntent) -> CGImage? {
+    ///
+    /// `blackPointCompensation` false turns compensation off for relative
+    /// colorimetric (Soft Proof's option); perceptual never uses it.
+    public static func convert(_ image: CGImage, to space: CGColorSpace, intent: RenderingIntent,
+                               blackPointCompensation: Bool = true) -> CGImage? {
         let bits: Int
         let info: CGBitmapInfo
         switch space.model {
@@ -215,7 +219,8 @@ public enum ICCImageConversion {
                                     bitmapInfo: stripInfo.rawValue),
               let stripBase = strip.data else { return nil }
         strip.interpolationQuality = .none
-        let blackPoint = intent.usesBlackPointCompensation ? ICCTransform.blackPoint(of: destination) : 0
+        let blackPoint = intent.usesBlackPointCompensation && blackPointCompensation
+            ? ICCTransform.blackPoint(of: destination) : 0
         let floats = stripBase.bindMemory(to: Float.self, capacity: width * rows * 4)
         // ColorSync converts packed floats with no alpha, the one layout
         // whose handling is the same on every macOS Latent runs on; the

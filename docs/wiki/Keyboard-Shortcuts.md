@@ -72,6 +72,7 @@ These are the default keys. Settings › Keyboard changes any of them, gives key
 | V | Develop: switch the treatment between Color and Black & White |
 | W | White Balance Selector: click something neutral in the photo |
 | J | Show or hide clipping on the image: highlights red, crushed shadows blue |
+| S | Turn Soft Proofing on or off in Develop |
 | [, ] | Smaller, larger brush or spot (while the mask brush, spot removal or red-eye is on) |
 | ⌫ | Delete the selected spot patch or red-eye spot |
 | Esc | Leave any on-image tool; with none on, leave the full-screen image |

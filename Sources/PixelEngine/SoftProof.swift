@@ -46,17 +46,30 @@ public struct SoftProofOptions: Codable, Equatable, Sendable {
     /// mapped to the screen's white and black: the proof then looks as dull
     /// as a print beside the screen honestly does.
     public var simulatePaperAndInk = false
+    /// Black point compensation with Relative Colorimetric: the image's
+    /// black mapped to the paper's deepest black, so shadows keep their
+    /// detail. Off shows what a conversion without it does: everything
+    /// darker than the paper can hold blocks up into one black. Perceptual
+    /// tables map black to black themselves, so it means nothing there.
+    public var blackPointCompensation = true
 
-    public init(intent: RenderingIntent = .perceptual, simulatePaperAndInk: Bool = false) {
+    public init(intent: RenderingIntent = .perceptual, simulatePaperAndInk: Bool = false,
+                blackPointCompensation: Bool = true) {
         self.intent = intent
         self.simulatePaperAndInk = simulatePaperAndInk
+        self.blackPointCompensation = blackPointCompensation
     }
+
+    /// Whether this proof compensates the black point: only Relative
+    /// Colorimetric with the option on.
+    public var compensatesBlack: Bool { intent.usesBlackPointCompensation && blackPointCompensation }
 
     /// Fields missing from an older store keep their defaults.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         intent = (try? c.decode(RenderingIntent.self, forKey: .intent)) ?? .perceptual
         simulatePaperAndInk = (try? c.decode(Bool.self, forKey: .simulatePaperAndInk)) ?? false
+        blackPointCompensation = (try? c.decode(Bool.self, forKey: .blackPointCompensation)) ?? true
     }
 }
 
@@ -207,7 +220,8 @@ public final class SoftProofLUT: @unchecked Sendable {
     /// trip the gamut warning is judged on.
     ///
     /// Into the target: the chosen intent, with black point compensation
-    /// for relative colorimetric (`ICCTransform`). Clipping to [0,1] there
+    /// for relative colorimetric unless the options turn it off
+    /// (`ICCTransform`). Clipping to [0,1] there
     /// is the gamut limit a file or print imposes; ColorSync keeps
     /// out-of-range values in float pixels.
     ///
@@ -243,11 +257,25 @@ public final class SoftProofLUT: @unchecked Sendable {
         do {
             let relative = try into(.relativeColorimetric, compensate: true)
             let reference = try back(relative, intent: .relativeColorimetric, expand: true)
-            let device = options.intent == .relativeColorimetric ? relative : try into(.perceptual, compensate: false)
-            let proofed = options.simulatePaperAndInk
-                ? try back(device, intent: .absoluteColorimetric, expand: false)
-                : (options.intent == .relativeColorimetric ? reference
-                   : try back(device, intent: .relativeColorimetric, expand: true))
+            // Relative colorimetric without black point compensation goes
+            // in unscaled, so shadows below the paper's black clip there;
+            // mapping the target's black back to screen black then shows
+            // them blocked up, as the print will be.
+            let uncompensated = options.intent == .relativeColorimetric && !options.blackPointCompensation
+            let device: [Float]
+            if options.intent == .relativeColorimetric {
+                device = uncompensated ? try into(.relativeColorimetric, compensate: false) : relative
+            } else {
+                device = try into(.perceptual, compensate: false)
+            }
+            let proofed: [Float]
+            if options.simulatePaperAndInk {
+                proofed = try back(device, intent: .absoluteColorimetric, expand: false)
+            } else if options.intent == .relativeColorimetric && !uncompensated {
+                proofed = reference
+            } else {
+                proofed = try back(device, intent: .relativeColorimetric, expand: true)
+            }
             return (proofed, reference)
         } catch {
             throw ProofError.conversionFailed

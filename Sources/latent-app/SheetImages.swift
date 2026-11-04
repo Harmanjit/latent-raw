@@ -168,7 +168,8 @@ final class SheetRenderer: @unchecked Sendable {
             }
             substitutions.record(item.name, missing: rendered.maskSubstitutions)
             guard let profile else { return rendered.cgImage }
-            return SheetColorConversion.convert(rendered.cgImage, to: profile.colorSpace, intent: profile.intent)
+            return SheetColorConversion.convert(rendered.cgImage, to: profile.colorSpace, intent: profile.intent,
+                                                blackPointCompensation: profile.blackPointCompensation)
                 ?? rendered.cgImage
         }, substitutions: substitutions)
     }
@@ -239,6 +240,8 @@ struct SheetProfile: @unchecked Sendable {
     let colorSpace: CGColorSpace
     /// The intent pictures are converted into it with.
     var intent: RenderingIntent = .perceptual
+    /// Soft Proof's black point compensation, for relative colorimetric.
+    var blackPointCompensation = true
 
     init?(url: URL) {
         guard let data = try? Data(contentsOf: url), let space = CGColorSpace(iccData: data as CFData) else { return nil }
@@ -252,7 +255,7 @@ struct SheetProfile: @unchecked Sendable {
     /// the same file, converted the same way.
     func rendersLike(_ other: SheetProfile?) -> Bool {
         guard let other else { return false }
-        return url == other.url && intent == other.intent
+        return url == other.url && intent == other.intent && blackPointCompensation == other.blackPointCompensation
     }
 }
 
@@ -262,8 +265,10 @@ enum SheetColorConversion {
     /// relative colorimetric). Should that fail, perceptual through Core
     /// Graphics, as Latent always printed: 16 bits for RGB and grey
     /// profiles, 8 for CMYK. Nil for a space a bitmap can't use.
-    static func convert(_ image: CGImage, to space: CGColorSpace, intent: RenderingIntent = .perceptual) -> CGImage? {
-        if let converted = ICCImageConversion.convert(image, to: space, intent: intent) { return converted }
+    static func convert(_ image: CGImage, to space: CGColorSpace, intent: RenderingIntent = .perceptual,
+                        blackPointCompensation: Bool = true) -> CGImage? {
+        if let converted = ICCImageConversion.convert(image, to: space, intent: intent,
+                                                      blackPointCompensation: blackPointCompensation) { return converted }
         return drawConverted(image, to: space)
     }
 

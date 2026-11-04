@@ -199,7 +199,8 @@ extension EditorModel {
     /// Returns a short description of what ran, for the status bar.
     /// What actually renders: the edit, or the Before (the defaults,
     /// unless Copy After to Before set another) while "before" is held.
-    var renderParameters: EditParameters { showingBefore ? beforeParameters : parameters }
+    /// Soft proofing's unproofed Before shows the edit itself.
+    var renderParameters: EditParameters { showingBefore && !showsUnproofedBefore ? beforeParameters : parameters }
 
     @discardableResult
     private func renderPreview(session: ImageSession, pipeline: RenderPipeline) throws -> String {

@@ -94,7 +94,13 @@ The pin list under the sliders has a row for each patch, in the order they apply
 
 ## Soft proofing
 
-Soft proofing shows on screen what a file or a print will look like before you make it. Open **Soft Proof** at the bottom of the adjustments and switch it on, then pick the target: **sRGB**, **Display P3**, or **ICC profile…** to choose a printer or paper profile (they live in /Library/ColorSync/Profiles, or wherever your printer's installer put them). HDR highlights are switched off while proofing, since neither a print nor an SDR file can hold them.
+Soft proofing shows on screen what a file or a print will look like before you make it. Open **Soft Proof** at the bottom of the adjustments and switch it on (or press **S** in Develop, Lightroom's key; **View › Soft Proofing** does the same), then pick the target from the menu under the switch:
+
+- **sRGB** or **Display P3**, for a file.
+- A profile under **Installed Profiles**: the printer, paper and CMYK profiles in the Mac's shared folders, /Library/ColorSync/Profiles and /System/Library/ColorSync/Profiles (and the folders printer installers make inside them).
+- **Add Profile…** for a profile anywhere else. The file chooser opens in your own ~/Library/ColorSync/Profiles, where downloaded paper profiles often go. Latent can only read that folder once you have picked a profile there, so profiles in it are added one by one rather than listed. An added profile stays in the menu from then on, across launches; **Remove from Menu** forgets it (the file itself is left alone).
+
+The target you pick is remembered for the next launch; Soft Proof itself always starts off. HDR highlights are switched off while proofing, since neither a print nor an SDR file can hold them.
 
 **Intent** decides what happens to colours the target can't reproduce:
 
@@ -103,14 +109,18 @@ Soft proofing shows on screen what a file or a print will look like before you m
 
 Try both and keep the one that looks better; there is no rule. The intent only matters for ICC profiles: sRGB and Display P3 clip the same way either way.
 
+**Black Point Compensation** (Relative Colorimetric with an ICC profile only, on by default) is the shadow mapping described above. Untick it to see what a conversion without it does: everything darker than the paper's deepest black blocks up into one black. A print made while proofing uses the same setting. Perceptual maps black to black by itself, so the box is greyed out there.
+
 **Simulate Paper & Ink** (ICC profiles only) shows the paper's white and the ink's black as they really are, instead of mapping them to the screen's white and black. The proof goes duller and slightly tinted: that is what a print looks like next to a bright screen. Judge contrast and shadows with it on.
 
 Two gamut warnings can paint over the proof:
 
 - **Destination gamut warning** paints **red** the colours the target can't reproduce. Which colours are red doesn't depend on the intent.
-- **Monitor gamut warning** paints **blue** the colours of the proof your screen itself can't show, so you know which parts of the proof can't be judged on this display. It uses the profile of the screen the window is on.
+- **Monitor gamut warning** paints **blue** the colours of the proof your screen itself can't show, so you know which parts of the proof can't be judged on this display. It uses the profile of the screen the window is on, which the panel names under the warnings ("Screen: Studio Display · Studio Display", say).
 
-Where both apply, red wins. The line under the warnings says what share of all colours the target can't reproduce.
+Each warning has its own colour well beside its box. Change a colour when the photo's own reds or blues would hide the warning, such as a red dress against the red warning; **Reset Warning Colours** brings back red and blue. The colours are remembered between launches. Where both warnings apply, the destination warning wins. The line under the panel says what share of all colours the target can't reproduce.
+
+**Before shows the unproofed edit** (on by default): while proofing, **Before** (`\`) shows your edit as it is without the proof, so pressing `\` flips between the proof and the screen version, as Lightroom's Before/After does in Soft Proofing. Untick it and Before shows the photo before editing, as it does when you aren't proofing. Either way Before stays in SDR while proofing, so the two compare like with like.
 
 **Create Proof Copy** keeps the edit as it is now as a snapshot named "Proof — " and the target's name, such as "Proof — Canson Rag Photographique". A proof copy is a snapshot, not a [virtual copy](Library#virtual-copies): the version adjusted for that paper, kept with the photo in the History panel's snapshot list, to restore before printing. To keep the screen version and the print version side by side as two photos, make a virtual copy (⌘') first and proof that. A typical session: save a snapshot of your screen version, switch on Soft Proof, adjust the photo until the proof looks right, then Create Proof Copy. Pressing it again for the same target replaces that proof copy (the button then reads **Update Proof Copy**). Like other snapshots, saving one isn't a step in History.
 

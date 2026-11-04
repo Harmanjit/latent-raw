@@ -219,6 +219,20 @@ struct ColourExtras {
     float4 pointShift[kMaxPointColours];   // hue, saturation, luminance, variance
 };
 
+/// The gamut warning colours GamutWarningColours.packedWords packs into
+/// proofMode's y, z and w as six half floats (linear Rec.2020), when bit 8
+/// of x says they are there; Lightroom's red and blue otherwise.
+inline float3 destinationWarningColour(uint4 mode) {
+    if ((mode.x & 8) == 0) return float3(0.6274, 0.0691, 0.0164);
+    half2 rg = as_type<half2>(mode.y), bm = as_type<half2>(mode.z);
+    return float3(float(rg.x), float(rg.y), float(bm.x));
+}
+inline float3 monitorWarningColour(uint4 mode) {
+    if ((mode.x & 8) == 0) return float3(0.0433, 0.0113, 0.8956);
+    half2 br = as_type<half2>(mode.z), gb = as_type<half2>(mode.w);
+    return float3(float(br.y), float(gb.x), float(gb.y));
+}
+
 /// Rec.2020 luminance of a working-space colour: the grey a black and
 /// white conversion starts from, and what Saturation pulls towards.
 inline float workingLuma(float3 p) { return dot(p, float3(0.2627, 0.6780, 0.0593)); }
@@ -687,7 +701,7 @@ kernel void colorAndTone(
     constant float2 &tileOrigin                  [[buffer(19)]],
     constant float &binSpan                      [[buffer(20)]],
     constant int &maskOverlayIndex               [[buffer(21)]],  // -1 = none
-    constant uint &proofMode                     [[buffer(22)]],  // bits: 1 proof, 2 destination warning, 4 monitor warning
+    constant uint4 &proofMode                    [[buffer(22)]],  // x bits: 1 proof, 2 destination warning, 4 monitor warning, 8 colours in y-w
     constant float &vibrance                     [[buffer(23)]],  // −1…1
     constant float *toneRangeLUT                 [[buffer(24)]],  // 256 shifts in t
     constant float *channelCurveLUT              [[buffer(25)]],  // 3 x 256: red, green, blue
@@ -823,21 +837,24 @@ kernel void colorAndTone(
     // show of it. The table covers [0,1]^3 at 33 samples; the sampler maps
     // the colour onto texel centres so the corners of the cube land exactly
     // on the first and last samples.
-    if (proofMode != 0 && applyToneMap != 0) {
+    if (proofMode.x != 0 && applyToneMap != 0) {
         constexpr sampler s3(coord::normalized, address::clamp_to_edge, filter::linear);
         float3 d = clamp(display / headroom, 0.0, 1.0);
         float3 uvw = d * (32.0 / 33.0) + (0.5 / 33.0);
         float4 proofed = proofLUT.sample(s3, uvw);
         display = proofed.rgb * headroom;
-        // Warnings, in Lightroom's colours so they read the same: blue for
+        // Warnings, in Lightroom's colours unless set otherwise: blue for
         // what the screen can't show of the proof, red for what the target
-        // can't reproduce (red wins where both apply). The colours are the
-        // sRGB primaries in linear Rec.2020, so every screen shows them.
-        if ((proofMode & 4) != 0) {
+        // can't reproduce (the destination warning wins where both apply).
+        // The defaults are the sRGB primaries in linear Rec.2020, so every
+        // screen shows them.
+        if ((proofMode.x & 4) != 0) {
             float3 shown = clamp(proofed.rgb, 0.0, 1.0) * (32.0 / 33.0) + (0.5 / 33.0);
-            if (monitorGamutLUT.sample(s3, shown).a > 0.5) display = float3(0.0433, 0.0113, 0.8956) * headroom;
+            if (monitorGamutLUT.sample(s3, shown).a > 0.5)
+                display = monitorWarningColour(proofMode) * headroom;
         }
-        if ((proofMode & 2) != 0 && proofed.a > 0.5) display = float3(0.6274, 0.0691, 0.0164) * headroom;
+        if ((proofMode.x & 2) != 0 && proofed.a > 0.5)
+            display = destinationWarningColour(proofMode) * headroom;
     }
 
     // Stage 15: working space -> output space, then encode — or not.
