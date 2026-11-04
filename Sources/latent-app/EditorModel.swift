@@ -327,7 +327,11 @@ final class EditorModel: ObservableObject {
     // MARK: - Soft proofing
 
     @Published var proofEnabled = false { didSet { if proofEnabled != oldValue { rebuildProof() } } }
-    @Published var proofTarget: SoftProofTarget = .sRGB { didSet { if proofTarget != oldValue { rebuildProof() } } }
+    /// The last target chosen (SoftProofSettings.swift); proofing itself
+    /// starts off.
+    @Published var proofTarget: SoftProofTarget = SoftProofTargetStore().restored() {
+        didSet { if proofTarget != oldValue { rebuildProof() } }
+    }
     @Published var gamutWarning = false { didSet { if gamutWarning != oldValue { rerender() } } }
     @Published var proofStatus = ""
     var proofLUT: SoftProofLUT?
@@ -340,6 +344,22 @@ final class EditorModel: ObservableObject {
         didSet { if monitorGamutWarning != oldValue { rebuildMonitorGamut() } }
     }
     var monitorGamutLUT: SoftProofLUT?
+    /// The warning colours and what Before shows while proofing, remembered
+    /// between launches (SoftProofSettings.swift).
+    @Published var gamutWarningColours = SoftProofSettingsStore().warningColours {
+        didSet {
+            guard gamutWarningColours != oldValue else { return }
+            SoftProofSettingsStore().warningColours = gamutWarningColours
+            if proofLUT != nil { rerender() }
+        }
+    }
+    @Published var proofBeforeShowsUnproofed = SoftProofSettingsStore().beforeShowsUnproofed {
+        didSet {
+            guard proofBeforeShowsUnproofed != oldValue else { return }
+            SoftProofSettingsStore().beforeShowsUnproofed = proofBeforeShowsUnproofed
+            if proofLUT != nil && showingBefore { rerender() }
+        }
+    }
 
     // MARK: - Tone tools (EditorModel+ToneTools.swift)
 

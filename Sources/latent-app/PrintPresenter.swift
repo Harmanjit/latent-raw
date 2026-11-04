@@ -73,8 +73,9 @@ enum PrintPresenter {
     /// soft proofing is on. A profile proofed against earlier and turned
     /// off since isn't what the user expects the print to look like.
     static func proofProfile(for model: EditorModel) -> SheetProfile? {
-        guard model.proofEnabled, case .icc(let url) = model.proofTarget else { return nil }
-        return SheetProfile(url: url)
+        guard model.proofEnabled, case .icc(let url) = model.proofTarget, var profile = SheetProfile(url: url) else { return nil }
+        profile.blackPointCompensation = model.proofOptions.blackPointCompensation
+        return profile
     }
 
     /// The window title of a print: the one picture's name, or "12 Photos".

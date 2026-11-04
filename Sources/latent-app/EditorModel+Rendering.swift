@@ -199,7 +199,7 @@ extension EditorModel {
     /// Returns a short description of what ran, for the status bar.
     /// What actually renders: the edit, or the defaults while "before"
     /// is held.
-    var renderParameters: EditParameters { showingBefore ? defaultParameters : parameters }
+    var renderParameters: EditParameters { showingBefore && !showsUnproofedBefore ? defaultParameters : parameters }
 
     @discardableResult
     private func renderPreview(session: ImageSession, pipeline: RenderPipeline) throws -> String {

@@ -35,7 +35,9 @@ extension EditorModel {
             output.maskOverlay = i
             output.maskOverlayStyle = MaskOverlaySettings.shared.style
         }
-        output.proof = proofLUT
+        // Before, while proofing, can be the edit without the proof.
+        output.proof = showsUnproofedBefore ? nil : proofLUT
+        output.gamutWarningColours = gamutWarningColours
         output.gamutWarning = gamutWarning
         output.monitorGamut = monitorGamutWarning ? monitorGamutLUT : nil
         output.spotVisualisation = dustVisualisation
@@ -82,14 +84,21 @@ extension EditorModel {
         rerender()
     }
 
+    /// Add Profile…: a profile from anywhere, ~/Library/ColorSync/Profiles
+    /// to start with, added to the menu for good (`ProofProfileLibrary`)
+    /// and proofed against.
     func chooseProofProfile() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "icc") ?? .data,
                                      UTType(filenameExtension: "icm") ?? .data]
-        panel.directoryURL = URL(fileURLWithPath: "/Library/ColorSync/Profiles")
+        panel.directoryURL = ProofProfileLibrary.userProfilesFolder
         panel.message = "Choose an ICC profile to proof against (printer, paper, display)"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        proofTarget = .icc(url)
+        guard ProofProfileLibrary.shared.add(url) else {
+            proofStatus = "Proof failed: could not read ICC profile \(url.lastPathComponent)"
+            return
+        }
+        selectProofTarget(.icc(url))
         proofEnabled = true
     }
 

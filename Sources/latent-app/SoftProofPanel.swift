@@ -1,32 +1,23 @@
 import SwiftUI
+import AppKit
 import ColorKit
 import PixelEngine
 
 /// The Soft Proof group: what to proof against, how (rendering intent,
-/// paper and ink), which gamut warnings to paint, and a proof copy of the
-/// edit. Everything but the proof copy is a view setting, never part of
-/// the edit.
+/// paper and ink, black point compensation), which gamut warnings to paint
+/// and in what colours, what Before shows, and a proof copy of the edit.
+/// Everything but the proof copy is a view setting, never part of the edit.
 struct SoftProofPanel: View {
     @ObservedObject var model: EditorModel
+    @ObservedObject private var profiles = ProofProfileLibrary.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Toggle("Soft proof", isOn: $model.proofEnabled)
                 .toggleStyle(.switch).controlSize(.small)
-                .help("Show the photo as it will look in the target below")
-            Picker("Soft proof target", selection: Binding(
-                get: { model.proofTarget == .sRGB ? 0 : model.proofTarget == .displayP3 ? 1 : 2 },
-                set: { v in
-                    if v == 0 { model.proofTarget = .sRGB }
-                    else if v == 1 { model.proofTarget = .displayP3 }
-                    else { model.chooseProofProfile() }
-                })) {
-                Text("sRGB").tag(0)
-                Text("Display P3").tag(1)
-                Text(model.proofTarget.isICC ? model.proofTarget.displayName + "…" : "ICC profile…").tag(2)
-            }
-            .pickerStyle(.menu).labelsHidden().controlSize(.small)
-            .help("The colour space, printer or paper profile to proof against")
+                .help("Show the photo as it will look in the target below (S)")
+            targetMenu
+                .help("The colour space, printer or paper profile to proof against")
 
             HStack {
                 Text("Intent").font(.subheadline).accessibilityHidden(true)
@@ -48,12 +39,34 @@ struct SoftProofPanel: View {
                       : "Only for printer and paper profiles")
                 .disabled(!model.proofTarget.isICC)
 
-            Toggle("Destination gamut warning (red)", isOn: $model.gamutWarning)
+            Toggle("Black Point Compensation", isOn: $model.proofOptions.blackPointCompensation)
                 .toggleStyle(.checkbox).controlSize(.small)
-                .help("Paint red the colours the target can't reproduce")
-            Toggle("Monitor gamut warning (blue)", isOn: $model.monitorGamutWarning)
+                .help(model.proofTarget.isICC && model.proofOptions.intent == .relativeColorimetric
+                      ? "Map the photo's black to the paper's deepest black so shadows keep their detail. Off shows them blocked up, as a conversion without it prints them"
+                      : "Only for Relative Colorimetric with a printer or paper profile; Perceptual maps black itself")
+                .disabled(!model.proofTarget.isICC || model.proofOptions.intent != .relativeColorimetric)
+
+            warningRow("Destination gamut warning", isOn: $model.gamutWarning,
+                       colour: colourBinding(\.destination),
+                       help: "Paint the colours the target can't reproduce")
+            warningRow("Monitor gamut warning", isOn: $model.monitorGamutWarning,
+                       colour: colourBinding(\.monitor),
+                       help: "Paint the colours of the proof this screen can't show")
+            if model.gamutWarningColours != .standard {
+                Button("Reset Warning Colours") { model.gamutWarningColours = .standard }
+                    .controlSize(.small).buttonStyle(.link)
+                    .help("Back to red for the destination and blue for the monitor, as in Lightroom")
+            }
+
+            Toggle("Before shows the unproofed edit", isOn: $model.proofBeforeShowsUnproofed)
                 .toggleStyle(.checkbox).controlSize(.small)
-                .help("Paint blue the colours of the proof this screen can't show")
+                .help("While proofing, Before (\\) shows the edit as it is without the proof, to compare with the proof. Off, Before is the photo before editing")
+
+            if let screen = EditorModel.monitorProfileDescription() {
+                Text("Screen: \(screen)").font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help("The screen the editor is on and the colour profile macOS shows it with, which the monitor gamut warning reads")
+            }
 
             if !model.proofStatus.isEmpty {
                 Text(model.proofStatus).font(.caption2).foregroundStyle(.secondary)
@@ -71,6 +84,73 @@ struct SoftProofPanel: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .disabled(!model.hasImage)
+        .task { await profiles.loadInstalled() }
+    }
+
+    /// sRGB, Display P3, the profiles added, the Mac's installed profiles,
+    /// and Add Profile… for one from anywhere else.
+    private var targetMenu: some View {
+        Menu {
+            targetButton("sRGB", .sRGB)
+            targetButton("Display P3", .displayP3)
+            if !profiles.added.isEmpty {
+                Divider()
+                ForEach(profiles.added) { targetButton($0.name, .icc($0.url)) }
+            }
+            if !profiles.installed.isEmpty {
+                Menu("Installed Profiles") {
+                    ForEach(profiles.installed) { targetButton($0.name, .icc($0.url)) }
+                }
+            }
+            Divider()
+            Button("Add Profile…") { model.chooseProofProfile() }
+            if !profiles.added.isEmpty {
+                Menu("Remove from Menu") {
+                    ForEach(profiles.added) { profile in
+                        Button(profile.name) { profiles.remove(profile) }
+                    }
+                }
+            }
+        } label: {
+            Text(model.proofTarget.displayName)
+        }
+        .menuStyle(.borderlessButton).controlSize(.small).fixedSize()
+        .accessibilityLabel("Soft proof target")
+        .accessibilityValue(model.proofTarget.displayName)
+    }
+
+    private func targetButton(_ title: String, _ target: SoftProofTarget) -> some View {
+        Button {
+            model.selectProofTarget(target)
+        } label: {
+            if model.proofTarget == target { Label(title, systemImage: "checkmark") } else { Text(title) }
+        }
+    }
+
+    /// A warning's checkbox with the colour it paints in.
+    private func warningRow(_ title: String, isOn: Binding<Bool>, colour: Binding<Color>, help: String) -> some View {
+        HStack {
+            Toggle(title, isOn: isOn)
+                .toggleStyle(.checkbox).controlSize(.small)
+            Spacer()
+            ColorPicker("\(title) colour", selection: colour, supportsOpacity: false)
+                .labelsHidden().controlSize(.small)
+        }
+        .help(help)
+    }
+
+    /// One warning colour as a colour well edits it, in sRGB.
+    private func colourBinding(_ key: WritableKeyPath<GamutWarningColours, SIMD3<Float>>) -> Binding<Color> {
+        Binding(
+            get: {
+                let c = model.gamutWarningColours[keyPath: key]
+                return Color(.sRGB, red: Double(c.x), green: Double(c.y), blue: Double(c.z))
+            },
+            set: { colour in
+                guard let ns = NSColor(colour).usingColorSpace(.sRGB) else { return }
+                model.gamutWarningColours[keyPath: key] = SIMD3(Float(ns.redComponent), Float(ns.greenComponent),
+                                                                Float(ns.blueComponent))
+            })
     }
 }
 
