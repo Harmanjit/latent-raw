@@ -190,7 +190,11 @@ kernel void localDetailApply(
     float masks[8] = { a.x, a.y, a.z, a.w, b.x, b.y, b.z, b.w };
 
     float2 uv = (float2(gid) + 0.5) / float2(output.get_width(), output.get_height());
-    float3 lin = ldToLinear(image.read(gid).rgb, isLinear, headroom);
+    float4 source = image.read(gid);
+    float3 lin = ldToLinear(source.rgb, isLinear, headroom);
+    // Outside every mask the pixel is written back as it came: the trip
+    // to linear and back rounds differently from GPU to GPU.
+    bool touched = false;
     float2 base = pair.read(gid).rg;
     float2 bS = small.sample(s, uv).rg;
     float2 bM = medium.sample(s, uv).rg;
@@ -200,6 +204,7 @@ kernel void localDetailApply(
         constant LocalDetailParams &p = params[i];
         float m = masks[clamp(int(p.detail.z), 0, 7)];
         if (m <= 0.0) continue;
+        touched = true;
 
         // Dehaze, as the global slider (dark-channel prior), scaled by the mask.
         float dehaze = p.effects.z * m;
@@ -265,5 +270,5 @@ kernel void localDetailApply(
         }
     }
 
-    output.write(float4(ldFromLinear(lin, isLinear, headroom), 1.0), gid);
+    output.write(touched ? float4(ldFromLinear(lin, isLinear, headroom), 1.0) : float4(source.rgb, 1.0), gid);
 }
