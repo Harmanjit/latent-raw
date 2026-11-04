@@ -93,6 +93,8 @@ struct ContentView: View {
     @State private var dustExpanded = false
     @State private var touchUpExpanded = false
     @State private var compareRecord: ImageRecord?
+    /// The photo selected before this one, for Previous.
+    @State private var previousPhoto = PreviousPhoto()
     /// The sidebar and filmstrip stay as the user left them.
     @AppStorage("latent.sidebarVisible") private var sidebarVisible = true
     @AppStorage("latent.filmstripVisible") private var filmstripVisible = true
@@ -203,6 +205,9 @@ struct ContentView: View {
         })
         .onChange(of: mode) { old, _ in modeDidChange(from: old) }
         .onChange(of: library.selectedImageID) { followSelectionOnSecondDisplay() }
+        .onChange(of: library.selectedImageID) { old, new in
+            previousPhoto.selectionChanged(from: old, to: new, folder: library.folderURL)
+        }
         .onChange(of: secondDisplay.isShowing) { followSelectionOnSecondDisplay(at: .zero) }
         // A move or rename closed the image the grid showed there.
         .onChange(of: fileOperations.isBusy) { _, busy in if !busy { followSelectionOnSecondDisplay(at: .zero) } }
@@ -875,7 +880,7 @@ struct ContentView: View {
             guard let catalog = library.catalog else { return }
             library.perform("Saving the edit") {
                 try await library.saveEditStack(json, schemaVersion: EditStack.schemaVersion,
-                                                 processVersion: EditStack.processVersion,
+                                                 processVersion: EditStack.processVersion(ofJSON: json),
                                                  forImageID: imageID, in: catalog)
             }
         }
@@ -1317,6 +1322,8 @@ struct ContentView: View {
             copySettings()
         case .pasteSettings:
             pasteSettings()
+        case .pasteFromPrevious:
+            pasteFromPrevious()
         case .rotate(let quarterTurns):
             rotate(by: quarterTurns)
         case .geometry(.resetOrientation):
@@ -1448,6 +1455,7 @@ struct ContentView: View {
         }
         state.isEditingText = editingText
         state.arrowKeysPanImage = prefs.arrowKeysPanImage
+        state.hasPreviousPhoto = previousPhoto.id(in: library.folderURL, current: library.selectedImageID) != nil
         state.imageZoomedIn = model.hasImage && !model.fitMode
         state.showingBefore = model.showingBefore
         state.cropToolActive = model.cropToolActive
@@ -1543,6 +1551,26 @@ struct ContentView: View {
         applyToSelectionOrEditor(stack, groups: model.pasteGroups, what: "Pasted", undoName: "Paste Settings")
     }
 
+    /// Previous: the stored edit of the photo selected before this one,
+    /// once the editor's save of it has landed.
+    private func pasteFromPrevious() {
+        guard let id = previousPhoto.id(in: library.folderURL, current: library.selectedImageID),
+              let record = library.images.first(where: { $0.id == id }) else {
+            reportOutcome("No previous photo to paste from"); return
+        }
+        model.flushPendingSave()
+        Task {
+            await library.waitForPendingWork()
+            do {
+                let stack = try await library.editStack(for: record).map { try EditStack.decode(json: $0) } ?? EditStack()
+                applyToSelectionOrEditor(stack, groups: EditGroup.previousGroups,
+                                         what: "Pasted \(record.fileName)’s", undoName: "Paste Settings From Previous")
+            } catch {
+                model.reportFailure("Pasting settings from \(record.fileName)", error)
+            }
+        }
+    }
+
     /// Where pasted settings and a preset go. The grid changes the stored
     /// edit of every selected image. Loupe, Compare, Survey and Develop show
     /// one image (in Survey, the focused pane) and change that one only, as
@@ -1561,17 +1589,25 @@ struct ContentView: View {
         }
     }
 
-    private func applyToSelectionOrEditor(_ stack: EditStack, groups: Set<EditGroup>, what: String, undoName: String) {
+    /// `amount` is a preset's Amount (`PresetAmount`); 1 applies `stack` as it is.
+    private func applyToSelectionOrEditor(_ stack: EditStack, groups: Set<EditGroup>, what: String, undoName: String,
+                                          amount: Float = PresetAmount.full) {
         let target = SettingsTarget.choose(mode: mode, editorHasImage: model.hasImage)
+        // Each open model blends from its own photo's values.
+        func forModel(_ m: EditorModel) -> EditStack {
+            amount == PresetAmount.full ? stack : m.stack(applying: stack, groups: groups, amount: amount)
+        }
         // Compare's Select pane may show the candidate's own photo. It never
         // saves, so it takes the new look directly rather than going stale.
         if target != .selection, mode == .compare, let select = compareRecord?.id, select == library.selectedImageID {
-            compareModel?.apply(stack, groups: groups)
+            if let m = compareModel { m.apply(forModel(m), groups: groups) }
         }
         // So may a Survey pane, the focused one.
-        if target != .selection, mode == .survey { survey.model(for: library.selectedImageID)?.apply(stack, groups: groups) }
+        if target != .selection, mode == .survey, let m = survey.model(for: library.selectedImageID) {
+            m.apply(forModel(m), groups: groups)
+        }
         if target == .editor {
-            model.apply(stack, groups: groups)
+            model.apply(forModel(model), groups: groups)
             return
         }
         // Through perform, so quitting waits for the edits being rewritten.
@@ -1586,7 +1622,7 @@ struct ContentView: View {
                     // An unreadable existing edit throws here and the image
                     // is skipped, never replaced by the pasted modules alone.
                     let current = try existing.map { try EditStack.decode(json: $0) } ?? EditStack()
-                    let merged = current.merged(with: stack, groups: groups)
+                    let merged = current.applying(stack, groups: groups, amount: amount)
                     return merged == EditStack() ? nil : try merged.encodeJSON()
                 }
             } catch {
@@ -1607,7 +1643,7 @@ struct ContentView: View {
             if let selected = library.selectedImage,
                Self.editorHolds(selected, catalogImageID: model.catalogImageID, imageTitle: model.imageTitle),
                target == .primary || library.selectedImageIDs.contains(selected.id ?? -1) {
-                model.apply(stack, groups: groups)
+                model.apply(forModel(model), groups: groups)
                 handledByEditor = selected.id
             }
             // A pasted touch-up wants faces the stored edits don't have:
@@ -1711,8 +1747,12 @@ struct ContentView: View {
     }
 
     private func applyPresetToSelection(_ preset: Preset) {
+        let amount = PresetAmountSession.amount
+        let editorBase = SettingsTarget.choose(mode: mode, editorHasImage: model.hasImage) == .editor
+            ? EditStack(parameters: model.parameters) : nil
         applyToSelectionOrEditor(preset.stack, groups: preset.groups, what: "Applied “\(preset.name)” —",
-                                 undoName: "Apply Preset")
+                                 undoName: "Apply Preset", amount: amount)
+        if let editorBase { model.rememberPresetApplication(base: editorBase, preset: preset) }
     }
 
     private func step(_ offset: Int) {
@@ -1914,8 +1954,14 @@ struct ContentView: View {
                     disclosureLabel("Soft Proof")
                 }
 
-                Button("Reset All") { model.resetAdjustments() }
-                    .disabled(!model.hasImage)
+                HStack {
+                    Button("Previous") { _ = perform(.pasteFromPrevious) }
+                        .disabled(!model.hasImage
+                                  || previousPhoto.id(in: library.folderURL, current: library.selectedImageID) == nil)
+                        .help("Paste the settings of the photo selected before this one (⌥⌘V)")
+                    Button("Reset All") { model.resetAdjustments() }
+                        .disabled(!model.hasImage)
+                }
 
                 Spacer(minLength: 0)
             }
@@ -1930,6 +1976,7 @@ struct ContentView: View {
         }
         // A number typed for one photo must not land on the next.
         .sliderFieldSubject(model.sourceURL)
+        .modifier(ProcessUpdatePromptModifier(model: model, library: library))
     }
 
     /// Scroll targets in the adjustments panel.

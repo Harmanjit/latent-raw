@@ -17,8 +17,9 @@ public struct EditStack: Codable, Equatable, Sendable {
     public static let schemaVersion = 1
     /// Bumped when an algorithm changes in a way that would render old
     /// edits differently. Existing sidecars keep their version and, until
-    /// the user upgrades them, must keep rendering as they did.
-    public static let processVersion = "1.0"
+    /// the user upgrades them, must keep rendering as they did
+    /// (`ProcessVersion`).
+    public static let processVersion = ProcessVersion.current.id
 
     public var schema: Int = EditStack.schemaVersion
     public var process: String = EditStack.processVersion
@@ -298,6 +299,7 @@ public struct EditStack: Codable, Equatable, Sendable {
                    angle: p.crop.angle, aspect: p.crop.aspect)
         storeDetailEffects(from: p)
         modules.flatfield = p.flatField?.sanitized
+        process = p.processVersion
         // Parameters always measure the sensor plane as it is now.
         frame = hasGeometry ? Self.activeAreaFrame : nil
     }
@@ -385,6 +387,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         }
         restoreDetailEffects(into: &p)
         p.flatField = modules.flatfield?.sanitized
+        p.processVersion = process
         return p
     }
 

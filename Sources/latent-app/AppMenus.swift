@@ -77,6 +77,8 @@ struct CommandState: Equatable {
     var secondaryDisplayShowing = false
     /// Settings has the arrow keys pan a zoomed-in image.
     var arrowKeysPanImage = false
+    /// A photo was selected before this one in the open folder (Previous).
+    var hasPreviousPhoto = false
     /// The image shown is zoomed in past fit.
     var imageZoomedIn = false
     /// A folder is open, so it has collections to make.
@@ -177,6 +179,7 @@ struct CommandState: Equatable {
         case .copySettings: hasImage || hasSelection
         case .matchTotalExposures: mode == .library && selectionCount >= 2
         case .pasteSettings: hasImage || selectionCount > 0
+        case .pasteFromPrevious: hasPreviousPhoto && (hasImage || selectionCount > 0)
         case .clearFilter: filterActive
         case .slideshow: hasVisibleImages && editorReady
         case .editExternally: (mode == .survey ? hasSelection : hasImage || hasSelection) && editorReady && !exportingOpenImage
@@ -367,6 +370,7 @@ struct LatentCommands: Commands {
             item("Copy Settings", .copySettings)
             item("Paste Settings", .pasteSettings)
             CullingSelectMenu { AnyView(item($0, $1)) }
+            item("Paste Settings From Previous", .pasteFromPrevious)
         }
 
         CommandGroup(before: .toolbar) {

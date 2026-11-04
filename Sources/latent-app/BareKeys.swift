@@ -104,6 +104,9 @@ enum KeyCommand: Equatable, Sendable {
     case photoMergeHDRPanorama
     case slideshow, editExternally
     case undo, redo, copySettings, pasteSettings
+    /// Lightroom's Previous: every setting of the photo selected before
+    /// this one (`PreviousPhoto`).
+    case pasteFromPrevious
     case rotate(Int), zoomIn, zoomOut, zoomToFit, zoomToActualSize
     case autoAdjust, clearFilter, swapCompare, revealInFinder
     /// Photo › Match Total Exposures: the selection's Exposure sliders set

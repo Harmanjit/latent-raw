@@ -185,6 +185,9 @@ public struct EditParameters: Sendable, Equatable {
     /// Flat-field correction from a reference raw (FlatField.swift); nil
     /// for none, which every edit older than it has.
     public var flatField: FlatFieldCorrection? = nil
+    /// The rendering generation the edit was made with (`ProcessVersion`);
+    /// a stage whose behaviour changed between versions branches on it.
+    public var processVersion: String = EditStack.processVersion
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,

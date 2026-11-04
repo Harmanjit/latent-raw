@@ -43,9 +43,12 @@ struct ColourSections: View {
         }
 
         DisclosureGroup(isExpanded: $calibrationExpanded) {
-            CalibrationPanel(calibration: $model.parameters.colour.calibration)
-                .disabled(!model.hasImage)
-                .padding(.top, 8)
+            VStack(alignment: .leading, spacing: 10) {
+                ProcessVersionMenu(model: model)
+                CalibrationPanel(calibration: $model.parameters.colour.calibration)
+            }
+            .disabled(!model.hasImage)
+            .padding(.top, 8)
         } label: {
             ColourSectionLabel(title: "Calibration")
         }

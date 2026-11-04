@@ -28,7 +28,7 @@ Going the other way, Latent's **Original + XMP sidecar** export copies a raw wit
 | Stars, flags, colour labels | **The same**, with the same keys. Latent writes labels by their English colour name, as Lightroom does. |
 | Virtual copies | **The same**, with ⌘', Set Copy as Master and a badge in the grid. See [Virtual copies](Library#virtual-copies). |
 | XMP sidecars beside the raw | Latent's sidecars are standard XMP but live in `_latent/xmp/`, not beside the raw. They are the source of truth: the database can always be rebuilt from them. |
-| Develop presets | **Develop presets** (five built in, plus your own, saved as files you can share). Lightroom presets can't be imported. See [Presets and clipboard](Develop#presets-and-clipboard). |
+| Develop presets | **Develop presets** (five built in, plus your own, saved as files you can share), with an **Amount** slider, and **Previous** (⌥⌘V). Lightroom presets can't be imported. See [Presets and clipboard](Develop#presets-and-clipboard). |
 | Export presets | **Export presets**, multi-preset export and **Export with Previous**. See [Export](Export). |
 | Profiles (Adobe Standard, Adobe Color and the rest) | **Profiles**: Latent Standard, Neutral and Flat, creative and black and white looks, and DNG camera profiles (`.dcp`) you import yourself. See [Develop](Develop#modules). |
 | Masks: Subject, Sky, Objects, People, brush, gradients, ranges | **Local Adjustments**: Subject, Select by Class (sky, people, vegetation and more), Click to Select, Select Objects (Box), brush, gradients, colour and luminance ranges, combined with add, subtract and intersect. See [Masking](Masking). |
@@ -43,7 +43,7 @@ Going the other way, Latent's **Original + XMP sidecar** export copies a raw wit
 
 ## Keys that are the same
 
-G, E, C, N and D for the views; 0–5 for stars; P, X and U for flags; 6–9 for colour labels; B for the target collection; ⌘N for a new collection; ⌘' for a virtual copy; ⌘[ and ⌘] to rotate; R for crop, with O and ⇧O for the crop guides; W for the White Balance Selector; J for clipping; V for black and white; `\` for before and after; ⌘U for Auto; ⇧⌘C and ⇧⌘V to copy and paste settings; ⇧⌘E to export and ⌥⇧⌘E for Export with Previous; ⌘E for the external editor; ⌃H, ⌃⇧H, ⌃M and ⌃⇧M for Photo Merge.
+G, E, C, N and D for the views; 0–5 for stars; P, X and U for flags; 6–9 for colour labels; B for the target collection; ⌘N for a new collection; ⌘' for a virtual copy; ⌘[ and ⌘] to rotate; R for crop, with O and ⇧O for the crop guides; W for the White Balance Selector; J for clipping; V for black and white; `\` for before and after; ⌘U for Auto; ⇧⌘C and ⇧⌘V to copy and paste settings; ⌥⌘V for Previous; ⇧⌘E to export and ⌥⇧⌘E for Export with Previous; ⌘E for the external editor; ⌃H, ⌃⇧H, ⌃M and ⌃⇧M for Photo Merge.
 
 **Different:** spot removal is **H**, red-eye is **Y**, and ⌘R refreshes the open folder. Masks have no key; use the **Add** menu in Local Adjustments or **Develop › Masks**. The full list is on [Keyboard Shortcuts](Keyboard-Shortcuts).
 
