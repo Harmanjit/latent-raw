@@ -19,6 +19,13 @@ public struct PixelReadout: Equatable, Sendable {
         linear = linearDisplayP3
     }
 
+    /// How far the brightest channel is above SDR white, in stops, when
+    /// it is (an HDR view); nil within SDR.
+    public var stopsAboveSDRWhite: Float? {
+        let peak = max(linear.x, max(linear.y, linear.z))
+        return peak > 1.0001 && peak.isFinite ? log2(peak) : nil
+    }
+
     /// 0…100 per channel, encoded with the sRGB curve, clamped to SDR.
     public var percent: SIMD3<Float> {
         SIMD3(Self.encode(linear.x), Self.encode(linear.y), Self.encode(linear.z)) * 100
@@ -108,4 +115,9 @@ public struct ClippingIndicators: OptionSet, Hashable, Sendable {
     public static let shadows = ClippingIndicators(rawValue: 1 << 0)
     public static let highlights = ClippingIndicators(rawValue: 1 << 1)
     public static let both: ClippingIndicators = [.shadows, .highlights]
+    /// Visualise HDR Ranges: the picture in grey, with what lies above SDR
+    /// white coloured by how many stops above it, and what reaches the HDR
+    /// ceiling in magenta (Present.metal's `hdrRangeIndicator`). Not one of
+    /// J's two.
+    public static let hdrRanges = ClippingIndicators(rawValue: 1 << 2)
 }

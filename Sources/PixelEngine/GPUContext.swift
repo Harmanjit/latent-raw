@@ -141,6 +141,8 @@ public final class GPUContext: @unchecked Sendable {
         case lensBlurPrepare, lensBlurGather, lensBlurComposite, lensBlurDepthView
         // Export output sharpening (ExportSharpen.metal, ExportOutputSharpening.swift).
         case exportOutputSharpen
+        // The Colour Mixer's Option-drag hue isolation (Present.metal).
+        case hueIsolate
     }
 
     /// Built pipelines, by kernel. A Mutex because renders run on several

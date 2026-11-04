@@ -173,6 +173,7 @@ public final class ImageSession {
         case lensBlurReduced, lensBlurGathered // the lens blur's shrunk copy and its blur
         case lensBlur, lensBlurPreview     // output of the lens blur stage
         case depthView, depthViewPreview   // the viewport's Show Depth pass
+        case hueIsolated, hueIsolatedPreview // the Colour Mixer's Option-drag preview
     }
 
     /// Which set of pooled textures a render draws from. Pools never share

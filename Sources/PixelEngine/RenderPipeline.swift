@@ -367,6 +367,10 @@ public struct RenderOutput: Sendable, Equatable {
     /// Show Depth: the depth map in colour with the focus range marked,
     /// in place of the picture (viewport only; LensBlurStage).
     public var depthVisualisation = false
+    /// Option-drag on a Colour Mixer slider: the HSL band (0 red … 7
+    /// magenta) whose colours stay while the rest of the picture goes grey
+    /// (RenderPipeline+HueIsolation.swift). Viewport only; nil normally.
+    public var hueIsolation: Int? = nil
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -401,6 +405,7 @@ public struct RenderOutput: Sendable, Equatable {
             && a.spotVisualisation == b.spotVisualisation && a.touchUpOverlay == b.touchUpOverlay
             && a.sharpenMaskPreview == b.sharpenMaskPreview
             && a.depthVisualisation == b.depthVisualisation
+            && a.hueIsolation == b.hueIsolation
     }
 }
 
@@ -811,6 +816,12 @@ public final class RenderPipeline {
             final = try applyDustVisualise(session: session, cmdBuffer: cmdBuffer, input: final,
                                            outputRole: displayRole == .display ? .visualised : .visualisedPreview,
                                            visualisation: visualisation, binSpan: binSpan)
+        }
+
+        // Display pass: the Colour Mixer's Option-drag hue isolation.
+        if let band = output.hueIsolation {
+            final = try applyHueIsolation(session: session, cmdBuffer: cmdBuffer, input: final, band: band,
+                                          outputRole: displayRole == .display ? .hueIsolated : .hueIsolatedPreview)
         }
 
         // Display pass: Show Depth, for the viewport only, last so it

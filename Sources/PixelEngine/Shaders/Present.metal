@@ -84,6 +84,7 @@ constant uint kMagnifierNearest = 1u << 3;
 // ClippingIndicators in PixelReadout.swift, shifted up by four.
 constant uint kClipShadows      = 1u << 4;
 constant uint kClipHighlights   = 1u << 5;
+constant uint kHDRRanges        = 1u << 6;
 
 // The clipping overlay (J). Same lines as the histogram's end bins
 // (Histogram.metal), so what turns red is what the clipped readout counts:
@@ -91,7 +92,27 @@ constant uint kClipHighlights   = 1u << 5;
 // encodes to 0 is crushed. 0.9955 is the linear value that encodes to
 // 254.5/255; the top is the layer's own ceiling, which is SDR white
 // unless the view is rendered with HDR headroom.
+// Visualise HDR Ranges. The SDR part of the picture turns a dim grey so
+// the colours read; above SDR white each stop has its own colour (blue,
+// green, yellow, then orange from three stops up), and a pixel at the
+// ceiling the layer was rendered to (the HDR Limit or the screen's) turns
+// magenta: HDR clipping. Values are linear Display P3, 1.0 = SDR white.
+inline float3 hdrRangeIndicator(float3 c, float contentHeadroom) {
+    float peak = max(c.r, max(c.g, c.b));
+    if (peak <= 1.0) {
+        float y = dot(max(c, 0.0), float3(0.2290, 0.6917, 0.0793));
+        return float3(y * 0.5);
+    }
+    if (contentHeadroom > 1.0 && peak >= 0.9955 * contentHeadroom) return float3(1.0, 0.0, 1.0);
+    float stops = log2(peak);
+    if (stops <= 1.0) return float3(0.1, 0.4, 1.0);
+    if (stops <= 2.0) return float3(0.2, 0.85, 0.3);
+    if (stops <= 3.0) return float3(1.0, 0.9, 0.1);
+    return float3(1.0, 0.5, 0.0);
+}
+
 inline float3 clippingIndicator(float3 c, float contentHeadroom, uint flags) {
+    if ((flags & kHDRRanges) != 0) return hdrRangeIndicator(c, contentHeadroom);
     float peak = max(c.r, max(c.g, c.b));
     if ((flags & kClipHighlights) != 0 && peak >= 0.9955 * contentHeadroom) return float3(1.0, 0.0, 0.0);
     if ((flags & kClipShadows) != 0 && peak < 0.000152) return float3(0.0, 0.3, 1.0);
@@ -120,7 +141,7 @@ inline float3 composite(float3 p,
         if (uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= 1.0 && uv.y <= 1.0) {
             float2 st = tileSource.xy + uv * tileSource.zw;
             float4 c = tileNearest ? tile.sample(nearestSampler, st) : tile.sample(linearSampler, st);
-            float3 shown = (flags & (kClipShadows | kClipHighlights)) != 0
+            float3 shown = (flags & (kClipShadows | kClipHighlights | kHDRRanges)) != 0
                 ? clippingIndicator(c.rgb, tileHeadroom, flags) : c.rgb;
             return toneMapToHeadroom(shown, displayHeadroom, tileHeadroom);
         }
@@ -134,7 +155,7 @@ inline float3 composite(float3 p,
         return float3(backgroundLevel);
     }
     float4 c = base.sample(linearSampler, uv);
-    float3 shown = (flags & (kClipShadows | kClipHighlights)) != 0
+    float3 shown = (flags & (kClipShadows | kClipHighlights | kHDRRanges)) != 0
         ? clippingIndicator(c.rgb, baseHeadroom, flags) : c.rgb;
     return toneMapToHeadroom(shown, displayHeadroom, baseHeadroom);
 }
@@ -185,4 +206,61 @@ kernel void presentToScreen(
         color = mix(inside, color, outside);
     }
     drawable.write(float4(color, 1.0), gid);
+}
+
+// The Option-drag preview on a Colour Mixer (HSL) slider: everything grey
+// but the colours that band moves, as Lightroom shows while Option is held.
+// A display pass on the viewport's picture (linear Display P3), run after
+// every stage (RenderPipeline+HueIsolation.swift). The hue is judged as
+// the colour kernel's HSL bands judge it, on Rec.2020 primaries at gamma
+// 2.2, so what stays coloured is what the slider acts on; each band
+// shares the hues between its centre and its neighbours' as the kernel's
+// `hslBandWeights` does, and greys (which the bands leave alone) go grey.
+struct HueIsolationParams {
+    float3x3 toWorking;   // linear Display P3 -> linear Rec.2020
+    uint band;            // 0 red ... 7 magenta
+};
+
+constant float kIsolationCentres[8] = {0.0, 30.0, 60.0, 120.0, 180.0, 240.0, 270.0, 300.0};
+
+inline float isolationBandWeight(float hue, uint band) {
+    int lo = 7, hi = 0;
+    float span = 360.0 - kIsolationCentres[7];
+    float t = (hue >= kIsolationCentres[7]) ? (hue - kIsolationCentres[7]) / span : 0.0;
+    for (int i = 0; i < 7; i++) {
+        if (hue >= kIsolationCentres[i] && hue < kIsolationCentres[i + 1]) {
+            lo = i; hi = i + 1;
+            t = (hue - kIsolationCentres[i]) / (kIsolationCentres[i + 1] - kIsolationCentres[i]);
+            break;
+        }
+    }
+    float w = 0.0;
+    if (uint(lo) == band) w += 1.0 - t;
+    if (uint(hi) == band) w += t;
+    return w;
+}
+
+kernel void hueIsolate(
+    texture2d<float, access::read>  input   [[texture(0)]],
+    texture2d<float, access::write> output  [[texture(1)]],
+    constant HueIsolationParams &params     [[buffer(0)]],
+    uint2 gid                               [[thread_position_in_grid]])
+{
+    if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
+    float4 c = input.read(gid);
+    float3 g = pow(max(params.toWorking * c.rgb, 0.0), 1.0 / 2.2);
+    float mx = max(g.r, max(g.g, g.b)), mn = min(g.r, min(g.g, g.b));
+    float d = mx - mn;
+    float hue = 0.0;
+    if (d > 1e-6) {
+        if (mx == g.r) hue = fmod((g.g - g.b) / d, 6.0);
+        else if (mx == g.g) hue = (g.b - g.r) / d + 2.0;
+        else hue = (g.r - g.g) / d + 4.0;
+        hue *= 60.0;
+        if (hue < 0.0) hue += 360.0;
+    }
+    float saturation = mx > 1e-6 ? d / mx : 0.0;
+    float keep = isolationBandWeight(hue, params.band) * smoothstep(0.0, 0.15, saturation);
+    float y = dot(max(c.rgb, 0.0), float3(0.2290, 0.6917, 0.0793));
+    output.write(float4(mix(float3(y), c.rgb, keep), c.a), gid);
 }
