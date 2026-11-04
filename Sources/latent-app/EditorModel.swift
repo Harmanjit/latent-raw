@@ -681,4 +681,11 @@ final class EditorModel: ObservableObject {
     @Published var showingBefore = false {
         didSet { if showingBefore != oldValue { rerender() } }
     }
+
+    /// The Before when it is not the unedited image: set by Copy After to
+    /// Before and Swap (EditorModel+BeforeAfter.swift), for one image, for
+    /// the session. Never saved.
+    @Published var beforeOverride: BeforeOverride? {
+        didSet { if showingBefore && beforeOverride != oldValue { rerender() } }
+    }
 }

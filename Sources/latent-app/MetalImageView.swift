@@ -72,6 +72,9 @@ struct MetalImageView: NSViewRepresentable {
     /// the pointer read through the same mirror so zoom, pan and the
     /// magnifier land where they look. A view only.
     var mirrored = false
+    /// Only this part of the view shows, as fractions of it (a
+    /// Before/After split); nil, all of it.
+    var visibleFraction: CGRect? = nil
 
     func makeNSView(context: Context) -> MetalLayerView {
         let view = MetalLayerView()
@@ -97,6 +100,7 @@ struct MetalImageView: NSViewRepresentable {
         view.clipping = clipping
         view.onPointer = onPointer
         view.mirrored = mirrored
+        view.visibleFraction = visibleFraction
         view.display(preview: preview, tile: tile, transform: transform, frame: frame,
                      magnifierTile: magnifierTile)
     }
@@ -145,6 +149,34 @@ final class MetalLayerView: NSView {
     /// See `MetalImageView.mirrored`.
     var mirrored = false {
         didSet { if mirrored != oldValue { applyMirror() } }
+    }
+
+    /// See `MetalImageView.visibleFraction`: a mask on the layer, so the
+    /// view under it shows through the rest. Mouse events still land on
+    /// the whole view, which is what a split wants: both halves are one
+    /// picture, edited here.
+    var visibleFraction: CGRect? {
+        didSet { if visibleFraction != oldValue { updateVisibleMask() } }
+    }
+
+    private func updateVisibleMask() {
+        guard let metalLayer else { return }
+        guard let fraction = visibleFraction else {
+            metalLayer.mask = nil
+            return
+        }
+        let mask = metalLayer.mask ?? CALayer()
+        mask.backgroundColor = CGColor(gray: 0, alpha: 1)
+        var rect = CGRect(x: bounds.width * fraction.minX, y: bounds.height * fraction.minY,
+                          width: bounds.width * fraction.width, height: bounds.height * fraction.height)
+        // The fraction is top-down, as this view is; the layer's own
+        // coordinates may run bottom-up.
+        if !metalLayer.isGeometryFlipped { rect.origin.y = bounds.height - rect.maxY }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mask.frame = rect
+        metalLayer.mask = mask
+        CATransaction.commit()
     }
 
     /// Fires with the screen's refresh while there is a frame to draw, and
@@ -293,6 +325,7 @@ final class MetalLayerView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         updateDrawableSize()
+        if visibleFraction != nil { updateVisibleMask() }
         applyMirror()
     }
 

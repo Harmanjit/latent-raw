@@ -138,6 +138,9 @@ enum KeyCommand: Equatable, Sendable {
     case toggleAutoAdvance, select(CullingSelection), refinePhotos
     /// Photo › Stacking (StackCommands.swift).
     case stack(StackCommand)
+    /// View › Loupe Overlay, and Develop's Before/After and Reference views
+    /// (DevelopViews.swift).
+    case view(ViewCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).

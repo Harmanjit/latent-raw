@@ -36,6 +36,9 @@ struct FilmstripView: NSViewRepresentable {
         collection.dataSource = context.coordinator
         collection.delegate = context.coordinator
         collection.setAccessibilityLabel("Filmstrip")
+        // Drags carry the file out, and the image to Develop's reference pane.
+        collection.setDraggingSourceOperationMask(.copy, forLocal: false)
+        collection.setDraggingSourceOperationMask(.copy, forLocal: true)
         let click = NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.clicked(_:)))
         collection.addGestureRecognizer(click)
         context.coordinator.collectionView = collection
@@ -66,7 +69,7 @@ struct FilmstripView: NSViewRepresentable {
         var onSelect: ((ImageRecord) -> Void)?
         weak var collectionView: NSCollectionView?
 
-        private var images: [ImageRecord] = []
+        private(set) var images: [ImageRecord] = []
         private var currentID: Int64?
         private var thumbnailVersion = -1
         /// The current image still has to be scrolled into view: set when

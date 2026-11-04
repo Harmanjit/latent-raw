@@ -22,6 +22,13 @@ struct ImageViewport: View {
     /// Loupe: drawn mirrored while View › Mirror Image Mode is on.
     var followsMirrorImageMode = false
     @ObservedObject private var mirrorImageMode = MirrorImageMode.shared
+    /// View › Loupe Overlay draws over this viewport (Loupe and Develop's
+    /// editor; not Compare's or a second Develop pane).
+    var showsLoupeOverlay: Bool = false
+    /// A Before/After split: the part of the view this pane shows, as
+    /// fractions of it, the pane under it showing through the rest.
+    var visibleFraction: CGRect? = nil
+    @ObservedObject private var overlay = LoupeOverlaySettings.shared
 
     /// A Develop tool owns clicks and drags on the image, so there's no
     /// swipe to another image and no magnifier while one is armed.
@@ -31,7 +38,11 @@ struct ImageViewport: View {
 
     var body: some View {
         ZStack {
-            prefs.surroundColor
+            if let visibleFraction {
+                prefs.surroundColor.mask(FractionMask(fraction: visibleFraction))
+            } else {
+                prefs.surroundColor
+            }
 
             if let device = model.device, let presenter = model.presenter,
                let preview = model.preview {
@@ -64,7 +75,8 @@ struct ImageViewport: View {
                                 onToolEnded: { model.imageToolEnded() },
                                 clipping: allowsTools ? model.clipping : [],
                                 onPointer: allowsTools ? { model.pointerMoved(to: $0) } : nil,
-                                mirrored: followsMirrorImageMode && mirrorImageMode.isOn)
+                                mirrored: followsMirrorImageMode && mirrorImageMode.isOn,
+                                visibleFraction: visibleFraction)
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isImage)
                     .accessibilityLabel(model.imageTitle ?? "Image")
@@ -97,6 +109,11 @@ struct ImageViewport: View {
                 if allowsTools && model.showsMaskShapeOverlay {
                     MaskShapeOverlay(model: model)
                 }
+                if showsLoupeOverlay && overlay.isShown {
+                    LoupeOverlayView(model: model)
+                    LoupeOverlayControls()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
             } else {
                 VStack(spacing: 12) {
                     Text(model.isReady ? "No image open" : model.setupError == nil ? "Starting…" : "Metal unavailable")
@@ -108,6 +125,18 @@ struct ImageViewport: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Shows `fraction` of the view (a Before/After split's half).
+struct FractionMask: View {
+    let fraction: CGRect
+    var body: some View {
+        GeometryReader { geo in
+            Rectangle()
+                .frame(width: geo.size.width * fraction.width, height: geo.size.height * fraction.height)
+                .offset(x: geo.size.width * fraction.minX, y: geo.size.height * fraction.minY)
+        }
     }
 }
 

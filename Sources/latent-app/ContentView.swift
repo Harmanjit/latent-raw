@@ -55,6 +55,8 @@ struct ContentView: View {
     @ObservedObject private var fullScreen = FullScreenImageMode.shared
     @ObservedObject private var mirrorImageMode = MirrorImageMode.shared
     @ObservedObject private var secondDisplay = SecondaryDisplay.shared
+    /// Develop's Before/After and Reference views (DevelopViews.swift).
+    @ObservedObject private var developViews = DevelopViewState.shared
     /// The second display's Loupe waiting to load a grid selection.
     @State private var secondDisplayLoad: Task<Void, Never>?
     @State private var mode: AppMode = .library
@@ -153,7 +155,8 @@ struct ContentView: View {
                 case .loupe:
                     VStack(spacing: 0) {
                         ImageViewport(model: model, allowsTools: false, onStep: { _ = perform(.step($0)) },
-                                      followsMirrorImageMode: true)
+                                      followsMirrorImageMode: true,
+                                      showsLoupeOverlay: true)
                         if !fullScreen.isActive {
                             Divider()
                             ImageCaption(record: library.selectedImage)
@@ -731,7 +734,7 @@ struct ContentView: View {
     private func updateCompareLink() {
         let showing = mode == .compare
         let linked = showing && compareSyncsView
-        model.linkedPane = linked ? compareModel : nil
+        model.linkedPane = linked ? compareModel : developViews.linkedPane(for: mode)
         compareModel?.linkedPane = linked ? model : nil
         compareModel?.isOffScreen = !showing
         if !showing, !MemoryPolicy.current.keepsIdleImages { compareModel?.closeImage() }
@@ -1381,6 +1384,8 @@ struct ContentView: View {
         case .newCollection, .newSmartCollection, .newCollectionSet, .saveFilterAsSmartCollection,
              .addToTargetCollection, .removeFromCollection:
             CollectionCommands.perform(command, library: library, onlyPrimary: mode != .library)
+        case .view(let command):
+            developViews.perform(command, load: { load($0) })
         }
         return true
     }
@@ -1462,6 +1467,7 @@ struct ContentView: View {
         state.secondaryDisplayShowing = secondDisplay.isShowing
         state.sortKey = library.sort.key
         state.mirrorImageMode = mirrorImageMode.isOn
+        state.views = developViews.commandState(main: model)
         return state
     }
 
@@ -1699,7 +1705,9 @@ struct ContentView: View {
 
     private var imageArea: some View {
         ZStack {
-            ImageViewport(model: model, onStep: { _ = perform(.step($0)) })
+            DevelopImageArea(state: developViews, model: model, library: library,
+                             onStep: { _ = perform(.step($0)) },
+                             onSwapReference: { _ = perform(.view(.swapReference)) })
             if model.isExporting {
                 Color.black.opacity(0.4)
                 ProgressView("Exporting…")

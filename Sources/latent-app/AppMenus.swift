@@ -90,6 +90,8 @@ struct CommandState: Equatable {
     var mirrorImageMode = false
     /// Stacks in the selection and the folder (StackCommands.swift).
     var stacking = StackCommandState()
+    /// The loupe overlay, and Develop's Before/After and Reference views.
+    var views = ViewCommandState()
 
     /// Whether the arrow keys pan the image rather than step through images
     /// (Loupe and Develop only; Compare keeps them for the candidate).
@@ -212,6 +214,7 @@ struct CommandState: Equatable {
         case .toggleAutoAdvance: true
         case .select, .refinePhotos: mode == .library && hasVisibleImages
         case .stack(let stack): isEnabled(stack)
+        case .view(let command): isEnabled(command)
         }
     }
 
@@ -385,6 +388,8 @@ struct LatentCommands: Commands {
             toolToggle("Show Loupe on Second Display", .secondaryDisplay, isOn: state.secondaryDisplayShowing)
             Divider()
             item(state.beforeAfterTitle, .beforeAfter)
+            ViewModesMenus(state: state.views, item: { AnyView(item($0, $1)) },
+                           toggle: { AnyView(toolToggle($0, $1, isOn: $2)) })
             item(state.clippingTitle, .toggleClipping)
             item("Make Select", .makeSelect)
             item("Swap Select and Candidate", .swapCompare)
