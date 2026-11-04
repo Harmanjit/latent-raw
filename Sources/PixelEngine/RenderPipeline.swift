@@ -179,6 +179,9 @@ public struct EditParameters: Sendable, Equatable {
     public var lensProfile: String? = nil
     public var postCropVignette: PostCropVignette = .off
     public var grain: Grain = .off
+    /// The rendering generation the edit was made with (`ProcessVersion`);
+    /// a stage whose behaviour changed between versions branches on it.
+    public var processVersion: String = EditStack.processVersion
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
