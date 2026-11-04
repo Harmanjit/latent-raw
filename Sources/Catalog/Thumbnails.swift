@@ -76,9 +76,13 @@ extension Catalog {
     ///
     /// `progress` is called on each completion with (done, total).
     /// `editedRenderer` makes thumbnails for images with edits; without
-    /// one, those are skipped (their embedded thumbnail stays).
+    /// one, those are skipped (their embedded thumbnail stays). `quality`
+    /// and `priority` come from Settings › Performance (utility, the
+    /// efficiency cores, unless the user asked for otherwise).
     public func generateMissingThumbnails(
         concurrency: Int = 4,
+        quality: Double = Thumbnailer.defaultQuality,
+        priority: TaskPriority = .utility,
         editedRenderer: (any EditedThumbnailRenderer)? = nil,
         progress: (@Sendable (Int, Int) -> Void)? = nil
     ) async throws -> ThumbnailReport {
@@ -123,15 +127,15 @@ extension Catalog {
                 guard next < jobs.count, !Task.isCancelled else { return }
                 let job = jobs[next]
                 next += 1
-                group.addTask(priority: .utility) {
+                group.addTask(priority: priority) {
                     do {
                         if let json = job.editStackJSON, let renderer = editedRenderer {
                             let image = try renderer.renderThumbnail(rawFileAt: job.source,
                                                                      editStackJSON: json)
-                            try Thumbnailer.write(image, to: job.destination)
+                            try Thumbnailer.write(image, to: job.destination, quality: quality)
                         } else {
                             try Thumbnailer.makeFromEmbeddedPreview(rawFileAt: job.source,
-                                                                    to: job.destination)
+                                                                    to: job.destination, quality: quality)
                         }
                         return (job.relPath, nil)
                     } catch {
@@ -140,7 +144,7 @@ extension Catalog {
                 }
             }
 
-            for _ in 0..<min(concurrency, jobs.count) { enqueue() }
+            for _ in 0..<min(max(1, concurrency), jobs.count) { enqueue() }
             while let (relPath, error) = try await group.next() {
                 done += 1
                 if let error {
@@ -183,7 +187,7 @@ extension Catalog {
     /// Waits until no other thumbnail pass runs, then counts this one as
     /// running. The waiter is handed the turn directly, so a pass starting
     /// meanwhile can't slip in between.
-    private func beginThumbnailPass() async {
+    func beginThumbnailPass() async {
         if thumbnailPassRunning {
             await withCheckedContinuation { thumbnailPassWaiters.append($0) }
         } else {
@@ -191,7 +195,7 @@ extension Catalog {
         }
     }
 
-    private func endThumbnailPass() {
+    func endThumbnailPass() {
         if thumbnailPassWaiters.isEmpty {
             thumbnailPassRunning = false
         } else {

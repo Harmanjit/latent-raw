@@ -20,7 +20,27 @@ public struct ThumbnailImage: @unchecked Sendable {
 public final class Library: ObservableObject {
     @Published public private(set) var folderURL: URL?
     @Published public private(set) var images: [ImageRecord] = [] {
-        didSet { if !isPatchingRecords { recomputeVisible() } }
+        didSet {
+            // Records patched in place keep their positions (`applyChangedRecords`).
+            if !keepsImagePositions { imageIndexByIDStorage = nil }
+            if !isPatchingRecords { recomputeVisible() }
+        }
+    }
+    /// Image id → position in `images`, built on first use after the list
+    /// changes. `selectedImage` and `selectedImages` are read many times in
+    /// each redraw of the main window (the menu state alone reads both), and
+    /// were each a walk through every image of the folder.
+    private var imageIndexByIDStorage: [Int64: Int]?
+    private var keepsImagePositions = false
+    var imageIndexByID: [Int64: Int] {
+        if let index = imageIndexByIDStorage { return index }
+        var index: [Int64: Int] = [:]
+        index.reserveCapacity(images.count)
+        for (position, record) in images.enumerated() {
+            if let id = record.id, index[id] == nil { index[id] = position }
+        }
+        imageIndexByIDStorage = index
+        return index
     }
     /// The grid's contents: `images` after `filter` and `sort`.
     @Published public private(set) var visibleImages: [ImageRecord] = []
@@ -94,6 +114,8 @@ public final class Library: ObservableObject {
     @Published public internal(set) var recentlyAdded: RecentlyAdded?
     /// Bumped whenever thumbnails land, so a grid knows to refresh cells.
     @Published public private(set) var thumbnailVersion = 0
+    /// Files done when `thumbnailVersion` last moved, in the running pass.
+    private var thumbnailVersionDone = 0
     /// The most recent failure of a catalog operation, for the status bar.
     /// Cleared by the next success or by the user.
     @Published public var lastError: String?
@@ -114,7 +136,11 @@ public final class Library: ObservableObject {
     @Published public var selectedImageIDs: Set<Int64> = []
 
     public var selectedImages: [ImageRecord] {
-        images.filter { $0.id.map(selectedImageIDs.contains) ?? false }
+        guard !selectedImageIDs.isEmpty else { return [] }
+        // In `images` order, as before; positions sorted rather than every
+        // image tested, so a handful selected in 20,000 costs a handful.
+        let index = imageIndexByID
+        return selectedImageIDs.compactMap { index[$0] }.sorted().map { images[$0] }
     }
 
     /// Sets both selections from the grid. The primary (lead) is `primary`
@@ -147,11 +173,17 @@ public final class Library: ObservableObject {
     /// GPU pipeline, which the catalog doesn't know about).
     public var thumbnailRenderer: (any EditedThumbnailRenderer)?
     private var thumbnailTask: Task<Void, Never>?
+    /// Quality and priority of thumbnail passes (Settings › Performance).
+    /// Takes effect from the next pass.
+    public var thumbnailGeneration = ThumbnailGenerationSettings()
+    /// How often a pass's progress reaches the status bar, at most.
+    static let thumbnailProgressInterval: TimeInterval = 0.1
 
     public init() {}
 
     public var selectedImage: ImageRecord? {
-        images.first { $0.id == selectedImageID }
+        guard let id = selectedImageID, let position = imageIndexByID[id] else { return nil }
+        return images[position]
     }
 
     /// Runs a catalog operation and, if it fails, records what and why
@@ -208,6 +240,12 @@ public final class Library: ObservableObject {
     /// Position in the *visible* list, which is what arrow keys walk.
     public var selectedIndex: Int? {
         visibleImages.firstIndex { $0.id == selectedImageID }
+    }
+
+    /// Tests only: shows `records` as if a folder holding them had opened,
+    /// without a catalog (the performance tests use 20,000 made-up records).
+    func replaceImagesForTesting(_ records: [ImageRecord]) {
+        images = records
     }
 
     // MARK: - Filtering and sorting
@@ -269,7 +307,9 @@ public final class Library: ObservableObject {
         }
         guard changed else { return }
         isPatchingRecords = true
+        keepsImagePositions = true
         images = updated
+        keepsImagePositions = false
         isPatchingRecords = false
         if reorder {
             recomputeVisible()
@@ -481,10 +521,14 @@ public final class Library: ObservableObject {
         collections.catalogDidLoad(list.collections, isNewCatalog: isNewCatalog)
         followRecentlyAdded(list.recentlyAdded)
         recomputeVisible()
-        if let selected = selectedImageID, !images.contains(where: { $0.id == selected }) {
+        let index = imageIndexByID
+        if let selected = selectedImageID, index[selected] == nil {
             selectedImageID = nil
         }
-        selectedImageIDs = selectedImageIDs.filter { id in images.contains { $0.id == id } }
+        // Through the index: testing each selected id against every image
+        // took seconds on a refresh with a big folder all selected.
+        let kept = selectedImageIDs.filter { index[$0] != nil }
+        if kept != selectedImageIDs { selectedImageIDs = kept }
         statusText = "\(images.count) images · \(list.report)"
 
         startThumbnailGeneration()
@@ -504,11 +548,18 @@ public final class Library: ObservableObject {
 
     // MARK: - Thumbnails
 
+    /// Stops the running pass taking new files (Discard Thumbnails waits
+    /// for it, and shouldn't wait for a whole folder).
+    func cancelThumbnailGeneration() {
+        thumbnailTask?.cancel()
+    }
+
     func startThumbnailGeneration() {
         guard let catalog else { return }
         thumbnailTask?.cancel()
         thumbnailsDone = 0
         thumbnailsTotal = 0
+        thumbnailVersionDone = 0
         thumbnailTask = Task { [weak self] in
             do {
                 let needed = try await catalog.imagesNeedingThumbnails().count
@@ -517,16 +568,28 @@ public final class Library: ObservableObject {
                 await MainActor.run { if self?.catalog === catalog { self?.thumbnailsTotal = needed } }
                 guard needed > 0 else { return }
                 let renderer = await self?.thumbnailRenderer
+                let settings = await self?.thumbnailGeneration ?? ThumbnailGenerationSettings()
+                // Every published change redraws the whole main window, so
+                // progress lands at most ten times a second rather than per
+                // file (twice per file before: done and total).
+                let throttle = ProgressThrottle(interval: Library.thumbnailProgressInterval)
                 let report = try await catalog.generateMissingThumbnails(
+                    concurrency: settings.priority.concurrency(),
+                    quality: settings.quality.heicQuality,
+                    priority: settings.priority.taskPriority,
                     editedRenderer: renderer
                 ) { done, total in
+                    guard throttle.shouldReport(done: done, total: total) else { return }
                     Task { @MainActor in
-                        guard self?.catalog === catalog else { return }
-                        self?.thumbnailsDone = done
-                        self?.thumbnailsTotal = total
-                        // Refresh the grid every few, and at the end, rather
-                        // than per file — cells reload cheaply but not for free.
-                        if done % 8 == 0 || done == total { self?.thumbnailVersion += 1 }
+                        guard let self, self.catalog === catalog else { return }
+                        if self.thumbnailsDone != done { self.thumbnailsDone = done }
+                        if self.thumbnailsTotal != total { self.thumbnailsTotal = total }
+                        // Refresh the grid's waiting cells every eight files or
+                        // so, and at the end — cells reload cheaply but not for free.
+                        if done - self.thumbnailVersionDone >= 8 || done == total {
+                            self.thumbnailVersionDone = done
+                            self.thumbnailVersion += 1
+                        }
                     }
                 }
                 await MainActor.run {

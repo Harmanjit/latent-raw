@@ -31,6 +31,10 @@ public enum Thumbnailer {
     /// Long-edge size in pixels.
     public static let size = 512
 
+    /// HEIC quality thumbnails are written at, unless Settings › Performance
+    /// asks for another (`ThumbnailGenerationSettings.Quality`).
+    public static let defaultQuality = 0.8
+
     /// The `thumb_key` recorded for a thumbnail made from the embedded
     /// preview. Edited images record a hash of their edit instead, so a
     /// stale thumbnail is detected by a key mismatch (DESIGN.md §10).
@@ -48,22 +52,23 @@ public enum Thumbnailer {
 
     /// Writes an already-rendered, camera-oriented image as a thumbnail.
     /// Used for edited images, whose pixels come from the pipeline.
-    public static func write(_ image: CGImage, to destination: URL) throws {
-        try writeHEIC(image, to: destination)
+    public static func write(_ image: CGImage, to destination: URL, quality: Double = defaultQuality) throws {
+        try writeHEIC(image, to: destination, quality: quality)
     }
 
     /// Extracts, downscales, orients and writes. Pure: a file in, a file
     /// out, no database. Safe to call from any thread.
-    public static func makeFromEmbeddedPreview(rawFileAt source: URL, to destination: URL) throws {
+    public static func makeFromEmbeddedPreview(rawFileAt source: URL, to destination: URL,
+                                               quality: Double = defaultQuality) throws {
         // A JPEG, TIFF and the like is its own preview.
         if RenderedImageFormat.handles(path: source.path) {
-            try writeHEIC(try decodeDownscaled(imageAt: source), to: destination)
+            try writeHEIC(try decodeDownscaled(imageAt: source), to: destination, quality: quality)
             return
         }
         let raw = try RawFile(path: source.path, metadataOnly: true)
         guard let jpeg = raw.embeddedJPEGPreview() else { throw ThumbnailError.noEmbeddedPreview }
         let image = try decodeDownscaled(jpeg, orientation: raw.summary.orientation)
-        try writeHEIC(image, to: destination)
+        try writeHEIC(image, to: destination, quality: quality)
     }
 
     /// Decodes `jpeg` at no more than `size` px on the long edge, then
@@ -143,7 +148,7 @@ public enum Thumbnailer {
 
     /// Writes to a temp file beside the destination, then renames, so a
     /// half-written thumbnail never exists under the real name.
-    static func writeHEIC(_ image: CGImage, to destination: URL) throws {
+    static func writeHEIC(_ image: CGImage, to destination: URL, quality: Double = defaultQuality) throws {
         let directory = destination.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let tmp = FileOperations.companionTemporaryURL(for: destination)
@@ -151,7 +156,7 @@ public enum Thumbnailer {
         guard let dest = CGImageDestinationCreateWithURL(tmp as CFURL, UTType.heic.identifier as CFString, 1, nil) else {
             throw ThumbnailError.encodeFailed
         }
-        let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.8]
+        let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: min(max(quality, 0.1), 1)]
         CGImageDestinationAddImage(dest, image, options as CFDictionary)
         guard CGImageDestinationFinalize(dest) else {
             try? FileManager.default.removeItem(at: tmp)
