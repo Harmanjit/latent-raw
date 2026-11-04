@@ -52,7 +52,10 @@ enum CullingKeys {
             let advancing = KeyCommand.advance(inner)
             return base.map { ($0, advancing) } ?? (advancing, nil)
         }
-        return base.map { ($0, nil) }
+        // A key two scoped commands share: the second runs when the first
+        // is unavailable here (it passes the key through).
+        let shared = Shortcuts.commands(for: press)
+        return base.map { ($0, shared.count > 1 ? shared[1] : nil) }
     }
 
     /// The key as typed without Shift, when Shift is held.

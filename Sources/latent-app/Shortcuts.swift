@@ -12,7 +12,8 @@ struct ShortcutModifiers: OptionSet, Hashable {
 /// Where a shortcut does anything. Two shortcuts may share keys only when
 /// their scopes can never apply at once.
 enum ShortcutScope: Equatable {
-    case everywhere, develop, compare, survey
+    /// Library: the grid and Loupe, never Develop.
+    case everywhere, library, develop, compare, survey
 
     func overlaps(_ other: ShortcutScope) -> Bool {
         self == .everywhere || other == .everywhere || self == other
@@ -186,7 +187,7 @@ enum Shortcuts {
         // Lightroom's stacking keys.
         Shortcut(.stack(.group), "g", .command),
         Shortcut(.stack(.unstack), "g", [.shift, .command]),
-        Shortcut(.stack(.toggleExpanded), "s"),
+        Shortcut(.stack(.toggleExpanded), "s", in: .library),
         Shortcut(.stack(.moveToTop), "s", .shift),
         // Photo Merge. Lightroom's key: ⌃H is otherwise only the text
         // system's delete-backward, which the command leaves to a field
@@ -235,8 +236,15 @@ enum Shortcuts {
     }
 
     static func command(for press: BareKeyPress, in table: [Shortcut]) -> KeyCommand? {
+        commands(for: press, in: table).first
+    }
+
+    /// Every command on `press`, in table order. Two share a key only when
+    /// their scopes never apply at once (S: Expand Stack in the Library,
+    /// Soft Proofing in Develop); the first one available runs.
+    static func commands(for press: BareKeyPress, in table: [Shortcut]? = nil) -> [KeyCommand] {
         let modifiers: ShortcutModifiers = press.shift ? .shift : []
-        return table.first { $0.key == press.key && $0.modifiers == modifiers }?.command
+        return (table ?? Keymap.shared.effective).filter { $0.key == press.key && $0.modifiers == modifiers }.map(\.command)
     }
 
     /// Modifiers in the menu bar's order (⌃⌥⇧⌘), then the key.

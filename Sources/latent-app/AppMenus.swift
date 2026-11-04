@@ -248,6 +248,8 @@ struct CommandState: Equatable {
     static func passesThroughWhenUnavailable(_ command: KeyCommand) -> Bool {
         switch command {
         case .deleteHeal, .makeSelect, .toolSize, .panImage: true
+        // S is Expand Stack in the Library and Soft Proofing in Develop.
+        case .toggleSoftProof, .stack(.toggleExpanded): true
         default: false
         }
     }
