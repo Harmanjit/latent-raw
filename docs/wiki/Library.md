@@ -83,6 +83,14 @@ Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to
 
 **Custom sort.** Choose Custom, then drag thumbnails to arrange them. The arrangement is saved per folder in `_latent/custom-order.json`, so it survives a rebuilt catalog and moves with the folder. New files appear after your arrangement, by name. Images hidden by a filter keep their places. An image renamed or moved within the folder with Latent's own commands keeps its place, and so does a file renamed in Finder, the next time the folder is opened. ⌘Z undoes a rearrangement.
 
+## Faster culling
+
+**Auto Advance** (Photo › Auto Advance) moves on to the next photo each time you set a star, flag or colour label, so you can go through a shoot with one key per photo. It is remembered between launches. Without it, hold **⇧** with the key (⇧3, ⇧P, ⇧X, ⇧7 and so on) to set it and move on just that once, as in Lightroom; with **Caps Lock** on, every star, flag and label key moves on. In Compare, ⇧X stays Make Select. Moving on works as → does: in the grid the next photo becomes the only one selected, and in Loupe, Compare and Develop the next photo opens.
+
+**Selecting.** Besides ⌘A, the Edit menu has **Select None** (⌘D), **Invert Selection**, **Select by Flag** (Picked, ⌥⌘A; Unflagged; Rejected), **Select by Rating** (exactly that many stars), **Select by Colour Label** (or No Label) and **Deselect Unflagged** (⌥⇧⌘D), which keeps only the picked and rejected photos of the selection. They choose among the photos the grid shows, and work in the grid only.
+
+**Refine Photos** (Photo › Refine Photos…) is Lightroom's second pass: of the photos the grid shows, every unflagged one becomes rejected and every picked one unflagged, ready to pick again. Rejected photos stay rejected. Latent says how many photos will change and asks first, and one ⌘Z puts every flag back.
+
 ## Colour labels
 
 Give photos a colour label to sort a shoot beyond stars and flags: red for the client's choices, green for the portfolio, whatever you like. The keys are Lightroom's: **6** red, **7** yellow, **8** green, **9** blue. Purple has no key; use **Photo › Label** or the right-click **Label** menu. Pressing the key of the label a photo already has takes it off. With several photos selected in the grid, the key labels all of them, or takes the label off all of them when the photo the panel shows already has it. In Loupe, Compare and Develop the key labels the photo shown.

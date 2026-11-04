@@ -1094,6 +1094,12 @@ struct ContentView: View {
         library.perform("Flagging") { try await library.setFlag(flag, onlyPrimary: mode != .library) }
     }
 
+    /// Stars, flags and labels from the keys and menus, the Select
+    /// commands and Refine Photos (CullingCommands.swift).
+    private var culling: CullingCommands {
+        CullingCommands(library: library, onlyPrimary: mode != .library, advance: { _ = perform(.step(1)) })
+    }
+
     /// A label key, menu item or the panel's dots: toggles by the primary.
     private func chooseLabel(_ label: ColorLabel?) {
         library.perform("Labelling") { try await library.chooseLabel(label, onlyPrimary: mode != .library) }
@@ -1189,16 +1195,16 @@ struct ContentView: View {
             model.toggleZoomAtCenter()
             if mode == .compare { compareModel?.toggleZoomAtCenter() }
         // Ratings 0-5 and flags P/X/U, the same keys Lightroom uses.
-        case .rate(let stars):
-            rate(stars)
-        case .pick:
-            flag(.picked)
-        case .reject:
-            flag(.rejected)
-        case .unflag:
-            flag(.none)
-        case .label(let label):
-            chooseLabel(label)
+        case .rate, .pick, .reject, .unflag, .label:
+            culling.perform(command, advancing: CullingPreferences.shared.autoAdvance)
+        case .advance(let command):
+            culling.perform(command, advancing: true)
+        case .toggleAutoAdvance:
+            CullingPreferences.shared.autoAdvance.toggle()
+        case .select(let selection):
+            culling.select(selection)
+        case .refinePhotos:
+            culling.refine()
         case .beforeAfter:
             if model.hasImage { model.showingBefore.toggle() }
         case .crop:
