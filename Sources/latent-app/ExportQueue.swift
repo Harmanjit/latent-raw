@@ -210,8 +210,14 @@ final class ExportQueue: ObservableObject {
     /// the failures; the summary counts them.
     @Published private(set) var notes: [String] = []
     @Published private(set) var summary = ""
+    /// Paused between files (`pause()`); false whenever nothing runs.
+    @Published private(set) var isPaused = false
 
     private var task: Task<Void, Never>?
+    /// Read by the loop before each file: pausing lets the file being
+    /// written finish and starts no other until Resume. The GPU slot stays
+    /// taken meanwhile, so another job doesn't start under a paused export.
+    private let pauseGate = PauseGate()
 
     /// Another full-size GPU job holds the queue's slot: a Photo Merge
     /// (PhotoMergeQueue). Such a job is as heavy as an export, so for the
@@ -272,12 +278,15 @@ final class ExportQueue: ObservableObject {
         guard !records.isEmpty, !batches.isEmpty, let catalog = library.catalog, let root = library.folderURL else { return }
         isRunning = true
         stoppingForQuit = false
+        pauseGate.resume()
+        isPaused = false
         done = 0; total = records.count * batches.count; failures = []; notes = []; summary = ""
         if batches.count == 1 { batches[0].preset.save() }
         ExportPrevious.save(batches)
         // Held until the loop below finishes, however it finishes.
         let activity = ExportActivity(reason: "Exporting \(records.count) image\(records.count == 1 ? "" : "s")")
 
+        let pauseGate = pauseGate
         task = Task { [weak self] in
             defer { activity.end() }
             // One full-size render on the GPU at a time.
@@ -310,6 +319,9 @@ final class ExportQueue: ObservableObject {
             }.value
             images: for (index, record) in records.enumerated() {
                 if Task.isCancelled { break batches }
+                // Cancelling (or quitting) a paused export ends the wait,
+                // and the check after it stops the run.
+                if await pauseGate.waitWhilePaused(), Task.isCancelled { break batches }
                 let name = batches.count > 1 ? "\(record.fileName) (\(batch.name ?? "batch"))" : record.fileName
                 await MainActor.run { self?.currentName = name }
 
@@ -425,6 +437,8 @@ final class ExportQueue: ObservableObject {
             await MainActor.run {
                 guard let self else { return }
                 self.isRunning = false
+                self.pauseGate.resume()
+                self.isPaused = false
                 self.currentName = ""
                 let cancelled = Task.isCancelled ? " (cancelled)" : ""
                 let skippedNote = skipped > 0 ? " · \(skipped) skipped (already there)" : ""
@@ -445,6 +459,19 @@ final class ExportQueue: ObservableObject {
     }
 
     func cancel() { task?.cancel() }
+
+    /// Holds the run before its next file; the one being written finishes.
+    func pause() {
+        guard isRunning else { return }
+        pauseGate.pause()
+        isPaused = true
+    }
+
+    /// Carries on from the next file.
+    func resume() {
+        pauseGate.resume()
+        isPaused = false
+    }
 
     /// Output `index` of `plan` settled against the disk, and its folder
     /// made when `makeFolder` (date subfolders) and it is to be written. On

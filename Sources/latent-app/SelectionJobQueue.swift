@@ -103,6 +103,13 @@ protocol SelectionJob: Sendable {
 /// and the panel says the folder changed. ContentView also cancels the
 /// job when a folder is about to be replaced, so the worker stops early.
 ///
+/// **Pausing.** `pause()` lets the photo under way finish and then holds
+/// the worker before the next one, keeping the GPU slot (an export can't
+/// slip in and change what the job's photos look like meanwhile) and
+/// everything done so far; `resume()` carries on with the next photo.
+/// Cancel, quitting and a folder change all stop a paused job as they
+/// stop a running one, committing the photos already done.
+///
 /// **Memory.** The worker is a detached task holding one photo at a time
 /// (that is the job's business), and between photos it waits while memory
 /// pressure is critical rather than open the next raw in the middle of a
@@ -121,6 +128,8 @@ final class SelectionJobQueue: ObservableObject {
     /// be read, photos left alone because their edit changed meanwhile,
     /// and whatever the job itself noted.
     @Published private(set) var notes: [String] = []
+    /// Paused between photos (`pause()`); false whenever nothing runs.
+    @Published private(set) var isPaused = false
 
     /// The GPU slot shared with exports and Photo Merge.
     let gpuSlot: ExportQueue
@@ -139,6 +148,8 @@ final class SelectionJobQueue: ObservableObject {
     /// The memory pressure the worker reads between photos. Written on the
     /// main thread by the monitor, read from the worker's thread.
     private let pressure = PressureLevel()
+    /// Read by the worker between photos.
+    private let pauseGate = PauseGate()
     private var pressureMonitor: MemoryPressureMonitor?
 
     init(gpuSlot: ExportQueue, jobs: OutputJobs = .shared) {
@@ -170,6 +181,8 @@ final class SelectionJobQueue: ObservableObject {
         progress = nil
         summary = ""
         notes = []
+        pauseGate.resume()
+        isPaused = false
         let outputJob = jobs.begin(job.outputKind, name: records[0].fileName,
                                    cancel: { [weak self] in self?.cancel() })
         task = Task {
@@ -180,6 +193,8 @@ final class SelectionJobQueue: ObservableObject {
             await finish(job, outcome: outcome, elapsed: Date().timeIntervalSince(started),
                          library: library, catalog: catalog)
             isRunning = false
+            pauseGate.resume()
+            isPaused = false
             gpuSlot.releaseSlot()
             jobs.end(outputJob)
         }
@@ -190,6 +205,19 @@ final class SelectionJobQueue: ObservableObject {
     /// and the queue ends a moment later.
     func cancel() {
         task?.cancel()
+    }
+
+    /// Holds the job before its next photo; the one under way finishes.
+    func pause() {
+        guard isRunning else { return }
+        pauseGate.pause()
+        isPaused = true
+    }
+
+    /// Carries on from the next photo.
+    func resume() {
+        pauseGate.resume()
+        isPaused = false
     }
 
     /// Returns once the job under way, if any, has ended and committed.
@@ -225,6 +253,7 @@ final class SelectionJobQueue: ObservableObject {
     private func run(_ job: any SelectionJob, records: [ImageRecord], catalog: Catalog, gpu: GPUContext,
                      generation: Int) async -> WorkerOutcome {
         let pressure = pressure
+        let pauseGate = pauseGate
         let report: @Sendable (MergeProgress) -> Void = { [weak self] progress in
             // In the order the worker reported, on the main thread.
             DispatchQueue.main.async {
@@ -257,6 +286,10 @@ final class SelectionJobQueue: ObservableObject {
                         try await Task.sleep(for: Self.pressurePollInterval)
                         try Task.checkCancellation()
                     }
+                    // Paused: held here, between photos. Cancelling ends
+                    // the wait, and the check after it stops the loop.
+                    await pauseGate.waitWhilePaused()
+                    try Task.checkCancellation()
                 } catch {
                     outcome.cancelled = true
                     break

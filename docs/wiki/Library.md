@@ -181,6 +181,14 @@ A pasted or preset **Touch-up** carries its sliders but not the faces they were 
 
 The job runs in the background, one photo at a time, with "Photo 3 of 12: DSC_0107.NEF" and a Cancel dust removal button in the left panel; quitting stops it and keeps the photos already done. Nothing is written until the job ends, then every photo's spots are saved together as one undo step, "Remove Dust (12 Images)", and the panel reports "Removed dust from 11 photos (412 spots) in 38 s". A photo whose edit changed while the job ran, or that couldn't be read, is left alone and named in the notes. Opening another folder while the job runs gives it nowhere to write, so it ends with "Remove Dust cancelled · the folder changed, so nothing was written" and the first folder's photos are untouched; run it again in that folder. The spots go in as heal patches under Sensor Dust, ahead of any patches of your own, so a photo's existing spot removal is untouched; a spot already under one of your patches is not added twice.
 
+## Background activity
+
+Long jobs run in the background while you keep working: making thumbnails, an export, Remove Dust and Find Faces, a Photo Merge, a print or contact sheet, and a watched-folder import. The left panel shows how far each has got.
+
+**Pause** sits beside Cancel for thumbnails, exports, Remove Dust and Find Faces. Pausing lets the file or photo under way finish, then starts nothing new and shows "Paused"; **Resume** carries on from the next one, with nothing lost or done twice. A paused export or selection job keeps its turn on the graphics processor, so another export or merge can't start until it is resumed or cancelled. Cancel, opening another folder and quitting stop a paused job exactly as they stop a running one: a cancelled Remove Dust or Find Faces still keeps the photos already done. Thumbnails start unpaused in every folder you open; while paused, the grid shows the embedded previews already made.
+
+The **Activity** button in the status bar appears while anything runs in the background (it shows a pause symbol when everything is paused). Click it for a list of each job with its progress, Pause or Resume, and Cancel. A Photo Merge, a print and a watched-folder import are single steps with nothing to pause between, so they have Cancel (where they can be stopped) but no Pause.
+
 ## Virtual copies
 
 A virtual copy is another version of a photo: its own edit, rating, flag, colour label, rotation, keywords, history and snapshots, sharing the one raw file. Use one to try a black-and-white version beside the colour one, or a square crop beside the full frame, and keep both. A copy takes no disk space beyond its sidecar and thumbnail.

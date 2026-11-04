@@ -69,16 +69,24 @@ struct LibraryPanel: View {
 
             if library.thumbnailsTotal > 0 && library.thumbnailsDone < library.thumbnailsTotal {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Thumbnails \(library.thumbnailsDone) of \(library.thumbnailsTotal)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text("Thumbnails \(library.thumbnailsDone) of \(library.thumbnailsTotal)"
+                             + (library.thumbnailsPaused ? " · Paused" : ""))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Making thumbnails" + (library.thumbnailsPaused ? ", paused" : ""))
+                            .accessibilityValue("\(library.thumbnailsDone) of \(library.thumbnailsTotal)")
+                        Spacer()
+                        PauseResumeButton(isPaused: library.thumbnailsPaused, jobName: "thumbnails") {
+                            library.setThumbnailsPaused($0)
+                        }
+                    }
                     ProgressView(value: Double(library.thumbnailsDone),
                                  total: Double(library.thumbnailsTotal))
                         .controlSize(.small)
+                        .accessibilityHidden(true)
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Making thumbnails")
-                .accessibilityValue("\(library.thumbnailsDone) of \(library.thumbnailsTotal)")
+                .accessibilityElement(children: .contain)
             }
 
             if !library.undecidedSubfolders.isEmpty {
@@ -241,7 +249,8 @@ struct LibraryPanel: View {
     }
 
     /// The export, Photo Merge or selection job under way, with its
-    /// Cancel. They take turns over one GPU slot, so only one of the three
+    /// Pause/Resume (not a merge's: one merge is one indivisible piece of
+    /// work) and Cancel. They take turns over one GPU slot, so only one of the three
     /// is ever running.
     ///
     /// Outside the Export disclosure group on purpose: the panel is the
@@ -252,8 +261,11 @@ struct LibraryPanel: View {
         if selectionJobs.isRunning {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(selectionJobs.title).font(.caption2)
+                    Text(selectionJobs.title + (selectionJobs.isPaused ? " · Paused" : "")).font(.caption2)
                     Spacer()
+                    PauseResumeButton(isPaused: selectionJobs.isPaused, jobName: selectionJobs.title) {
+                        $0 ? selectionJobs.pause() : selectionJobs.resume()
+                    }
                     Button("Cancel") { selectionJobs.cancel() }
                         .controlSize(.mini)
                         .accessibilityLabel(Self.cancelLabel(forJob: selectionJobs.title))
@@ -289,8 +301,12 @@ struct LibraryPanel: View {
         } else if exportQueue.isRunning {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text("\(exportQueue.done) of \(exportQueue.total)").font(.caption2)
+                    Text("\(exportQueue.done) of \(exportQueue.total)" + (exportQueue.isPaused ? " · Paused" : ""))
+                        .font(.caption2)
                     Spacer()
+                    PauseResumeButton(isPaused: exportQueue.isPaused, jobName: "export") {
+                        $0 ? exportQueue.pause() : exportQueue.resume()
+                    }
                     Button("Cancel") { exportQueue.cancel() }.controlSize(.mini)
                 }
                 ProgressView(value: Double(exportQueue.done), total: Double(max(exportQueue.total, 1)))

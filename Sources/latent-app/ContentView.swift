@@ -2213,6 +2213,8 @@ struct ContentView: View {
                 .accessibilityLabel("Filmstrip")
 
             FileOperationStatus(operations: fileOperations)
+            ActivityStatusButton(library: library, exportQueue: exportQueue, photoMerge: photoMerge,
+                                 selectionJobs: selectionJobs)
 
             if let problem = currentProblem {
                 HStack(spacing: 4) {
