@@ -50,6 +50,10 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 |---|---|
 | ⌘Z, ⇧⌘Z | Undo, redo (in Develop, the image's edit history; elsewhere, what you did in the Library, moves and renames included) |
 | `\` | Before / after |
+| ⇧Y | Develop: Before and After side by side, then split, then one above the other, then split across, then one image again |
+| ⌥⇧⌘←, ⌥⇧⌘→, ⌥⇧⌘↑ | Develop: copy the After's settings to the Before, the Before's to the After (undoable), or swap them |
+| ⇧R | Develop: Reference view, a reference photo beside the one you edit (drag one in from the filmstrip) |
+| ⌥⌘O | Loupe and Develop: show or hide the loupe overlay (grid, guides, layout image; View › Loupe Overlay) |
 | ⌘U | Auto adjust |
 | R | Crop and straighten tool |
 | O, ⇧O | While cropping: the next crop guide overlay (thirds, grid, golden ratio, golden spiral, diagonal, triangle, none), and turn the spiral or triangle |

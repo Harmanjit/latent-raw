@@ -85,6 +85,8 @@ struct CommandState: Equatable {
     var showsRegularCollection = false
     /// What B does: "Add to Quick Collection", or the target's name.
     var targetCollectionTitle = "Add to Quick Collection"
+    /// The loupe overlay, and Develop's Before/After and Reference views.
+    var views = ViewCommandState()
 
     /// Whether the arrow keys pan the image rather than step through images
     /// (Loupe and Develop only; Compare keeps them for the candidate).
@@ -195,6 +197,7 @@ struct CommandState: Equatable {
         case .addToTargetCollection: hasCatalog && (hasSelection || selectionCount > 0)
         case .removeFromCollection: showsRegularCollection && (hasSelection || selectionCount > 0)
         case .geometry(let geometry): isEnabled(geometry)
+        case .view(let command): isEnabled(command)
         }
     }
 
@@ -364,6 +367,8 @@ struct LatentCommands: Commands {
             toolToggle("Show Loupe on Second Display", .secondaryDisplay, isOn: state.secondaryDisplayShowing)
             Divider()
             item(state.beforeAfterTitle, .beforeAfter)
+            ViewModesMenus(state: state.views, item: { AnyView(item($0, $1)) },
+                           toggle: { AnyView(toolToggle($0, $1, isOn: $2)) })
             item(state.clippingTitle, .toggleClipping)
             item("Make Select", .makeSelect)
             item("Swap Select and Candidate", .swapCompare)

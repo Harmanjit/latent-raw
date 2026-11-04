@@ -135,6 +135,15 @@ enum Shortcuts {
         Shortcut(.undo, "z", .command),
         Shortcut(.redo, "z", [.shift, .command]),
         Shortcut(.beforeAfter, "\\"),
+        // Lightroom's keys: ⇧Y for the Before/After views (Y is red-eye
+        // here), ⇧R for Reference view, ⌥⌘O for the loupe overlay, and
+        // ⌥⇧⌘ with an arrow to copy or swap Before and After settings.
+        Shortcut(.view(.cycleBeforeAfter), "y", .shift, in: .develop),
+        Shortcut(.view(.referenceView), "r", .shift, in: .develop),
+        Shortcut(.view(.toggleOverlay), "o", [.option, .command]),
+        Shortcut(.view(.copyAfterToBefore), .leftArrow, [.option, .shift, .command]),
+        Shortcut(.view(.copyBeforeToAfter), .rightArrow, [.option, .shift, .command]),
+        Shortcut(.view(.swapBeforeAfter), .upArrow, [.option, .shift, .command]),
         Shortcut(.autoAdjust, "u", .command),
         Shortcut(.crop, "r"),
         Shortcut(.geometry(.cycleCropGuide), "o", in: .develop),
@@ -311,6 +320,10 @@ extension Shortcuts {
         ("Editing", [
             ShortcutPageRow([.undo, .redo], "Undo, redo (in Develop, the image's edit history; elsewhere, what you did in the Library, moves and renames included)"),
             ShortcutPageRow([.beforeAfter], "Before / after"),
+            ShortcutPageRow([.view(.cycleBeforeAfter)], "Develop: Before and After side by side, then split, then one above the other, then split across, then one image again"),
+            ShortcutPageRow([.view(.copyAfterToBefore), .view(.copyBeforeToAfter), .view(.swapBeforeAfter)], "Develop: copy the After's settings to the Before, the Before's to the After (undoable), or swap them"),
+            ShortcutPageRow([.view(.referenceView)], "Develop: Reference view, a reference photo beside the one you edit (drag one in from the filmstrip)"),
+            ShortcutPageRow([.view(.toggleOverlay)], "Loupe and Develop: show or hide the loupe overlay (grid, guides, layout image; View › Loupe Overlay)"),
             ShortcutPageRow([.autoAdjust], "Auto adjust"),
             ShortcutPageRow([.crop], "Crop and straighten tool"),
             ShortcutPageRow([.geometry(.cycleCropGuide), .geometry(.rotateCropGuide)], "While cropping: the next crop guide overlay (thirds, grid, golden ratio, golden spiral, diagonal, triangle, none), and turn the spiral or triangle"),
