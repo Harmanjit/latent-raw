@@ -7,6 +7,9 @@ struct PresetsPanel: View {
     let onApply: (Preset) -> Void
     @State private var newName = ""
     @State private var showingSave = false
+    /// The Amount the next preset applies at, and the last one re-blends
+    /// at while it is still the photo's last change (`PresetAmountSession`).
+    @AppStorage(PresetAmountSession.amountKey) private var amount = 1.0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -39,6 +42,21 @@ struct PresetsPanel: View {
                     .disabled(!model.hasImage)
             }
             .controlSize(.small)
+
+            HStack(spacing: 6) {
+                Text("Amount").font(.caption)
+                ResettableSlider(value: Binding(get: { Float(amount) }, set: { amount = Double($0) }),
+                                 in: PresetAmount.range, label: "Preset amount",
+                                 accessibilityValue: String(format: "%.0f percent", amount * 100)) {
+                    amount = 1
+                }
+                Text(String(format: "%.0f%%", amount * 100)).font(.caption.monospacedDigit())
+                    .frame(width: 38, alignment: .trailing)
+            }
+            .help("How strongly a preset applies: 0% leaves the photo alone, 200% goes twice as far. "
+                  + "Moving it straight after applying a preset re-blends that preset. Double-click for 100%.")
+            .onChange(of: amount) { _, new in model.reblendLastPreset(amount: Float(new)) }
+            .disabled(!model.hasImage)
 
             Divider()
 

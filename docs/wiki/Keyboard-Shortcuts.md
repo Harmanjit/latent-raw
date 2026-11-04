@@ -63,6 +63,7 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | ⌫ | Delete the selected spot patch or red-eye spot |
 | Esc | Leave any on-image tool; with none on, leave the full-screen image |
 | ⇧⌘C, ⇧⌘V | Copy / paste settings (to the whole selection in the Library) |
+| ⌥⌘V | Previous: paste the settings of the photo selected before this one (all but spot removal, dust and touch-up) |
 | Double-click a slider | Reset it |
 | Click a slider's value | Type a value: Return or Tab applies it, Esc cancels, ↑ and ↓ step it (with ⇧, ten steps) |
 | ⌥-drag the sharpening Masking slider | Show the sharpening mask while dragging: white is sharpened |
