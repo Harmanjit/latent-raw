@@ -78,6 +78,12 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Rendering intent when printing**, taken from the soft proof. See [Print](Export#print).
 - **HDR Limit** sets how far above white each photo's highlights may go on an HDR screen and in an HDR export. See [HDR Limit](Develop#hdr-limit).
 
+## Presets and settings
+
+- **Preset Amount** applies a preset at 0–200% strength, and re-blends the last one live. See [Presets and clipboard](Develop#presets-and-clipboard).
+- **Previous** (⌥⌘V) pastes the settings of the photo selected before this one. See [Presets and clipboard](Develop#presets-and-clipboard).
+- **Process versions**: each edit records which rendering it was made with, shown in Calibration, ready for an Update Process Version dialog when the rendering next changes. See [Process versions](Develop#process-versions).
+
 ## Help
 
 - These help pages gained a [Getting Started](Getting-Started) rewrite, three tutorials, [Coming from Lightroom](Coming-from-Lightroom), a [Glossary](Glossary) and an [FAQ](FAQ). The same pages are in the app under **Help › Latent Help** (⌘?).
