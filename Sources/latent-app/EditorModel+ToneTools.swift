@@ -118,9 +118,9 @@ extension EditorModel {
 
     // MARK: - Clipping overlay
 
-    /// J: both indicators on, or off.
+    /// J: both indicators on, or off. Visualise HDR Ranges is left alone.
     func toggleClipping() {
-        clipping = clipping.isEmpty ? .both : []
+        if clipping.isDisjoint(with: .both) { clipping.formUnion(.both) } else { clipping.subtract(.both) }
     }
 
     // MARK: - White balance

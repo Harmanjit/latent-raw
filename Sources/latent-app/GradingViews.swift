@@ -210,18 +210,22 @@ struct CurveEditor: View {
 /// Recovery, which repairs clipped colour rather than moving tones.
 struct ToneRangeSliders: View {
     @Binding var ranges: ToneRanges
+    /// Shift-double-click on a slider: set it from Auto's estimate
+    /// (`EditorModel.autoToneSlider`). nil: Shift-double-click resets too.
+    var auto: ((AutoTone.Slider) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            row("Highlights", $ranges.highlights)
-            row("Shadows", $ranges.shadows)
-            row("Whites", $ranges.whites)
-            row("Blacks", $ranges.blacks)
+            row("Highlights", $ranges.highlights, .highlights)
+            row("Shadows", $ranges.shadows, .shadows)
+            row("Whites", $ranges.whites, .whites)
+            row("Blacks", $ranges.blacks, .blacks)
         }
     }
 
-    private func row(_ title: String, _ value: Binding<Float>) -> some View {
+    private func row(_ title: String, _ value: Binding<Float>, _ slider: AutoTone.Slider) -> some View {
         let format = SliderValueFormat(printf: "%+.2f")
+        let auto = self.auto
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title).font(.subheadline)
@@ -232,8 +236,9 @@ struct ToneRangeSliders: View {
             }
             .accessibilityHidden(true)
             // Named on the NSSlider itself, which SwiftUI's modifiers don't reach.
-            ResettableSlider(value: value, in: -1...1, label: title, format: format) { value.wrappedValue = 0 }
-                .help("Double-click to reset")
+            ResettableSlider(value: value, in: -1...1, label: title, format: format,
+                             shiftReset: auto.map { auto in { auto(slider) } }) { value.wrappedValue = 0 }
+                .help(auto == nil ? "Double-click to reset" : "Double-click to reset, Shift-double-click for Auto")
         }
     }
 }
@@ -242,6 +247,9 @@ struct ToneRangeSliders: View {
 /// luminance is selected. Same layout as Lightroom's HSL panel.
 struct HSLPanel: View {
     @Binding var hsl: HSLAdjustments
+    /// Told the band to isolate while a slider is Option-dragged, nil on
+    /// release (`EditorModel.hueIsolationBand`).
+    var onIsolate: ((Int?) -> Void)? = nil
     @State private var mode = 1   // 0 hue, 1 saturation, 2 luminance
 
     private static let modeNames = ["hue", "saturation", "luminance"]
@@ -265,9 +273,13 @@ struct HSLPanel: View {
                         .accessibilityHidden(true)
                     ResettableSlider(value: binding(band), in: -1...1,
                                      label: "\(HSLAdjustments.bandNames[band]) \(Self.modeNames[mode])",
-                                     format: SliderValueFormat(decimals: 0, signed: true, scale: 100)) {
+                                     format: SliderValueFormat(decimals: 0, signed: true, scale: 100),
+                                     onPress: onIsolate.map { isolate in
+                                         { pressed, option in isolate(pressed && option ? band : nil) }
+                                     }) {
                         binding(band).wrappedValue = 0
                     }
+                    .help("Double-click to reset. Option-drag shows only the colours this slider changes")
                     Text(String(format: "%+.0f", binding(band).wrappedValue * 100))
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)

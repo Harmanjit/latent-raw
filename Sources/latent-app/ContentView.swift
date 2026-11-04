@@ -1280,6 +1280,8 @@ struct ContentView: View {
             FileIntegrityModel.shared.startVerifying(library: library)
         case .findDuplicates:
             FileIntegrityModel.shared.showDuplicates(library: library)
+        case .matchTotalExposures:
+            MatchTotalExposures.run(library: library) { reportOutcome($0) }
         case .slideshow:
             SlideshowController.start(model: model, library: library)
         case .editExternally:
@@ -1447,7 +1449,7 @@ struct ContentView: View {
         state.canAddMask = model.hasImage && model.parameters.locals.count < LocalAdjustment.maximumCount
         state.hasSelectedMask = model.selectedLocal != nil
         state.showMaskOverlay = model.showMaskOverlay
-        state.clippingShown = !model.clipping.isEmpty
+        state.clippingShown = !model.clipping.isDisjoint(with: .both)
         state.whiteBalanceSelectorActive = model.toneTool == .whiteBalance
         state.filterActive = library.filter.isActive
         state.hasCatalog = library.folderURL != nil
@@ -1838,7 +1840,7 @@ struct ContentView: View {
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 8) {
                         HSLTargetRow(model: model)
-                        HSLPanel(hsl: $model.parameters.hsl)
+                        HSLPanel(hsl: $model.parameters.hsl, onIsolate: { model.hueIsolationBand = $0 })
                             .disabled(!model.hasImage)
                     }
                     .padding(.top, 8)
@@ -1982,7 +1984,7 @@ struct ContentView: View {
                     sliderRow(title: "Mid Grey",
                                value: $model.parameters.greyPoint,
                                range: 0.05...0.5, format: "%.3f", defaultValue: 0.1845)
-                    ToneRangeSliders(ranges: $model.parameters.toneRanges)
+                    ToneRangeSliders(ranges: $model.parameters.toneRanges, auto: { model.autoToneSlider($0) })
                         .disabled(!model.hasImage)
 
                     // Only offered on screens that can actually show more

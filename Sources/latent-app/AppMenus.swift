@@ -170,6 +170,7 @@ struct CommandState: Equatable {
         case .redo: (mode != .develop || hasImage) && redoLabel != nil
             && !(redoChangesFiles && (exportQueueRunning || outputJobRunning))
         case .copySettings: hasImage || hasSelection
+        case .matchTotalExposures: mode == .library && selectionCount >= 2
         case .pasteSettings: hasImage || selectionCount > 0
         case .clearFilter: filterActive
         case .slideshow: hasVisibleImages && editorReady
@@ -438,6 +439,7 @@ struct LatentCommands: Commands {
             item("Remove Dust…", .removeDust)
             item("Verify Files…", .verifyFiles)
             item("Find Duplicates…", .findDuplicates)
+            item("Match Total Exposures", .matchTotalExposures)
             Divider()
             item(state.targetCollectionTitle, .addToTargetCollection)
             item("Remove from Collection", .removeFromCollection)

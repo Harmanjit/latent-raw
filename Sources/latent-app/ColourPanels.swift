@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import PixelEngine
 
 /// The Develop panel's colour groups after HSL: Black & White, Point
@@ -382,9 +383,16 @@ struct ColourGradingPanel: View {
 /// A colour wheel: the angle round it is the tint's hue, the distance from
 /// the centre its strength. Drag the puck anywhere on the wheel; double-
 /// click to take the tint off. VoiceOver adjusts the strength.
+///
+/// Lightroom's modifiers: Shift keeps the hue and changes only the
+/// strength; Command moves the puck a tenth as far as the pointer, for
+/// fine changes. Both can be pressed or let go mid-drag.
 struct ColourWheel: View {
     @Binding var wheel: GradingWheel
     let title: String
+    /// Where the drag began, and the puck there, for Command's fine moves
+    /// and Shift's fixed hue.
+    @State private var dragStart: (wheel: GradingWheel, puck: CGPoint)?
 
     private static let rim: [Color] = stride(from: 0, through: 360, by: 30).map {
         // SwiftUI's angular gradient runs clockwise on screen; hue runs
@@ -412,17 +420,19 @@ struct ColourWheel: View {
             .position(centre)
             .contentShape(Circle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                let dx = value.location.x - centre.x, dy = value.location.y - centre.y
-                var hue = Float(atan2(-dy, dx) * 180 / .pi)
-                if hue < 0 { hue += 360 }
-                let strength = Float(min(hypot(dx, dy) / max(radius, 1), 1))
-                wheel.hue = (hue * 10).rounded() / 10
-                wheel.saturation = (strength * 1000).rounded() / 1000
-            })
+                let start = dragStart ?? (wheel, puck(centre: centre, radius: radius))
+                if dragStart == nil { dragStart = start }
+                let flags = NSEvent.modifierFlags
+                let next = Self.dragged(start: start.wheel, startPuck: start.puck, location: value.location,
+                                        translation: value.translation, centre: centre, radius: radius,
+                                        lockHue: flags.contains(.shift), fine: flags.contains(.command))
+                wheel.hue = next.hue
+                wheel.saturation = next.saturation
+            }.onEnded { _ in dragStart = nil })
             .onTapGesture(count: 2) { wheel.saturation = 0 }
         }
         .aspectRatio(1, contentMode: .fit)
-        .help("\(title): drag for the tint's colour and strength. Double-click to remove the tint.")
+        .help("\(title): drag for the tint's colour and strength. Shift-drag keeps the hue, Command-drag for fine moves. Double-click to remove the tint.")
         .accessibilityElement()
         .accessibilityLabel("\(title) tint")
         .accessibilityValue(String(format: "hue %.0f degrees, saturation %.0f", wheel.hue, wheel.saturation * 100))
@@ -433,6 +443,33 @@ struct ColourWheel: View {
             @unknown default: break
             }
         }
+    }
+
+    /// Where a drag puts the tint. Plainly, the puck goes to the pointer;
+    /// `fine` moves it from where it started by a tenth of the pointer's
+    /// travel; `lockHue` keeps the starting hue and takes only the
+    /// strength from the new position.
+    static func dragged(start: GradingWheel, startPuck: CGPoint, location: CGPoint, translation: CGSize,
+                        centre: CGPoint, radius: CGFloat, lockHue: Bool, fine: Bool) -> GradingWheel {
+        let target = fine
+            ? CGPoint(x: startPuck.x + translation.width * 0.1, y: startPuck.y + translation.height * 0.1)
+            : location
+        let dx = target.x - centre.x, dy = target.y - centre.y
+        var hue = Float(atan2(-dy, dx) * 180 / .pi)
+        if hue < 0 { hue += 360 }
+        var strength = Float(min(hypot(dx, dy) / max(radius, 1), 1))
+        if lockHue {
+            // The distance along the starting hue's direction, so dragging
+            // across the centre doesn't flip the colour.
+            let a = CGFloat(start.hue) * .pi / 180
+            let along = dx * cos(a) - dy * sin(a)
+            strength = Float(min(max(along / max(radius, 1), 0), 1))
+            hue = start.hue
+        }
+        var next = start
+        next.hue = (hue * 10).rounded() / 10
+        next.saturation = (strength * 1000).rounded() / 1000
+        return next
     }
 
     private func puck(centre: CGPoint, radius: CGFloat) -> CGPoint {

@@ -196,6 +196,11 @@ final class EditorModel: ObservableObject {
     @Published var sharpenMaskPreview = false {
         didSet { if sharpenMaskPreview != oldValue { rerender() } }
     }
+    /// Option-drag on a Colour Mixer slider: the band whose colours the
+    /// viewport keeps while the rest goes grey. Display only.
+    @Published var hueIsolationBand: Int? = nil {
+        didSet { if hueIsolationBand != oldValue { rerender() } }
+    }
     /// The defringe eyedropper is armed: the next click on the image picks
     /// a fringe colour (EditorModel+DetailTools.swift).
     @Published var defringePickerActive = false

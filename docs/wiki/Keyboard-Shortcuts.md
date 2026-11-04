@@ -60,6 +60,10 @@ These are the default keys. Settings › Keyboard changes any of them, gives key
 | ⇧R | Develop: Reference view, a reference photo beside the one you edit (drag one in from the filmstrip) |
 | ⌥⌘O | Loupe and Develop: show or hide the loupe overlay (grid, guides, layout image; View › Loupe Overlay) |
 | ⌘U | Auto adjust |
+| ⌥⇧⌘M | Library: match the selected photos' total exposure to the lead photo's |
+| ⇧-double-click a tone slider | Highlights, Shadows, Whites or Blacks: set that slider the Auto way |
+| ⌥-drag an HSL slider | Show only the colours the slider changes |
+| ⇧- or ⌘-drag a colour wheel | Colour Grading: keep the hue, or move finely |
 | R | Crop and straighten tool |
 | O, ⇧O | While cropping: the next crop guide overlay (thirds, grid, golden ratio, golden spiral, diagonal, triangle, none), and turn the spiral or triangle |
 | ⌘-drag in the crop tool | Draw a line along something level or upright to straighten by it |

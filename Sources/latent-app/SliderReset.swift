@@ -27,11 +27,15 @@ struct ResettableSlider: View {
     /// Told when the knob is pressed (true, with whether Option was held)
     /// and released (false), for previews shown only while dragging.
     let onPress: ((_ pressed: Bool, _ option: Bool) -> Void)?
+    /// Shift-double-click, where the slider has an Auto value (Whites,
+    /// Blacks and the other tone ranges). nil: Shift-double-click resets.
+    let shiftReset: (() -> Void)?
     let reset: () -> Void
 
     init(value: Binding<Float>, in range: ClosedRange<Float>, label: String? = nil,
          format: SliderValueFormat? = nil, showsField: Bool = false, accessibilityValue: String? = nil,
          onPress: ((_ pressed: Bool, _ option: Bool) -> Void)? = nil,
+         shiftReset: (() -> Void)? = nil,
          reset: @escaping () -> Void) {
         _value = value
         self.range = range
@@ -40,6 +44,7 @@ struct ResettableSlider: View {
         self.showsField = showsField
         self.accessibilityValue = accessibilityValue
         self.onPress = onPress
+        self.shiftReset = shiftReset
         self.reset = reset
     }
 
@@ -56,7 +61,8 @@ struct ResettableSlider: View {
 
     private var slider: some View {
         DoubleClickSliderView(value: $value, range: range, label: label,
-                              valueText: accessibilityValue ?? format.text(value), onPress: onPress, reset: reset)
+                              valueText: accessibilityValue ?? format.text(value), onPress: onPress,
+                              shiftReset: shiftReset, reset: reset)
     }
 }
 
@@ -143,6 +149,7 @@ private struct DoubleClickSliderView: NSViewRepresentable {
     let label: String?
     let valueText: String
     var onPress: ((_ pressed: Bool, _ option: Bool) -> Void)? = nil
+    var shiftReset: (() -> Void)? = nil
     let reset: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -156,7 +163,10 @@ private struct DoubleClickSliderView: NSViewRepresentable {
         slider.controlSize = .small
         slider.target = context.coordinator
         slider.action = #selector(Coordinator.changed(_:))
-        slider.onDoubleClick = { context.coordinator.parent.reset() }
+        slider.onDoubleClick = { shift in
+            let parent = context.coordinator.parent
+            if shift, let auto = parent.shiftReset { auto() } else { parent.reset() }
+        }
         slider.onPress = { pressed, option in context.coordinator.parent.onPress?(pressed, option) }
         slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
         return slider
@@ -182,12 +192,13 @@ private struct DoubleClickSliderView: NSViewRepresentable {
 }
 
 final class DoubleClickSlider: NSSlider {
-    var onDoubleClick: (() -> Void)?
+    /// Told whether Shift was held.
+    var onDoubleClick: ((_ shift: Bool) -> Void)?
     var onPress: ((_ pressed: Bool, _ option: Bool) -> Void)?
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
-            onDoubleClick?()
+            onDoubleClick?(event.modifierFlags.contains(.shift))
             return
         }
         // NSSlider tracks the drag inside super.mouseDown and returns on
