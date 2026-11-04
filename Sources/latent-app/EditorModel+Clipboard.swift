@@ -55,6 +55,8 @@ extension EditorModel {
         // A pasted touch-up keeps this image's own faces, of which it may
         // have none yet.
         findFacesIfPastedTouchUpNeedsThem()
+        // A pasted Upright Mode is analysed on this photo.
+        analysePastedUpright(stack, groups: groups)
     }
 
     func pasteSettings() {

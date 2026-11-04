@@ -79,6 +79,9 @@ enum KeyCommand: Equatable, Sendable {
     /// Photo › Verify Files… (the selection, or the folder) and Find
     /// Duplicates… (FileIntegrityViews.swift).
     case verifyFiles, findDuplicates
+    /// Photo › Flat-Field Correction…: a reference frame's falloff and cast
+    /// taken out of every selected photo (the open one in Develop).
+    case flatFieldCorrection
     case makeSelect
     /// Survey (N), and taking its focused pane away.
     case survey, removeFromSurvey

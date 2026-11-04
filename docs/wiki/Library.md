@@ -183,6 +183,10 @@ With several images selected, ⇧⌘V pastes copied settings onto all of them, a
 
 A pasted or preset **Touch-up** carries its sliders but not the faces they were found on, so after the paste Latent finds the faces in each of those photos itself: a "Finding faces" job runs in the background, with its progress and a Cancel face search button in the left panel, and writes the faces (and, with Remove blemishes on, the blemishes) back as one undo step, "Find Faces (12 Images)". A photo with no face is left alone and named in the panel's notes. In Loupe, Compare and Survey the job runs for the image shown; in Develop the open image finds its faces on the spot, and the job leaves that one to the editor rather than finding them twice. Opening another folder while the job runs ends it without writing anything, the same as Remove Dust below.
 
+A pasted or preset **Upright Mode** (without Upright Transforms) carries the mode but not the correction, so after the paste an "Upright analysis" job reads each photo's straight lines and writes its own correction, refitting the crop when Constrain Crop is on, as one undo step, "Upright (12 Images)". A photo with no straight lines to go by is left uncorrected and named in the notes. It runs after a face search the same paste started. In Develop the open image is analysed on the spot.
+
+**Photo › Flat-Field Correction…** applies a flat-field reference to the selection as a background job of the same kind; see [Flat-field correction](Develop#flat-field-correction).
+
 ### Remove Dust
 
 **Photo › Remove Dust…** finds sensor dust in every selected photo and heals it, the batch version of Develop's Sensor Dust (see [Develop](Develop#modules)). In the Library it takes the selection; in Loupe, Compare and Survey the image shown; in Develop it works on the open image in memory, where ⌘Z takes it back. The dialog says how many photos it will touch and offers three ways to find the spots:

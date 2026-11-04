@@ -67,6 +67,8 @@ extension ExportWorker {
         } catch {
             throw ExportWorkerError.unreadableEdit(error)
         }
+        // A flat-field correction needs its reference's gain map on this Mac.
+        FlatFieldCache.shared.ensureGainMap(for: parameters.flatField, photo: request.sourceURL, gpu: gpu)
         let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
         let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
                                               rotation: rotation, geometry: parameters)

@@ -43,6 +43,9 @@ final class OutputJobs {
         /// Photo › Verify Files… (FileIntegrityModel): every file read
         /// again. Stopping it keeps the results so far.
         case verifyFiles
+        /// Flat-Field Correction or a pasted Upright mode analysed over the
+        /// selection (SelectionJobQueue). Stopping it keeps the photos done.
+        case batchEdit
     }
 
     struct Job: Identifiable {
@@ -73,6 +76,7 @@ final class OutputJobs {
         case .dustRemoval: "Removing dust from \(name)"
         case .findFaces: "Finding faces in \(name)"
         case .verifyFiles: "Verifying \(name)"
+        case .batchEdit: "Updating \(name)"
         }
         let job = Job(kind: kind, name: name, cancel: cancel, activity: ExportActivity(reason: reason))
         running.append(job)
@@ -110,6 +114,7 @@ final class OutputJobs {
         let dust = jobs.filter { $0.kind == .dustRemoval }
         let faces = jobs.filter { $0.kind == .findFaces }
         let verifying = jobs.filter { $0.kind == .verifyFiles }
+        let batch = jobs.filter { $0.kind == .batchEdit }
         // One merge runs at a time, so "merge" below is one kind's word
         // unless a future queue runs two.
         let mergeWord = merges.allSatisfy { $0.kind == .panoramaMerge } ? "panorama merge"
@@ -128,6 +133,7 @@ final class OutputJobs {
         if !dust.isEmpty { underWay.append("removing sensor dust from photos") }
         if !faces.isEmpty { underWay.append("finding faces for touch-up") }
         if !verifying.isEmpty { underWay.append("verifying files") }
+        if !batch.isEmpty { underWay.append("updating the edits of photos") }
         // What quitting stops, then what it waits for.
         var stopped: [String] = []
         if !sheets.isEmpty {
@@ -141,6 +147,7 @@ final class OutputJobs {
         if !dust.isEmpty { stopped.append("the dust removal, which keeps the photos already done") }
         if !faces.isEmpty { stopped.append("the face search, which keeps the photos already done") }
         if !verifying.isEmpty { stopped.append("the verification, which keeps the files already checked") }
+        if !batch.isEmpty { stopped.append("the update, which keeps the photos already done") }
         var information = stopped.isEmpty ? "" : "Quitting now stops " + stopped.joined(separator: ", and ")
         if !prints.isEmpty {
             information += (information.isEmpty ? "Quitting now " : ", and ")

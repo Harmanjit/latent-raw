@@ -174,6 +174,7 @@ public final class ImageSession {
         case lensBlur, lensBlurPreview     // output of the lens blur stage
         case depthView, depthViewPreview   // the viewport's Show Depth pass
         case hueIsolated, hueIsolatedPreview // the Colour Mixer's Option-drag preview
+        case flatField, flatFieldPreview   // camera RGB after flat-field correction
     }
 
     /// Which set of pooled textures a render draws from. Pools never share

@@ -56,6 +56,8 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 
 - **Upright** straightens converging lines automatically, or from guides you draw, and the **Transform** sliders correct keystone, rotation, aspect, scale and offset. See [Transform and Upright](Develop#transform-and-upright).
 - **Flips** and **Constrain Crop**. See [Transform and Upright](Develop#transform-and-upright).
+- **Copy Settings' Upright choices**: Upright Mode (analysed again on each photo), Upright Transforms, Transform Adjustments and Constrain Crop are separate groups, as in Lightroom. See [Presets and clipboard](Develop#presets-and-clipboard).
+- **Flat-field correction** takes a reference frame's vignetting and colour cast out of a whole selection. See [Flat-field correction](Develop#flat-field-correction).
 - **Crop guides** (O) such as thirds, golden ratio and golden spiral, and a **Surround** that sets how dark the area outside the crop is. See [Crop guides and the surround](Develop#crop-guides-and-the-surround).
 
 ## Detail and effects

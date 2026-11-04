@@ -199,6 +199,8 @@ struct LensCorrectionsPanel: View {
             .controlSize(.small)
             .help("Click a coloured fringe on the image: the purple or green hue range moves to its colour")
             .accessibilityLabel("Pick fringe colour")
+
+            FlatFieldSection(model: model)
         }
         .toggleStyle(.switch)
         .controlSize(.small)

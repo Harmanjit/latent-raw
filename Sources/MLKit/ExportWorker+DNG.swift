@@ -47,6 +47,8 @@ extension ExportWorker {
         } catch {
             throw ExportWorkerError.unreadableEdit(error)
         }
+        // A flat-field correction needs its reference's gain map on this Mac.
+        FlatFieldCache.shared.ensureGainMap(for: edit.flatField, photo: sourceURL, gpu: gpu)
         var defaults = EditParameters()
         defaults.whiteBalance = session.asShotWhiteBalance
         defaults.outputSpace = .rec2020

@@ -36,6 +36,8 @@ extension ExportWorker {
         } catch {
             throw ExportWorkerError.unreadableEdit(error)
         }
+        // A flat-field correction needs its reference's gain map on this Mac.
+        FlatFieldCache.shared.ensureGainMap(for: parameters.flatField, photo: sourceURL, gpu: gpu)
         try Task.checkCancellation()
         // A slide has nowhere to say a mask was made with another model;
         // the log keeps the fact.
