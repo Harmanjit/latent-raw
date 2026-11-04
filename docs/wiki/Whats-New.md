@@ -76,6 +76,7 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Export with Previous** (⌥⇧⌘E), **several presets in one run**, and new destinations: beside the original, or chosen when the export starts. See [Export with Previous](Export#export-with-previous).
 - **Soft proofing** with Perceptual and Relative Colorimetric intents, **Simulate Paper & Ink**, a monitor gamut warning and **proof copies**. See [Soft proofing](Develop#soft-proofing).
 - **Rendering intent when printing**, taken from the soft proof. See [Print](Export#print).
+- **More soft-proof controls**: **S** turns proofing on and off, profiles from anywhere (your own ~/Library/ColorSync/Profiles included) stay in the menu, the Mac's installed printer profiles are listed, the target is remembered, **Black Point Compensation** can be turned off, the two gamut warnings take colours you choose, and Before compares the proof with the unproofed edit. See [Soft proofing](Develop#soft-proofing).
 - **HDR Limit** sets how far above white each photo's highlights may go on an HDR screen and in an HDR export. See [HDR Limit](Develop#hdr-limit).
 
 ## Help

@@ -6,11 +6,11 @@ Two walkthroughs for getting photos out of Latent: preparing a print with soft p
 
 A screen glows; paper doesn't. Soft proofing shows on screen what a print will look like, so you can adjust before you spend ink and paper.
 
-**1. Get the paper's profile.** Paper makers and print labs publish an ICC profile for each printer and paper. Download it from their site in your browser and put it in the Mac's shared ColorSync folder, **/Library/ColorSync/Profiles** (the Library folder at the top of the disk, not the one in your home folder); Finder asks for your password. Printer installers often put profiles there already. Latent lists the profiles in that folder; a profile kept anywhere else can still be chosen by hand, with **ICC profile…** in Soft Proof or **Other…** in the export sheet.
+**1. Get the paper's profile.** Paper makers and print labs publish an ICC profile for each printer and paper. Download it from their site in your browser and put it in the Mac's shared ColorSync folder, **/Library/ColorSync/Profiles** (the Library folder at the top of the disk, not the one in your home folder); Finder asks for your password. Printer installers often put profiles there already. Latent lists the profiles in that folder; a profile kept anywhere else can still be chosen by hand, with **Add Profile…** in Soft Proof (which then keeps it in its menu) or **Other…** in the export sheet.
 
 **2. Optional: make a print version.** Select the photo and press **⌘'** to make a virtual copy. Proof and adjust the copy, and your screen version stays as it is. See [Virtual copies](Library#virtual-copies).
 
-**3. Switch on the proof.** In Develop, open **Soft Proof** at the bottom of the adjustments, tick **Soft proof**, and choose **ICC profile…** as the target. Pick the paper's profile.
+**3. Switch on the proof.** In Develop, open **Soft Proof** at the bottom of the adjustments, tick **Soft proof** (or press **S**), and pick the paper's profile from the target menu, under **Installed Profiles**, or with **Add Profile…**.
 
 **4. Choose an intent.** **Perceptual** squeezes all the colours into what the paper can show, keeping their relationships. **Relative Colorimetric** keeps every colour that fits exactly and clips the rest. Flip between them and keep the one that looks better.
 
