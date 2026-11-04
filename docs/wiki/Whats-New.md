@@ -13,11 +13,11 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Title, caption, creator and copyright** for one photo or many, carried into every export. See [Title, caption, creator and copyright](Library#title-caption-creator-and-copyright).
 - **Rename with Template** renames a whole selection from tokens such as `{date}` and `{seq}`, with every new name shown first. See [Moving, copying and renaming](Library#moving-copying-and-renaming).
 - **Virtual copies** (⌘') give one photo several versions with their own edits, sharing the raw file; **Duplicate** makes a real second file. See [Virtual copies](Library#virtual-copies).
-<!-- RECONCILE: two branches edited this; merge into one text -->
-- **Auto Advance**, ⇧ with a star, flag or label key, **Select by Flag, Rating or Colour Label**, **Invert Selection**, **Deselect Unflagged** and **Refine Photos** speed up culling, as in Lightroom. See [Faster culling](Library#faster-culling).
-
 - **Stacks**: Group into Stack (⌘G), Unstack (⇧⌘G), S to expand or collapse, Move to Top of Stack, and Auto-Stack by Capture Time, with the stack's count on its thumbnail. Exports can be added to the catalog and stacked with their originals. See [Stacks](Library#stacks).
-<!-- /RECONCILE -->
+
+## Culling and the grid
+
+- **Auto Advance**, ⇧ with a star, flag or label key, **Select by Flag, Rating or Colour Label**, **Invert Selection**, **Deselect Unflagged** and **Refine Photos** speed up culling, as in Lightroom. See [Faster culling](Library#faster-culling).
 - **Reset to Camera Orientation** takes back the quarter turns you gave the selection. See [The grid](Library#the-grid).
 - **Flip Horizontal and Flip Vertical for a whole selection**, from the Photo menu or a right-click, and **Mirror Image Mode** to see the library mirrored without changing a thing. See [The grid](Library#the-grid).
 - **Fifteen more sort orders**, Lightroom's Added Order, Edit Time, Edit Count, Pick, Label Text and Colour, File Extension and Type, Aspect Ratio, Title and Caption, plus Camera, Lens, ISO and Focal Length, and View › Sort › Reverse Sort Order. See [The grid](Library#the-grid).
@@ -26,17 +26,21 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 
 - **Folder watching**: photos copied into, renamed in or deleted from the open folder appear and go by themselves; **Refresh Folder** (⌘R) checks at any time. See [Watching folders](Library#watching-folders).
 - **Auto Import** moves (or copies) new photos in from a folder your card reader or tethering app saves into, optionally applying a develop preset. See [Watching folders](Library#watching-folders).
-- **Pause and Resume** for thumbnails, exports, Remove Dust and Find Faces, and an **Activity** button in the status bar listing everything running in the background. See [Background activity](Library#background-activity).
 - **Recently Added** in the sidebar shows what the latest scan found. See [The sidebar](Library#the-sidebar).
 - **Find folder**, **Add Parent Folder…** and **volume meters** in the sidebar help you get around and keep an eye on free space. See [The sidebar](Library#the-sidebar).
 - **JPEG, HEIC, TIFF and PNG** (and WebP and AVIF where macOS reads them) are catalogued and open in Develop, looking exactly as they are. See [JPEG, TIFF and other pictures](Develop#jpeg-tiff-and-other-pictures).
 - **RAW+JPEG pairs** show as one photo, and the JPEG moves and renames with its raw. See [RAW+JPEG pairs](Library#rawjpeg-pairs).
-<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Verify Files** reads every file again and finds ones that were silently damaged (same size and date, different content), with a mark on their thumbnails. See [Verifying files](Library#verifying-files).
 - **Find Duplicates** groups photos whose files are identical, or taken at the same moment, and selects or rejects all but the one to keep. See [Finding duplicates](Library#finding-duplicates).
-
+- **Pause and Resume** for thumbnails, exports, Remove Dust and Find Faces, and an **Activity** button in the status bar listing everything running in the background. See [Background activity](Library#background-activity).
 - **Settings › Performance** sets thumbnail quality, how hard background thumbnail generation works and how much memory the grid keeps, and shows and tidies the folder's thumbnail cache; **File › Rebuild Thumbnails** remakes the selection's. Big folders also sort, search and keep their selection faster. See [Thumbnails and performance](Library#thumbnails-and-performance).
-<!-- /RECONCILE -->
+
+## Viewing
+
+- **Before/After views**: side by side, split, top and bottom (⇧Y), with Copy After → Before, Copy Before → After and Swap. See [Before/After and Reference view](Develop#beforeafter-and-reference-view).
+- **Reference view** (⇧R) edits one photo beside another, dragged in from the filmstrip, with Lock and Swap. See [Before/After and Reference view](Develop#beforeafter-and-reference-view).
+- **Loupe overlay** (⌥⌘O): a grid, draggable guides and a layout image over the photo in Loupe and Develop. See [Loupe overlay](Develop#loupe-overlay).
+- **Clipping overlay** (J), a colour readout under the pointer and a histogram you can drag. See [The viewport](Develop#the-viewport).
 
 ## Colour and tone
 
@@ -50,9 +54,9 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Point Colour** changes one colour picked from the photo, such as evening out skin. See [Develop](Develop#modules).
 - **Region tone curve** with Highlights, Lights, Darks and Shadows sliders, point curve presets and **Refine Saturation**. See [Develop](Develop#modules).
 - **Targeted adjustment**: drag up or down on the photo itself to move the curve or the HSL sliders. See [Develop](Develop#modules).
-- **Clipping overlay** (J), a colour readout under the pointer and a histogram you can drag. See [The viewport](Develop#the-viewport).
 - **Auto** now sets Highlights, Shadows, Whites, Blacks, Vibrance and Saturation as well, and **Shift-double-click** on one tone slider sets just that one. See [Develop](Develop#modules).
 - **⌥-drag on an HSL slider** shows only the colours it changes, and the Colour Grading wheels take **⇧** (keep the hue) and **⌘** (fine moves). See [Develop](Develop#modules).
+- **HDR Limit** sets how far above white each photo's highlights may go on an HDR screen and in an HDR export. See [HDR Limit](Develop#hdr-limit).
 - **Visualise HDR Ranges** colours what lies above SDR white by stops, and the readout says how far above white a colour is. See [HDR Limit](Develop#hdr-limit).
 - **Match Total Exposures** (⌥⇧⌘M) gives a selection one brightness from their shutter, aperture and ISO. See [Applying edits to many images](Library#applying-edits-to-many-images).
 
@@ -96,35 +100,20 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Metadata levels** from All to Copyright only or None. See [The sheet](Export#the-sheet).
 - **Graphic watermarks**, fonts and rotation, as well as text. See [The sheet](Export#the-sheet).
 - **AVIF and JPEG XL** where macOS can write them, 8-bit and compressed TIFF, and **Limit file size**. See [The sheet](Export#the-sheet).
-- **DNG export** writes a linear DNG with the corrections baked in and the look left open. See [DNG export](Export#dng-export-render-to-dng).
-- **DNG contents**: the full look baked in, or the original raw as a DNG, as well as the corrections alone. See [DNG export](Export#dng-export-render-to-dng).
+- **DNG export** writes a DNG with the corrections baked in and the look left open, the full look baked in, or the original raw as a linear DNG. See [DNG export](Export#dng-export-render-to-dng).
 - **HDR Output** on export: a gain map in JPEG, HEIC and now AVIF, or with **Maximize compatibility** off a full 10-bit PQ HEIC or AVIF, up to each photo's HDR Limit. Formats this Mac can't write, such as JPEG XL on macOS 27.2, are shown greyed out with the reason. See [The sheet](Export#the-sheet).
 - **Original + XMP sidecar** copies the raw with a sidecar other applications read. See [Exporting originals](Export#exporting-originals).
 - **Export with Previous** (⌥⇧⌘E), **several presets in one run**, and new destinations: beside the original, or chosen when the export starts. See [Export with Previous](Export#export-with-previous).
 - **Soft proofing** with Perceptual and Relative Colorimetric intents, **Simulate Paper & Ink**, a monitor gamut warning and **proof copies**. See [Soft proofing](Develop#soft-proofing).
 - **Rendering intent when printing**, taken from the soft proof. See [Print](Export#print).
 - **More soft-proof controls**: **S** turns proofing on and off, profiles from anywhere (your own ~/Library/ColorSync/Profiles included) stay in the menu, the Mac's installed printer profiles are listed, the target is remembered, **Black Point Compensation** can be turned off, the two gamut warnings take colours you choose, and Before compares the proof with the unproofed edit. See [Soft proofing](Develop#soft-proofing).
-- **HDR Limit** sets how far above white each photo's highlights may go on an HDR screen and in an HDR export. See [HDR Limit](Develop#hdr-limit).
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
-## Keyboard
-
-- **Customisable shortcuts**: Settings › Keyboard lists every command, searchable and grouped, with click-to-record keys, a warning (and an offer to reassign) when keys are taken, reset one or all, and keymap import and export as JSON. Menu commands without a key can be given one. See [Customising the keys](Keyboard-Shortcuts#customising-the-keys).
-
-## Viewing
-
-- **Before/After views**: side by side, split, top and bottom (⇧Y), with Copy After → Before, Copy Before → After and Swap. See [Before/After and Reference view](Develop#beforeafter-and-reference-view).
-- **Reference view** (⇧R) edits one photo beside another, dragged in from the filmstrip, with Lock and Swap. See [Before/After and Reference view](Develop#beforeafter-and-reference-view).
-- **Loupe overlay** (⌥⌘O): a grid, draggable guides and a layout image over the photo in Loupe and Develop. See [Loupe overlay](Develop#loupe-overlay).
-<!-- /RECONCILE -->
-
-## Presets and settings
+## Presets and keyboard
 
 - **Preset Amount** applies a preset at 0–200% strength, and re-blends the last one live. See [Presets and clipboard](Develop#presets-and-clipboard).
 - **Previous** (⌥⌘V) pastes the settings of the photo selected before this one. See [Presets and clipboard](Develop#presets-and-clipboard).
 - **Process versions**: each edit records which rendering it was made with, shown in Calibration, ready for an Update Process Version dialog when the rendering next changes. See [Process versions](Develop#process-versions).
-<!-- /RECONCILE -->
+- **Customisable shortcuts**: Settings › Keyboard lists every command, searchable and grouped, with click-to-record keys, a warning (and an offer to reassign) when keys are taken, reset one or all, and keymap import and export as JSON. Menu commands without a key can be given one. See [Customising the keys](Keyboard-Shortcuts#customising-the-keys).
 
 ## Help
 

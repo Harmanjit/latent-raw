@@ -165,11 +165,7 @@ The left panel shows the selected image's name, rating, flag, colour label, keyw
 
 ## Loupe, Compare and Survey
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
-**Loupe** (E, or Space from the grid) shows one image full size with a caption. Arrows step, Z toggles fit and 100%, rating keys act on the image shown. With View › Mirror Image Mode on it is drawn mirrored, and zooming, panning and the magnifier follow the mirrored picture.
-
-**Loupe** (E, or Space from the grid) shows one image full size with a caption. Arrows step, Z toggles fit and 100%, rating keys act on the image shown. View › Loupe Overlay (⌥⌘O) lays a grid, guides or a layout image over it; see [Loupe overlay](Develop#loupe-overlay).
-<!-- /RECONCILE -->
+**Loupe** (E, or Space from the grid) shows one image full size with a caption. Arrows step, Z toggles fit and 100%, rating keys act on the image shown. With View › Mirror Image Mode on it is drawn mirrored, and zooming, panning and the magnifier follow the mirrored picture. View › Loupe Overlay (⌥⌘O) lays a grid, guides or a layout image over it; see [Loupe overlay](Develop#loupe-overlay).
 
 **Compare** (C) pins a "Select" on the left and walks a "Candidate" on the right with the arrows. While **Sync** (in the Compare bar) is on, zoom and pan stay matched by position in each picture, so images with different crops, rotations or sizes show the same region, and a candidate stepped in while zoomed keeps the zoom. ⇧X promotes the candidate to Select; Swap exchanges them. Rating keys act on the candidate. Sync is on at each launch.
 
@@ -240,7 +236,6 @@ A virtual copy is another version of a photo: its own edit, rating, flag, colour
 
 **Moving, copying or duplicating a copy** acts on its master's file: Move to Folder moves the master, with all its copies; Copy to Folder and Duplicate copy the master's file with the master's settings. To get a copy's settings into a file of its own, use Set Copy as Master first, or export it. Rename is not available for a copy, since it has no file of its own.
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
 ## Verifying files
 
 **Photo › Verify Files…** reads the selected photos' files again, or every file in the folder when nothing is selected, and compares each with the content hash the catalog recorded when it last saw the file change. Lightroom does this for DNGs only (Validate DNG Files); Latent does it for every file it catalogues, raws included. It runs in the background, with its progress and Cancel in the left panel, and reads from the disk rather than from memory, so a file opened a minute ago is still checked on disk. Each file is:
@@ -269,7 +264,6 @@ A stack folds photos that belong together, such as a burst, a bracket or the fra
 **Sorting and filtering.** A stack's photos stay together, in stack order, where the first of them falls in the sort. Filters, collections and smart collections look at every photo in a stack: when the top photo doesn't match but another does, a collapsed stack shows the highest photo that matches, so a match is never hidden inside a stack. Ratings, labels and the other marks belong to each photo, not to the stack, and commands such as Export act on the photos selected, so selecting a collapsed stack's top exports that photo alone.
 
 Grouping, unstacking, removing, moving to the top and auto-stacking can be undone; expanding and collapsing is a way of looking and can't. Stacks are kept in the folder's catalog, not in sidecars (see [Limitations](Limitations#workflow)). An export can join its original's stack: see Add to this catalog under [The sheet](Export#the-sheet).
-<!-- /RECONCILE -->
 
 ## Undo
 
