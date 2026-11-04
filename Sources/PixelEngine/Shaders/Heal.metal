@@ -49,7 +49,7 @@ using namespace metal;
 
 struct HealPatchGPU {
     float4 geometry;   // target.xy, source.xy, normalized sensor
-    float4 params;     // radius (fraction of short side), feather, mode (0 heal, 1 clone), unused
+    float4 params;     // radius (fraction of short side), feather, mode (0 heal, 1 clone), opacity
 };
 
 // Where one patch lands on the texture being rendered (HealStage.swift).
@@ -238,9 +238,10 @@ kernel void healApply(
             float3 healed = mix(added, ratio, useRatio);
             v.rgb = mix(v.rgb, healed, smoothstep(0.002, 0.02, ft.a));
         }
-        // Feather: full inside (1 - feather) * r, fading to nothing at r.
+        // Feather: full inside (1 - feather) * r, fading to nothing at r;
+        // Opacity scales the whole patch (1, the default, is exact).
         float inner = (1.0 - p.params.y) * r;
-        float w = 1.0 - smoothstep(inner, r, dist);
+        float w = (1.0 - smoothstep(inner, r, dist)) * p.params.w;
         c.rgb = mix(c.rgb, v.rgb, w);
     }
     scratch.write(c, gid);

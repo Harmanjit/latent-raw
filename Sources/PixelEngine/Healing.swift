@@ -46,10 +46,16 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
     /// replaces the brush as the area filled. Nil otherwise, and absent
     /// from the JSON then, so every other patch encodes as before.
     public var objectMask: RemoveObjectMask?
+    /// How strongly the patch replaces what is under it, 0…1, in every
+    /// mode: the healed, cloned or filled pixels are mixed with the image
+    /// beneath by this much. Nil means fully (1), and is absent from the
+    /// JSON then, so every patch made before Opacity encodes as before.
+    public var opacity: Float?
 
     public init(id: UUID = UUID(), target: SIMD2<Float>, source: SIMD2<Float>,
                 radius: Float, feather: Float = 0.35, mode: Mode = .heal,
-                stroke: [SIMD2<Float>]? = nil, objectMask: RemoveObjectMask? = nil) {
+                stroke: [SIMD2<Float>]? = nil, objectMask: RemoveObjectMask? = nil,
+                opacity: Float? = nil) {
         self.id = id
         self.target = target
         self.source = source
@@ -58,7 +64,11 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
         self.mode = mode
         self.stroke = stroke
         self.objectMask = objectMask
+        self.opacity = opacity
     }
+
+    /// `opacity` with nil read as fully, 1.
+    public var effectiveOpacity: Float { opacity ?? 1 }
 
     /// Patches per image; a stroke counts as one, however long.
     public static let maximumCount = 32
@@ -80,7 +90,8 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
 
     /// The patch as a render can trust it, whatever wrote the sidecar:
     /// centres and stroke points within `coordinateRange`, a radius of at
-    /// most half the short side, a feather in 0…1 and a stroke of at most
+    /// most half the short side, a feather and an opacity in 0…1 (an
+    /// opacity that isn't finite reads as fully) and a stroke of at most
     /// `maximumStrokePoints` (every so many kept, ends included). Nil when
     /// a number isn't finite. A patch the app made comes back unchanged.
     public var sanitized: HealPatch? {
@@ -98,6 +109,7 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
         p.source = clamped(source)
         p.radius = min(max(radius, 0), 0.5)
         p.feather = min(max(feather, 0), 1)
+        p.opacity = opacity.map { $0.isFinite ? min(max($0, 0), 1) : 1 }
         if var offsets = stroke {
             if offsets.count > Self.maximumStrokePoints {
                 let last = offsets.count - 1, kept = Self.maximumStrokePoints
@@ -256,11 +268,11 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
 /// Mirror of `HealPatchGPU` in Heal.metal.
 struct HealPatchGPU {
     var geometry: SIMD4<Float>   // target.xy, source.xy (normalized sensor)
-    var params: SIMD4<Float>     // radius (fraction of short side), feather, mode (0 heal, 1 clone), 0
+    var params: SIMD4<Float>     // radius (fraction of short side), feather, mode (0 heal, 1 clone), opacity
 
     init(_ p: HealPatch) {
         geometry = SIMD4(p.target.x, p.target.y, p.source.x, p.source.y)
-        params = SIMD4(p.radius, p.feather, p.mode == .clone ? 1 : p.mode == .remove ? 2 : 0, 0)
+        params = SIMD4(p.radius, p.feather, p.mode == .clone ? 1 : p.mode == .remove ? 2 : 0, p.effectiveOpacity)
     }
 }
 
