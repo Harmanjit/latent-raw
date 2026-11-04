@@ -19,6 +19,7 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 
 - **Folder watching**: photos copied into, renamed in or deleted from the open folder appear and go by themselves; **Refresh Folder** (⌘R) checks at any time. See [Watching folders](Library#watching-folders).
 - **Auto Import** moves (or copies) new photos in from a folder your card reader or tethering app saves into, optionally applying a develop preset. See [Watching folders](Library#watching-folders).
+- **Pause and Resume** for thumbnails, exports, Remove Dust and Find Faces, and an **Activity** button in the status bar listing everything running in the background. See [Background activity](Library#background-activity).
 - **Recently Added** in the sidebar shows what the latest scan found. See [The sidebar](Library#the-sidebar).
 - **Find folder**, **Add Parent Folder…** and **volume meters** in the sidebar help you get around and keep an eye on free space. See [The sidebar](Library#the-sidebar).
 - **JPEG, HEIC, TIFF and PNG** (and WebP and AVIF where macOS reads them) are catalogued and open in Develop, looking exactly as they are. See [JPEG, TIFF and other pictures](Develop#jpeg-tiff-and-other-pictures).
