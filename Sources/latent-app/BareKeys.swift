@@ -74,6 +74,9 @@ enum KeyCommand: Equatable {
     /// Photo › Remove Dust…: dust found or verified in every selected photo
     /// (in memory on the open image in Develop).
     case removeDust
+    /// Photo › Verify Files… (the selection, or the folder) and Find
+    /// Duplicates… (FileIntegrityViews.swift).
+    case verifyFiles, findDuplicates
     case makeSelect
     /// Survey (N), and taking its focused pane away.
     case survey, removeFromSurvey

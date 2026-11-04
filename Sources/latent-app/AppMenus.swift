@@ -134,6 +134,11 @@ struct CommandState: Equatable {
         // selection elsewhere, run as a batch job that takes the GPU slot
         // (`photoMergeRunning` covers any holder of it) and reads the files
         // at their paths, so not during a move, copy or rename either.
+        // Files are read in the grid's folder; not while files move or
+        // another job reads them (a verify run is an output job itself).
+        case .verifyFiles: mode == .library && (hasVisibleImages || hasSelection) && !fileOperationRunning
+            && !outputJobRunning
+        case .findDuplicates: mode == .library && hasVisibleImages
         case .removeDust:
             editorReady && (mode == .develop ? hasImage : selectionCount >= 1) && !exportQueueRunning
             && !photoMergeRunning && !fileOperationRunning && !isEditingText
@@ -403,6 +408,8 @@ struct LatentCommands: Commands {
                 item("HDR Panorama… (Experimental)", .photoMergeHDRPanorama)
             }
             item("Remove Dust…", .removeDust)
+            item("Verify Files…", .verifyFiles)
+            item("Find Duplicates…", .findDuplicates)
             Divider()
             item(state.targetCollectionTitle, .addToTargetCollection)
             item("Remove from Collection", .removeFromCollection)

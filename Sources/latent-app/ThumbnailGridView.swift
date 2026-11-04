@@ -481,6 +481,8 @@ final class ThumbnailItem: NSCollectionViewItem {
     /// Shows a changed record: marks redraw only if they differ, and a new
     /// rotation asks for the turned thumbnail.
     func update(record: ImageRecord, isEdited: Bool) {
+        // Before the guard: Verify Files changes this without changing the record.
+        cellView.setDamaged(record.id.map { library?.damagedImageIDs.contains($0) ?? false } ?? false)
         guard record != self.record || isEdited != self.isEdited else { return }
         self.record = record
         self.isEdited = isEdited
@@ -607,6 +609,7 @@ final class ThumbnailCellView: NSView {
     private let tagDotsView = TagDotsView()
     private let labelDotView = LabelDotView()
     private let copyBadge = VirtualCopyBadgeView()
+    private let damagedBadge = DamagedFileBadgeView()
     private var storedTags: String?
     private var hoverArea: NSTrackingArea?
     private var imagePixels: CGSize?
@@ -659,6 +662,7 @@ final class ThumbnailCellView: NSView {
         addSubview(tagDotsView)
         addSubview(labelDotView)
         addSubview(copyBadge)
+        addSubview(damagedBadge)
 
         // VoiceOver reads the cell as one image (name, flag, stars, edited)
         // rather than scraps of it.
@@ -678,7 +682,8 @@ final class ThumbnailCellView: NSView {
         let text = Self.accessibilityText(name: nameField.stringValue, rating: rating, flag: flag, isEdited: isEdited)
         let tags = SpokenText.finderTags(tagDotsView.tags)
         let label = SpokenText.label(labelDotView.label)
-        return [text, label, tags].filter { !$0.isEmpty }.joined(separator: ", ")
+        let damaged = damagedBadge.isHidden ? "" : "file damaged"
+        return [text, label, tags, damaged].filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
     /// The stars' clicks, for VoiceOver: one action per rating.
@@ -723,6 +728,12 @@ final class ThumbnailCellView: NSView {
     override func mouseExited(with event: NSEvent) { isHovered = false }
 
     /// Shows the virtual-copy mark on the picture (VirtualCopyBadgeView).
+    /// Verify Files found the file damaged (FileIntegrity).
+    func setDamaged(_ isDamaged: Bool) {
+        guard damagedBadge.isHidden == isDamaged else { return }
+        damagedBadge.isHidden = !isDamaged
+    }
+
     func setVirtualCopy(_ isCopy: Bool) {
         guard copyBadge.isHidden == isCopy else { return }
         copyBadge.isHidden = !isCopy
@@ -802,6 +813,7 @@ final class ThumbnailCellView: NSView {
         labelDotView.frame = info.labelDotFrame
         starsView.frame = info.starsFrame
         copyBadge.frame = VirtualCopyBadgeView.frame(inImageFrame: imageLayer.frame)
+        damagedBadge.frame = DamagedFileBadgeView.frame(inImageFrame: imageLayer.frame)
     }
 
     /// Colours resolve here, against the view's appearance.

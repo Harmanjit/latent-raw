@@ -117,6 +117,7 @@ struct LibraryPanel: View {
             // always show how far it has got and offer its Cancel, and what
             // it had to say at the end, whether or not Export is folded away.
             runningJob
+            FileVerificationProgressView()
             mergeNotes
 
             DisclosureGroup(isExpanded: $exportExpanded) {

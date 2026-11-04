@@ -252,6 +252,7 @@ struct ContentView: View {
                                   canMerge: !exportQueue.isGPUBusy)
                 .motionFollowsAccessibility()
         }
+        .fileIntegritySheets(library: library)
         .sheet(item: $removeDustSheet) { sheet in
             RemoveDustSheet(model: sheet, onRemove: { startRemoveDust(from: $0) }, canRemove: !exportQueue.isGPUBusy)
                 .motionFollowsAccessibility()
@@ -1264,6 +1265,10 @@ struct ContentView: View {
             beginHDRPanoramaMerge()
         case .removeDust:
             presentRemoveDust(inMemory: mode == .develop)
+        case .verifyFiles:
+            FileIntegrityModel.shared.startVerifying(library: library)
+        case .findDuplicates:
+            FileIntegrityModel.shared.showDuplicates(library: library)
         case .slideshow:
             SlideshowController.start(model: model, library: library)
         case .editExternally:
