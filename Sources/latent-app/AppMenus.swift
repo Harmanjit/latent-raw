@@ -293,6 +293,8 @@ struct LatentCommands: Commands {
     @FocusedValue(\.commandContext) private var context
     @ObservedObject private var keyWindowText = KeyWindowTextFocus.shared
     @ObservedObject private var externalEditors = ExternalEditorSettings.shared
+    /// Rebuilds the items when the user changes a key in Settings › Keyboard.
+    @ObservedObject private var keyboard = KeyboardSettings.shared
 
     private var state: CommandState {
         var state = context?.state ?? CommandState()

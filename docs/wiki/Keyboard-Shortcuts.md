@@ -7,6 +7,8 @@ Single keys do nothing while you type in a text field, such as search, keywords 
 
 In the Library grid, stars, flags and rotation apply to every selected image. In Loupe, Compare and Develop they apply to the image shown, and in Survey to the focused pane.
 
+These are the default keys. Settings › Keyboard changes any of them, gives keys to menu commands that have none, and imports or exports the result as a keymap file; the menu bar and the single keys follow straight away. See [Customising the keys](#customising-the-keys) below.
+
 ## Views and navigation
 
 | Keys | Action |
@@ -94,3 +96,14 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | ⌃⇧H | HDR merge without the dialog, with the options it was last left with; problems show in the status bar |
 | ⌃M | Stitch the selected photos into one panorama DNG beside them (see [Photo Merge](Photo-Merge)); not while typing in a text field |
 | ⌃⇧M | Merge a bracket at each position and stitch the results into one DNG (experimental; see [Photo Merge](Photo-Merge)); not while typing in a text field |
+
+## Customising the keys
+
+Settings › Keyboard lists every command above, and the menu commands without a key, grouped as on this page and searchable by name or keys. Click a command's keys and press the new combination to change them.
+
+- Keys another command already has: Latent asks before moving them, and the other command is left without keys. Keys macOS or a standard menu item keeps (⌘Q, ⌘C, ⌘, and the like) can't be taken.
+- A single key, with or without ⇧, works anywhere but a text field, as the defaults do; a combination with ⌘, ⌥ or ⌃ goes on the command's menu item. Panning has no menu item, so it takes single keys only.
+- The ⌫ button beside a command takes its keys away; the arrow resets it to its default; Reset All puts every default back.
+- Export Keymap… saves your changes (only what differs from the defaults) as a JSON file, and Import Keymap… replaces yours with one, unless it would put two commands on the same keys.
+
+Changes are kept per user on this Mac and apply as soon as you make them.

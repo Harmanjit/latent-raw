@@ -19,8 +19,7 @@ extension ColorLabel {
 
     /// The key that sets it, for tooltips: "6", or nil for purple.
     var keyHint: String? {
-        guard let command = Shortcuts.all.first(where: { $0.command == .label(self) }) else { return nil }
-        return command.glyphs
+        Shortcuts.shortcut(for: .label(self))?.glyphs
     }
 }
 
