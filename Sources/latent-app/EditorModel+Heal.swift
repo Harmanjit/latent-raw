@@ -42,6 +42,11 @@ extension EditorModel {
     }
 
     func deleteSelectedHeal() {
+        // Several selected (Select All, ⌘-click in the pin list): all go.
+        if !healPinSelection.isEmpty {
+            deleteHeals(selectedHealIDs)
+            return
+        }
         guard let i = selectedHealIndex, i < parameters.heals.count else { return }
         parameters.heals.remove(at: i)
         selectedHealIndex = parameters.heals.isEmpty ? nil : min(i, parameters.heals.count - 1)
@@ -50,12 +55,13 @@ extension EditorModel {
     func clearHeals() {
         parameters.heals = []
         selectedHealIndex = nil
+        healPinSelection = []
     }
 
     /// Which patch and which of its circles (or strokes) is under `p`
     /// (normalised sensor, on the RAW grid: patches are stored there and
     /// the click has already been through `rawNormalized`).
-    private func hitHeal(_ p: SIMD2<Float>) -> (index: Int, isSource: Bool, offset: SIMD2<Float>)? {
+    func hitHeal(_ p: SIMD2<Float>) -> (index: Int, isSource: Bool, offset: SIMD2<Float>)? {
         let size = SIMD2(Float(sensorSize.width), Float(sensorSize.height))
         let short = min(size.x, size.y)
         // Selected patch first, then the most recent on top.
@@ -92,9 +98,17 @@ extension EditorModel {
     /// image; a patch is healed before the lens stage (RenderPipeline
     /// stage 5), so it is stored on the raw grid and the click goes
     /// through the lens map first, exactly as dust and touch-up do.
-    func healToolBegan(at screen: CGPoint) {
+    func healToolBegan(at screen: CGPoint, option: Bool = false) {
         guard hasImage else { return }
+        // Option: a click deletes the spot under it, a drag draws a marquee
+        // and deletes every spot whose pin is inside (RemoveToolPins.swift).
+        if option {
+            healDrag = .marquee(screen)
+            healMarquee = CGRect(origin: screen, size: .zero)
+            return
+        }
         let p = rawNormalized(sensorNormalized(screen))
+        healPinSelection = []
         if let hit = hitHeal(p) {
             selectedHealIndex = hit.index
             healDrag = hit.isSource ? .movingSource(hit.index, hit.offset) : .movingTarget(hit.index, hit.offset)
@@ -115,7 +129,7 @@ extension EditorModel {
             // Remove has no source: the click places the patch, a drag moves it.
             guard let patch = preparedRemovePatch(HealPatch(target: p, source: p, radius: healRadius,
                                                             feather: healFeather, mode: .remove)) else { return }
-            parameters.heals.append(patch)
+            parameters.heals.append(stampingOpacity(patch))
             selectedHealIndex = parameters.heals.count - 1
             // Detect Objects runs when the button is let go, where it landed.
             healDrag = .placing(parameters.heals.count - 1)
@@ -127,8 +141,8 @@ extension EditorModel {
         var offset = SIMD2(2.5 * healRadius * short / size.x, 0)
         if p.x + offset.x + healRadius * short / size.x > 1 { offset = -offset }
         let source = simd_clamp(p + offset, SIMD2(0, 0), SIMD2(1, 1))
-        parameters.heals.append(HealPatch(target: p, source: source, radius: healRadius,
-                                          feather: healFeather, mode: healMode))
+        parameters.heals.append(stampingOpacity(HealPatch(target: p, source: source, radius: healRadius,
+                                                          feather: healFeather, mode: healMode)))
         selectedHealIndex = parameters.heals.count - 1
         healDrag = .placing(parameters.heals.count - 1)
     }
@@ -152,13 +166,23 @@ extension EditorModel {
             parameters.heals[i].source = simd_clamp(p - off, SIMD2(0, 0), SIMD2(1, 1))
         case .painting:
             addPaintedPoint(p)
+        case .marquee(let start):
+            healMarquee = CGRect(x: min(start.x, screen.x), y: min(start.y, screen.y),
+                                 width: abs(screen.x - start.x), height: abs(screen.y - start.y))
         default:
             break
         }
     }
 
     func healToolEnded() {
-        if case .painting = healDrag { finishPaintedStroke() }
+        if case .painting = healDrag {
+            let before = parameters.heals.count
+            finishPaintedStroke()
+            if healOpacity < 1, parameters.heals.count > before, let last = parameters.heals.last {
+                parameters.heals[parameters.heals.count - 1] = stampingOpacity(last)
+            }
+        }
+        if case .marquee(let start) = healDrag { finishHealMarquee(from: start) }
         if case .placing(let i) = healDrag, i < parameters.heals.count, parameters.heals[i].mode == .remove {
             removePatchPlaced(parameters.heals[i])
         }
@@ -180,6 +204,7 @@ extension EditorModel {
         defringePickerActive = false
         lensBlurState.pickingFocus = false
         healDrag = nil
+        healMarquee = nil
         redEyeDrag = nil
         paintingHealStroke = []
     }
@@ -198,7 +223,7 @@ extension EditorModel {
         // Point Colour's picker takes one click, then lets go on release.
         if pointColourPicking { pointColourPicked(at: screen); return }
         if toneTool != .none { toneToolBegan(at: screen); return }
-        if healToolActive { healToolBegan(at: screen); return }
+        if healToolActive { healToolBegan(at: screen, option: exclude); return }
         if redEyeToolActive { redEyeToolBegan(at: screen); return }
         // Clicks only: a ring is removed or a spot added on the press.
         if dustToolActive { dustToolBegan(at: screen); return }

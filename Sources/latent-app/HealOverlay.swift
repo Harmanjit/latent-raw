@@ -8,6 +8,8 @@ import PixelEngine
 /// outline until the mouse is let go. Purely visual; the
 /// Metal view underneath owns the mouse and the model does the hit
 /// testing, so this can never disagree with what a drag actually grabs.
+/// Tool Overlay (RemoveToolPins.swift) chooses which patches are drawn;
+/// the stroke being painted and the Option-drag marquee always are.
 /// A patch is healed before the lens stage and so is stored on the raw
 /// grid, while the view shows the corrected image: every point is placed
 /// through the lens map (`outputNormalized`), as DustOverlay does.
@@ -20,8 +22,13 @@ struct HealOverlay: View {
             let scale = geo.size.width > 0 ? model.drawableSize.width / geo.size.width : 2
             Canvas { context, _ in
                 let short = min(model.sensorSize.width, model.sensorSize.height)
-                for (i, patch) in model.parameters.heals.enumerated() {
-                    let selected = i == model.selectedHealIndex
+                let selection = model.selectedHealIndices
+                let visible = model.healToolOverlay.visibleIndices(count: model.parameters.heals.count,
+                                                                   selected: selection,
+                                                                   pointerOverImage: model.pointerOverImage)
+                for i in visible {
+                    let patch = model.parameters.heals[i]
+                    let selected = selection.contains(i)
                     let r = CGFloat(patch.radius) * short * model.viewport.zoom / scale
                     let t = point(patch.target, scale: scale)
                     let s = point(patch.source, scale: scale)
@@ -65,6 +72,13 @@ struct HealOverlay: View {
                     let outline = outlinePath(model.paintingHealStroke, radius: r, scale: scale, merged: false)
                     context.stroke(outline, with: .color(.black.opacity(0.5)), lineWidth: 3)
                     context.stroke(outline, with: .color(.white), lineWidth: 1.5)
+                }
+                if let marquee = model.healMarquee {
+                    let box = Path(CGRect(x: marquee.minX / scale, y: marquee.minY / scale,
+                                          width: marquee.width / scale, height: marquee.height / scale))
+                    context.fill(box, with: .color(.red.opacity(0.12)))
+                    context.stroke(box, with: .color(.black.opacity(0.5)), lineWidth: 3)
+                    context.stroke(box, with: .color(.white), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 }
             }
             .allowsHitTesting(false)

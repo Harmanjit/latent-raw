@@ -2036,15 +2036,15 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Toggle(isOn: $model.healToolActive) {
-                    Text(model.healToolActive ? "Healing: on" : "Heal…")
+                    Text(model.healToolActive ? "Remove Tool: on" : "Remove Tool…")
                 }
                 .toggleStyle(.button)
-                .help("Arm the tool, then click a spot to remove it; drag to pick the source, or paint with Brush (H)")
+                .help("Arm the tool, then click a spot to remove it; drag to pick the source, or paint with Brush. Option-drag deletes the spots inside a marquee (H)")
                 Picker("Heal mode", selection: Binding(get: { model.activeHealMode },
                                                   set: { model.activeHealMode = $0 })) {
+                    Text("Remove").tag(HealPatch.Mode.remove)
                     Text("Heal").tag(HealPatch.Mode.heal)
                     Text("Clone").tag(HealPatch.Mode.clone)
-                    Text("Remove").tag(HealPatch.Mode.remove)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -2070,18 +2070,13 @@ struct ContentView: View {
                                      set: { model.activeHealFeather = $0 }),
                       range: 0...1, format: "%.2f", defaultValue: 0.35)
                 .disabled(model.activeHealMode == .remove)
+            sliderRow(title: "Opacity",
+                      value: Binding(get: { model.activeHealOpacity * 100 },
+                                     set: { model.activeHealOpacity = $0 / 100 }),
+                      range: 0...100, format: "%.0f%%", defaultValue: 100)
 
-            HStack {
-                let n = model.parameters.heals.count
-                Text(n == 0 ? "No patches. Click a dust spot or blemish to remove it."
-                     : "\(n) patch\(n == 1 ? "" : "es")")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if n > 0 {
-                    Button("Clear all") { model.clearHeals() }.controlSize(.mini)
-                }
-            }
+            HealOverlayOptions(model: model)
+            HealPinList(model: model)
 
             Divider()
             RedEyeSection(model: model)
