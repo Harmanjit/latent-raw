@@ -488,6 +488,7 @@ final class ThumbnailItem: NSCollectionViewItem {
         cellView.setTags(stored: record.finderTags)
         cellView.setLabel(record.label)
         cellView.setVirtualCopy(record.isVirtualCopy)
+        cellView.setStack(record.id.flatMap { library?.stackMemberships[$0] })
         loadIfNeeded()
     }
 
@@ -607,6 +608,8 @@ final class ThumbnailCellView: NSView {
     private let tagDotsView = TagDotsView()
     private let labelDotView = LabelDotView()
     private let copyBadge = VirtualCopyBadgeView()
+    private let stackBadge = StackBadgeView()
+    private var stackMembership: StackMembership?
     private var storedTags: String?
     private var hoverArea: NSTrackingArea?
     private var imagePixels: CGSize?
@@ -659,6 +662,7 @@ final class ThumbnailCellView: NSView {
         addSubview(tagDotsView)
         addSubview(labelDotView)
         addSubview(copyBadge)
+        addSubview(stackBadge)
 
         // VoiceOver reads the cell as one image (name, flag, stars, edited)
         // rather than scraps of it.
@@ -678,7 +682,8 @@ final class ThumbnailCellView: NSView {
         let text = Self.accessibilityText(name: nameField.stringValue, rating: rating, flag: flag, isEdited: isEdited)
         let tags = SpokenText.finderTags(tagDotsView.tags)
         let label = SpokenText.label(labelDotView.label)
-        return [text, label, tags].filter { !$0.isEmpty }.joined(separator: ", ")
+        return [text, label, tags, StackBadgeView.spokenText(stackMembership)].filter { !$0.isEmpty }
+            .joined(separator: ", ")
     }
 
     /// The stars' clicks, for VoiceOver: one action per rating.
@@ -726,6 +731,14 @@ final class ThumbnailCellView: NSView {
     func setVirtualCopy(_ isCopy: Bool) {
         guard copyBadge.isHidden == isCopy else { return }
         copyBadge.isHidden = !isCopy
+    }
+
+    /// Shows the stack mark on the picture (StackBadgeView).
+    func setStack(_ membership: StackMembership?) {
+        guard membership != stackMembership else { return }
+        stackMembership = membership
+        stackBadge.show(membership)
+        needsLayout = true
     }
 
     /// Finder tags in their stored form; decoded only when they changed.
@@ -802,6 +815,7 @@ final class ThumbnailCellView: NSView {
         labelDotView.frame = info.labelDotFrame
         starsView.frame = info.starsFrame
         copyBadge.frame = VirtualCopyBadgeView.frame(inImageFrame: imageLayer.frame)
+        stackBadge.frame = stackBadge.frame(inImageFrame: imageLayer.frame)
     }
 
     /// Colours resolve here, against the view's appearance.

@@ -85,6 +85,8 @@ struct CommandState: Equatable {
     var showsRegularCollection = false
     /// What B does: "Add to Quick Collection", or the target's name.
     var targetCollectionTitle = "Add to Quick Collection"
+    /// Stacks in the selection and the folder (StackCommands.swift).
+    var stacking = StackCommandState()
 
     /// Whether the arrow keys pan the image rather than step through images
     /// (Loupe and Develop only; Compare keeps them for the candidate).
@@ -195,6 +197,7 @@ struct CommandState: Equatable {
         case .addToTargetCollection: hasCatalog && (hasSelection || selectionCount > 0)
         case .removeFromCollection: showsRegularCollection && (hasSelection || selectionCount > 0)
         case .geometry(let geometry): isEnabled(geometry)
+        case .stack(let stack): isEnabled(stack)
         }
     }
 
@@ -395,6 +398,8 @@ struct LatentCommands: Commands {
             item("Create Virtual Copy", .createVirtualCopy)
             item("Set Copy as Master", .setCopyAsMaster)
             item("Remove Virtual Copy", .removeVirtualCopy)
+            Divider()
+            StackingMenu { AnyView(item($0, $1)) }
             Divider()
             Menu("Photo Merge") {
                 item("HDR…", .photoMergeHDR)

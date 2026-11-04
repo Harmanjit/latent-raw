@@ -163,6 +163,11 @@ enum Shortcuts {
         Shortcut(.refreshFolder, "r", .command),
         // Lightroom's key for Create Virtual Copy.
         Shortcut(.createVirtualCopy, "'", .command),
+        // Lightroom's stacking keys.
+        Shortcut(.stack(.group), "g", .command),
+        Shortcut(.stack(.unstack), "g", [.shift, .command]),
+        Shortcut(.stack(.toggleExpanded), "s"),
+        Shortcut(.stack(.moveToTop), "s", .shift),
         // Photo Merge. Lightroom's key: ⌃H is otherwise only the text
         // system's delete-backward, which the command leaves to a field
         // being typed in (CommandState).
@@ -340,6 +345,9 @@ extension Shortcuts {
             ShortcutPageRow([.refreshFolder], "Refresh the open folder: scan it again for photos added, removed or renamed outside Latent"),
             ShortcutPageRow([.createVirtualCopy], "Create a virtual copy of each selected image (in Loupe and Develop, of the image shown): another version of the photo with its own edit, rating and keywords, sharing the file"),
             ShortcutPageRow(keys: .gesture("Drag images onto a sidebar folder"), "Move them there with their edits (hold ⌥ to copy)"),
+            ShortcutPageRow([.stack(.group), .stack(.unstack)], "Group the selected photos into a stack (the lead on top), unstack"),
+            ShortcutPageRow([.stack(.toggleExpanded)], "Expand or collapse the selected stacks"),
+            ShortcutPageRow([.stack(.moveToTop)], "Move the lead photo to the top of its stack"),
         ]),
         ("Photo Merge", [
             ShortcutPageRow([.photoMergeHDR], "HDR merge of the selected photos into one DNG beside them (see [Photo Merge](Photo-Merge)); not while typing in a text field, where ⌃H deletes backward"),
