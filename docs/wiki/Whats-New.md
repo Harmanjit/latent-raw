@@ -78,6 +78,10 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Rendering intent when printing**, taken from the soft proof. See [Print](Export#print).
 - **HDR Limit** sets how far above white each photo's highlights may go on an HDR screen and in an HDR export. See [HDR Limit](Develop#hdr-limit).
 
+## Keyboard
+
+- **Customisable shortcuts**: Settings › Keyboard lists every command, searchable and grouped, with click-to-record keys, a warning (and an offer to reassign) when keys are taken, reset one or all, and keymap import and export as JSON. Menu commands without a key can be given one. See [Customising the keys](Keyboard-Shortcuts#customising-the-keys).
+
 ## Help
 
 - These help pages gained a [Getting Started](Getting-Started) rewrite, three tutorials, [Coming from Lightroom](Coming-from-Lightroom), a [Glossary](Glossary) and an [FAQ](FAQ). The same pages are in the app under **Help › Latent Help** (⌘?).
