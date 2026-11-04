@@ -42,6 +42,8 @@ struct RemoveRegionGPU {
     float2 maskOrigin;    // region position of the object mask's top-left
     float2 maskScale;     // mask cells per region pixel
     int2 maskSize;        // mask cells; 0 when the hole is the brush
+    float opacity;        // how much of the fill replaces the image, 0…1
+    float unused;
 };
 
 struct RemoveLevelGPU {
@@ -364,15 +366,24 @@ kernel void removeVote(
 }
 
 // The filled hole, decoded, into the working texture; nothing else changes.
+// Below full opacity the fill is mixed, in linear light, with `original`
+// (the region as removePrepare first encoded it); at full opacity that
+// texture isn't read and the fill is written exactly as it always was.
 kernel void removeComposite(
-    texture2d<float, access::read>  img     [[texture(0)]],
-    texture2d<uint, access::read>   hole    [[texture(1)]],
-    texture2d<float, access::write> working [[texture(2)]],
-    constant RemoveRegionGPU &R             [[buffer(0)]],
-    uint2 gid                               [[thread_position_in_grid]])
+    texture2d<float, access::read>  img      [[texture(0)]],
+    texture2d<uint, access::read>   hole     [[texture(1)]],
+    texture2d<float, access::write> working  [[texture(2)]],
+    texture2d<float, access::read>  original [[texture(3)]],
+    constant RemoveRegionGPU &R              [[buffer(0)]],
+    uint2 gid                                [[thread_position_in_grid]])
 {
     if (int(gid.x) >= R.size.x || int(gid.y) >= R.size.y) return;
     if (hole.read(gid).r == 0) return;
     float4 c = img.read(gid);
-    working.write(float4(c.rgb * c.rgb, c.a), uint2(int2(gid) + R.origin));
+    float3 fill = c.rgb * c.rgb;
+    if (R.opacity < 1.0) {
+        float3 o = original.read(gid).rgb;
+        fill = mix(o * o, fill, max(R.opacity, 0.0));
+    }
+    working.write(float4(fill, c.a), uint2(int2(gid) + R.origin));
 }

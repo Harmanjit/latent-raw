@@ -82,16 +82,35 @@ final class EditorModel: ObservableObject {
                 dustToolActive = false; touchUpToolActive = false
             } else {
                 selectedHealIndex = nil
+                healPinSelection = []
             }
         }
     }
     @Published var selectedHealIndex: Int?
+    /// Patches selected alongside `selectedHealIndex` (Select All, ⌘-click
+    /// in the pin list), deleted with it (RemoveToolPins.swift).
+    @Published var healPinSelection: Set<UUID> = []
+    /// The Option-drag marquee in progress, screen points; spots inside it
+    /// are deleted when the mouse is let go.
+    @Published var healMarquee: CGRect?
+    /// When the tool's pins are drawn: Lightroom's Tool Overlay setting.
+    @Published var healToolOverlay: HealToolOverlay = .saved {
+        didSet { if healToolOverlay != oldValue { healToolOverlay.save() } }
+    }
+    /// Whether the pointer is over the image, for Tool Overlay's Auto.
+    @Published var pointerOverImage = false
     /// Defaults for the next patch; editing a selected patch updates these too.
     @Published var healRadius: Float = 0.02
     @Published var healFeather: Float = 0.35
     @Published var healMode: HealPatch.Mode = .heal
+    /// Opacity of the next patch, 0…1.
+    @Published var healOpacity: Float = 1
 
-    enum HealDrag { case placing(Int), movingTarget(Int, SIMD2<Float>), movingSource(Int, SIMD2<Float>), painting }
+    enum HealDrag {
+        case placing(Int), movingTarget(Int, SIMD2<Float>), movingSource(Int, SIMD2<Float>), painting
+        /// An Option-drag from this screen point: the delete marquee.
+        case marquee(CGPoint)
+    }
     var healDrag: HealDrag?
     /// Whether a drag on empty image paints a stroke instead of placing a circle.
     @Published var healShape: HealShape = .spot

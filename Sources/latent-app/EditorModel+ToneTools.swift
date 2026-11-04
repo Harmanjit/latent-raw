@@ -112,6 +112,7 @@ extension EditorModel {
 
     /// The pointer moved over the image (nil: it left).
     func pointerMoved(to screen: CGPoint?) {
+        if pointerOverImage != (screen != nil) { pointerOverImage = screen != nil }
         let readout = screen.flatMap { displayedPixel(atScreen: $0) }.map { PixelReadout(linearDisplayP3: $0) }
         if pixelProbe.readout != readout { pixelProbe.readout = readout }
     }

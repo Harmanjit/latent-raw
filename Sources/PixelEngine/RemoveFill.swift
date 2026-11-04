@@ -125,6 +125,8 @@ struct RemoveRegionGPU {
     var maskOrigin: SIMD2<Float>
     var maskScale: SIMD2<Float>
     var maskSize: SIMD2<Int32>
+    var opacity: Float = 1
+    var unused: Float = 0
 }
 
 /// Mirror of `RemoveLevelGPU` in Remove.metal.
@@ -201,7 +203,8 @@ enum RemoveStage {
         var region = RemoveRegionGPU(size: size, origin: lo, centre: toRegion(p.target),
                                      radius: p.radius * min(sensorSize.x, sensorSize.y) / binSpan,
                                      pathCount: Int32(path.count),
-                                     maskOrigin: .zero, maskScale: .zero, maskSize: .zero)
+                                     maskOrigin: .zero, maskScale: .zero, maskSize: .zero,
+                                     opacity: p.effectiveOpacity)
         if let mask = p.objectMask {
             let boxSize = mask.size * sensorSize / binSpan
             region.maskOrigin = toRegion(p.target + mask.origin)
@@ -347,6 +350,15 @@ enum RemoveStage {
         var path = plan.path.isEmpty ? [SIMD2<Float>.zero] : plan.path
         encoder.setBytes(&path, length: path.count * MemoryLayout<SIMD2<Float>>.stride, index: 1)
         dispatch(encoder, pipelines.prepare, region.size)
+        // Below full opacity the composite mixes with the region as it was,
+        // which the synthesis overwrites: prepare a copy of it first.
+        var original: MTLTexture?
+        if region.opacity < 1 {
+            let copy = try texture(region.size, .rgba16Float)
+            encoder.setTexture(copy, index: 1)
+            dispatch(encoder, pipelines.prepare, region.size)
+            original = copy
+        }
         for l in levels.indices.dropFirst() {
             var fine = levels[l - 1].size, coarse = levels[l].size
             encoder.setComputePipelineState(pipelines.downsample)
@@ -436,6 +448,7 @@ enum RemoveStage {
         encoder.setTexture(images[0][current[0]], index: 0)
         encoder.setTexture(holes[0], index: 1)
         encoder.setTexture(working, index: 2)
+        encoder.setTexture(original ?? images[0][current[0]], index: 3)
         encoder.setBytes(&region, length: regionBytes, index: 0)
         dispatch(encoder, pipelines.composite, region.size)
     }
