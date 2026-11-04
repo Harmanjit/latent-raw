@@ -62,11 +62,42 @@ public enum RenderedDNGExport {
     }
 
     /// The recipe written into the DNG: `source` is the original.
-    public static func recipe(source: MergeRecipe.Source, maximum: Float) -> MergeRecipe {
+    /// `look` names a full look baked in (`options["look"]`), so the
+    /// recipe says the pixels are display-referred underneath.
+    public static func recipe(source: MergeRecipe.Source, maximum: Float, look: BakedLook? = nil) -> MergeRecipe {
         // Above every stored value, so nothing counts as clipped: the
         // render reconstructed the highlights already.
         MergeRecipe(kind: .rendered, clipLevel: max(maximum, 1) * 2, lensApplied: true, reference: 0,
-                    sources: [source])
+                    options: look == nil ? [:] : ["look": .string("baked")], sources: [source])
+    }
+
+    /// A full look baked into a rendered DNG ("DNG, full look baked in").
+    ///
+    /// A raw file holds scene light, and whatever opens it applies its own
+    /// tone curve. To keep the edit's look, the render's display-referred
+    /// light (tone curve, grading and the rest applied, SDR white at 1) is
+    /// passed through the inverse of the default tone curve, Latent's
+    /// Naka-Rushton sigmoid at `contrast` and `greyPoint` (ColorPipeline
+    /// .metal, `toneMapSigmoid` with no headroom). Latent opening the DNG
+    /// with its default look then turns the pixels back into the edit's
+    /// display values. Other raw converters apply curves of their own, so
+    /// there the file opens close to, not exactly as, the edit.
+    public struct BakedLook: Sendable, Equatable {
+        public var contrast: Float
+        public var greyPoint: Float
+        public init(contrast: Float, greyPoint: Float) { self.contrast = contrast; self.greyPoint = greyPoint }
+
+        /// Display values at and above this are held here: the sigmoid
+        /// reaches 1 only at infinite light. About seven stops above grey
+        /// at the default contrast, within a half float's range.
+        static let ceiling: Float = 0.9995
+
+        /// The scene value the sigmoid y = x^c / (x^c + k^c) takes to `y`.
+        public func sceneValue(display y: Float) -> Float {
+            let held = min(max(y, 0), Self.ceiling)
+            guard held > 0 else { return 0 }
+            return max(greyPoint, 1e-6) * pow(held / (1 - held), 1 / max(contrast, 1e-3))
+        }
     }
 
     /// Writes the DNG. `texture` is rgba16Float, linear Rec. 2020, with
@@ -77,11 +108,14 @@ public enum RenderedDNGExport {
     public static func write(texture: MTLTexture, commandQueue: MTLCommandQueue, summary: RawSummary,
                              cameraToXYZ: [Float]?, lensModel: String?, preview: CGImage,
                              source: MergeRecipe.Source, softwareVersion: String, to url: URL,
-                             replacingExisting: Bool) throws -> MergeDNGWriteResult {
+                             replacingExisting: Bool, look: BakedLook? = nil) throws -> MergeDNGWriteResult {
         guard let cameraToXYZ, let toCamera = workingToCamera(cameraToXYZ: cameraToXYZ) else {
             throw MergeDNGError.invalidMetadata("the photo's camera has no colour matrix, so a DNG can't describe it")
         }
-        let workingMaximum = try ExposureNormalisation.maximum(of: texture, commandQueue: commandQueue)
+        var workingMaximum = try ExposureNormalisation.maximum(of: texture, commandQueue: commandQueue)
+        // The inverse curve rises with the light, so it takes the largest
+        // value to the largest.
+        if let look { workingMaximum = look.sceneValue(display: workingMaximum) }
         // A bound on the largest camera value: no row of the matrix can
         // take a pixel further than the sum of its weights' sizes.
         let rowWeight = (0..<3).map { row in (0..<3).reduce(Float(0)) { $0 + abs(toCamera[$1][row]) } }.max() ?? 1
@@ -89,14 +123,21 @@ public enum RenderedDNGExport {
         let streamed = try LinearRawPixelSource.texture(texture, commandQueue: commandQueue)
         let pixels = LinearRawPixelSource(width: streamed.width, height: streamed.height) { region, rgb in
             try streamed.fill(region, rgb)
+            if let look { undoTone(rgb, look: look) }
             toCameraSpace(rgb, matrix: toCamera)
         }
         let writer = LinearRawDNGWriter()
         return try writer.write(pixels, maximum: maximum,
                                 metadata: metadata(summary: summary, cameraToXYZ: cameraToXYZ, lensModel: lensModel,
                                                    softwareVersion: softwareVersion),
-                                recipe: recipe(source: source, maximum: maximum), preview: preview, to: url,
+                                recipe: recipe(source: source, maximum: maximum, look: look), preview: preview, to: url,
                                 replacingExisting: replacingExisting)
+    }
+
+    /// RGB half floats taken back through the default tone curve in place
+    /// (`BakedLook.sceneValue`), channel by channel as the curve works.
+    static func undoTone(_ rgb: UnsafeMutableBufferPointer<Float16>, look: BakedLook) {
+        for i in rgb.indices { rgb[i] = Float16(look.sceneValue(display: Float(rgb[i]))) }
     }
 
     /// RGB half floats turned through `matrix` in place, negatives cut to 0.
