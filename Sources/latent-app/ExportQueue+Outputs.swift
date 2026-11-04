@@ -31,6 +31,8 @@ struct ExportFileJob: Sendable {
     /// For originals: what the XMP sidecar says (rating, label, keywords,
     /// the edit), as the catalog's own sidecar has it; nil writes none.
     var sidecar: XMPSidecar.Fields?
+    /// For a DNG: the scene-referred edit, the full look, or the original.
+    var dngContent: DNGExportContent = .sceneReferred
 
     func run(gpu: GPUContext) async throws -> ExportFileResult {
         switch kind {
@@ -39,9 +41,18 @@ struct ExportFileJob: Sendable {
             return ExportFileResult(pixelCount: outcome.pixelWidth * outcome.pixelHeight,
                                     maskSubstitutions: outcome.maskSubstitutions)
         case .dng:
+            if dngContent == .original, DNGExportContent.isDNG(request.sourceURL) {
+                // Already a DNG: the file itself, mosaic and all.
+                try Self.copyOriginal(request.sourceURL, to: request.destinationURL, sidecar: nil,
+                                      replacingExisting: request.replacesExisting)
+                return ExportFileResult(pixelCount: 0, maskSubstitutions: [])
+            }
             let rendered = try await ExportWorker.renderSceneLinear(
                 sourceURL: request.sourceURL, editStackJSON: request.editStackJSON,
-                userRotation: request.userRotation, gpu: gpu)
+                userRotation: request.userRotation, gpu: gpu, content: dngContent)
+            let defaults = EditParameters()
+            let look = dngContent == .fullLook
+                ? RenderedDNGExport.BakedLook(contrast: defaults.contrast, greyPoint: defaults.greyPoint) : nil
             let destination = request.destinationURL
             let source = MergeRecipe.Source(
                 path: RenderedDNGExport.relativePath(of: request.sourceURL, from: destination.deletingLastPathComponent()),
@@ -50,7 +61,7 @@ struct ExportFileJob: Sendable {
                                         summary: rendered.summary, cameraToXYZ: rendered.cameraToXYZ,
                                         lensModel: rendered.lensModel, preview: rendered.preview, source: source,
                                         softwareVersion: Self.softwareVersion, to: destination,
-                                        replacingExisting: request.replacesExisting)
+                                        replacingExisting: request.replacesExisting, look: look)
             return ExportFileResult(pixelCount: rendered.texture.width * rendered.texture.height,
                                     maskSubstitutions: rendered.maskSubstitutions)
         case .original:
