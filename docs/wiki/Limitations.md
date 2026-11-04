@@ -70,6 +70,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **A JPEG or PNG contact sheet is one picture,** at most 8192 px a side, holding every photo, so a large selection gets small cells. A PDF can have as many pages as it needs.
 - **The print panel's preview is drawn from thumbnails.** It shows the layout; the photos themselves are rendered for the printer only when you print.
 - **Showing and hiding the sidebar and filmstrip has no keyboard shortcut or menu item.** The filmstrip has its film button in the status bar.
+- **Custom keys have edges.** Settings › Keyboard changes the keys of commands in the menus and the single-key table, not of standard items (Quit, Copy, Settings and the like), gestures, or keys inside panels and sheets (Esc in a dialog, ↑ ↓ in a slider's value). Two commands can't share keys even where they never apply at once, since single keys are looked up by keys alone. Keys are limited to letters, digits, punctuation, Space, the arrows, Return, ⌫, Esc and F2; other function keys and Tab can't be recorded, and Esc on its own cancels recording (a command whose default is Esc gets it back with its reset button). Panning takes single keys only, having no menu item. Menu titles that show a single key, such as Pick (P), follow the change; tooltips in the Develop panels that name a key may still show the default.
 
 ## Photo Merge
 

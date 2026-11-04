@@ -163,6 +163,7 @@ struct PreferencesView: View {
             aiTab.tabItem { Label("AI", systemImage: "cpu") }
             SlideshowSettingsTab().tabItem { Label("Slideshow", systemImage: "play.rectangle") }
             ExternalEditorSettingsTab().tabItem { Label("External Editor", systemImage: "arrow.up.forward.app") }
+            KeyboardSettingsTab().tabItem { Label("Keyboard", systemImage: "keyboard") }
         }
         .frame(width: 520)
         .padding(20)

@@ -84,7 +84,7 @@ Select one or many photos in the Library and press ⇧⌘E (**File › Export**)
 
 - **Help › Latent Help** (⌘?) opens these pages inside the app, with search. They ship with the app, so they work with no internet connection.
 - Point at a control and wait a moment: most buttons and sliders explain themselves in a tooltip.
-- The menu bar lists every command with its key, and [Keyboard Shortcuts](Keyboard-Shortcuts) lists them all.
+- The menu bar lists every command with its key, and [Keyboard Shortcuts](Keyboard-Shortcuts) lists them all. **Settings › Keyboard** changes any of them.
 - New here from Lightroom? Read [Coming from Lightroom](Coming-from-Lightroom). A word you don't know? Try the [Glossary](Glossary). A question? The [FAQ](FAQ). Something went wrong? [Troubleshooting](Troubleshooting).
 - What changed in this release: [What's New](Whats-New).
 - To report a bug or ask for help, see [Report an issue or get help](FAQ#report-an-issue-or-get-help).

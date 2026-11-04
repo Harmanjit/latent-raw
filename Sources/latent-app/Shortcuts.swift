@@ -203,14 +203,25 @@ enum Shortcuts {
         SystemShortcut(title: "Latent Help", key: .character("?"), modifiers: .command),
     ]
 
+    /// The command's keys in effect: its default from `all`, unless the
+    /// user changed them in Settings › Keyboard (`Keymap`).
     static func shortcut(for command: KeyCommand) -> Shortcut? {
+        Keymap.shared.effective.first { $0.command == command }
+    }
+
+    /// The command's keys as shipped, whatever the user changed.
+    static func defaultShortcut(for command: KeyCommand) -> Shortcut? {
         all.first { $0.command == command }
     }
 
-    /// The command a single key press gives, if any.
+    /// The command a single key press gives, if any, with the user's keys.
     static func command(for press: BareKeyPress) -> KeyCommand? {
+        command(for: press, in: Keymap.shared.effective)
+    }
+
+    static func command(for press: BareKeyPress, in table: [Shortcut]) -> KeyCommand? {
         let modifiers: ShortcutModifiers = press.shift ? .shift : []
-        return all.first { $0.key == press.key && $0.modifiers == modifiers }?.command
+        return table.first { $0.key == press.key && $0.modifiers == modifiers }?.command
     }
 
     /// Modifiers in the menu bar's order (⌃⌥⇧⌘), then the key.
@@ -376,6 +387,8 @@ extension Shortcuts {
             "Single keys do nothing while you type in a text field, such as search, keywords or a slider's value; click the grid or the image to get them back. The menu bar lists these commands too, with a single key after the name, as in Pick (P).",
             "",
             "In the Library grid, stars, flags and rotation apply to every selected image. In Loupe, Compare and Develop they apply to the image shown, and in Survey to the focused pane.",
+            "",
+            "These are the default keys. Settings › Keyboard changes any of them, gives keys to menu commands that have none, and imports or exports the result as a keymap file; the menu bar and the single keys follow straight away. See [Customising the keys](#customising-the-keys) below.",
         ]
         for section in page {
             lines += ["", "## \(section.title)", "", "| Keys | Action |", "|---|---|"]
@@ -383,13 +396,26 @@ extension Shortcuts {
                 lines.append("| \(pageKeys(row.keys)) | \(row.action) |")
             }
         }
+        lines += ["", "## Customising the keys", ""] + customisingNotes
         return lines.joined(separator: "\n") + "\n"
     }
+
+    private static let customisingNotes = [
+        "Settings › Keyboard lists every command above, and the menu commands without a key, grouped as on this page and searchable by name or keys. Click a command's keys and press the new combination to change them.",
+        "",
+        "- Keys another command already has: Latent asks before moving them, and the other command is left without keys. Keys macOS or a standard menu item keeps (⌘Q, ⌘C, ⌘, and the like) can't be taken.",
+        "- A single key, with or without ⇧, works anywhere but a text field, as the defaults do; a combination with ⌘, ⌥ or ⌃ goes on the command's menu item. Panning has no menu item, so it takes single keys only.",
+        "- The ⌫ button beside a command takes its keys away; the arrow resets it to its default; Reset All puts every default back.",
+        "- Export Keymap… saves your changes (only what differs from the defaults) as a JSON file, and Import Keymap… replaces yours with one, unless it would put two commands on the same keys.",
+        "",
+        "Changes are kept per user on this Mac and apply as soon as you make them.",
+    ]
 
     private static func pageKeys(_ keys: ShortcutPageRow.Keys) -> String {
         switch keys {
         case .commands(let commands):
-            let glyphs = commands.map { shortcut(for: $0).map { markdownGlyphs($0.glyphs) } ?? "?" }
+            // The page documents the defaults, not this Mac's keymap.
+            let glyphs = commands.map { defaultShortcut(for: $0).map { markdownGlyphs($0.glyphs) } ?? "?" }
             return collapsingDigitRuns(glyphs).joined(separator: ", ")
         case .system(let title):
             return system.first { $0.title == title }.map { markdownGlyphs(glyphs($0.key, $0.modifiers)) } ?? "?"
