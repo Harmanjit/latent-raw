@@ -78,6 +78,18 @@ public final class Library: ObservableObject {
             objectWillChange.send()
         }
     }
+    /// The open catalog's stacks (Library+Stacks.swift), and each stacked
+    /// photo's place in its stack. A change reloads the grid, whose badges
+    /// show the stacks even where the list itself stays the same.
+    @Published public internal(set) var stacks: [ImageStack] = [] {
+        didSet {
+            guard stacks != oldValue else { return }
+            stackMemberships = StackLayout.memberships(stacks)
+            visibleListVersion += 1
+            if !isPatchingRecords { recomputeVisible() }
+        }
+    }
+    public private(set) var stackMemberships: [Int64: StackMembership] = [:]
     @Published public private(set) var isBusy = false
     /// Opens and refreshes still running. They can overlap (a second folder
     /// clicked while the first reconciles), so one finishing isn't the end.
@@ -228,7 +240,8 @@ public final class Library: ObservableObject {
                     && (!filter.isActive || filter.matches(record, isEdited: isEdited, keywords: keywords))
             }
             : shown
-        let next = passing.sorted(by: sort, customPositions: customPositions)
+        let next = StackLayout.arrange(passing.sorted(by: sort, customPositions: customPositions),
+                                       memberships: stackMemberships)
         if next != visibleImages {
             if !next.elementsEqual(visibleImages, by: { $0.id == $1.id }) {
                 visibleListVersion += 1
@@ -429,6 +442,7 @@ public final class Library: ObservableObject {
         var customOrder: [String]
         var collections: CollectionsState
         var recentlyAdded: RecentlyAdded?
+        var stacks: [ImageStack]
     }
 
     /// Reconciles `catalog` and reads its list, touching nothing shown:
@@ -443,7 +457,8 @@ public final class Library: ObservableObject {
                               keywordIndex: try await catalog.allImageKeywords(),
                               customOrder: await catalog.customOrder(),
                               collections: try await catalog.loadCollections(),
-                              recentlyAdded: try await catalog.recentlyAdded())
+                              recentlyAdded: try await catalog.recentlyAdded(),
+                              stacks: try await catalog.allStacks())
         try await willPublishList?(catalog)
         return list
     }
@@ -477,6 +492,7 @@ public final class Library: ObservableObject {
         editedImageIDs = list.editedImageIDs
         keywordIndex = list.keywordIndex
         customOrder = list.customOrder
+        stacks = list.stacks
         isPatchingRecords = false
         collections.catalogDidLoad(list.collections, isNewCatalog: isNewCatalog)
         followRecentlyAdded(list.recentlyAdded)

@@ -147,6 +147,9 @@ enum Schema {
         migrator.registerMigration("vcopies_v1_virtual_copies") { db in
             try VirtualCopySchema.migrate(db)
         }
+        migrator.registerMigration("stacks_v1_stack_tables") { db in
+            try StackSchema.migrate(db)
+        }
 
         return migrator
     }
