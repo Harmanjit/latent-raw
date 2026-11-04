@@ -147,8 +147,19 @@ public final class Library: ObservableObject {
     /// GPU pipeline, which the catalog doesn't know about).
     public var thumbnailRenderer: (any EditedThumbnailRenderer)?
     private var thumbnailTask: Task<Void, Never>?
+    /// Thumbnail generation's Pause (the library panel's button and the
+    /// Activity popover). Every pass reads it, so a pass started by an
+    /// edit while paused waits too; a new catalog starts unpaused.
+    public let thumbnailPause = PauseGate()
+    @Published public private(set) var thumbnailsPaused = false
 
     public init() {}
+
+    /// Pauses or resumes thumbnail generation between files.
+    public func setThumbnailsPaused(_ paused: Bool) {
+        if paused { thumbnailPause.pause() } else { thumbnailPause.resume() }
+        thumbnailsPaused = paused
+    }
 
     public var selectedImage: ImageRecord? {
         images.first { $0.id == selectedImageID }
@@ -456,6 +467,7 @@ public final class Library: ObservableObject {
             willReplaceCatalog?()
             if let old = self.catalog, old !== catalog { dropUndo(for: old) }
             thumbnailTask?.cancel()
+            setThumbnailsPaused(false)
             // Image ids belong to a catalog: nothing decoded for the old one
             // may be shown, or cached, under the new one's ids. Ids also
             // restart in every catalog, so two folders can list the same ids
@@ -517,8 +529,9 @@ public final class Library: ObservableObject {
                 await MainActor.run { if self?.catalog === catalog { self?.thumbnailsTotal = needed } }
                 guard needed > 0 else { return }
                 let renderer = await self?.thumbnailRenderer
+                let pause = self?.thumbnailPause
                 let report = try await catalog.generateMissingThumbnails(
-                    editedRenderer: renderer
+                    editedRenderer: renderer, pause: pause
                 ) { done, total in
                     Task { @MainActor in
                         guard self?.catalog === catalog else { return }

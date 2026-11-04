@@ -77,9 +77,12 @@ extension Catalog {
     /// `progress` is called on each completion with (done, total).
     /// `editedRenderer` makes thumbnails for images with edits; without
     /// one, those are skipped (their embedded thumbnail stays).
+    /// While `pause` is paused no new file is started; the files under way
+    /// finish, and the pass carries on from the next one on Resume.
     public func generateMissingThumbnails(
         concurrency: Int = 4,
         editedRenderer: (any EditedThumbnailRenderer)? = nil,
+        pause: PauseGate? = nil,
         progress: (@Sendable (Int, Int) -> Void)? = nil
     ) async throws -> ThumbnailReport {
         await beginThumbnailPass()
@@ -140,6 +143,7 @@ extension Catalog {
                 }
             }
 
+            await pause?.waitWhilePaused()
             for _ in 0..<min(concurrency, jobs.count) { enqueue() }
             while let (relPath, error) = try await group.next() {
                 done += 1
@@ -159,6 +163,10 @@ extension Catalog {
                     try recordThumbnailKeys(unrecorded.map { ($0.relPath, $0.key) })
                     unrecorded = []
                 }
+                // Paused: nothing new starts. Cancelled while paused, the
+                // wait ends and `enqueue` takes nothing, so the keys of
+                // the files already made are still recorded below.
+                await pause?.waitWhilePaused()
                 enqueue()
             }
             if !unrecorded.isEmpty {
