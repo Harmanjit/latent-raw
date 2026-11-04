@@ -67,6 +67,10 @@ Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to
 
 **Reset to Camera Orientation** (Photo menu) takes away the quarter turns you gave the selected images with ⌘[ and ⌘], so each shows the way the camera recorded it. One ⌘Z gives every image its own turns back.
 
+**Flip Horizontal** and **Flip Vertical** (Photo menu, or right-click) mirror every selected image, exactly as Develop's [Transform](Develop#transform-and-upright) flip does, crop and masks included; in Loupe they flip the image shown, and in Develop the open image. The flip is part of each photo's edit, so it shows in Develop's Transform section and in exports, and one ⌘Z takes it back from every image. A photo whose crop or masks were made before Latent measured them on the camera's active area is skipped and named; open it in Develop once (which converts it) and flip it there or again here.
+
+**Mirror Image Mode** (View menu) draws every thumbnail and the Loupe image mirrored left to right, as Lightroom does, for looking at a composition with fresh eyes. It changes nothing in the photos and is off again at the next launch.
+
 **Stars.** Click the stars under a thumbnail to rate it; the empty ones appear when you point at the cell. Clicking a selected image's stars rates the whole selection, clicking another image's selects it first, and clicking the rating it already has clears it.
 
 **Finder tags** show as coloured dots at the end of the name, up to three per image. See [Finder tags](Library#finder-tags).
@@ -75,11 +79,21 @@ Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to
 
 **Thumbnail size.** The slider in the filter bar, or ⌘= and ⌘- while the grid shows (View > Larger Thumbnails, Smaller Thumbnails). The size is remembered.
 
-**Right-click** an image for Open in Loupe, Open in Develop, Compare Selected (with exactly two selected), Survey Selected (two to four), Rating, Flag, Label, Rotate Left and Right, Create Virtual Copy, Set Copy as Master, Remove Virtual Copy, Copy Settings, Paste Settings, Apply Preset, Export, Reveal in Finder, Rename… (Rename N Images… with several selected, which opens Rename with Template), Rename with Template…, Move to Folder and Copy to Folder, Duplicate, and Add to Quick Collection (B), Add to Collection and, while the grid shows a collection, Remove from it, acting on the selection. Right-click between images for Select All and Reveal Folder in Finder.
+**Right-click** an image for Open in Loupe, Open in Develop, Compare Selected (with exactly two selected), Survey Selected (two to four), Rating, Flag, Label, Rotate Left and Right, Flip Horizontal and Vertical, Create Virtual Copy, Set Copy as Master, Remove Virtual Copy, Copy Settings, Paste Settings, Apply Preset, Export, Reveal in Finder, Rename… (Rename N Images… with several selected, which opens Rename with Template), Rename with Template…, Move to Folder and Copy to Folder, Duplicate, and Add to Quick Collection (B), Add to Collection and, while the grid shows a collection, Remove from it, acting on the selection. Right-click between images for Select All and Reveal Folder in Finder.
 
 **Filter bar** above the grid: rating threshold (click a star for "this many or better"), flag states, colour label, edited-only, camera, lens, keyword, Finder tag, and a search that looks in file names, titles and captions, combined with AND. The Label menu takes any number of labels, plus No Label and Custom Label (a label another application named), and shows images with any one of them. A keyword also finds the photos tagged with keywords inside it (Places finds Places › France › Paris). While a collection is shown, the filter narrows its photos. The count shows how many pass. ⇧⌘L clears the filter. Arrow keys walk only the visible images.
 
-**Sort** by capture time, file name, rating, modified date or Custom. Each key remembers its own direction: the first time, capture time and modified run newest first, rating most stars first, and file name and Custom front to back. Latent reopens with the last sort you used, whichever folder you open.
+**Sort** (the menu in the filter bar, or View › Sort) by capture time, file name, rating, modified date or Custom, or by Lightroom's other orders:
+
+- **Added order**: the order the photos joined the catalog.
+- **Edit time** and **Edit count**: when each photo's edit was last saved, and how many steps its history holds (the history keeps its most recent steps, so a long-edited photo stops counting at that cap). Unedited photos come last.
+- **Pick**: picks, then unflagged, then rejects.
+- **Label text** (alphabetically by the label's name) and **Label colour** (red, yellow, green, blue, purple, then labels another application wrote).
+- **File extension**, and **File type**, which groups every camera raw as Raw and puts DNG, JPEG, HEIF and TIFF on their own.
+- **Aspect ratio**, from tall to wide as the photo shows in the grid, after the camera's orientation and your quarter turns. The crop isn't taken into account.
+- **Title**, **Caption**, **Camera**, **Lens**, **ISO** and **Focal length**.
+
+Photos with nothing to sort by (no label, no lens, no title) come last in either direction. The arrow beside the menu, or **View › Sort › Reverse Sort Order**, turns the order round. Each key remembers its own direction: the first time, capture time, modified, edit time, edit count, rating and pick start with the newest, the most or the picks, and the rest run front to back (A to Z, smallest first). Latent reopens with the last sort you used, whichever folder you open.
 
 **Custom sort.** Choose Custom, then drag thumbnails to arrange them. The arrangement is saved per folder in `_latent/custom-order.json`, so it survives a rebuilt catalog and moves with the folder. New files appear after your arrangement, by name. Images hidden by a filter keep their places. An image renamed or moved within the folder with Latent's own commands keeps its place, and so does a file renamed in Finder, the next time the folder is opened. ⌘Z undoes a rearrangement.
 
@@ -128,7 +142,7 @@ The left panel shows the selected image's name, rating, flag, colour label, keyw
 
 ## Loupe, Compare and Survey
 
-**Loupe** (E, or Space from the grid) shows one image full size with a caption. Arrows step, Z toggles fit and 100%, rating keys act on the image shown.
+**Loupe** (E, or Space from the grid) shows one image full size with a caption. Arrows step, Z toggles fit and 100%, rating keys act on the image shown. With View › Mirror Image Mode on it is drawn mirrored, and zooming, panning and the magnifier follow the mirrored picture.
 
 **Compare** (C) pins a "Select" on the left and walks a "Candidate" on the right with the arrows. While **Sync** (in the Compare bar) is on, zoom and pan stay matched by position in each picture, so images with different crops, rotations or sizes show the same region, and a candidate stepped in while zoomed keeps the zoom. ⇧X promotes the candidate to Select; Swap exchanges them. Rating keys act on the candidate. Sync is on at each launch.
 

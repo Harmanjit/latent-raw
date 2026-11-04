@@ -19,6 +19,9 @@ struct ImageViewport: View {
     /// two-finger swipe at fit steps once per swipe; nil (Compare) it
     /// doesn't.
     var onStep: ((Int) -> Void)? = nil
+    /// Loupe: drawn mirrored while View › Mirror Image Mode is on.
+    var followsMirrorImageMode = false
+    @ObservedObject private var mirrorImageMode = MirrorImageMode.shared
 
     /// A Develop tool owns clicks and drags on the image, so there's no
     /// swipe to another image and no magnifier while one is armed.
@@ -60,7 +63,8 @@ struct ImageViewport: View {
                                 onToolMoved: { model.imageToolMoved(to: $0) },
                                 onToolEnded: { model.imageToolEnded() },
                                 clipping: allowsTools ? model.clipping : [],
-                                onPointer: allowsTools ? { model.pointerMoved(to: $0) } : nil)
+                                onPointer: allowsTools ? { model.pointerMoved(to: $0) } : nil,
+                                mirrored: followsMirrorImageMode && mirrorImageMode.isOn)
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isImage)
                     .accessibilityLabel(model.imageTitle ?? "Image")

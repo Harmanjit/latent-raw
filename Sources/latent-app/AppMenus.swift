@@ -85,6 +85,9 @@ struct CommandState: Equatable {
     var showsRegularCollection = false
     /// What B does: "Add to Quick Collection", or the target's name.
     var targetCollectionTitle = "Add to Quick Collection"
+    /// View › Sort's tick, and Mirror Image Mode's.
+    var sortKey = LibrarySort.default.key
+    var mirrorImageMode = false
 
     /// Whether the arrow keys pan the image rather than step through images
     /// (Loupe and Develop only; Compare keeps them for the candidate).
@@ -200,6 +203,7 @@ struct CommandState: Equatable {
         case .addToTargetCollection: hasCatalog && (hasSelection || selectionCount > 0)
         case .removeFromCollection: showsRegularCollection && (hasSelection || selectionCount > 0)
         case .geometry(let geometry): isEnabled(geometry)
+        case .libraryView(let command): isEnabled(command)
         }
     }
 
@@ -375,6 +379,8 @@ struct LatentCommands: Commands {
             item("Remove from Survey", .removeFromSurvey)
             Divider()
             item("Clear Filters", .clearFilter)
+            LibraryViewMenuItems(state: state, item: { AnyView(item($0, $1)) },
+                                 toggle: { AnyView(toolToggle($0, $1, isOn: $2)) })
             Divider()
         }
 
@@ -396,6 +402,7 @@ struct LatentCommands: Commands {
             item("Rotate Left", .rotate(-1))
             item("Rotate Right", .rotate(1))
             item("Reset to Camera Orientation", .geometry(.resetOrientation))
+            FlipMenuItems { AnyView(item($0, $1)) }
             Divider()
             item("Create Virtual Copy", .createVirtualCopy)
             item("Set Copy as Master", .setCopyAsMaster)

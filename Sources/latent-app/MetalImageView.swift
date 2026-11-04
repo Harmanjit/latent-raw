@@ -68,6 +68,10 @@ struct MetalImageView: NSViewRepresentable {
     /// The pointer moved over the view (nil: it left), for the colour
     /// readout. nil when nothing wants it, so no tracking is set up.
     var onPointer: ((CGPoint?) -> Void)? = nil
+    /// Mirror Image Mode: the picture drawn mirrored left to right, and
+    /// the pointer read through the same mirror so zoom, pan and the
+    /// magnifier land where they look. A view only.
+    var mirrored = false
 
     func makeNSView(context: Context) -> MetalLayerView {
         let view = MetalLayerView()
@@ -92,6 +96,7 @@ struct MetalImageView: NSViewRepresentable {
         view.allowsMagnifier = allowsMagnifier
         view.clipping = clipping
         view.onPointer = onPointer
+        view.mirrored = mirrored
         view.display(preview: preview, tile: tile, transform: transform, frame: frame,
                      magnifierTile: magnifierTile)
     }
@@ -137,6 +142,10 @@ final class MetalLayerView: NSView {
         didSet { if (onPointer == nil) != (oldValue == nil) { updateTrackingAreas() } }
     }
     private var pointerTracking: NSTrackingArea?
+    /// See `MetalImageView.mirrored`.
+    var mirrored = false {
+        didSet { if mirrored != oldValue { applyMirror() } }
+    }
 
     /// Fires with the screen's refresh while there is a frame to draw, and
     /// is paused the rest of the time, so several changes in one refresh
@@ -284,6 +293,22 @@ final class MetalLayerView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         updateDrawableSize()
+        applyMirror()
+    }
+
+    override func layout() {
+        super.layout()
+        applyMirror()
+    }
+
+    /// Mirrors the layer about its centre, or puts it back. Applied again
+    /// whenever the size changes, since the mirror depends on the width.
+    private func applyMirror() {
+        guard let metalLayer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        metalLayer.setMirrored(mirrored)
+        CATransaction.commit()
     }
 
     private var backingScale: CGFloat { window?.backingScaleFactor ?? 2 }
@@ -370,8 +395,14 @@ final class MetalLayerView: NSView {
     /// Event location as device pixels with a top-left origin, which is
     /// the coordinate system ViewportTransform speaks.
     private func screenPoint(for event: NSEvent) -> CGPoint {
-        let p = convert(event.locationInWindow, from: nil)
+        let p = mirroredPoint(convert(event.locationInWindow, from: nil))
         return CGPoint(x: p.x * backingScale, y: p.y * backingScale)
+    }
+
+    /// A point in view points as the picture under it sees it: across the
+    /// mirror in Mirror Image Mode.
+    private func mirroredPoint(_ p: CGPoint) -> CGPoint {
+        mirrored ? CGPoint(x: bounds.width - p.x, y: p.y) : p
     }
 
     /// Trackpad pinch.
@@ -409,7 +440,7 @@ final class MetalLayerView: NSView {
             onZoom?(factor, screenPoint(for: event))
         case .pan(let points):
             // Precise deltas are in points; the model pans in device pixels.
-            onPan?(CGSize(width: points.width * backingScale, height: points.height * backingScale))
+            onPan?(CGSize(width: points.width * backingScale * (mirrored ? -1 : 1), height: points.height * backingScale))
         case .none:
             break
         }
@@ -490,7 +521,7 @@ final class MetalLayerView: NSView {
             }
             return
         }
-        onPan?(CGSize(width: event.deltaX * backingScale,
+        onPan?(CGSize(width: event.deltaX * backingScale * (mirrored ? -1 : 1),
                       height: event.deltaY * backingScale))
     }
 
@@ -551,8 +582,9 @@ final class MetalLayerView: NSView {
 
     /// Shows or moves the magnifier to `location` (view points). It draws
     /// at once from whatever the model has, and the model sharpens it.
-    private func showMagnifier(at location: CGPoint) {
+    private func showMagnifier(at viewLocation: CGPoint) {
         let scale = backingScale
+        let location = mirroredPoint(viewLocation)
         let loupe = ViewerInteraction.Magnifier(
             center: CGPoint(x: location.x * scale, y: location.y * scale),
             radius: ViewerInteraction.Magnifier.radiusPoints * scale,

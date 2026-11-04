@@ -138,7 +138,9 @@ extension LibrarySort {
         case .captureTime: return old.captureTime != new.captureTime
         case .rating: return old.rating != new.rating
         case .modified: return old.mtime != new.mtime
-        case .fileName, .custom: return false
+        case .fileName, .custom, .addedOrder, .editTime, .editCount: return false
+        default:
+            return key.field(of: old, editStats: [:]) != key.field(of: new, editStats: [:])
         }
     }
 }
