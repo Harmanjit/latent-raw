@@ -720,26 +720,28 @@ public final class Library: ObservableObject {
         if !failures.isEmpty { throw SelectionChangeError(total: records.count, failures: failures) }
     }
 
-    public func setRating(_ rating: Int, onlyPrimary: Bool = false) async throws {
+    /// `targets`, when given, are the images to change instead of the
+    /// selection's (read before Auto Advance moved it, `cullingTargets`).
+    public func setRating(_ rating: Int, onlyPrimary: Bool = false, targets: [ImageRecord]? = nil) async throws {
         let written = catalog, after = min(max(rating, 0), 5), before = UndoLedger<Int>()
         defer {
             let changed = before.recorded.filter { $0.value != after }
             fileFreshUndo("Rating", count: changed.count, in: written,
                           undo: .rating(changed), redo: .rating(changed.mapValues { _ in after }))
         }
-        try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in
+        try await change(targets ?? metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in
             if let previous = try await catalog.exchangeRating(rating, forImageID: id) { before.record(id, previous) }
         }
     }
 
-    public func setFlag(_ flag: ImageFlag, onlyPrimary: Bool = false) async throws {
+    public func setFlag(_ flag: ImageFlag, onlyPrimary: Bool = false, targets: [ImageRecord]? = nil) async throws {
         let written = catalog, before = UndoLedger<Int>()
         defer {
             let changed = before.recorded.filter { $0.value != flag.rawValue }
             fileFreshUndo("Flag", count: changed.count, in: written,
                           undo: .flag(changed), redo: .flag(changed.mapValues { _ in flag.rawValue }))
         }
-        try await change(metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in
+        try await change(targets ?? metadataTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in
             if let previous = try await catalog.exchangeFlag(flag, forImageID: id) { before.record(id, previous) }
         }
     }

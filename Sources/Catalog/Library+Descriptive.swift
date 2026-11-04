@@ -5,14 +5,14 @@ import Foundation
 extension Library {
     /// Sets the label of every image a rating would change (the visible
     /// selection, or the primary only, `batchTargets`). Nil clears it.
-    public func setLabel(_ label: String?, onlyPrimary: Bool = false) async throws {
+    public func setLabel(_ label: String?, onlyPrimary: Bool = false, targets: [ImageRecord]? = nil) async throws {
         let written = catalog, after = DescriptiveField.normalized(label) ?? "", before = UndoLedger<String>()
         defer {
             let changed = before.recorded.filter { $0.value != after }
             fileFreshUndo("Label", count: changed.count, in: written,
                           undo: .label(changed), redo: .label(changed.mapValues { _ in after }))
         }
-        try await change(batchTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in
+        try await change(targets ?? batchTargets(onlyPrimary: onlyPrimary)) { catalog, id, _ in
             if let previous = try await catalog.exchangeLabel(after, forImageID: id) {
                 before.record(id, previous.label ?? "")
             }

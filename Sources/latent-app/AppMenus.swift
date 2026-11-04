@@ -204,6 +204,11 @@ struct CommandState: Equatable {
         case .removeFromCollection: showsRegularCollection && (hasSelection || selectionCount > 0)
         case .geometry(let geometry): isEnabled(geometry)
         case .libraryView(let command): isEnabled(command)
+        // Culling (CullingCommands.swift). The Select commands and Refine
+        // Photos work on the grid, as Lightroom's Library does.
+        case .advance(let command): command.isCulling && isEnabled(command) && hasVisibleImages
+        case .toggleAutoAdvance: true
+        case .select, .refinePhotos: mode == .library && hasVisibleImages
         }
     }
 
@@ -302,6 +307,7 @@ struct LatentCommands: Commands {
     @FocusedValue(\.commandContext) private var context
     @ObservedObject private var keyWindowText = KeyWindowTextFocus.shared
     @ObservedObject private var externalEditors = ExternalEditorSettings.shared
+    @ObservedObject private var culling = CullingPreferences.shared
 
     private var state: CommandState {
         var state = context?.state ?? CommandState()
@@ -346,6 +352,7 @@ struct LatentCommands: Commands {
             Divider()
             item("Copy Settings", .copySettings)
             item("Paste Settings", .pasteSettings)
+            CullingSelectMenu { AnyView(item($0, $1)) }
         }
 
         CommandGroup(before: .toolbar) {
@@ -398,6 +405,8 @@ struct LatentCommands: Commands {
                 Divider()
                 item("No Label", .label(nil))
             }
+            toolToggle("Auto Advance", .toggleAutoAdvance, isOn: culling.autoAdvance)
+            item("Refine Photos…", .refinePhotos)
             Divider()
             item("Rotate Left", .rotate(-1))
             item("Rotate Right", .rotate(1))

@@ -39,10 +39,14 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Finder tags are read, never written.** A tag changed in Finder shows when the folder is next scanned: at once while it is watched, otherwise after Refresh Folder.
 - **Undo in the Library has edges.** It covers ratings, flags, labels, titles, captions, creators and copyrights, rotation, keywords, collections, pasted settings and presets, Custom sort rearrangements, virtual copies, and moves, copies, duplicates and renames. Exports and Auto Import can't be undone. Opening another folder clears it, except for moves, copies and renames. A move, copy or rename can't be undone while an export, print, contact sheet or Photo Merge is running.
 <!-- RECONCILE: two branches edited this; merge into one text -->
+<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Mirror Image Mode mirrors the grid and Loupe only.** The filmstrip, Compare, Survey, Develop, the second display and slideshows show photos the right way round, and the mode isn't remembered between launches. Flipping a selection outside Develop skips photos whose crop or masks predate the active-area change until they are opened in Develop once.
 - **Aspect ratio sorting ignores the crop**, and Edit count counts the steps the history keeps (it is capped), not every change ever made. There is no Lightroom Media Type sort, since Latent catalogues no video.
 
 - **Not every background job can be paused.** A Photo Merge, a print, a contact sheet and a watched-folder import have no Pause (Auto Import can be switched off in Settings instead), and a paused job carries on from where it was only while Latent stays open: quitting stops it, and nothing is resumed at the next launch. A paused export or selection job still keeps the Mac from sleeping, as a running one does. Nothing waits in a queue: a job that needs the graphics processor while another holds it is refused, not queued.
+<!-- /RECONCILE -->
+
+- **Culling shortcuts are simpler than Lightroom's.** Select by Rating picks exactly that many stars (no "or more" and no add, subtract or intersect with the selection), and the Select commands and Refine Photos work only in the grid.
 <!-- /RECONCILE -->
 - **Renaming files on import** isn't possible, since there is no import step; Rename with Template renames photos already in the folder.
 - **Rename, Move and Copy work only in the Library grid,** and not while an export, print, contact sheet or Photo Merge is running.

@@ -39,6 +39,9 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | 0–5 | Stars |
 | P, X, U | Pick, reject, unflag |
 | 6–9 | Red, yellow, green, blue label (the same key again takes it off) |
+| ⇧ with a star, flag or label key | Set it and move on to the next photo (Lightroom's auto-advance once; ⇧X is still Make Select in Compare) |
+| Caps Lock on | Star, flag and label keys move on to the next photo, as Photo › Auto Advance does |
+| ⌘D, ⌥⌘A, ⌥⇧⌘D | In the grid: select none, select the picked photos, deselect the unflagged ones (Edit › Invert Selection and Select by Flag, Rating or Colour Label have no keys) |
 | ⌘[, ⌘] | Rotate left, right |
 | ⇧⌘L | Clear the filter bar |
 | B | Add the selection to the target collection (the Quick Collection unless you chose another), or take it out when it is all there already |

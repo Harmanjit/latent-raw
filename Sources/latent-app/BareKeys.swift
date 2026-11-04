@@ -56,7 +56,9 @@ struct BareKeyPress: Equatable {
 /// (if any) reach it. The keys themselves are in `Shortcuts.all`, one
 /// table for single keys and Command shortcuts alike; Lightroom's keys, so
 /// muscle memory carries over. `ContentView.perform(_:)` runs them all.
-enum KeyCommand: Equatable {
+/// Sendable said outright, since the indirect `advance` case stops Swift
+/// inferring it and the shortcut table is a static `[Shortcut]`.
+enum KeyCommand: Equatable, Sendable {
     case step(Int), openSelection
     case library, develop, loupe, compare, toggleLoupe, toggleZoom
     case rate(Int), pick, reject, unflag
@@ -129,6 +131,11 @@ enum KeyCommand: Equatable {
     case geometry(GeometryCommand)
     /// Photo › Flip for the selection, View › Sort and Mirror Image Mode.
     case libraryView(LibraryViewCommand)
+    /// Culling (CullingCommands.swift): a star, flag or label and then the
+    /// next photo (Shift with its key, or Caps Lock), Photo › Auto Advance,
+    /// Edit's Select commands and Photo › Refine Photos.
+    indirect case advance(KeyCommand)
+    case toggleAutoAdvance, select(CullingSelection), refinePhotos
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).
@@ -285,11 +292,15 @@ struct BareKeyMonitor: NSViewRepresentable {
                                            shift: flags.contains(.shift), command: flags.contains(.command),
                                            option: flags.contains(.option), control: flags.contains(.control)),
                   !press.belongs(to: KeyFocus(window.firstResponder)),
-                  let command = KeyCommand.command(for: press) else { return false }
+                  let resolved = CullingKeys.commands(for: press, unshifted: CullingKeys.unshiftedPress(of: event),
+                                                      capsLock: flags.contains(.capsLock))
+            else { return false }
+            let (command, fallback) = resolved
             // A repeat of a command that must not repeat is swallowed, so the
             // held key neither runs it again nor reaches anything else.
             if event.isARepeat && !command.repeatsWhileHeld { return true }
-            return perform?(command) ?? false
+            if perform?(command) == true { return true }
+            return fallback.map { perform?($0) ?? false } ?? false
         }
     }
 }

@@ -127,6 +127,11 @@ enum Shortcuts {
         Shortcut(.rotate(-1), "[", .command),
         Shortcut(.rotate(1), "]", .command),
         Shortcut(.clearFilter, "l", [.shift, .command]),
+        // Lightroom's selection keys: Select None, Select Flagged (picked)
+        // and Deselect Unflagged.
+        Shortcut(.select(.none), "d", .command),
+        Shortcut(.select(.flag(.picked)), "a", [.option, .command]),
+        Shortcut(.select(.deselectUnflagged), "d", [.option, .shift, .command]),
         // Lightroom's keys: B adds to the target (Quick) collection, ⌘N
         // makes a collection.
         Shortcut(.addToTargetCollection, "b"),
@@ -303,6 +308,9 @@ extension Shortcuts {
             ShortcutPageRow([.pick, .reject, .unflag], "Pick, reject, unflag"),
             ShortcutPageRow([.label(.red), .label(.yellow), .label(.green), .label(.blue)],
                             "Red, yellow, green, blue label (the same key again takes it off)"),
+            ShortcutPageRow(keys: .gesture("⇧ with a star, flag or label key"), "Set it and move on to the next photo (Lightroom's auto-advance once; ⇧X is still Make Select in Compare)"),
+            ShortcutPageRow(keys: .gesture("Caps Lock on"), "Star, flag and label keys move on to the next photo, as Photo › Auto Advance does"),
+            ShortcutPageRow([.select(.none), .select(.flag(.picked)), .select(.deselectUnflagged)], "In the grid: select none, select the picked photos, deselect the unflagged ones (Edit › Invert Selection and Select by Flag, Rating or Colour Label have no keys)"),
             ShortcutPageRow([.rotate(-1), .rotate(1)], "Rotate left, right"),
             ShortcutPageRow([.clearFilter], "Clear the filter bar"),
             ShortcutPageRow([.addToTargetCollection], "Add the selection to the target collection (the Quick Collection unless you chose another), or take it out when it is all there already"),
