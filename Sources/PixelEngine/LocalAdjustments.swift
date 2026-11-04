@@ -62,6 +62,17 @@ public struct LocalAdjustment: Equatable, Sendable, Codable, Identifiable {
     public var sharpness: Float = 0
     public var noise: Float = 0
     public var defringe: Float = 0
+    /// A point curve inside the mask: master, and red, green and blue
+    /// (Lightroom's Curve in a mask), on the same display-referred,
+    /// gamma 2.2 scale as the global curve. nil is a straight line.
+    public var curve: ToneCurve?
+    public var channelCurves: RGBCurves?
+    /// Point Colour swatches that act only inside the mask, at most
+    /// `maximumPointColours`.
+    public var pointColours: [PointColour] = []
+    /// Grain inside the mask, its own amount, size and roughness, on top
+    /// of any global grain. nil is none.
+    public var grain: Grain?
 
     public init(id: UUID = UUID(), name: String, shape: MaskShape, invert: Bool = false,
                 exposureEV: Float = 0, contrast: Float = 0, saturation: Float = 0, warmth: Float = 0,
@@ -87,7 +98,7 @@ public struct LocalAdjustment: Equatable, Sendable, Codable, Identifiable {
     /// detail stage runs after the colour kernel for this mask.
     public var wantsDetailStage: Bool {
         !hidden && amount > 0 && (texture != 0 || clarity != 0 || dehaze != 0 || sharpness != 0
-            || noise > 0 || defringe > 0)
+            || noise > 0 || defringe > 0 || wantsToneColourStage)
     }
 
     /// Limited by the GPU-side array; more would need a different layout.
@@ -203,16 +214,23 @@ public struct BrushStroke: Equatable, Sendable, Codable {
     /// Opacity each dab adds, 0...1.
     public var flow: Float
     public var erase: Bool
+    /// Auto Mask: each dab paints only where the picture is like the
+    /// colour and brightness under the brush's centre (BrushAutoMask.swift).
+    /// nil is off, as every stroke was before.
+    public var autoMask: Bool?
     /// The most coverage the stroke can build up, 0…1 (Lightroom's
     /// Density): painting over it again never goes past. nil is full, as
     /// every stroke was before.
     public var density: Float?
 
     public init(points: [SIMD2<Float>], radius: Float, feather: Float, flow: Float, erase: Bool,
-                density: Float? = nil) {
+                density: Float? = nil, autoMask: Bool? = nil) {
         self.points = points; self.radius = radius; self.feather = feather
         self.flow = flow; self.erase = erase; self.density = density
+        self.autoMask = autoMask == true ? true : nil
     }
+
+    var isAutoMasked: Bool { autoMask == true }
 }
 
 /// Restrict a mask to a band of displayed luminance (0 = black, 1 = white),
@@ -372,12 +390,17 @@ final class BrushMaskRasterizer {
     private let context: CGContext
     private var drawnFingerprint: [StrokeFingerprint] = []
     private var drawnPointsInLast = 0
+    /// The guide Auto Mask strokes were drawn against; a different one
+    /// (or the first, after drawing without) redraws everything.
+    private var drawnGuide: UUID?
+    private var guide: BrushGuide?
 
     struct StrokeFingerprint: Equatable {
-        let radius: Float, feather: Float, flow: Float, erase: Bool, density: Float?
+        let radius: Float, feather: Float, flow: Float, erase: Bool, density: Float?, autoMask: Bool
         let first: SIMD2<Float>
         init(_ s: BrushStroke) {
             radius = s.radius; feather = s.feather; flow = s.flow; erase = s.erase; density = s.density
+            autoMask = s.isAutoMasked
             first = s.points.first ?? SIMD2(-1, -1)
         }
     }
@@ -401,12 +424,16 @@ final class BrushMaskRasterizer {
 
     /// Brings the bitmap up to date with `strokes`. Returns true if
     /// anything was drawn (so the texture needs re-uploading).
-    func update(strokes: [BrushStroke]) -> Bool {
+    func update(strokes: [BrushStroke], guide: BrushGuide? = nil) -> Bool {
         let fingerprints = strokes.map(StrokeFingerprint.init)
-        let extendsDrawn = !strokes.isEmpty
+        let usesGuide = strokes.contains(where: \.isAutoMasked)
+        let guideChanged = usesGuide && guide?.id != drawnGuide
+        self.guide = guide
+        if usesGuide { drawnGuide = guide?.id }
+        let extendsDrawn = !guideChanged && !strokes.isEmpty
             && fingerprints == drawnFingerprint
             && strokes.last!.points.count >= drawnPointsInLast
-        let extendsWithNewStroke = strokes.count == drawnFingerprint.count + 1
+        let extendsWithNewStroke = !guideChanged && strokes.count == drawnFingerprint.count + 1
             && Array(fingerprints.dropLast()) == drawnFingerprint
             && (drawnFingerprint.isEmpty || drawnPointsInLast == strokeBefore(strokes).count)
 
@@ -443,6 +470,10 @@ final class BrushMaskRasterizer {
     /// coverage up to 1 without ever exceeding it; erasing multiplies
     /// what's there by (1 − dab), which `darken` with black achieves.
     private func draw(_ stroke: BrushStroke, points: [SIMD2<Float>]) {
+        if stroke.isAutoMasked, let guide, guide.width == width, guide.height == height {
+            drawAutoMasked(stroke, points: points, guide: guide)
+            return
+        }
         let radiusPx = CGFloat(stroke.radius) * CGFloat(min(width, height))
         guard radiusPx > 0.5 else { return }
         let inner = CGFloat(1 - min(max(stroke.feather, 0), 1))
@@ -523,7 +554,7 @@ final class BrushMaskSet {
     /// element id -> slice. `aiMasks` supplies the pixels for model
     /// elements, by element id; one without pixels yet gets no slice
     /// (and masks nothing).
-    func sync(locals: [LocalAdjustment], aiMasks: [UUID: MaskBitmap]) -> [UUID: Int32] {
+    func sync(locals: [LocalAdjustment], aiMasks: [UUID: MaskBitmap], guide: BrushGuide? = nil) -> [UUID: Int32] {
         let elements = locals.flatMap(\.maskElements).filter { $0.shape.usesMaskSlice }
         // Room for every element: grow the array, starting the slices
         // over (the rasterizers redraw and the model masks upload again).
@@ -557,7 +588,7 @@ final class BrushMaskSet {
                     entry = (slice, raster)
                     rasterizers[element.id] = entry
                 }
-                if entry.raster.update(strokes: strokes), let bytes = entry.raster.data {
+                if entry.raster.update(strokes: strokes, guide: guide), let bytes = entry.raster.data {
                     texture.replace(region: MTLRegionMake2D(0, 0, entry.raster.width, entry.raster.height),
                                     mipmapLevel: 0, slice: entry.slice, withBytes: bytes,
                                     bytesPerRow: entry.raster.bytesPerRow, bytesPerImage: 0)

@@ -207,6 +207,9 @@ public final class ImageSession {
     /// A 1x1 array texture to bind when there are no brush masks: Metal
     /// requires every declared texture slot to be bound.
     private var placeholderMasks: MTLTexture?
+    /// What Auto Mask brush strokes compare against (BrushAutoMask.swift),
+    /// built by the first render whose edit has one.
+    var brushGuide: BrushGuide?
 
     /// Pixels for AI-generated masks, keyed by local id. Set by the app
     /// after MLKit produces them; the session only stores and uploads.
@@ -303,7 +306,7 @@ public final class ImageSession {
                                           sensorHeight: file.summary.rawHeight)
             }
             guard let set = brushMasks else { return (nil, [:]) }
-            return (set.texture, set.sync(locals: locals, aiMasks: aiMasks))
+            return (set.texture, set.sync(locals: locals, aiMasks: aiMasks, guide: brushGuide))
         }
         if placeholderMasks == nil {
             let d = MTLTextureDescriptor()
@@ -581,6 +584,7 @@ public final class ImageSession {
         guard level == .critical else { return false }
         brushMasks = nil
         placeholderMasks = nil
+        brushGuide = nil
         if touchUpMasks != nil {
             touchUpMasks = nil
             touchUpMaskTexture = nil
