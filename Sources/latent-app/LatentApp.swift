@@ -73,7 +73,7 @@ final class MainWindowModels {
     static let shared = MainWindowModels()
 
     let model = EditorModel()
-    let library = PairedJPEGDefaults.attached(to: LibrarySortDefaults.attached(to: Library()))
+    let library = PerformanceSettings.attached(to: PairedJPEGDefaults.attached(to: LibrarySortDefaults.attached(to: Library())))
     let exportQueue: ExportQueue
     /// Photo › Photo Merge, taking turns with the export queue for the GPU.
     let photoMerge: PhotoMergeQueue

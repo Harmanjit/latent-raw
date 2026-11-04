@@ -31,8 +31,12 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Find folder**, **Add Parent Folder…** and **volume meters** in the sidebar help you get around and keep an eye on free space. See [The sidebar](Library#the-sidebar).
 - **JPEG, HEIC, TIFF and PNG** (and WebP and AVIF where macOS reads them) are catalogued and open in Develop, looking exactly as they are. See [JPEG, TIFF and other pictures](Develop#jpeg-tiff-and-other-pictures).
 - **RAW+JPEG pairs** show as one photo, and the JPEG moves and renames with its raw. See [RAW+JPEG pairs](Library#rawjpeg-pairs).
+<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Verify Files** reads every file again and finds ones that were silently damaged (same size and date, different content), with a mark on their thumbnails. See [Verifying files](Library#verifying-files).
 - **Find Duplicates** groups photos whose files are identical, or taken at the same moment, and selects or rejects all but the one to keep. See [Finding duplicates](Library#finding-duplicates).
+
+- **Settings › Performance** sets thumbnail quality, how hard background thumbnail generation works and how much memory the grid keeps, and shows and tidies the folder's thumbnail cache; **File › Rebuild Thumbnails** remakes the selection's. Big folders also sort, search and keep their selection faster. See [Thumbnails and performance](Library#thumbnails-and-performance).
+<!-- /RECONCILE -->
 
 ## Colour and tone
 

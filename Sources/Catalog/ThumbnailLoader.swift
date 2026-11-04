@@ -139,6 +139,13 @@ public final class ThumbnailLoader: @unchecked Sendable {
         }
     }
 
+    /// The most bytes of decoded thumbnails kept (Settings › Performance).
+    /// Lowering it evicts the least recently used straight away.
+    public var memoryBudget: Int {
+        get { lock.withLock { memory.budget } }
+        set { lock.withLock { memory.budget = max(0, newValue) } }
+    }
+
     /// A thumbnail already in memory, for drawing a cell synchronously
     /// without a placeholder flash. A larger tier also satisfies the
     /// request (the layer scales it down).

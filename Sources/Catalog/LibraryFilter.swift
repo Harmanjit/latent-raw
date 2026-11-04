@@ -47,10 +47,13 @@ public struct LibraryFilter: Equatable, Sendable {
         if let keyword, !keywords.contains(where: { KeywordPath.path($0, isWithin: keyword) }) { return false }
         if let finderTag, !FinderTag.stored(record.finderTags, contains: finderTag) { return false }
         if !labels.isEmpty, !labels.contains(where: { $0.matches(record.label) }) { return false }
-        let needle = text.trimmingCharacters(in: .whitespaces)
+        let needle = text.isEmpty ? "" : text.trimmingCharacters(in: .whitespaces)
         // The name, or the title or caption the photographer gave it.
-        if !needle.isEmpty, ![record.fileName, record.title ?? "", record.caption ?? ""]
-            .contains(where: { $0.range(of: needle, options: .caseInsensitive) != nil }) {
+        // Tested one at a time, without building an array per record: this
+        // runs over the whole folder at every keystroke in the search field.
+        if !needle.isEmpty, record.fileName.range(of: needle, options: .caseInsensitive) == nil,
+           record.title?.range(of: needle, options: .caseInsensitive) == nil,
+           record.caption?.range(of: needle, options: .caseInsensitive) == nil {
             return false
         }
         return true
@@ -120,6 +123,7 @@ public extension Array where Element == ImageRecord {
         if sort.key == .custom {
             return CustomOrder.arranged(self, positions: customPositions, ascending: sort.ascending)
         }
+        if let keyed = keyedSorted(by: sort) { return keyed }
         switch sort.key {
         case .captureTime, .rating, .modified, .fileName, .custom:
             break

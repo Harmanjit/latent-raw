@@ -1387,6 +1387,8 @@ struct ContentView: View {
             fileCommands.transferSelection(.copy, to: nil)
         case .refreshFolder:
             library.refreshFromDisk()
+        case .rebuildThumbnails:
+            library.rebuildThumbnails(for: library.batchTargets(onlyPrimary: mode != .library))
         case .createVirtualCopy, .setCopyAsMaster, .removeVirtualCopy, .duplicatePhoto:
             VirtualCopyCommands(library: library, model: model, inGrid: mode == .library, open: { load($0) }).perform(command)
         case .back:

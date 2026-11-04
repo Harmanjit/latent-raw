@@ -43,6 +43,21 @@ _latent/
 
 **Network volumes** use SQLite's rollback journal instead of write-ahead logging, which is unreliable over SMB and NFS.
 
+### Thumbnails and performance
+
+Thumbnails are made in the background as soon as a folder opens: from the camera's embedded preview for an unedited raw, from the picture itself for a JPEG or TIFF, and from your edit once you have edited a photo. Everything larger than a thumbnail (Loupe, Develop, the second display) is rendered live from the raw, so there are no larger previews to build or to wait for.
+
+**Settings › Performance** controls them:
+
+- **Quality**: how finely the 512 px HEIC thumbnails are compressed. Low, Standard (the default) or High. A change applies to thumbnails made from then on.
+- **Background generation**: Low makes two at a time on the efficiency cores and leaves the Mac to you; Normal (the default) makes four; High uses every core but two and fills a new folder fastest. It takes effect from the next pass.
+- **Memory for the grid**: how much memory decoded thumbnails may keep, so scrolling back needs no decoding. Automatic is a thirty-second of the Mac's memory, between 64 and 256 MB. Half is given back when macOS runs short of memory, all of it when memory is critical.
+- **Thumbnail cache**: how many files the open folder's `_latent/thumbnails` holds and how much disk they take, including any that no photo uses any more. **Remove Unused** deletes those; **Discard and Rebuild All…** throws every thumbnail of the folder away and makes them all again at the current quality.
+
+**File › Rebuild Thumbnails** makes the selected photos' thumbnails again, from their current edits and at the current quality (in Loupe and Develop, the photo on screen). The old thumbnail stays until the new one replaces it. Use it after changing the quality, or if a thumbnail looks wrong.
+
+Thumbnail progress reaches the status bar at most ten times a second, so a big folder filling in doesn't slow the window down.
+
 ## Supported files
 
 **Raw files:** NEF, NRW, ARW, SRF, SR2, CR2, CR3, CRW, DNG, RAF, ORF, RW2, PEF, SRW, 3FR, FFF, IIQ, MOS, MRW, X3F. Decoding is by LibRaw. Only Bayer-pattern sensors render; see [Limitations](Limitations).
