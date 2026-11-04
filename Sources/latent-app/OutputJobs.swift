@@ -40,6 +40,9 @@ final class OutputJobs {
         /// Find Faces over the selection, for touch-up (SelectionJobQueue).
         /// Stopping it keeps the photos already done too.
         case findFaces
+        /// Flat-Field Correction or a pasted Upright mode analysed over the
+        /// selection (SelectionJobQueue). Stopping it keeps the photos done.
+        case batchEdit
     }
 
     struct Job: Identifiable {
@@ -69,6 +72,7 @@ final class OutputJobs {
         case .hdrPanoramaMerge: "Merging an HDR panorama from \(name)"
         case .dustRemoval: "Removing dust from \(name)"
         case .findFaces: "Finding faces in \(name)"
+        case .batchEdit: "Updating \(name)"
         }
         let job = Job(kind: kind, name: name, cancel: cancel, activity: ExportActivity(reason: reason))
         running.append(job)
@@ -105,6 +109,7 @@ final class OutputJobs {
             || $0.kind == .hdrPanoramaMerge }
         let dust = jobs.filter { $0.kind == .dustRemoval }
         let faces = jobs.filter { $0.kind == .findFaces }
+        let batch = jobs.filter { $0.kind == .batchEdit }
         // One merge runs at a time, so "merge" below is one kind's word
         // unless a future queue runs two.
         let mergeWord = merges.allSatisfy { $0.kind == .panoramaMerge } ? "panorama merge"
@@ -122,6 +127,7 @@ final class OutputJobs {
         // One selection job runs at a time, so each of these is one job.
         if !dust.isEmpty { underWay.append("removing sensor dust from photos") }
         if !faces.isEmpty { underWay.append("finding faces for touch-up") }
+        if !batch.isEmpty { underWay.append("updating the edits of photos") }
         // What quitting stops, then what it waits for.
         var stopped: [String] = []
         if !sheets.isEmpty {
@@ -134,6 +140,7 @@ final class OutputJobs {
         }
         if !dust.isEmpty { stopped.append("the dust removal, which keeps the photos already done") }
         if !faces.isEmpty { stopped.append("the face search, which keeps the photos already done") }
+        if !batch.isEmpty { stopped.append("the update, which keeps the photos already done") }
         var information = stopped.isEmpty ? "" : "Quitting now stops " + stopped.joined(separator: ", and ")
         if !prints.isEmpty {
             information += (information.isEmpty ? "Quitting now " : ", and ")

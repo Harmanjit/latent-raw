@@ -646,11 +646,17 @@ final class EditorModel: ObservableObject {
     /// remembers what the user usually wants.
     @Published var pasteGroups: Set<EditGroup> = {
         if let raw = UserDefaults.standard.array(forKey: "latent.pasteGroups") as? [String] {
-            return Set(raw.compactMap(EditGroup.init(rawValue:)))
+            let groups = Set(raw.compactMap(EditGroup.init(rawValue:)))
+            // Saved before Crop's transform was split into its own groups.
+            return UserDefaults.standard.bool(forKey: "latent.pasteGroups.transformSplit")
+                ? groups : EditGroup.upgradingLegacy(groups)
         }
         return EditGroup.lookGroups
     }() {
-        didSet { UserDefaults.standard.set(pasteGroups.map(\.rawValue), forKey: "latent.pasteGroups") }
+        didSet {
+            UserDefaults.standard.set(pasteGroups.map(\.rawValue), forKey: "latent.pasteGroups")
+            UserDefaults.standard.set(true, forKey: "latent.pasteGroups.transformSplit")
+        }
     }
 
     @Published var presets: [Preset] = PresetStore.load()

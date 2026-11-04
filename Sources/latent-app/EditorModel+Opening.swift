@@ -133,6 +133,7 @@ extension EditorModel {
             regenerateTouchUpMasksIfNeeded()
             regenerateDepthMapIfNeeded()
             regenerateAIDenoiseIfNeeded()
+            ensureFlatFieldGainMap()
         } catch {
             // Nothing of the previous photo may outlive a failed open: with
             // its id, history or denoise run still here, Undo or a history

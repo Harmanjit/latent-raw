@@ -75,6 +75,8 @@ struct ContentView: View {
     /// Photo › Remove Dust… over the selection, or over the open image in
     /// Develop (then in memory, through the editor's history).
     @State private var removeDustSheet: RemoveDustSheetModel?
+    /// Photo › Flat-Field Correction… over the selection.
+    @State private var flatFieldSheet: FlatFieldSheetModel?
     /// Compare's left pane ("Select"): its own render, created the first
     /// time Compare opens. The right pane ("Candidate") is the main model,
     /// which follows the selection as arrow keys move it.
@@ -254,6 +256,11 @@ struct ContentView: View {
         }
         .sheet(item: $removeDustSheet) { sheet in
             RemoveDustSheet(model: sheet, onRemove: { startRemoveDust(from: $0) }, canRemove: !exportQueue.isGPUBusy)
+                .motionFollowsAccessibility()
+        }
+        .sheet(item: $flatFieldSheet) { sheet in
+            FlatFieldSheet(model: sheet, onApply: { $0.start(queue: selectionJobs, model: model, library: library) },
+                           canApply: !exportQueue.isGPUBusy)
                 .motionFollowsAccessibility()
         }
         .sheet(item: $templateRenaming) { request in
@@ -1264,6 +1271,14 @@ struct ContentView: View {
             beginHDRPanoramaMerge()
         case .removeDust:
             presentRemoveDust(inMemory: mode == .develop)
+        case .flatFieldCorrection:
+            // The selection in the grid, where the reference is picked
+            // among it; the photo shown in the other views.
+            let records = library.batchTargets(onlyPrimary: mode != .library)
+            let urls = records.compactMap { library.fileURL(for: $0) }
+            if !records.isEmpty, urls.count == records.count {
+                flatFieldSheet = FlatFieldSheetModel(records: records, urls: urls)
+            }
         case .slideshow:
             SlideshowController.start(model: model, library: library)
         case .editExternally:
@@ -1556,6 +1571,14 @@ struct ContentView: View {
                    !selectionJobs.start(FaceFindJob(), records: targets, library: library, gpu: gpu) {
                     library.lastError = PastedTouchUp.refused
                 }
+            }
+            // A pasted Upright Mode is analysed on each photo, after the
+            // face search if one started (OpticsJobs.swift).
+            if stack.wantsUprightAnalysis(groups: groups), let gpu = model.gpuContext {
+                model.flushPendingSave()
+                PastedUpright.start(PastedTouchUp.jobTargets(library.batchTargets(onlyPrimary: target == .primary),
+                                                             handledByEditor: handledByEditor),
+                                    queue: selectionJobs, library: library, gpu: gpu)
             }
         }
     }

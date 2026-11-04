@@ -74,6 +74,9 @@ enum KeyCommand: Equatable {
     /// Photo › Remove Dust…: dust found or verified in every selected photo
     /// (in memory on the open image in Develop).
     case removeDust
+    /// Photo › Flat-Field Correction…: a reference frame's falloff and cast
+    /// taken out of every selected photo (the open one in Develop).
+    case flatFieldCorrection
     case makeSelect
     /// Survey (N), and taking its focused pane away.
     case survey, removeFromSurvey

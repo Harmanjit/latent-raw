@@ -137,6 +137,11 @@ struct CommandState: Equatable {
         case .removeDust:
             editorReady && (mode == .develop ? hasImage : selectionCount >= 1) && !exportQueueRunning
             && !photoMergeRunning && !fileOperationRunning && !isEditingText
+        // Over catalog photos only, written by the job queue as Remove
+        // Dust's batch is, so the same conditions.
+        case .flatFieldCorrection:
+            editorReady && selectionCount >= 1 && !exportQueueRunning && !photoMergeRunning
+            && !fileOperationRunning && !isEditingText
         // Survey's panes aren't the editor's image, which may be one from before.
         case .exportOpenImage: hasImage && !exportingOpenImage && mode != .survey
         // Library prints the selection, and so does Survey, whose selection
@@ -403,6 +408,7 @@ struct LatentCommands: Commands {
                 item("HDR Panorama… (Experimental)", .photoMergeHDRPanorama)
             }
             item("Remove Dust…", .removeDust)
+            item("Flat-Field Correction…", .flatFieldCorrection)
             Divider()
             item(state.targetCollectionTitle, .addToTargetCollection)
             item("Remove from Collection", .removeFromCollection)
