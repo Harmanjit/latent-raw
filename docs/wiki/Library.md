@@ -185,6 +185,21 @@ A virtual copy is another version of a photo: its own edit, rating, flag, colour
 
 **Moving, copying or duplicating a copy** acts on its master's file: Move to Folder moves the master, with all its copies; Copy to Folder and Duplicate copy the master's file with the master's settings. To get a copy's settings into a file of its own, use Set Copy as Master first, or export it. Rename is not available for a copy, since it has no file of its own.
 
+## Verifying files
+
+**Photo › Verify Files…** reads the selected photos' files again, or every file in the folder when nothing is selected, and compares each with the content hash the catalog recorded when it last saw the file change. Lightroom does this for DNGs only (Validate DNG Files); Latent does it for every file it catalogues, raws included. It runs in the background, with its progress and Cancel in the left panel, and reads from the disk rather than from memory, so a file opened a minute ago is still checked on disk. Each file is:
+
+- **Verified**: its content matches.
+- **Changed since the last scan**: its size or date differs, so something changed it on purpose (another app saved it, it was replaced). Refresh Folder (⌘R) records the new content.
+- **Damaged**: the same size and date, but different content. Nothing changes a file that way on purpose: it is silent corruption from a failing disk, a bad copy or a damaged backup. Restore it from a backup.
+- **Missing** or **couldn't be read**.
+
+When the run ends a sheet lists what was not verified, with **Select Damaged Photos** to select them in the grid. A damaged photo has a red warning triangle at the top-left of its thumbnail (its virtual copies too, since they share the file) until the file changes, for example when you restore it. Verify reads each file once: a virtual copy is checked through its master's file. Stopping it, or quitting, keeps the results for the files already checked.
+
+## Finding duplicates
+
+**Photo › Find Duplicates…** lists photos in the folder whose files are byte-for-byte identical, in groups. Virtual copies share their file on purpose and are never counted. A second list, **Same moment, camera and size, different files**, shows photos taken at the same second by the same camera at the same pixel size whose files differ, such as a copy with rewritten metadata; treat those as likely rather than certain duplicates. In each group the first photo is the one to keep: one with an edit, then the higher rating, then the first by path. Click a photo to select it in the grid. **Select All but First** selects the rest of every group, and **Reject All but First** also flags them rejected (⌘Z takes it back); tick **Include same-moment photos** to take in the second list too. Latent never deletes a file, so removing the rejected ones is up to you in Finder.
+
 ## Undo
 
 ⌘Z and ⇧⌘Z undo and redo what you did in Library, Loupe, Compare and Survey: ratings, picks and rejects, colour labels, titles, captions, creators and copyrights, rotation, keywords (added, removed, renamed or deleted), collections (made, renamed, moved, deleted, photos added or taken out), settings pasted or presets applied, a Custom sort rearrangement, virtual copies made, removed or set as master, and moves, copies, duplicates and renames. The Edit menu names the step, as in Undo Paste Settings (12 Images). Each image goes back to its own previous value. In Develop, ⌘Z steps through that image's edit history instead, and while you are typing in a field, ⌘Z undoes only the typing. Opening another folder clears the undo of ratings, flags, labels, titles and the other text fields, rotation, keywords, collections, settings and rearrangements; moves, copies and renames can still be undone.
