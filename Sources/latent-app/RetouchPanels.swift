@@ -58,6 +58,27 @@ struct RedEyeSection: View {
             }
             .controlSize(.small)
 
+            HStack(spacing: 8) {
+                Picker("Eye type", selection: Binding(get: { model.activeRedEyeKind },
+                                                      set: { model.activeRedEyeKind = $0 })) {
+                    Text("Red Eye").tag(RedEyeSpot.Kind.human)
+                    Text("Pet Eye").tag(RedEyeSpot.Kind.pet)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help("Red Eye fixes a person's flash-red pupil. Pet Eye replaces an animal's glowing green, yellow or white pupil with a dark one")
+                .accessibilityLabel("Eye type")
+                Spacer()
+                if model.activeRedEyeKind == .pet {
+                    Toggle("Add Catchlight", isOn: Binding(get: { model.activePetEyeCatchlight },
+                                                           set: { model.activePetEyeCatchlight = $0 }))
+                        .toggleStyle(.checkbox)
+                        .help("Adds a small highlight to the dark pupil, up and to the left, so the eye looks alive")
+                }
+            }
+            .controlSize(.small)
+
             row("Pupil Size", value: Binding(get: { model.activeRedEyeRadiusPixels },
                                              set: { model.activeRedEyeRadiusPixels = $0 }),
                 range: 2...400, format: "%.0f px", defaultValue: model.redEyeDefaultRadiusPixels)
@@ -68,7 +89,7 @@ struct RedEyeSection: View {
 
             HStack {
                 let n = model.parameters.redEyes.count
-                Text(n == 0 ? "No red-eye spots. Click a red pupil, or Auto."
+                Text(n == 0 ? "No red-eye spots. Click a red pupil, or Auto; for a pet, choose Pet Eye and circle its pupil."
                      : "\(n) red-eye spot\(n == 1 ? "" : "s")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)

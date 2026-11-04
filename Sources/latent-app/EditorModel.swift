@@ -43,6 +43,7 @@ final class EditorModel: ObservableObject {
                 touchUpParametersDidChange(from: oldValue)
                 modelMaskParametersDidChange(from: oldValue)
                 lensBlurParametersDidChange(from: oldValue)
+                reflectionParametersDidChange(from: oldValue)
             }
         }
     }
@@ -132,6 +133,10 @@ final class EditorModel: ObservableObject {
     /// Default size of the next spot; editing a selected spot updates it too.
     @Published var redEyeRadius: Float = RedEyeSpot.defaultRadius
     @Published var detectingRedEyes = false
+    /// Red Eye or Pet Eye for the next spot (EditorModel+PetEye.swift).
+    @Published var redEyeKind: RedEyeSpot.Kind = .human
+    /// Whether a new Pet Eye spot gets a catchlight.
+    @Published var petEyeCatchlight = true
     var redEyeDrag: RedEyeDrag?
 
     // MARK: - Sensor dust (EditorModel+Dust.swift)
@@ -222,6 +227,10 @@ final class EditorModel: ObservableObject {
 
     /// The depth map's job and source, Show Depth and Pick Focus.
     let lensBlurState = LensBlurState()
+
+    // MARK: - Reflections (EditorModel+Reflections.swift)
+
+    let reflectionState = ReflectionState()
 
     // MARK: - Crop and straighten
 
