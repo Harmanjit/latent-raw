@@ -975,7 +975,7 @@ enum MaskSubstitutions {
         case .depth:
             // Lens Blur's depth falls back to the subject mask's two planes.
             return LensBlurDepth.displayName(of: LensBlur.subjectDepthVersion, registry: registry)
-        case .denoise:
+        case .denoise, .reflectionRemoval:
             return nil
         }
     }

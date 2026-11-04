@@ -81,6 +81,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// Lens Blur (LensBlur.swift). Absent when neutral, so an edit
         /// that never used it encodes exactly as before.
         public var lensblur: LensBlur?
+        /// Distraction Removal › Reflections (ReflectionRemoval.swift).
+        /// Absent while off, so older edits encode exactly as before.
+        public var reflections: ReflectionRemoval?
         /// HDR Limit (`HDRLimit`). Absent at the default two stops, so
         /// edits that never touched it encode exactly as before.
         public var hdr: HDR?
@@ -278,6 +281,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         setColourControls(p.colour)
         modules.profile = p.profile?.sanitized
         modules.lensblur = p.lensBlur.isNeutral ? nil : p.lensBlur
+        modules.reflections = p.reflections.isNeutral ? nil : p.reflections
         modules.presence = (p.texture == 0 && p.clarity == 0 && p.dehaze == 0) ? nil
             : Presence(texture: p.texture, clarity: p.clarity, dehaze: p.dehaze)
         modules.vibrance = p.vibrance == 0 ? nil : Vibrance(amount: p.vibrance)
@@ -356,6 +360,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         p.touchUp = (modules.touchup ?? .neutral).sanitized
         p.profile = modules.profile?.sanitized
         p.lensBlur = (modules.lensblur ?? .neutral).sanitized
+        p.reflections = (modules.reflections ?? .neutral).sanitized
         if let pr = modules.presence { p.texture = pr.texture; p.clarity = pr.clarity; p.dehaze = pr.dehaze }
         else { p.texture = 0; p.clarity = 0; p.dehaze = 0 }
         p.vibrance = modules.vibrance?.amount ?? 0

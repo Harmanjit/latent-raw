@@ -92,6 +92,7 @@ final class ModelSettingsModel: ObservableObject {
         case .semanticSegmentation: "Classes"
         case .denoise: "Denoise"
         case .depth: "Depth"
+        case .reflectionRemoval: "Reflections"
         }
     }
 
