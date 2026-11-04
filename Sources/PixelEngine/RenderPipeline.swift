@@ -356,6 +356,8 @@ public struct RenderOutput: Sendable, Equatable {
     /// show (`SoftProofLUT.gamutCheck`), painted blue. nil = no monitor
     /// gamut warning.
     public var monitorGamut: SoftProofLUT? = nil
+    /// The colours the two warnings are painted in (GamutWarningColours.swift).
+    public var gamutWarningColours = GamutWarningColours.standard
     /// Visualise Spots, drawn over the viewport after sharpening. Never
     /// set for a file, like `maskOverlay`.
     public var spotVisualisation: SpotVisualisation? = nil
@@ -397,7 +399,7 @@ public struct RenderOutput: Sendable, Equatable {
             && a.headroom == b.headroom && a.encoded == b.encoded
             && a.toneMapped == b.toneMapped && a.maskOverlay == b.maskOverlay
             && a.proof?.id == b.proof?.id && a.gamutWarning == b.gamutWarning
-            && a.monitorGamut?.id == b.monitorGamut?.id
+            && a.monitorGamut?.id == b.monitorGamut?.id && a.gamutWarningColours == b.gamutWarningColours
             && a.spotVisualisation == b.spotVisualisation && a.touchUpOverlay == b.touchUpOverlay
             && a.sharpenMaskPreview == b.sharpenMaskPreview
             && a.depthVisualisation == b.depthVisualisation
@@ -1534,10 +1536,13 @@ public final class RenderPipeline {
 
         // Bits: 1 proof, 2 destination gamut warning, 4 monitor gamut
         // warning. Both warnings belong to proofing, so neither is set
-        // without a proof table.
-        var proofMode: UInt32 = output.proof == nil ? 0
-            : 1 | (output.gamutWarning ? 2 : 0) | (output.monitorGamut != nil ? 4 : 0)
-        encoder.setBytes(&proofMode, length: 4, index: 22)
+        // without a proof table. Bit 8: the warning colours follow in the
+        // other three words (GamutWarningColours.packedWords).
+        let warningColours = output.gamutWarningColours.packedWords
+        var proofMode = SIMD4<UInt32>(output.proof == nil ? 0
+            : 1 | (output.gamutWarning ? 2 : 0) | (output.monitorGamut != nil ? 4 : 0) | 8,
+            warningColours.x, warningColours.y, warningColours.z)
+        encoder.setBytes(&proofMode, length: 16, index: 22)
         var vibrance = parameters.vibrance
         encoder.setBytes(&vibrance, length: 4, index: 23)
         encodeToneRangesAndChannelCurves(encoder, parameters: parameters)
