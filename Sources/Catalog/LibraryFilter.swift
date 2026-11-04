@@ -61,6 +61,11 @@ public enum LibrarySortKey: String, CaseIterable, Sendable {
     case captureTime, fileName, rating, modified
     /// The arrangement the user makes by dragging (see `CustomOrder`).
     case custom
+    // Lightroom's other orders, and a few from the metadata
+    // (LibrarySortOrders.swift has what each one reads).
+    case addedOrder, editTime, editCount, pick, labelText, labelColour
+    case fileExtension, fileType, aspectRatio, title, caption
+    case camera, lens, iso, focalLength
 
     public var title: String {
         switch self {
@@ -69,6 +74,21 @@ public enum LibrarySortKey: String, CaseIterable, Sendable {
         case .rating: "Rating"
         case .modified: "Modified"
         case .custom: "Custom"
+        case .addedOrder: "Added order"
+        case .editTime: "Edit time"
+        case .editCount: "Edit count"
+        case .pick: "Pick"
+        case .labelText: "Label text"
+        case .labelColour: "Label colour"
+        case .fileExtension: "File extension"
+        case .fileType: "File type"
+        case .aspectRatio: "Aspect ratio"
+        case .title: "Title"
+        case .caption: "Caption"
+        case .camera: "Camera"
+        case .lens: "Lens"
+        case .iso: "ISO"
+        case .focalLength: "Focal length"
         }
     }
 }
@@ -93,10 +113,22 @@ public extension Array where Element == ImageRecord {
     /// way, so they never crowd the top of a descending list.
     ///
     /// `customPositions` is the saved arrangement for the Custom key
-    /// (`CustomOrder.positions`); other keys ignore it.
-    func sorted(by sort: LibrarySort, customPositions: [String: Int] = [:]) -> [ImageRecord] {
+    /// (`CustomOrder.positions`); other keys ignore it. `editStats` holds
+    /// what Edit time and Edit count read (`Library.editStats`).
+    func sorted(by sort: LibrarySort, customPositions: [String: Int] = [:],
+                editStats: [Int64: LibraryEditStat] = [:]) -> [ImageRecord] {
         if sort.key == .custom {
             return CustomOrder.arranged(self, positions: customPositions, ascending: sort.ascending)
+        }
+        switch sort.key {
+        case .captureTime, .rating, .modified, .fileName, .custom:
+            break
+        default:
+            // Each record's value worked out once, not at every comparison.
+            let fields = map { sort.key.field(of: $0, editStats: editStats) }
+            return indices.sorted { i, j in
+                orderFields(fields[i], fields[j], self[i], self[j], ascending: sort.ascending)
+            }.map { self[$0] }
         }
         let sorted = self.sorted { a, b in
             switch sort.key {
@@ -113,7 +145,7 @@ public extension Array where Element == ImageRecord {
                 let c = a.sourceFileName.localizedStandardCompare(b.sourceFileName)
                 if c == .orderedSame { return a.relPath < b.relPath }
                 return sort.ascending ? c == .orderedAscending : c == .orderedDescending
-            case .custom:
+            default:
                 return false   // handled above
             }
         }

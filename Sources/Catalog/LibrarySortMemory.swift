@@ -15,12 +15,9 @@ public struct LibrarySortMemory: Equatable, Sendable {
 
     /// Where a key starts: newest first for the dates and most stars first
     /// for rating, as a shoot is reviewed; A to Z and the user's own
-    /// arrangement front to back.
+    /// arrangement front to back (`LibrarySortKey.naturalAscending`).
     public static func naturalAscending(_ key: LibrarySortKey) -> Bool {
-        switch key {
-        case .captureTime, .modified, .rating: false
-        case .fileName, .custom: true
-        }
+        key.naturalAscending
     }
 
     public func ascending(for key: LibrarySortKey) -> Bool {

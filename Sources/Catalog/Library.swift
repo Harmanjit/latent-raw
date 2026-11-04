@@ -40,10 +40,15 @@ public final class Library: ObservableObject {
             guard sort != oldValue else { return }
             recomputeVisible()
             sortDidChange?(sort, sortMemory)
+            if sort.key != oldValue.key { refreshEditStatsIfSorted() }
         }
     }
     /// The directions of the sort keys not showing (see `chooseSortKey`).
     public var sortMemory = LibrarySortMemory()
+    /// What the Edit time and Edit count sorts read, kept only while one
+    /// of them is chosen (Library+EditStats.swift).
+    public internal(set) var editStats: [Int64: LibraryEditStat] = [:]
+    var editStatsGeneration = 0
     /// Called after every change of `sort`, with the directions to keep.
     /// The app saves both here so the choice outlives the launch; tests and
     /// a Library without the app keep them in memory only.
@@ -101,6 +106,7 @@ public final class Library: ObservableObject {
     @Published public internal(set) var editedImageIDs: Set<Int64> = [] {
         didSet {
             if filter.editedOnly || collections.activeScope?.readsEdits == true, !isPatchingRecords { recomputeVisible() }
+            if !isPatchingRecords { refreshEditStatsIfSorted() }
         }
     }
 
@@ -228,7 +234,7 @@ public final class Library: ObservableObject {
                     && (!filter.isActive || filter.matches(record, isEdited: isEdited, keywords: keywords))
             }
             : shown
-        let next = passing.sorted(by: sort, customPositions: customPositions)
+        let next = passing.sorted(by: sort, customPositions: customPositions, editStats: editStats)
         if next != visibleImages {
             if !next.elementsEqual(visibleImages, by: { $0.id == $1.id }) {
                 visibleListVersion += 1
@@ -477,10 +483,12 @@ public final class Library: ObservableObject {
         editedImageIDs = list.editedImageIDs
         keywordIndex = list.keywordIndex
         customOrder = list.customOrder
+        if isNewCatalog { editStats = [:] }
         isPatchingRecords = false
         collections.catalogDidLoad(list.collections, isNewCatalog: isNewCatalog)
         followRecentlyAdded(list.recentlyAdded)
         recomputeVisible()
+        refreshEditStatsIfSorted()
         if let selected = selectedImageID, !images.contains(where: { $0.id == selected }) {
             selectedImageID = nil
         }
@@ -917,6 +925,8 @@ public final class Library: ObservableObject {
     public func setHistory(_ steps: [(stackJSON: String, createdAt: Int64)], forImageID id: Int64,
                            in target: Catalog? = nil) async throws {
         try await (target ?? catalog)?.setHistory(steps, forImageID: id)
+        // Edit count reads the history.
+        if target == nil || target === catalog { refreshEditStatsIfSorted() }
     }
 
     // MARK: - Navigation
