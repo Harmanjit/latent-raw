@@ -68,6 +68,8 @@ Every file name is planned before anything is written. A line shows the first fi
 
 **After export.** **Show in Finder when done**, and **Open in** an application you choose (Choose App…), which opens the exported files in it, as Lightroom's Open in Other Application does.
 
+**Add to this catalog.** When an export writes into the open folder (or a subfolder it includes, as with Same folder as original), **Add to this catalog** indexes the new files as soon as the export finishes, rather than when the folder watcher next notices them, and selects them in the grid. **Stack** then puts each one in a stack with the photo it was exported from, just **above** or **below** it; the stack is left expanded so the new file shows. Files written elsewhere are left alone, and the status bar says how many. Not for Original + XMP sidecar, which is the same photo again. See [Stacks](Library#stacks).
+
 **Presets.** Save the current sheet under a name; four built-ins cover web at 2048 px, full-size JPEG, print TIFF in P3, and proofs by date. A preset keeps every setting above, including its location.
 
 **Export with several presets** (multi-batch). Open it at the top of the sheet and tick saved presets: one run exports the selection once with each, one preset after another, say a web JPEG and a print TIFF. A preset that writes to a chosen folder writes into a subfolder of the sheet's destination named after the preset; one set to the same folder as the original writes there; one set to choose later asks for its folder when the export starts. The sheet's own settings aren't used while presets are ticked.

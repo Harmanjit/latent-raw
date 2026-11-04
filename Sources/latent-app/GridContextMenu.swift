@@ -70,6 +70,7 @@ enum GridContextMenu {
                                  ("Set Copy as Master", .setCopyAsMaster), ("Remove Virtual Copy", .removeVirtualCopy)] {
             menu.addItem(ClosureMenuItem(title, enabled: actions.canRun(command)) { actions.command(command) })
         }
+        StackCommands.addItems(to: menu, actions: actions)
         menu.addItem(.separator())
 
         menu.addItem(ClosureMenuItem("Copy Settings", enabled: hasLead, actions.copySettings))

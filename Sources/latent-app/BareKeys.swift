@@ -136,6 +136,8 @@ enum KeyCommand: Equatable, Sendable {
     /// Edit's Select commands and Photo › Refine Photos.
     indirect case advance(KeyCommand)
     case toggleAutoAdvance, select(CullingSelection), refinePhotos
+    /// Photo › Stacking (StackCommands.swift).
+    case stack(StackCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).

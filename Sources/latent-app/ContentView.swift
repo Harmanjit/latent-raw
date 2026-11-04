@@ -1306,6 +1306,8 @@ struct ContentView: View {
             model.perform(geometry)
         case .libraryView(let command):
             performLibraryView(command)
+        case .stack(let stack):
+            StackCommands(library: library).perform(stack)
         case .zoomIn where mode == .library, .zoomOut where mode == .library:
             prefs.thumbnailSize = ThumbnailGridLayout.stepped(prefs.thumbnailSize, larger: command == .zoomIn)
         case .zoomIn:
@@ -1453,6 +1455,7 @@ struct ContentView: View {
         state.fileOperationRunning = fileOperations.isBusy
         state.primaryIsVirtualCopy = selected?.isVirtualCopy ?? false
         state.selectionHasVirtualCopy = mode == .library && library.selectedImages.contains(where: \.isVirtualCopy)
+        state.stacking = StackCommandState(library: library, mode: mode)
         state.surveyHasImage = survey.focusedModel?.hasImage ?? false
         state.fullScreenImage = fullScreen.isActive
         state.hasSecondDisplay = secondDisplay.hasSecondScreen

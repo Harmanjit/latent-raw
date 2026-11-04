@@ -149,6 +149,9 @@ enum Schema {
         }
         // Verify Files' last results (FileIntegrity.swift).
         FileIntegritySchema.register(in: &migrator)
+        migrator.registerMigration("stacks_v1_stack_tables") { db in
+            try StackSchema.migrate(db)
+        }
 
         return migrator
     }
