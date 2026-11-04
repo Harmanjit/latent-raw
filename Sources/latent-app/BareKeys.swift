@@ -111,6 +111,9 @@ enum KeyCommand: Equatable {
     /// File › Refresh Folder: scan the open folder again for files added,
     /// removed or renamed outside Latent.
     case refreshFolder
+    /// File › Rebuild Thumbnails: the selection's thumbnails made again, at
+    /// Settings › Performance's quality (`Library+ThumbnailCache.swift`).
+    case rebuildThumbnails
     /// Photo › Create Virtual Copy, Set Copy as Master, Remove Virtual Copy,
     /// and File › Duplicate (a true copy of the file beside it).
     case createVirtualCopy, setCopyAsMaster, removeVirtualCopy, duplicatePhoto

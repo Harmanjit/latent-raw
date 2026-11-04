@@ -161,6 +161,7 @@ struct PreferencesView: View {
             libraryTab.tabItem { Label("Library", systemImage: "photo.on.rectangle") }
             FolderSettingsTab().tabItem { Label("Folders", systemImage: "folder.badge.gearshape") }
             aiTab.tabItem { Label("AI", systemImage: "cpu") }
+            PerformanceSettingsTab().tabItem { Label("Performance", systemImage: "gauge.with.dots.needle.67percent") }
             SlideshowSettingsTab().tabItem { Label("Slideshow", systemImage: "play.rectangle") }
             ExternalEditorSettingsTab().tabItem { Label("External Editor", systemImage: "arrow.up.forward.app") }
         }

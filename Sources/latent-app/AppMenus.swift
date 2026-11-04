@@ -185,6 +185,7 @@ struct CommandState: Equatable {
             && !outputJobRunning
         case .back: canGoBack
         case .refreshFolder: hasFolder
+        case .rebuildThumbnails: hasFolder && (hasSelection || selectionCount > 0) && mode != .survey
         case .forward: canGoForward
         // The grid goes to Loupe first, which needs a selection.
         case .fullScreenImage: fullScreenImage || hasSelection || (mode == .develop && hasImage)
@@ -307,6 +308,7 @@ struct LatentCommands: Commands {
             item("Open Folder…", .openFolder)
             item("Open File…", .openFile)
             item("Refresh Folder", .refreshFolder)
+            item("Rebuild Thumbnails", .rebuildThumbnails)
             Divider()
             item(state.exportTitle, .export)
             item("Export with Previous", .exportWithPrevious)
