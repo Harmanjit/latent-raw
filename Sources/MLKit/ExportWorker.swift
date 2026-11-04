@@ -210,6 +210,8 @@ public enum ExportWorker {
         } catch {
             throw ExportWorkerError.unreadableEdit(error)
         }
+        // A flat-field correction needs its reference's gain map on this Mac.
+        FlatFieldCache.shared.ensureGainMap(for: parameters.flatField, photo: request.sourceURL, gpu: gpu)
 
         // Model-generated masks are not stored; make them again.
         let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)

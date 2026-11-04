@@ -84,6 +84,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// HDR Limit (`HDRLimit`). Absent at the default two stops, so
         /// edits that never touched it encode exactly as before.
         public var hdr: HDR?
+        /// Flat-field correction (FlatField.swift). Absent when there is
+        /// none, so edits that never used it encode exactly as before.
+        public var flatfield: FlatFieldCorrection?
     }
 
     public struct HDR: Codable, Equatable, Sendable { public var limit: Float }
@@ -290,6 +293,7 @@ public struct EditStack: Codable, Equatable, Sendable {
             : Crop(cx: p.crop.centre.x, cy: p.crop.centre.y, w: p.crop.size.x, h: p.crop.size.y,
                    angle: p.crop.angle, aspect: p.crop.aspect)
         storeDetailEffects(from: p)
+        modules.flatfield = p.flatField?.sanitized
         // Parameters always measure the sensor plane as it is now.
         frame = hasGeometry ? Self.activeAreaFrame : nil
     }
@@ -375,6 +379,7 @@ public struct EditStack: Codable, Equatable, Sendable {
             p.crop = .none
         }
         restoreDetailEffects(into: &p)
+        p.flatField = modules.flatfield?.sanitized
         return p
     }
 

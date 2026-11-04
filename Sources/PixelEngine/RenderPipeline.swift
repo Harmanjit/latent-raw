@@ -179,6 +179,9 @@ public struct EditParameters: Sendable, Equatable {
     public var lensProfile: String? = nil
     public var postCropVignette: PostCropVignette = .off
     public var grain: Grain = .off
+    /// Flat-field correction from a reference raw (FlatField.swift); nil
+    /// for none, which every edit older than it has.
+    public var flatField: FlatFieldCorrection? = nil
 
     public init(whiteBalance: ColorKit.WhiteBalance = .asShot,
                 exposureEV: Float = 0,
@@ -305,6 +308,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.lensProfile == b.lensProfile
             && a.lensBlur == b.lensBlur
             && a.hdrLimitStops == b.hdrLimitStops
+            && a.flatField == b.flatField
     }
 }
 
@@ -727,6 +731,20 @@ public final class RenderPipeline {
             }
         }
         renderInfo = renderInfo.markingHealCached(cachedHealed != nil)
+
+        // Stage 6b: flat-field correction, on the sensor grid before the
+        // lens stage moves pixels (FlatField.swift). Only once this Mac
+        // holds the reference's gain map: whoever opens or exports the
+        // photo makes it first, so a render never waits on a decode.
+        if let flat = parameters.flatField, flat.isActive,
+           let gain = FlatFieldCache.shared.texture(for: flat.hash, gpu: gpu),
+           gain.map.fits(aspect: Float(rawW) / Float(max(1, rawH))) {
+            colourInput = try FlatFieldStage.encode(input: colourInput, gain: gain.texture, amount: flat.amount,
+                                                    sensorSize: SIMD2(Float(rawW), Float(rawH)),
+                                                    sensorRect: sourceInfo.sensorRect, binSpan: binSpan,
+                                                    session: session, preview: displayRole != .display,
+                                                    gpu: gpu, commandBuffer: cmdBuffer)
+        }
 
         // Stage 7: lens corrections, still in camera space.
         if Self.wantsLensCorrection(session: session, parameters: parameters) {

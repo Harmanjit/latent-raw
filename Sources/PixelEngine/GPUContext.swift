@@ -141,6 +141,8 @@ public final class GPUContext: @unchecked Sendable {
         case lensBlurPrepare, lensBlurGather, lensBlurComposite, lensBlurDepthView
         // Export output sharpening (ExportSharpen.metal, ExportOutputSharpening.swift).
         case exportOutputSharpen
+        // Flat-field correction (FlatField.metal, FlatField.swift).
+        case flatFieldApply
     }
 
     /// Built pipelines, by kernel. A Mutex because renders run on several
@@ -299,7 +301,7 @@ public final class GPUContext: @unchecked Sendable {
                             "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye", "Slideshow",
                             "LinearSource", "MergeHDR", "MergeWarp", "MergeDeghost", "MergePanoPrep", "MergePanoBlend",
                             "Dust", "TouchUp", "DetailEffects", "LocalDetail", "Remove", "LensBlur",
-                            "ExportSharpen"]
+                            "ExportSharpen", "FlatField"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound
