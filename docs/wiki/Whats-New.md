@@ -13,6 +13,7 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Title, caption, creator and copyright** for one photo or many, carried into every export. See [Title, caption, creator and copyright](Library#title-caption-creator-and-copyright).
 - **Rename with Template** renames a whole selection from tokens such as `{date}` and `{seq}`, with every new name shown first. See [Moving, copying and renaming](Library#moving-copying-and-renaming).
 - **Virtual copies** (⌘') give one photo several versions with their own edits, sharing the raw file; **Duplicate** makes a real second file. See [Virtual copies](Library#virtual-copies).
+- **Stacks**: Group into Stack (⌘G), Unstack (⇧⌘G), S to expand or collapse, Move to Top of Stack, and Auto-Stack by Capture Time, with the stack's count on its thumbnail. Exports can be added to the catalog and stacked with their originals. See [Stacks](Library#stacks).
 - **Reset to Camera Orientation** takes back the quarter turns you gave the selection. See [The grid](Library#the-grid).
 
 ## Folders and files

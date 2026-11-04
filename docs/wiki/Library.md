@@ -185,9 +185,23 @@ A virtual copy is another version of a photo: its own edit, rating, flag, colour
 
 **Moving, copying or duplicating a copy** acts on its master's file: Move to Folder moves the master, with all its copies; Copy to Folder and Duplicate copy the master's file with the master's settings. To get a copy's settings into a file of its own, use Set Copy as Master first, or export it. Rename is not available for a copy, since it has no file of its own.
 
+## Stacks
+
+A stack folds photos that belong together, such as a burst, a bracket or the frames of a panorama, under one thumbnail, so the grid stays tidy while you cull. Everything is in **Photo › Stacking** and the grid's right-click menu, in the Library grid.
+
+**Group into Stack** (⌘G) puts the selected photos in one stack, with the lead photo (the one the left panel shows) on top. A selected photo that is already in a stack brings its whole stack, so grouping two stacks merges them. A new stack starts collapsed. **Unstack** (⇧⌘G) takes apart every stack the selection touches; **Remove from Stack** takes only the selected photos out, and a stack left with one photo stops being a stack.
+
+**Collapsed and expanded.** A collapsed stack shows its top photo alone, with a chip at the top-left of the picture giving the number of photos in it (▤ 3). Expanded, all its photos show, side by side, each numbered 1/3, 2/3 and so on. **S** (or Expand or Collapse Stack) turns the selected stacks the other way; **Expand All Stacks** and **Collapse All Stacks** do every stack in the folder. **Move to Top of Stack** (⇧S) makes the lead photo the one a collapsed stack shows.
+
+**Auto-Stack by Capture Time…** stacks the whole folder by time: photos taken within the number of seconds you give (60 to start, and remembered) of the one before go into one stack, earliest on top. Photos already in a stack, and photos with no capture time, are left alone.
+
+**Sorting and filtering.** A stack's photos stay together, in stack order, where the first of them falls in the sort. Filters, collections and smart collections look at every photo in a stack: when the top photo doesn't match but another does, a collapsed stack shows the highest photo that matches, so a match is never hidden inside a stack. Ratings, labels and the other marks belong to each photo, not to the stack, and commands such as Export act on the photos selected, so selecting a collapsed stack's top exports that photo alone.
+
+Grouping, unstacking, removing, moving to the top and auto-stacking can be undone; expanding and collapsing is a way of looking and can't. Stacks are kept in the folder's catalog, not in sidecars (see [Limitations](Limitations#workflow)). An export can join its original's stack: see Add to this catalog under [The sheet](Export#the-sheet).
+
 ## Undo
 
-⌘Z and ⇧⌘Z undo and redo what you did in Library, Loupe, Compare and Survey: ratings, picks and rejects, colour labels, titles, captions, creators and copyrights, rotation, keywords (added, removed, renamed or deleted), collections (made, renamed, moved, deleted, photos added or taken out), settings pasted or presets applied, a Custom sort rearrangement, virtual copies made, removed or set as master, and moves, copies, duplicates and renames. The Edit menu names the step, as in Undo Paste Settings (12 Images). Each image goes back to its own previous value. In Develop, ⌘Z steps through that image's edit history instead, and while you are typing in a field, ⌘Z undoes only the typing. Opening another folder clears the undo of ratings, flags, labels, titles and the other text fields, rotation, keywords, collections, settings and rearrangements; moves, copies and renames can still be undone.
+⌘Z and ⇧⌘Z undo and redo what you did in Library, Loupe, Compare and Survey: ratings, picks and rejects, colour labels, titles, captions, creators and copyrights, rotation, keywords (added, removed, renamed or deleted), collections (made, renamed, moved, deleted, photos added or taken out), settings pasted or presets applied, a Custom sort rearrangement, virtual copies made, removed or set as master, stacks grouped, taken apart or auto-stacked, and moves, copies, duplicates and renames. The Edit menu names the step, as in Undo Paste Settings (12 Images). Each image goes back to its own previous value. In Develop, ⌘Z steps through that image's edit history instead, and while you are typing in a field, ⌘Z undoes only the typing. Opening another folder clears the undo of ratings, flags, labels, titles and the other text fields, rotation, keywords, collections, settings and rearrangements; moves, copies and renames can still be undone.
 
 ## Moving, copying and renaming
 
