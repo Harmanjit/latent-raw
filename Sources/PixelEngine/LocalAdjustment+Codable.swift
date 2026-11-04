@@ -15,6 +15,7 @@ extension LocalAdjustment {
         case components, invertMask, amount, modelFeather, modelEdge, hidden
         case highlights, shadows, whites, blacks, tint, hue
         case texture, clarity, dehaze, sharpness, noise, defringe
+        case curve, channelCurves, pointColours, grain
     }
 
     public init(from decoder: Decoder) throws {
@@ -41,6 +42,25 @@ extension LocalAdjustment {
         tint = try slider(.tint); hue = try slider(.hue)
         texture = try slider(.texture); clarity = try slider(.clarity); dehaze = try slider(.dehaze)
         sharpness = try slider(.sharpness); noise = try slider(.noise); defringe = try slider(.defringe)
+        curve = try c.decodeIfPresent([[Float]].self, forKey: .curve).flatMap(Self.decodedCurve)
+        if let rgb = try c.decodeIfPresent([String: [[Float]]].self, forKey: .channelCurves) {
+            let curves = RGBCurves(red: rgb["red"].flatMap(Self.decodedCurve) ?? .identity,
+                                   green: rgb["green"].flatMap(Self.decodedCurve) ?? .identity,
+                                   blue: rgb["blue"].flatMap(Self.decodedCurve) ?? .identity)
+            channelCurves = curves.isIdentity ? nil : curves
+        }
+        pointColours = Array((try c.decodeIfPresent([PointColour].self, forKey: .pointColours) ?? [])
+            .prefix(Self.maximumPointColours).map(\.sanitized))
+        grain = try c.decodeIfPresent(Grain.self, forKey: .grain)?.sanitized
+    }
+
+    /// Points stored as [x, y] pairs, as the global curve is; fewer than
+    /// two, or a straight line, is no curve.
+    private static func decodedCurve(_ pairs: [[Float]]) -> ToneCurve? {
+        let points = pairs.compactMap { $0.count == 2 ? SIMD2($0[0], $0[1]) : nil }
+        guard points.count >= 2 else { return nil }
+        let curve = ToneCurve(points: points)
+        return curve.isIdentity ? nil : curve
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -67,5 +87,16 @@ extension LocalAdjustment {
             (.sharpness, sharpness), (.noise, noise), (.defringe, defringe),
         ]
         for (key, value) in sliders where value != 0 { try c.encode(value, forKey: key) }
+        func pairs(_ curve: ToneCurve) -> [[Float]] { curve.points.map { [$0.x, $0.y] } }
+        if let curve, !curve.isIdentity { try c.encode(pairs(curve), forKey: .curve) }
+        if let rgb = channelCurves, !rgb.isIdentity {
+            var stored: [String: [[Float]]] = [:]
+            if !rgb.red.isIdentity { stored["red"] = pairs(rgb.red) }
+            if !rgb.green.isIdentity { stored["green"] = pairs(rgb.green) }
+            if !rgb.blue.isIdentity { stored["blue"] = pairs(rgb.blue) }
+            try c.encode(stored, forKey: .channelCurves)
+        }
+        if !pointColours.isEmpty { try c.encode(pointColours, forKey: .pointColours) }
+        if let grain, grain.isActive { try c.encode(grain, forKey: .grain) }
     }
 }

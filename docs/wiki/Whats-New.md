@@ -74,6 +74,8 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Mask components**: build a mask from up to seven parts that add, subtract or intersect, such as a subject minus a brush. See [Components](Masking#components-add-subtract-intersect).
 - **More local sliders**: Amount, Highlights, Shadows, Whites, Blacks, Tint, Hue, Texture, Clarity, Dehaze, Sharpness, Noise and Defringe inside a mask. See [The sliders](Masking#the-sliders).
 - **Colour Range** and **Luminance Range** masks, and a brush with **Density**. See [Making a mask](Masking#making-a-mask).
+- **Curve, Point Colour and Grain inside masks**: a point curve with RGB channels, up to four Point Colour swatches and grain, each acting only inside the mask. See [The sliders](Masking#the-sliders).
+- **Auto Mask** for the brush: strokes paint only where the photo is like the colour under the brush, so they stop at edges. See [Auto Mask](Masking#auto-mask).
 - **Edge and Feather** refine the outline of subject, class and selection masks. See [Feather and Edge](Masking#feather-and-edge-for-model-masks).
 - **Select Objects (Box)**, mask renaming, hiding, **Duplicate and Invert** and **Delete Empty Masks**. See [Masking](Masking#looking-after-masks).
 - **Remove** takes a distraction out of the photo, filling it from its surroundings, and **Detect Objects** fills just the object you brushed over. See [Remove and Detect Objects](Develop#remove-and-detect-objects).

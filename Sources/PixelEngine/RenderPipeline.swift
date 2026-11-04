@@ -513,9 +513,10 @@ public final class RenderPipeline {
                         parameters: EditParameters = .neutral,
                         output: RenderOutput? = nil,
                         info: UnsafeMutablePointer<RenderInfo>? = nil) throws -> MTLTexture {
-        try renderStages(session, scale: scale, parameters: parameters,
-                         output: output ?? .file(parameters.outputSpace),
-                         cameraRGBOnly: false, info: info)
+        prepareBrushGuide(session, parameters: parameters)
+        return try renderStages(session, scale: scale, parameters: parameters,
+                                output: output ?? .file(parameters.outputSpace),
+                                cameraRGBOnly: false, info: info)
     }
 
     /// The demosaiced, white-balanced camera-space image — the pipeline
@@ -807,7 +808,9 @@ public final class RenderPipeline {
         if Self.wantsLocalDetail(parameters) {
             final = try applyLocalDetail(session: session, cmdBuffer: cmdBuffer, input: final,
                                          preview: displayRole != .display, parameters: parameters,
-                                         output: output, binSpan: binSpan)
+                                         output: output, binSpan: binSpan,
+                                         tileOrigin: SIMD2(Float(renderInfo.sensorRect.origin.x),
+                                                           Float(renderInfo.sensorRect.origin.y)))
         }
 
         // Stage 18: sharpening, on the display-referred result. Also for

@@ -479,7 +479,8 @@ extension EditorModel {
         case (.brush, .brush(var strokes)), (.erase, .brush(var strokes)):
             strokes.append(BrushStroke(points: [p], radius: brushRadius, feather: brushFeather,
                                        flow: brushFlow, erase: maskTool == .erase,
-                                       density: maskTool == .erase || brushDensity >= 1 ? nil : brushDensity))
+                                       density: maskTool == .erase || brushDensity >= 1 ? nil : brushDensity,
+                                       autoMask: brushAutoMask ? true : nil))
             setActiveMaskShape(.brush(strokes: strokes))
             lastDab = p
         default:
