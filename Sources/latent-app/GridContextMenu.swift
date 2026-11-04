@@ -61,6 +61,10 @@ enum GridContextMenu {
         menu.addItem(submenu("Label", labelItems(targets: targets, actions: actions)))
         menu.addItem(ClosureMenuItem("Rotate Left", enabled: hasLead) { actions.rotate(-1) })
         menu.addItem(ClosureMenuItem("Rotate Right", enabled: hasLead) { actions.rotate(1) })
+        for (title, horizontal) in [("Flip Horizontal", true), ("Flip Vertical", false)] {
+            let command = KeyCommand.libraryView(.flip(horizontal: horizontal))
+            menu.addItem(ClosureMenuItem(title, enabled: actions.canRun(command)) { actions.command(command) })
+        }
         menu.addItem(.separator())
         for (title, command) in [("Create Virtual Copy", KeyCommand.createVirtualCopy),
                                  ("Set Copy as Master", .setCopyAsMaster), ("Remove Virtual Copy", .removeVirtualCopy)] {

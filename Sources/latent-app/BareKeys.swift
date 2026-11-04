@@ -124,6 +124,8 @@ enum KeyCommand: Equatable {
     case addToTargetCollection, removeFromCollection
     /// Crop guides, straighten, flips, Upright, and the camera's orientation.
     case geometry(GeometryCommand)
+    /// Photo › Flip for the selection, View › Sort and Mirror Image Mode.
+    case libraryView(LibraryViewCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).

@@ -53,6 +53,7 @@ struct ContentView: View {
     @ObservedObject private var fileOperations = MainWindowModels.shared.library.fileOperations
     @ObservedObject private var navigator = FolderNavigator.shared
     @ObservedObject private var fullScreen = FullScreenImageMode.shared
+    @ObservedObject private var mirrorImageMode = MirrorImageMode.shared
     @ObservedObject private var secondDisplay = SecondaryDisplay.shared
     /// The second display's Loupe waiting to load a grid selection.
     @State private var secondDisplayLoad: Task<Void, Never>?
@@ -151,7 +152,8 @@ struct ContentView: View {
                     .onDisappear { model.flushPendingSave() }
                 case .loupe:
                     VStack(spacing: 0) {
-                        ImageViewport(model: model, allowsTools: false, onStep: { _ = perform(.step($0)) })
+                        ImageViewport(model: model, allowsTools: false, onStep: { _ = perform(.step($0)) },
+                                      followsMirrorImageMode: true)
                         if !fullScreen.isActive {
                             Divider()
                             ImageCaption(record: library.selectedImage)
@@ -1291,6 +1293,8 @@ struct ContentView: View {
         case .geometry(let geometry):
             guard mode == .develop, model.hasImage else { break }
             model.perform(geometry)
+        case .libraryView(let command):
+            performLibraryView(command)
         case .zoomIn where mode == .library, .zoomOut where mode == .library:
             prefs.thumbnailSize = ThumbnailGridLayout.stepped(prefs.thumbnailSize, larger: command == .zoomIn)
         case .zoomIn:
@@ -1442,7 +1446,31 @@ struct ContentView: View {
         state.fullScreenImage = fullScreen.isActive
         state.hasSecondDisplay = secondDisplay.hasSecondScreen
         state.secondaryDisplayShowing = secondDisplay.isShowing
+        state.sortKey = library.sort.key
+        state.mirrorImageMode = mirrorImageMode.isOn
         return state
+    }
+
+    /// View › Sort and Mirror Image Mode, and Photo › Flip (LibraryViewCommands.swift).
+    private func performLibraryView(_ command: LibraryViewCommand) {
+        switch command {
+        case .flip(let horizontal) where mode == .develop:
+            guard model.hasImage else { return }
+            model.perform(horizontal ? GeometryCommand.flipHorizontal : .flipVertical)
+        case .flip(let horizontal):
+            // The editor's pending save lands first, so the flip reads it.
+            model.flushPendingSave()
+            let onlyPrimary = SettingsTarget.choose(mode: mode, editorHasImage: model.hasImage) != .selection
+            library.perform("Flipping") {
+                reportOutcome(try await LibraryFlip.run(library, horizontal: horizontal, onlyPrimary: onlyPrimary))
+            }
+        case .toggleMirrorImageMode:
+            mirrorImageMode.isOn.toggle()
+        case .sort(let key):
+            library.chooseSortKey(key)
+        case .reverseSortOrder:
+            library.sort.ascending.toggle()
+        }
     }
 
     // MARK: - Settings clipboard and presets, in either mode

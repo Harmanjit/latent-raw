@@ -13,6 +13,7 @@ import Catalog
 struct ThumbnailGridView: NSViewRepresentable {
     @ObservedObject var library: Library
     @ObservedObject private var prefs = AppPreferences.shared
+    @ObservedObject private var mirrorImageMode = MirrorImageMode.shared
     /// Double-click, or Return: open this image in the editor.
     let onOpen: (ImageRecord) -> Void
     /// What the right-click menu does.
@@ -56,6 +57,7 @@ struct ThumbnailGridView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.actions = actions
         context.coordinator.sync(with: library, side: prefs.thumbnailSize)
+        context.coordinator.setMirrored(mirrorImageMode.isOn)
         if let collection = scrollView.documentView as? NSCollectionView {
             let colour = prefs.surroundNSColor
             if collection.backgroundColors.first != colour { collection.backgroundColors = [colour] }
@@ -126,6 +128,16 @@ struct ThumbnailGridView: NSViewRepresentable {
             if reloaded || library.selectedImageID != selectedID || library.selectedImageIDs != selectedIDs {
                 applyLibrarySelection()
             }
+        }
+
+        private var mirrored = false
+
+        /// View › Mirror Image Mode: the cells on screen lay out again
+        /// mirrored (or not); the rest do when they are next configured.
+        func setMirrored(_ on: Bool) {
+            guard on != mirrored else { return }
+            mirrored = on
+            forEachVisibleCell { $0.view.needsLayout = true }
         }
 
         // MARK: Cells
@@ -638,7 +650,7 @@ final class ThumbnailCellView: NSView {
         imageLayer.magnificationFilter = .linear
         // Frames change as cells are reused and resized; they must not animate.
         let still: [String: any CAAction] = ["contents": NSNull(), "bounds": NSNull(),
-                                             "position": NSNull(), "hidden": NSNull()]
+                                             "position": NSNull(), "hidden": NSNull(), "transform": NSNull()]
         imageLayer.actions = still
         placeholderLayer.actions = still
         layer?.addSublayer(placeholderLayer)
@@ -794,7 +806,8 @@ final class ThumbnailCellView: NSView {
         super.layout()
         let info = layoutInfo
         placeholderLayer.frame = info.thumbnailArea
-        imageLayer.frame = imagePixels.map(info.imageFrame(for:)) ?? info.thumbnailArea
+        imageLayer.setFrame(imagePixels.map(info.imageFrame(for:)) ?? info.thumbnailArea,
+                            mirrored: MirrorImageMode.shared.isOn)
         let tagCount = tagDotsView.tags.count
         nameField.frame = info.nameFrame(tagCount: tagCount)
         tagDotsView.frame = info.tagDotsFrame(tagCount: tagCount)
