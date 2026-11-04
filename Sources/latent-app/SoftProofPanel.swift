@@ -93,6 +93,13 @@ struct HDRLimitSlider: View {
                 model.parameters.hdrLimitStops = HDRLimit.defaultStops
             }
             .help("How far above white this photo's highlights may reach on an HDR screen and in a gain-map export. Double-click to reset")
+            Toggle("Visualise HDR Ranges", isOn: Binding(
+                get: { model.clipping.contains(.hdrRanges) },
+                set: { on in
+                    if on { model.clipping.insert(.hdrRanges) } else { model.clipping.remove(.hdrRanges) }
+                }))
+                .controlSize(.small)
+                .help("Grey out the SDR part of the picture and colour what lies above SDR white by stops: blue, green, yellow, orange; magenta reaches the HDR ceiling. Needs HDR display on an HDR screen")
         }
         .disabled(!model.hasImage)
     }

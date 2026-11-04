@@ -379,8 +379,11 @@ struct PixelReadoutText: View {
         Group {
             if let r = probe.readout {
                 let p = r.percent, lab = r.lab
+                // Above SDR white (an HDR view), how far, as Lightroom's
+                // HDR readout does; RGB itself stays on the 0–100 scale.
+                let hdr = r.stopsAboveSDRWhite.map { String(format: "   +%.1f stops", $0) } ?? ""
                 Text(String(format: "R %.0f  G %.0f  B %.0f %%   L %.0f  a %.0f  b %.0f",
-                            p.x, p.y, p.z, lab.x, lab.y, lab.z))
+                            p.x, p.y, p.z, lab.x, lab.y, lab.z) + hdr)
             } else {
                 Text("Point at the photo for its colour")
             }
@@ -389,7 +392,7 @@ struct PixelReadoutText: View {
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
-        .help("The colour under the pointer as shown: RGB in percent, and CIE Lab (D50)")
+        .help("The colour under the pointer as shown: RGB in percent, CIE Lab (D50), and in an HDR view how many stops above SDR white it is")
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Colour under the pointer")
     }

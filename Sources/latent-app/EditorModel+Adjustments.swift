@@ -58,7 +58,9 @@ extension EditorModel {
     }
 
     /// Computes a starting point from the image and applies it. Exposure,
-    /// contrast and white balance change; everything else stays.
+    /// contrast and white balance change, then Highlights, Shadows, Whites,
+    /// Blacks, Vibrance and Saturation are judged on that (AutoTone);
+    /// everything else stays. One history step.
     func autoAdjust() {
         guard let session, let pipeline, let gpuContext else { return }
         do {
@@ -68,6 +70,10 @@ extension EditorModel {
             next.exposureEV = suggestion.exposureEV
             next.contrast = suggestion.contrast
             if let wb = suggestion.whiteBalance { next.whiteBalance = wb }
+            let tone = try AutoTone.suggest(for: session, pipeline: pipeline, gpu: gpuContext, parameters: next)
+            next.toneRanges = tone.toneRanges
+            next.vibrance = tone.vibrance
+            next.colour.saturation = tone.saturation
             parameters = next
         } catch {
             status = "Auto failed: \(error)"

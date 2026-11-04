@@ -158,6 +158,7 @@ struct CommandState: Equatable {
         case .redo: (mode != .develop || hasImage) && redoLabel != nil
             && !(redoChangesFiles && (exportQueueRunning || outputJobRunning))
         case .copySettings: hasImage || hasSelection
+        case .matchTotalExposures: mode == .library && selectionCount >= 2
         case .pasteSettings: hasImage || selectionCount > 0
         case .clearFilter: filterActive
         case .slideshow: hasVisibleImages && editorReady
@@ -403,6 +404,7 @@ struct LatentCommands: Commands {
                 item("HDR Panorama… (Experimental)", .photoMergeHDRPanorama)
             }
             item("Remove Dust…", .removeDust)
+            item("Match Total Exposures", .matchTotalExposures)
             Divider()
             item(state.targetCollectionTitle, .addToTargetCollection)
             item("Remove from Collection", .removeFromCollection)

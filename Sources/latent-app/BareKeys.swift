@@ -98,6 +98,9 @@ enum KeyCommand: Equatable {
     case undo, redo, copySettings, pasteSettings
     case rotate(Int), zoomIn, zoomOut, zoomToFit, zoomToActualSize
     case autoAdjust, clearFilter, swapCompare, revealInFinder
+    /// Photo › Match Total Exposures: the selection's Exposure sliders set
+    /// to the lead photo's total exposure (MatchTotalExposures.swift).
+    case matchTotalExposures
     case addMask(NewMask), toggleMaskOverlay
     /// V: the open image's treatment, Color or Black & White.
     case toggleBlackAndWhite
