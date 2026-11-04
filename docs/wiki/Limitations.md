@@ -51,6 +51,7 @@ An honest list. Some are design decisions, some are unfinished work, some are th
 - **Slideshows are SDR,** even on an HDR screen, and leave out AI noise reduction so each slide is ready in time. The edit's other noise reduction still applies.
 - **The watermark is for exports.** Prints, contact sheets and the TIFF for an external editor don't carry it. It is one line of text or one PNG graphic, in a corner, turned in quarter turns.
 - **A JPEG or PNG contact sheet is one picture,** at most 8192 px a side, holding every photo, so a large selection gets small cells. A PDF can have as many pages as it needs.
+- **No Smart Previews and no larger cached previews.** Thumbnails are 512 px, with no size setting, and Loupe and Develop always render from the raw, so a folder on a disconnected drive can't be browsed or edited. There is no disk cache of decoded raws either: the demosaiced image is kept in memory only while a photo is open. See [Thumbnails and performance](Library#thumbnails-and-performance).
 - **The print panel's preview is drawn from thumbnails.** It shows the layout; the photos themselves are rendered for the printer only when you print.
 - **Showing and hiding the sidebar and filmstrip has no keyboard shortcut or menu item.** The filmstrip has its film button in the status bar.
 

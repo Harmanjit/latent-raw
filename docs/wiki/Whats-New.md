@@ -23,6 +23,7 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Find folder**, **Add Parent Folder…** and **volume meters** in the sidebar help you get around and keep an eye on free space. See [The sidebar](Library#the-sidebar).
 - **JPEG, HEIC, TIFF and PNG** (and WebP and AVIF where macOS reads them) are catalogued and open in Develop, looking exactly as they are. See [JPEG, TIFF and other pictures](Develop#jpeg-tiff-and-other-pictures).
 - **RAW+JPEG pairs** show as one photo, and the JPEG moves and renames with its raw. See [RAW+JPEG pairs](Library#rawjpeg-pairs).
+- **Settings › Performance** sets thumbnail quality, how hard background thumbnail generation works and how much memory the grid keeps, and shows and tidies the folder's thumbnail cache; **File › Rebuild Thumbnails** remakes the selection's. Big folders also sort, search and keep their selection faster. See [Thumbnails and performance](Library#thumbnails-and-performance).
 
 ## Colour and tone
 
