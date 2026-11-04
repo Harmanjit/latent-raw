@@ -194,7 +194,7 @@ tag or a short hash, any of which could later name other code, so
 
 ## A model that is not in the catalogue at all
 
-Latent can use five kinds of model, and a new one has to be one of them:
+Latent can use six kinds of model, and a new one has to be one of them:
 
 | Kind | What it does | Where it shows up |
 |---|---|---|
@@ -203,6 +203,7 @@ Latent can use five kinds of model, and a new one has to be one of them:
 | `semanticSegmentation` | Class labels per pixel, plus a labels file | Class masks |
 | `denoise` | Tiles in, tiles out | AI noise reduction — see the note below |
 | `depth` | One image in, relative depth out (larger is nearer) | Lens Blur's depth map |
+| `reflectionRemoval` | One image in, the same image without reflections out (RGB, 0…1) | Distraction Removal › Reflections; `convert_reflection_removal.py` is the template |
 
 A `denoise` model will import, but nothing offers a choice of one: AI noise
 reduction uses the bundled NAFNet and has no picker, so a second one would

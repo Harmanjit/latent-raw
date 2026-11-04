@@ -77,7 +77,8 @@ HASHED_FILES = ["Manifest.json",
                 "Data/com.apple.CoreML/model.mlmodel",
                 "Data/com.apple.CoreML/weights/weight.bin"]
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]{0,63}$")
-KINDS = ["promptedSegmentation", "subjectSegmentation", "semanticSegmentation", "denoise", "depth"]
+KINDS = ["promptedSegmentation", "subjectSegmentation", "semanticSegmentation", "denoise", "depth",
+         "reflectionRemoval"]
 COMPUTE_UNITS = ["cpuOnly", "cpuAndGPU", "cpuAndNeuralEngine", "all"]
 ACTIVATIONS = ["sigmoid", "probabilities"]
 REFINES = ["none", "guided"]

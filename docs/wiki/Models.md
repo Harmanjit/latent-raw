@@ -67,6 +67,12 @@ No depth model comes with the app. Without one, [Lens Blur](Develop#lens-blur) m
 
 The first installed depth model is the one a new blur uses. The Lens Blur panel's **Depth** menu lists the installed ones beside **Subject (two planes)** and makes the depth map again with the one you pick, which is an ordinary edit that ⌘Z takes back. A photo whose blur names a depth model this Mac lacks uses the two planes, the panel says "Depth from Subject (two planes), because Depth Anything V2 Small is not installed.", and the export queue counts it among the photos with substituted models.
 
+## Reflection removal
+
+No reflection removal model comes with the app, and none is in the catalogue: the released networks are mostly under research-only licences, so one has to be vetted first. `scripts/convert_reflection_removal.py` is ready for it: whoever vets a network fills in its code repository and commit, its class, its weights file's checksum and its licence where the script reads `<pin me>`, and the script refuses to run until they have. Its output is a folder for Add Model…, of the kind `reflectionRemoval` (see [Converting Models](Converting-Models#a-model-that-is-not-in-the-catalogue-at-all)). The model must take one RGB photo and return the scene behind the glass at the same framing.
+
+Once one is installed, the [Reflections](Develop#reflections) slider comes alive; the first installed reflection model is the one a new amount is set on. A photo whose edit names a reflection model this Mac lacks uses the installed one; with none at all, the photo shows and exports without the correction and the panel says a model is needed.
+
 ## Memory
 
 Models load when a mask first needs them and are let go when macOS reports memory pressure, then loaded again from their compiled copies when next needed. A large model such as BiRefNet General or SAM 2.1 Large takes a second or more to load and its share of memory while loaded, so on an 8 GB Mac the bundled models are the safer choice.
