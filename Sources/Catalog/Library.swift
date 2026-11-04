@@ -104,6 +104,10 @@ public final class Library: ObservableObject {
         }
     }
 
+    /// Images whose file Verify Files last found damaged, unchanged since,
+    /// so the grid can badge them (FileIntegrity).
+    @Published public internal(set) var damagedImageIDs: Set<Int64> = []
+
     /// The primary selection: what the editor opens and the panel edits.
     @Published public var selectedImageID: Int64? {
         didSet { if selectedImageID != oldValue { Task { await reloadSelectedKeywords() } } }
@@ -429,6 +433,7 @@ public final class Library: ObservableObject {
         var customOrder: [String]
         var collections: CollectionsState
         var recentlyAdded: RecentlyAdded?
+        var damagedImageIDs: Set<Int64> = []
     }
 
     /// Reconciles `catalog` and reads its list, touching nothing shown:
@@ -443,7 +448,8 @@ public final class Library: ObservableObject {
                               keywordIndex: try await catalog.allImageKeywords(),
                               customOrder: await catalog.customOrder(),
                               collections: try await catalog.loadCollections(),
-                              recentlyAdded: try await catalog.recentlyAdded())
+                              recentlyAdded: try await catalog.recentlyAdded(),
+                              damagedImageIDs: try await catalog.damagedImageIDs())
         try await willPublishList?(catalog)
         return list
     }
@@ -475,6 +481,7 @@ public final class Library: ObservableObject {
         isPatchingRecords = true
         images = list.images
         editedImageIDs = list.editedImageIDs
+        damagedImageIDs = list.damagedImageIDs
         keywordIndex = list.keywordIndex
         customOrder = list.customOrder
         isPatchingRecords = false

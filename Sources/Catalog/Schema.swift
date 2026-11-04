@@ -147,6 +147,8 @@ enum Schema {
         migrator.registerMigration("vcopies_v1_virtual_copies") { db in
             try VirtualCopySchema.migrate(db)
         }
+        // Verify Files' last results (FileIntegrity.swift).
+        FileIntegritySchema.register(in: &migrator)
 
         return migrator
     }
