@@ -175,6 +175,7 @@ public final class ImageSession {
         case depthView, depthViewPreview   // the viewport's Show Depth pass
         case hueIsolated, hueIsolatedPreview // the Colour Mixer's Option-drag preview
         case flatField, flatFieldPreview   // camera RGB after flat-field correction
+        case reflections, reflectionsPreview // output of the reflection removal stage
     }
 
     /// Which set of pooled textures a render draws from. Pools never share
@@ -286,6 +287,10 @@ public final class ImageSession {
 
     /// The depth map Lens Blur reads, and its texture once uploaded.
     var depthStore: (map: DepthMap, texture: MTLTexture?)?
+
+    /// Reflection removal's gain map, and its texture once uploaded
+    /// (ReflectionRemoval.swift).
+    var reflectionStore: (map: ReflectionMap, texture: MTLTexture?)?
 
     public func setAIMask(_ bitmap: MaskBitmap?, forLocal id: UUID) {
         aiMasks[id] = bitmap
@@ -537,6 +542,7 @@ public final class ImageSession {
         total += aiDenoisedCameraRGB?.allocatedSize ?? 0
         total += touchUpMaskTexture?.texture.allocatedSize ?? 0
         total += depthStore?.texture?.allocatedSize ?? 0
+        total += reflectionStore?.texture?.allocatedSize ?? 0
         return total
     }
 

@@ -17,6 +17,9 @@ public struct ModelManifest: Codable, Sendable, Identifiable, Equatable {
         /// Image in, relative inverse depth out (larger nearer): Lens Blur's
         /// depth map (`DepthEstimator`).
         case depth
+        /// Image in, the same image with window reflections taken out:
+        /// Distraction Removal › Reflections (`ReflectionRemover`).
+        case reflectionRemoval
     }
 
     public enum ComputeUnits: String, Codable, Sendable {

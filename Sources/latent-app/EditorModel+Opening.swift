@@ -132,6 +132,7 @@ extension EditorModel {
             regenerateMissingAIMasks()
             regenerateTouchUpMasksIfNeeded()
             regenerateDepthMapIfNeeded()
+            regenerateReflectionMapIfNeeded()
             regenerateAIDenoiseIfNeeded()
             ensureFlatFieldGainMap()
         } catch {

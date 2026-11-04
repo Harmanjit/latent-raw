@@ -74,7 +74,8 @@ CATALOGUE = os.path.join(REPO_ROOT, "Sources", "MLKit", "Resources", "Models", "
 PLACEHOLDER = latent_manifest.PLACEHOLDER
 # What Settings > AI > Models calls each kind in its "For" column.
 KIND_WORDS = {"promptedSegmentation": "Click to select", "subjectSegmentation": "Subject",
-              "semanticSegmentation": "Classes", "denoise": "Noise reduction", "depth": "Depth"}
+              "semanticSegmentation": "Classes", "denoise": "Noise reduction", "depth": "Depth",
+              "reflectionRemoval": "Reflections"}
 # Every convert_*.py verifies on one of these two unless --test-image names
 # another, and stops when neither is there. Looked for here as well, so a
 # fresh clone finds out before the download rather than after it.

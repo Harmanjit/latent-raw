@@ -139,6 +139,8 @@ public final class GPUContext: @unchecked Sendable {
         case removeComposite
         // Lens Blur (LensBlur.metal, LensBlurStage.swift).
         case lensBlurPrepare, lensBlurGather, lensBlurComposite, lensBlurDepthView
+        // Distraction Removal › Reflections (Reflections.metal, ReflectionRemoval.swift).
+        case reflectionApply
         // Export output sharpening (ExportSharpen.metal, ExportOutputSharpening.swift).
         case exportOutputSharpen
         // The Colour Mixer's Option-drag hue isolation (Present.metal).
@@ -303,7 +305,7 @@ public final class GPUContext: @unchecked Sendable {
                             "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye", "Slideshow",
                             "LinearSource", "MergeHDR", "MergeWarp", "MergeDeghost", "MergePanoPrep", "MergePanoBlend",
                             "Dust", "TouchUp", "DetailEffects", "LocalDetail", "Remove", "LensBlur",
-                            "ExportSharpen", "FlatField"]
+                            "ExportSharpen", "FlatField", "Reflections"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound

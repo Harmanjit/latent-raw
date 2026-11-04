@@ -1854,6 +1854,12 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
+                    DistractionRemovalSection(model: model).padding(.top, 8)
+                } label: {
+                    disclosureLabel("Distraction Removal")
+                }
+
+                DisclosureGroup {
                     ToneCurveControls(model: model)
                         .padding(.top, 8)
                 } label: {

@@ -232,6 +232,8 @@ public enum ExportWorker {
         // And Lens Blur's depth map (LensBlurDepth.swift).
         let depthStandIn = try await regenerateDepth(parameters, session: session, pipeline: pipeline, gpu: gpu,
                                                      rotation: rotation, name: request.sourceURL.lastPathComponent)
+        try await regenerateReflections(parameters, session: session, pipeline: pipeline, gpu: gpu,
+                                        rotation: rotation, name: request.sourceURL.lastPathComponent)
         lap("masks")
         try Task.checkCancellation()
 

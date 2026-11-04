@@ -30,6 +30,7 @@ public enum LoadedModel: Sendable {
     case prompted(SAM2Models)
     case semantic(SegmentationModel)
     case depth(DepthEstimator)
+    case reflection(ReflectionRemover)
 }
 
 /// Every model the app knows: the manifests bundled beside the packages,
@@ -233,6 +234,12 @@ public final class ModelRegistry: @unchecked Sendable {
         entries(kind: .depth).first(where: \.isInstalled)
     }
 
+    /// The reflection-removal model a NEW Reflections amount is set on:
+    /// the first installed one; nil with none, when the feature is off.
+    public func defaultReflectionRemoval() -> ModelEntry? {
+        entries(kind: .reflectionRemoval).first(where: \.isInstalled)
+    }
+
     // MARK: - Compute policy
 
     /// Lowest rank of {preference, manifest.computeUnits ?? .all,
@@ -287,6 +294,11 @@ public final class ModelRegistry: @unchecked Sendable {
         return nil
     }
 
+    public func reflectionRemover(id: String) async -> ReflectionRemover? {
+        if case .reflection(let model)? = await loadedModel(id: id, kind: .reflectionRemoval) { return model }
+        return nil
+    }
+
     /// What is loaded for `id` right now, without loading.
     func loaded(id: String) -> LoadedModel? {
         state.withLock { $0.loaded[id] }
@@ -334,6 +346,8 @@ public final class ModelRegistry: @unchecked Sendable {
                 return .semantic(try await SegmentationModel.load(entry, computeUnits: computeUnits))
             case .depth:
                 return .depth(try await DepthEstimator.load(entry, computeUnits: computeUnits))
+            case .reflectionRemoval:
+                return .reflection(try await ReflectionRemover.load(entry, computeUnits: computeUnits))
             case .denoise:
                 // AIDenoiser keeps its own loading (docs/Retouch.md §2 A).
                 return nil

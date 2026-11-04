@@ -101,6 +101,7 @@ extension EditStack {
             case .heal:
                 result.modules.heal = other.modules.heal
                 result.modules.redeye = other.modules.redeye
+                result.modules.reflections = other.modules.reflections
             case .dust:
                 result.modules.dust = other.modules.dust
             case .touchUp:
@@ -166,7 +167,7 @@ extension EditStack {
         if m.locals != nil { g.insert(.locals) }
         if m.crop != nil { g.insert(.crop) }
         g.formUnion(Self.presentTransformGroups(m.perspective))
-        if m.heal != nil || m.redeye != nil { g.insert(.heal) }
+        if m.heal != nil || m.redeye != nil || m.reflections != nil { g.insert(.heal) }
         if m.dust != nil { g.insert(.dust) }
         if m.touchup != nil { g.insert(.touchUp) }
         if m.profile != nil { g.insert(.profile) }

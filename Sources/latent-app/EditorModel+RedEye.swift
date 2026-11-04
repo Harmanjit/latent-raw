@@ -147,7 +147,7 @@ extension EditorModel {
             status = "At most \(RedEyeSpot.maximumCount) red-eye spots per image"
             return
         }
-        parameters.redEyes.append(RedEyeSpot(centre: p, radius: redEyeRadius))
+        parameters.redEyes.append(newRedEyeSpot(centre: p))
         selectedRedEyeIndex = parameters.redEyes.count - 1
         redEyeDrag = .sizing(parameters.redEyes.count - 1)
     }

@@ -139,6 +139,9 @@ public struct EditParameters: Sendable, Equatable {
     public var touchUp: TouchUp = .neutral
     /// Lens Blur over the session's depth map (LensBlur.swift). Off by default.
     public var lensBlur: LensBlur = .neutral
+    /// Distraction Removal › Reflections over the session's gain map
+    /// (ReflectionRemoval.swift). Off by default.
+    public var reflections: ReflectionRemoval = .neutral
     /// HDR Limit: how far above SDR white, in stops, the HDR rendition may
     /// reach, on an HDR screen and in a gain-map export. The default is the
     /// two stops Latent always used (`HDRLimit.defaultStops`).
@@ -307,6 +310,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.postCropVignette == b.postCropVignette && a.grain == b.grain
             && a.lensProfile == b.lensProfile
             && a.lensBlur == b.lensBlur
+            && a.reflections == b.reflections
             && a.hdrLimitStops == b.hdrLimitStops
             && a.flatField == b.flatField
     }
@@ -769,6 +773,18 @@ public final class RenderPipeline {
                                           output: output,
                                           renderInfo: renderInfo, binSpan: binSpan,
                                           profile: profile)
+
+        // Stage 15a: reflection removal, the graded image times the gain
+        // map a user-imported model made (ReflectionRemoval.swift). Only
+        // with a map on the session, so a render without one (no model,
+        // a thumbnail, the CLI) skips it and costs nothing.
+        if parameters.reflections.isActive, output.toneMapped, let gains = session.reflectionTexture() {
+            final = try ReflectionStage.encode(input: final, gains: gains, removal: parameters.reflections,
+                                               geometry: lensBlurGeometry(session: session, output: output,
+                                                                          renderInfo: renderInfo, binSpan: binSpan),
+                                               session: session, preview: displayRole != .display,
+                                               gpu: gpu, commandBuffer: cmdBuffer)
+        }
 
         // Stage 15b: lens blur, on the graded image after the local
         // adjustments, over the session's depth map (LensBlurStage.swift).
