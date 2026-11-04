@@ -5,7 +5,13 @@ import simd
 /// Mirror of `LocalDetailParams` in LocalDetail.metal.
 struct LocalDetailGPU: Equatable {
     var effects: SIMD4<Float>   // texture, clarity, dehaze, sharpness
-    var detail: SIMD4<Float>    // noise, defringe, mask slot, 0
+    var detail: SIMD4<Float>    // noise, defringe, mask slot, curve/colour/grain flags
+    // The tone curve, Point Colour and grain (LocalToneColour.swift).
+    var grain = SIMD4<Float>(repeating: 0)        // amount, size (sensor px), roughness, swatch count
+    var pointTarget0 = SIMD4<Float>(repeating: 0), pointTarget1 = SIMD4<Float>(repeating: 0)
+    var pointTarget2 = SIMD4<Float>(repeating: 0), pointTarget3 = SIMD4<Float>(repeating: 0)
+    var pointShift0 = SIMD4<Float>(repeating: 0), pointShift1 = SIMD4<Float>(repeating: 0)
+    var pointShift2 = SIMD4<Float>(repeating: 0), pointShift3 = SIMD4<Float>(repeating: 0)
 }
 
 /// Texture, clarity, dehaze, sharpness, noise and defringe inside masks
@@ -22,12 +28,34 @@ struct LocalDetailGPU: Equatable {
 enum LocalDetailStage {
     /// One entry per mask that wants the stage, in the slot order
     /// `LocalsGPUPlan` assigned.
-    static func params(for locals: [LocalAdjustment]) -> [LocalDetailGPU] {
+    static func params(for locals: [LocalAdjustment], shortSide: Float = 0) -> [LocalDetailGPU] {
         let plan = LocalsGPUPlan(locals: locals, slices: [:])
         return plan.detailSlots.sorted { $0.value < $1.value }.map { index, slot in
             let l = locals[index]
-            return LocalDetailGPU(effects: SIMD4(l.texture, l.clarity, l.dehaze, l.sharpness),
-                                  detail: SIMD4(max(l.noise, 0), max(l.defringe, 0), Float(slot), 0))
+            var gpu = LocalDetailGPU(effects: SIMD4(l.texture, l.clarity, l.dehaze, l.sharpness),
+                                     detail: SIMD4(max(l.noise, 0), max(l.defringe, 0), Float(slot),
+                                                   Float(l.toneColourFlags)))
+            let swatches = l.activePointColours.map(\.sanitized)
+            gpu.grain = SIMD4(LocalToneColour.grain(l.grain, shortSide: shortSide), Float(swatches.count))
+            var targets = [SIMD4<Float>](repeating: .zero, count: 4), shifts = targets
+            for (k, c) in swatches.prefix(4).enumerated() {
+                targets[k] = SIMD4(c.hue, c.saturation, c.value, c.range)
+                shifts[k] = SIMD4(c.hueShift, c.saturationShift, c.luminanceShift, c.variance)
+            }
+            gpu.pointTarget0 = targets[0]; gpu.pointTarget1 = targets[1]
+            gpu.pointTarget2 = targets[2]; gpu.pointTarget3 = targets[3]
+            gpu.pointShift0 = shifts[0]; gpu.pointShift1 = shifts[1]
+            gpu.pointShift2 = shifts[2]; gpu.pointShift3 = shifts[3]
+            return gpu
+        }
+    }
+
+    /// Whether any mask in the stage needs the blurs: the curve, Point
+    /// Colour and grain read only the pixel itself.
+    static func needsBlurs(_ locals: [LocalAdjustment]) -> Bool {
+        locals.contains { l in
+            l.wantsDetailStage && (l.texture != 0 || l.clarity != 0 || l.dehaze != 0 || l.sharpness != 0
+                || l.noise > 0 || l.defringe > 0)
         }
     }
 
@@ -38,6 +66,8 @@ enum LocalDetailStage {
 
     static func encode(input: MTLTexture, output: MTLTexture, maskA: MTLTexture, maskB: MTLTexture,
                        params: [LocalDetailGPU], blurs: Blurs, isLinear: Bool, headroom: Float,
+                       curveTable: [Float]? = nil, frame: LocalDetailFrameGPU = .init(tileOrigin: .zero, binSpan: 1, seed: 0),
+                       needsBlurs: Bool = true,
                        session: ImageSession, gpu: GPUContext, commandBuffer: MTLCommandBuffer) throws {
         guard input.width == output.width, input.height == output.height, !params.isEmpty else {
             throw RenderError.commandBufferFailed
@@ -96,9 +126,17 @@ enum LocalDetailStage {
             }
             return out
         }
-        let small = try blurred(sigma: blurs.small, role: .localDetailSmall, scratch: .localDetailDownA)
-        let medium = try blurred(sigma: blurs.medium, role: .localDetailMedium, scratch: .localDetailDownB)
-        let large = try blurred(sigma: blurs.large, role: .localDetailLarge, scratch: .localDetailDownC)
+        // Only the curve, Point Colour or grain: no blur is read, so the
+        // unblurred pair stands in for all three.
+        let small = needsBlurs ? try blurred(sigma: blurs.small, role: .localDetailSmall, scratch: .localDetailDownA) : pair
+        let medium = needsBlurs ? try blurred(sigma: blurs.medium, role: .localDetailMedium, scratch: .localDetailDownB) : pair
+        let large = needsBlurs ? try blurred(sigma: blurs.large, role: .localDetailLarge, scratch: .localDetailDownC) : pair
+        // Metal wants the curve buffer bound even when no mask reads it.
+        let table = curveTable ?? [Float](repeating: 0, count: 4)
+        guard let curves = gpu.device.makeBuffer(bytes: table, length: table.count * 4, options: .storageModeShared) else {
+            throw RenderError.gpuBufferAllocationFailed
+        }
+        var frame = frame
 
         let pso = try gpu.lazyPipeline(.localDetailApply)
         var packed = params
@@ -108,6 +146,8 @@ enum LocalDetailStage {
             e.setBytes(&count, length: 4, index: 1)
             e.setBytes(&linear, length: 4, index: 2)
             e.setBytes(&room, length: 4, index: 3)
+            e.setBuffer(curves, offset: 0, index: 4)
+            e.setBytes(&frame, length: MemoryLayout<LocalDetailFrameGPU>.stride, index: 5)
         }
     }
 }
@@ -152,20 +192,27 @@ extension RenderPipeline {
     /// global presence), reading the masks the colour kernel wrote.
     func applyLocalDetail(session: ImageSession, cmdBuffer: MTLCommandBuffer, input: MTLTexture,
                           preview: Bool, parameters: EditParameters, output: RenderOutput,
-                          binSpan: Float) throws -> MTLTexture {
+                          binSpan: Float, tileOrigin: SIMD2<Float> = .zero) throws -> MTLTexture {
         let locals = Array(parameters.locals.prefix(LocalAdjustment.maximumCount))
-        let params = LocalDetailStage.params(for: locals)
+        let summary = session.file.summary
+        let shortSide = Float(min(summary.rawWidth, summary.rawHeight))
+        let params = LocalDetailStage.params(for: locals, shortSide: shortSide)
+        let slots = LocalsGPUPlan(locals: locals, slices: [:]).detailSlots
+        // A pattern of its own, so local grain doesn't line up with the global grain's.
+        let seed = Grain.seed(cameraModel: summary.cameraModel, captureTime: summary.captureTime.timeIntervalSince1970,
+                              width: summary.rawWidth, height: summary.rawHeight) ^ 0x9E37_79B9
         let w = input.width, h = input.height
         let maskA = try session.texture(width: w, height: h, pixelFormat: .rgba16Float, role: .localMaskA)
         let maskB = try session.texture(width: w, height: h, pixelFormat: .rgba16Float, role: .localMaskB)
         let result = try session.texture(width: w, height: h, pixelFormat: .rgba16Float,
                                          role: preview ? .localDetailPreview : .localDetail)
-        let summary = session.file.summary
-        let shortSide = Float(min(summary.rawWidth, summary.rawHeight))
         try LocalDetailStage.encode(input: input, output: result, maskA: maskA, maskB: maskB, params: params,
                                     blurs: .init(small: 1.0 / binSpan, medium: 4.0 / binSpan,
                                                  large: 0.012 * shortSide / binSpan),
                                     isLinear: !output.encoded, headroom: output.headroom,
+                                    curveTable: LocalToneColour.curveTable(for: locals, slots: slots),
+                                    frame: LocalDetailFrameGPU(tileOrigin: tileOrigin, binSpan: binSpan, seed: seed),
+                                    needsBlurs: LocalDetailStage.needsBlurs(locals),
                                     session: session, gpu: gpu, commandBuffer: cmdBuffer)
         return result
     }
