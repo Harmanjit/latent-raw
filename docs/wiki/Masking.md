@@ -8,7 +8,7 @@ Local adjustments change part of the picture: a mask says where, and the mask's 
 
 - **Linear Gradient**: drag on the image from where the effect is full to where it fades out.
 - **Radial**: drag from the centre outward. **Width** and **Height** stretch it into an ellipse and **Feather** softens its edge. Click **Place or move** and drag from inside the ellipse to move it; drag from outside to draw a new one. While the tool is armed or the mask is shown, its outline is drawn on the image (dashed where the feather begins).
-- **Brush**: paint with **Size**, **Feather**, **Flow** and **Density**; Erase takes paint away. Flow is how much each dab adds; Density is the most a stroke can build up to, however often you go over it. **[** and **]** change the size.
+- **Brush**: paint with **Size**, **Feather**, **Flow** and **Density**; Erase takes paint away. Flow is how much each dab adds; Density is the most a stroke can build up to, however often you go over it. **[** and **]** change the size. Tick **Auto Mask** and each dab paints only where the photo is like the colour and brightness under the brush's centre, so a stroke along the edge of a sky stops at the trees; it works for Erase too. See [Auto Mask](#auto-mask).
 - **Whole Image**: everywhere, for use with a range.
 - **Subject** selects the main subject in one go with BiRefNet Lite (bundled) or Apple Vision.
 - **Click to Select** uses Segment Anything 2.1: click the thing you want, option-click to leave something out.
@@ -54,6 +54,20 @@ Each mask has an **Amount** (how strongly all its sliders apply, from 0 to full)
 - **Detail**: Sharpness (sharpens fine detail; below zero, softens), Noise (smooths luminance grain in flat areas and leaves edges alone) and Defringe (removes purple and green fringes on edges).
 
 Effects and Detail open once used. They need a look at each pixel's neighbourhood, so they run in a stage of their own after the global Presence; a photo whose masks don't use them never runs it.
+
+Below the sliders, three more groups open once used:
+
+- **Curve**: a point curve inside the mask, with RGB, Red, Green and Blue channels, drawn and edited as the global Tone Curve. It works on the same scale as the global curve, so the same shape does the same thing; a straight line is no curve.
+- **Point Colour**: **Pick a Colour** and click the photo; up to four swatches per mask, each with Hue, Saturation, Luminance, Range and Variance as in the global [Point Colour](Develop). Only the picked colours inside the mask change.
+- **Grain**: Grain, Size and Roughness, as the Effects grain but only inside the mask, on top of any global grain. Its pattern is fixed to the photo, so the export matches the screen.
+
+These three run in the same stage as Effects and Detail, after the global edit, so a mask's curve bends the picture as it finally looks.
+
+## Auto Mask
+
+With **Auto Mask** ticked, every new brush stroke compares each pixel under a dab with the colour and brightness at the dab's centre and paints only as much as they are alike. Brightness counts in stops, so a stroke on a mid-grey wall ignores both the black window frame and the white sky; colour counts for less in deep shadow, where noise scatters it. Strokes made with it off stay as they were.
+
+The stroke stores only that Auto Mask was on, never the pixels. What it compares against is the raw itself at a quarter of its size with the as-shot white balance and no other edit, worked out the first time a stroke needs it, so moving a slider never changes what a stroke covers, and the export paints exactly what the screen showed.
 
 ## Looking after masks
 
