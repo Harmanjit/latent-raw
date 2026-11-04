@@ -66,6 +66,10 @@ struct ExportPreset: Codable, Equatable {
     var metadataLevel: ExportMetadataLevel = .all
     var openInApp = false
     var openInAppPath: String?
+    /// Add to This Catalog, and stacking with the original
+    /// (ExportToCatalog.swift). Off in older presets.
+    var addToCatalog = false
+    var stackWithOriginal: ExportStackPlacement = .off
 
     var settings: ExportSettings {
         var s = ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap,
@@ -128,6 +132,8 @@ struct ExportPreset: Codable, Equatable {
         metadataLevel = (try? c.decodeIfPresent(ExportMetadataLevel.self, forKey: .metadataLevel)) ?? .all
         openInApp = (try? c.decodeIfPresent(Bool.self, forKey: .openInApp)) ?? false
         openInAppPath = (try? c.decodeIfPresent(String.self, forKey: .openInAppPath)) ?? nil
+        addToCatalog = (try? c.decodeIfPresent(Bool.self, forKey: .addToCatalog)) ?? false
+        stackWithOriginal = (try? c.decodeIfPresent(ExportStackPlacement.self, forKey: .stackWithOriginal)) ?? .off
     }
 
     var fileExtension: String {
@@ -288,6 +294,7 @@ final class ExportQueue: ObservableObject {
             var skipped = 0
             var substituted = 0
             var written: [URL] = []
+            var toCatalog: [Library.ExportedFile] = []
             var revealed: [URL] = []
             var opened: [(app: URL, files: [URL])] = []
           batches: for batch in batches {
@@ -408,6 +415,7 @@ final class ExportQueue: ObservableObject {
                         totalPixels += o.pixelCount
                         written.append(target)
                         writtenInBatch.append(target)
+                        if let file = preset.exportedFile(target, from: record) { toCatalog.append(file) }
                         if !o.maskSubstitutions.isEmpty {
                             substituted += 1
                             self.notes.append(MaskSubstitutions.exportNote(name: name, missing: o.maskSubstitutions))
@@ -421,7 +429,7 @@ final class ExportQueue: ObservableObject {
           }
             let elapsed = Date().timeIntervalSince(start)
             let exported = written
-            let toReveal = revealed, toOpen = opened
+            let toReveal = revealed, toOpen = opened, added = toCatalog
             await MainActor.run {
                 guard let self else { return }
                 self.isRunning = false
@@ -436,6 +444,7 @@ final class ExportQueue: ObservableObject {
                                       pixelsNote, skippedNote,
                                       MaskSubstitutions.summarySuffix(count: substituted))
                 guard !self.stoppingForQuit else { return }
+                if !added.isEmpty { ExportToCatalog.add(added, to: library) }
                 if !toReveal.isEmpty {
                     NSWorkspace.shared.activateFileViewerSelecting(Array(toReveal.prefix(50)))
                 }
@@ -629,6 +638,7 @@ struct ExportSheet: View {
 
             groupLabel("After Export")
             ExportAfterSection(preset: $preset)
+            ExportCatalogSection(preset: $preset)
             }
             }
             HStack {
