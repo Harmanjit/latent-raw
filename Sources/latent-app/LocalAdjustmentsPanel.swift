@@ -179,6 +179,7 @@ struct LocalAdjustmentsPanel: View {
             }
 
             LocalSliderGroups(local: binding)
+            MaskToneColourControls(model: model, index: i)
 
             HStack {
                 // With components, Invert turns the whole combination
@@ -247,6 +248,9 @@ struct LocalAdjustmentsPanel: View {
                 slider("Flow", $model.brushFlow, 0.1...1, "%.2f", 1)
                 slider("Density", $model.brushDensity, 0.1...1, "%.2f", 1)
                     .help("The most a stroke builds up to, however often you paint over it")
+                Toggle("Auto Mask", isOn: $model.brushAutoMask)
+                    .toggleStyle(.checkbox).controlSize(.small)
+                    .help("Paint only where the photo is like the colour and brightness under the brush's centre, so strokes stop at edges")
             }
         case .whole:
             Text("Whole image — use the ranges below to limit it.")

@@ -106,6 +106,8 @@ final class EditorModel: ObservableObject {
     @Published var pointColourPicking = false
     /// The Point Colour swatch whose sliders the panel shows.
     @Published var selectedPointColour: Int?
+    /// The mask a pick adds its swatch to, or nil for the global panel.
+    @Published var pointColourPickLocal: UUID?
 
     // MARK: - Content-aware Remove (EditorModel+Remove.swift)
 
@@ -414,6 +416,9 @@ final class EditorModel: ObservableObject {
     @Published var brushFlow: Float = 1.0
     /// The most a brush stroke builds up to, 0.1…1 (Density).
     @Published var brushDensity: Float = 1.0
+    /// Auto Mask: new strokes paint only where the picture is like the
+    /// colour under the brush (BrushAutoMask.swift).
+    @Published var brushAutoMask = false
     var isDraggingMask = false {
         didSet { if isDraggingMask != oldValue { rerender() } }
     }

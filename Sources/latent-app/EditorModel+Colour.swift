@@ -51,6 +51,19 @@ extension EditorModel {
             status = "At most \(PointColour.maximumCount) point colours per image"
             return
         }
+        pointColourPickLocal = nil
+        pointColourPicking = true
+    }
+
+    /// Arms the picker for a mask's own Point Colour: the swatch goes to
+    /// the local `id` names.
+    func beginLocalPointColourPick(_ id: UUID) {
+        guard hasImage, let local = parameters.locals.first(where: { $0.id == id }) else { return }
+        guard local.pointColours.count < LocalAdjustment.maximumPointColours else {
+            status = "At most \(LocalAdjustment.maximumPointColours) point colours per mask"
+            return
+        }
+        pointColourPickLocal = id
         pointColourPicking = true
     }
 
@@ -64,6 +77,13 @@ extension EditorModel {
                                                 parameters: parameters, stage: .beforePointColour)
             guard let rgb = image.averageColour(at: point) else {
                 status = "Click on the photo to pick a colour"
+                return
+            }
+            if let id = pointColourPickLocal {
+                pointColourPickLocal = nil
+                guard let i = parameters.locals.firstIndex(where: { $0.id == id }),
+                      parameters.locals[i].pointColours.count < LocalAdjustment.maximumPointColours else { return }
+                parameters.locals[i].pointColours.append(PointColour(picked: rgb))
                 return
             }
             guard parameters.colour.pointColours.count < PointColour.maximumCount else { return }
