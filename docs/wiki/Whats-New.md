@@ -78,6 +78,12 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Rendering intent when printing**, taken from the soft proof. See [Print](Export#print).
 - **HDR Limit** sets how far above white each photo's highlights may go on an HDR screen and in an HDR export. See [HDR Limit](Develop#hdr-limit).
 
+## Viewing
+
+- **Before/After views**: side by side, split, top and bottom (⇧Y), with Copy After → Before, Copy Before → After and Swap. See [Before/After and Reference view](Develop#beforeafter-and-reference-view).
+- **Reference view** (⇧R) edits one photo beside another, dragged in from the filmstrip, with Lock and Swap. See [Before/After and Reference view](Develop#beforeafter-and-reference-view).
+- **Loupe overlay** (⌥⌘O): a grid, draggable guides and a layout image over the photo in Loupe and Develop. See [Loupe overlay](Develop#loupe-overlay).
+
 ## Help
 
 - These help pages gained a [Getting Started](Getting-Started) rewrite, three tutorials, [Coming from Lightroom](Coming-from-Lightroom), a [Glossary](Glossary) and an [FAQ](FAQ). The same pages are in the app under **Help › Latent Help** (⌘?).

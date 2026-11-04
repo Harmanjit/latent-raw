@@ -128,7 +128,7 @@ The left panel shows the selected image's name, rating, flag, colour label, keyw
 
 ## Loupe, Compare and Survey
 
-**Loupe** (E, or Space from the grid) shows one image full size with a caption. Arrows step, Z toggles fit and 100%, rating keys act on the image shown.
+**Loupe** (E, or Space from the grid) shows one image full size with a caption. Arrows step, Z toggles fit and 100%, rating keys act on the image shown. View › Loupe Overlay (⌥⌘O) lays a grid, guides or a layout image over it; see [Loupe overlay](Develop#loupe-overlay).
 
 **Compare** (C) pins a "Select" on the left and walks a "Candidate" on the right with the arrows. While **Sync** (in the Compare bar) is on, zoom and pan stay matched by position in each picture, so images with different crops, rotations or sizes show the same region, and a candidate stepped in while zoomed keeps the zoom. ⇧X promotes the candidate to Select; Swap exchanges them. Rating keys act on the candidate. Sync is on at each launch.
 
