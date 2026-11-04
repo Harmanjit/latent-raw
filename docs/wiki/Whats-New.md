@@ -37,6 +37,10 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Region tone curve** with Highlights, Lights, Darks and Shadows sliders, point curve presets and **Refine Saturation**. See [Develop](Develop#modules).
 - **Targeted adjustment**: drag up or down on the photo itself to move the curve or the HSL sliders. See [Develop](Develop#modules).
 - **Clipping overlay** (J), a colour readout under the pointer and a histogram you can drag. See [The viewport](Develop#the-viewport).
+- **Auto** now sets Highlights, Shadows, Whites, Blacks, Vibrance and Saturation as well, and **Shift-double-click** on one tone slider sets just that one. See [Develop](Develop#modules).
+- **⌥-drag on an HSL slider** shows only the colours it changes, and the Colour Grading wheels take **⇧** (keep the hue) and **⌘** (fine moves). See [Develop](Develop#modules).
+- **Visualise HDR Ranges** colours what lies above SDR white by stops, and the readout says how far above white a colour is. See [HDR Limit](Develop#hdr-limit).
+- **Match Total Exposures** (⌥⇧⌘M) gives a selection one brightness from their shutter, aperture and ISO. See [Applying edits to many images](Library#applying-edits-to-many-images).
 
 ## Geometry
 

@@ -12,7 +12,7 @@ The order below follows the panel on the right, top to bottom, which is roughly 
 
 **2. Set the white balance.** In **White Balance**, the menu offers **As Shot**, **Auto** and light sources such as **Daylight**, **Cloudy** and **Tungsten**. For an exact result, press **W** (**Develop › White Balance Selector**) and click something in the photo that should be grey or white: a grey card, a white wall, a cloud in shade. Then fine-tune with **Temperature** and **Tint** to taste.
 
-**3. Try Auto.** Press **⌘U** (**Develop › Auto Adjust**). It sets exposure, contrast and white balance from the photo. Treat it as a starting point; every slider stays yours to move.
+**3. Try Auto.** Press **⌘U** (**Develop › Auto Adjust**). It sets exposure, contrast and white balance from the photo, then Highlights, Shadows, Whites, Blacks, Vibrance and Saturation. Treat it as a starting point; every slider stays yours to move.
 
 **4. Get the tones right.** In **Tone**:
 

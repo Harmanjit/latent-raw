@@ -63,7 +63,7 @@ Everything you set is written to the photo's sidecar at once, so it survives a r
 Select a photo and press D (or Return). The adjustments are on the right, in the order they are applied.
 
 - Drag a slider and the picture updates as you drag, at full quality. Double-click a slider to reset it, or click its number to type a value.
-- **Auto Adjust** (⌘U) is a good first step: it sets exposure, contrast and white balance from the photo.
+- **Auto Adjust** (⌘U) is a good first step: it sets exposure, contrast and white balance from the photo, then the tone sliders and Vibrance.
 - Press `\` to see the photo without your edits, and again to go back.
 - ⌘Z and ⇧⌘Z step back and forward through the photo's edit history.
 

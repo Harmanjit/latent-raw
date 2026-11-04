@@ -51,6 +51,10 @@ In the Library grid, stars, flags and rotation apply to every selected image. In
 | ⌘Z, ⇧⌘Z | Undo, redo (in Develop, the image's edit history; elsewhere, what you did in the Library, moves and renames included) |
 | `\` | Before / after |
 | ⌘U | Auto adjust |
+| ⌥⇧⌘M | Library: match the selected photos' total exposure to the lead photo's |
+| ⇧-double-click a tone slider | Highlights, Shadows, Whites or Blacks: set that slider the Auto way |
+| ⌥-drag an HSL slider | Show only the colours the slider changes |
+| ⇧- or ⌘-drag a colour wheel | Colour Grading: keep the hue, or move finely |
 | R | Crop and straighten tool |
 | O, ⇧O | While cropping: the next crop guide overlay (thirds, grid, golden ratio, golden spiral, diagonal, triangle, none), and turn the spiral or triangle |
 | ⌘-drag in the crop tool | Draw a line along something level or upright to straighten by it |
