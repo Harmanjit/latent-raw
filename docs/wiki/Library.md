@@ -98,6 +98,20 @@ Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to
 
 **Filter bar** above the grid: rating threshold (click a star for "this many or better"), flag states, colour label, edited-only, camera, lens, keyword, Finder tag, and a search that looks in file names, titles and captions, combined with AND. The Label menu takes any number of labels, plus No Label and Custom Label (a label another application named), and shows images with any one of them. A keyword also finds the photos tagged with keywords inside it (Places finds Places › France › Paris). While a collection is shown, the filter narrows its photos. The count shows how many pass. ⇧⌘L clears the filter. Arrow keys walk only the visible images.
 
+**More filters.** Beside the controls above, each leaving the filter as it was until you use it:
+
+- **Rating range.** The small arrow after the stars opens a popover with At least (the stars' own meaning), Exactly, At most and Between, and a star range with two ends. Exactly with no stars shows the unrated photos.
+- **Excluding labels.** Option-click a label in the Label menu to hide photos with it; it shows as "Not Red" in the menu and "−Red" on the button. A photo passes when it has one of the chosen labels (or none are chosen) and none of the excluded ones.
+- **Unedited.** Option-click Edited to show only photos without an edit; click it again to show everything. Edit › Select Unedited selects them.
+- **No Keywords.** In the keyword menu, and at the top of the Keyword List with how many photos have none.
+- **Kind.** Raw (camera raws and DNG, as the File type sort groups them), Not Raw, or RAW+JPEG Pair (the raws that have a JPEG companion, and the JPEGs when shown); and Masters, Virtual Copies, or masters that Have Virtual Copies.
+- **Ranges.** ISO, focal length, aperture and exposure time, each with a small histogram of the folder (or collection) and a two-thumb range under it. Drag a thumb to narrow the range; a photo that doesn't record the value is hidden while its range is set. ⇧⌘L clears these with everything else.
+- **Date.** From and To dates for the capture time, or Today, Last 7 Days, This Month and This Year. Photos without a capture date are hidden only while a range is set.
+- **Searching all fields.** The magnifying glass before the search box switches it from file name, title and caption (the default) to every searchable field: name, folder path, title, caption, creator, copyright, camera, lens and keywords. There every word must appear, "quoted words" match as one phrase, and -word leaves out photos containing it, so `nikon "blue hour" -raw` works as you'd expect.
+- **Filter presets.** The filter button at the right end of the bar saves the bar's settings under a name (Save Current Filter…), applies a saved preset with one click, and renames or removes them. Presets belong to the app, so every folder sees them; they are separate from Save Filter as Smart Collection.
+
+**Grid marks** (View › Grid Marks) choose how much each thumbnail shows: Always (every mark, as the grid has always looked), On Hover (marks only under the pointer), Minimal (the selection, flag and colour label only) and Extended (adds a line of exposure time, aperture and ISO along the bottom of the picture). A small tag in the badge row marks photos with keywords; point at it to read them. Pointing at the edited pencil lists what the edit changes, by group (Tone, Crop & Straighten and so on).
+
 **Sort** (the menu in the filter bar, or View › Sort) by capture time, file name, rating, modified date or Custom, or by Lightroom's other orders:
 
 - **Added order**: the order the photos joined the catalog.

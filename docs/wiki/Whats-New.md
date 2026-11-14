@@ -20,6 +20,17 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Auto Advance**, ⇧ with a star, flag or label key, **Select by Flag, Rating or Colour Label**, **Invert Selection**, **Deselect Unflagged** and **Refine Photos** speed up culling, as in Lightroom. See [Faster culling](Library#faster-culling).
 - **Reset to Camera Orientation** takes back the quarter turns you gave the selection. See [The grid](Library#the-grid).
 - **Flip Horizontal and Flip Vertical for a whole selection**, from the Photo menu or a right-click, and **Mirror Image Mode** to see the library mirrored without changing a thing. See [The grid](Library#the-grid).
+- **Search all fields** looks through names, paths, titles, captions, creator, copyright, camera, lens and keywords, with every word required, "quoted phrases" and -excluded words. See [More filters](Library#the-grid).
+- **Excluding colour labels**: Option-click a label in the Label menu to hide photos with it. See [More filters](Library#the-grid).
+- **Rating range**: at least, exactly, at most or between, from a popover beside the stars. See [More filters](Library#the-grid).
+- **Ranges** filter by ISO, focal length, aperture and exposure time, each over a histogram of the folder. See [More filters](Library#the-grid).
+- **Date range** filter, with Today, Last 7 Days, This Month and This Year. See [More filters](Library#the-grid).
+- **Kind** filters: Raw, Not Raw or RAW+JPEG Pair, and Masters, Virtual Copies or Has Virtual Copies. See [More filters](Library#the-grid).
+- **Unedited** (Option-click Edited) and **Edit › Select Unedited**. See [More filters](Library#the-grid).
+- **Filter presets** save the filter bar's settings under a name and apply them again. See [More filters](Library#the-grid).
+- **No Keywords** in the keyword menu and the Keyword List. See [More filters](Library#the-grid).
+- **View › Grid Marks**: Always, On Hover, Minimal and Extended thumbnails. See [The grid](Library#the-grid).
+- **Keyword badge and tooltips**: a tag on thumbnails with keywords, listing them, and the edited pencil lists what the edit changes. See [The grid](Library#the-grid).
 - **Fifteen more sort orders**, Lightroom's Added Order, Edit Time, Edit Count, Pick, Label Text and Colour, File Extension and Type, Aspect Ratio, Title and Caption, plus Camera, Lens, ISO and Focal Length, and View › Sort › Reverse Sort Order. See [The grid](Library#the-grid).
 
 ## Folders and files
