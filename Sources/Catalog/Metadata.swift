@@ -263,6 +263,7 @@ extension Catalog {
             fields.caption = row.caption
             fields.creator = row.creator
             fields.copyright = row.copyright
+            fields.more = row.moreDescriptive
             return fields
         }
     }

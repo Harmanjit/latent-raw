@@ -152,6 +152,28 @@ enum Schema {
         migrator.registerMigration("stacks_v1_stack_tables") { db in
             try StackSchema.migrate(db)
         }
+        migrator.registerMigration("metadata_v2_iptc_and_exif_extras") { db in
+            // The IPTC fields behind the Title & Copyright section's More
+            // (DescriptiveField), mirrored to the sidecar like the first
+            // four; and the EXIF the raw reader doesn't give (ExifExtras),
+            // a cache of the file like the camera and lens columns.
+            // Existing rows get NULL: nothing typed, and EXIF not read yet,
+            // which `exif_extras_version` NULL tells reconcile to fill in.
+            try db.alter(table: "images") { t in
+                for name in ["headline", "sublocation", "city", "state", "country", "country_code",
+                             "creator_job_title", "creator_email", "creator_url", "instructions"] {
+                    t.add(column: name, .text)
+                }
+                t.add(column: "gps_latitude", .double)
+                t.add(column: "gps_longitude", .double)
+                t.add(column: "gps_altitude", .double)
+                t.add(column: "flash_fired", .boolean)
+                t.add(column: "exposure_bias", .double)
+                t.add(column: "metering_mode", .integer)
+                t.add(column: "white_balance_mode", .integer)
+                t.add(column: "exif_extras_version", .integer)
+            }
+        }
 
         return migrator
     }

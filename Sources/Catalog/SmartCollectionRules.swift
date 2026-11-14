@@ -83,6 +83,9 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
     public enum Field: String, Codable, CaseIterable, Sendable {
         case rating, flag, label, edited, keyword, camera, lens, fileName, fileType, finderTag
         case captureDate, iso, focalLength, aperture
+        /// From the EXIF extras (ExifExtras): compensation in stops,
+        /// whether the flash fired, whether the file holds a position.
+        case exposureBias, flashFired, hasGPS
 
         public var title: String {
             switch self {
@@ -100,14 +103,17 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             case .iso: "ISO"
             case .focalLength: "Focal length"
             case .aperture: "Aperture"
+            case .exposureBias: "Exposure bias"
+            case .flashFired: "Flash fired"
+            case .hasGPS: "Has GPS position"
             }
         }
 
         /// The comparisons that make sense for the field, the first the default.
         public var operators: [Operator] {
             switch self {
-            case .rating, .iso, .focalLength, .aperture: [.atLeast, .atMost, .is, .isNot]
-            case .flag, .edited: [.is, .isNot]
+            case .rating, .iso, .focalLength, .aperture, .exposureBias: [.atLeast, .atMost, .is, .isNot]
+            case .flag, .edited, .flashFired, .hasGPS: [.is, .isNot]
             case .label: [.is, .isNot]
             case .keyword: [.is, .isNot, .contains, .doesNotContain]
             case .camera, .lens, .fileName, .finderTag:
@@ -121,9 +127,9 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
 
         public var valueKind: ValueKind {
             switch self {
-            case .rating, .iso, .focalLength, .aperture: .number
+            case .rating, .iso, .focalLength, .aperture, .exposureBias: .number
             case .flag: .flag
-            case .edited: .yesNo
+            case .edited, .flashFired, .hasGPS: .yesNo
             case .label, .keyword, .camera, .lens, .fileName, .fileType, .finderTag: .text
             case .captureDate: .date
             }
@@ -139,6 +145,8 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             case .focalLength: "50"
             case .aperture: "2.8"
             case .captureDate: "30"
+            case .exposureBias: "0"
+            case .flashFired, .hasGPS: "true"
             default: ""
             }
         }
@@ -156,6 +164,9 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             case .iso: old.iso != new.iso
             case .focalLength: old.focal != new.focal
             case .aperture: old.aperture != new.aperture
+            case .exposureBias: old.exposureBias != new.exposureBias
+            case .flashFired: old.flashFired != new.flashFired
+            case .hasGPS: old.hasGPS != new.hasGPS
             case .edited, .keyword: false
             }
         }
@@ -208,6 +219,14 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
         case .iso: return compare(record.iso.map(Double.init))
         case .focalLength: return compare(record.focal)
         case .aperture: return compare(record.aperture)
+        case .exposureBias: return compare(record.exposureBias)
+        case .flashFired:
+            // Unknown counts as not fired.
+            let hit = (record.flashFired ?? false) == (value != "false")
+            return op == .isNot ? !hit : hit
+        case .hasGPS:
+            let hit = record.hasGPS == (value != "false")
+            return op == .isNot ? !hit : hit
         case .flag:
             let wanted = Set(value.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) })
             let hit = wanted.contains(record.flag)
