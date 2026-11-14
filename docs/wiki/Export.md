@@ -56,13 +56,9 @@ A keyword inside others (Places › France › Paris) is written as each of its 
 
 Tags that only describe the raw's storage (orientation, sensor layout, autofocus points), makers' private data and Camera Raw's edit settings are never written. **Include location** (off by default, and in presets saved before it existed) also keeps the **GPS position**, place names, and the camera body's and lens's serial numbers, at All and All except camera info; see [Security and Privacy](Security-and-Privacy#location-in-exports).
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
 **Watermark.** Off by default. Switch it on to stamp **Text** or a **Graphic** into a corner of every exported file. Text: one line, where `{year}` becomes the capture year and `{name}` the original file name, in any letter case; the naming tokens below work too, filled in for each photo (`© {year} {creator|Ann Smith}`, `{lens} · {iso}`), and Insert lists them, in the system font or any font installed on the Mac; its size is a share of the picture's short edge (1–20%) and its colour is picked as sRGB and converted for the file's colour space. Graphic: a PNG logo (up to 4 MB; transparent parts stay transparent), sized by its longer side as a share of the picture's short edge (2–50%). The PNG is kept in the preset, so it still works after the original file moves. Either can be turned 90°, 180° or 270° (270° runs text up the side of the picture), and has an opacity. It is drawn into the file after the resize, never into the photo or its edit, so it looks the same at any export size. In a file with an HDR gain map it is not brightened on HDR screens. Presets remember the watermark even while the switch is off.
 
 **Border.** Off by default. Pads each file with a border on every side, a percentage of the picture's long edge or a number of pixels, in a colour you pick (sRGB, converted for the file's colour space). **Canvas** enlarges it further to a shape, 1:1, 4:5, 3:2, 16:9 or a custom ratio, growing the short sides so the photo is never cropped; turned to match the picture, or always portrait or landscape (a landscape photo on a 4:5 portrait canvas, say). **Position** places the photo in the room left over, centred by default. An **inner line** of a width, colour and gap from the picture can frame it. The border is drawn after the resize, so the picture keeps the size asked for and the file grows by the border, and before the watermark, which is placed on the whole canvas. A bordered file is SDR: HDR Output is left out.
-
-**Watermark.** Off by default. Switch it on to stamp **Text** or a **Graphic** into a corner of every exported file. Text: one line, where `{year}` becomes the capture year and `{name}` the original file name, in any letter case, in the system font or any font installed on the Mac; its size is a share of the picture's short edge (1–20%) and its colour is picked as sRGB and converted for the file's colour space. Graphic: a PNG logo (up to 4 MB; transparent parts stay transparent), sized by its longer side as a share of the picture's short edge (2–50%). The PNG is kept in the preset, so it still works after the original file moves. Either can be turned 90°, 180° or 270° (270° runs text up the side of the picture), and has an opacity. It is drawn into the file after the resize, never into the photo or its edit, so it looks the same at any export size. In a file with an HDR gain map it is not brightened on HDR screens. Presets remember the watermark even while the switch is off.
-<!-- /RECONCILE -->
 
 **Naming.** A template with tokens, expanded per image. Tokens can be typed in any letter case, or picked from Insert:
 
@@ -106,7 +102,6 @@ Every file name is planned before anything is written. A line shows the first fi
 
 **Compare qualities.** **Compare…** next to Quality (JPEG and HEIC) opens a window with the first image encoded at two to four qualities side by side at 100%. Drag any pane to pan them all. Each pane shows the size of the whole file at that quality, and **Use** sets the sheet's quality. JPEG panes look exactly as the file will; the edges of HEIC panes can differ slightly. The window closes with the sheet.
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
 ### Apply a preset at export
 
 **Apply preset**, under the watermark, applies a develop preset to the exported files only, as darktable's style on export: a black and white set or a web look from the same edits, without touching them. Choose **None** (the default) or any preset. **Append** applies it over each photo's edit, as Apply Preset does; **Replace** uses the preset alone, from no edit. **Amount** blends it as the Presets panel's Amount does, 0–200%. The preset is merged into a copy of each photo's edit just before the render, so the edit in the catalog and its sidecar never change. The choice is kept in export presets; a preset deleted since shows as **Missing** and nothing is applied. DNG exports don't use it.
@@ -114,7 +109,6 @@ Every file name is planned before anything is written. A line shows the first fi
 ## PDF export
 
 **PDF** in the format menu writes one PDF per photo: the edited photo on a page of its own, drawn as Print and Contact Sheet draw theirs. **Page** is **Fit to image** (the photo's own size at the Resolution set for images, 300 ppi when none is) or **A4**, **US Letter** or **A3**, turned to match the photo, which is then rendered at no more pixels than the page holds at that resolution. A **margin** in millimetres goes round the photo, and an optional **caption** under it is made from the same tokens as the file name (`{name}`, `{date}`…). The colour is sRGB, or Display P3 when it was chosen for image files. PDFs aren't added to the catalog.
-<!-- /RECONCILE -->
 
 ## DNG export (Render to DNG)
 

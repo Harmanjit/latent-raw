@@ -68,26 +68,24 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Reference view** (⇧R) edits one photo beside another, dragged in from the filmstrip, with Lock and Swap. See [Before/After and Reference view](Develop#beforeafter-and-reference-view).
 - **Loupe overlay** (⌥⌘O): a grid, draggable guides and a layout image over the photo in Loupe and Develop. See [Loupe overlay](Develop#loupe-overlay).
 - **Clipping overlay** (J), a colour readout under the pointer and a histogram you can drag. See [The viewport](Develop#the-viewport).
-<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Clipping warning options**: Any channel, Luminance or Saturation (gamut), shadow and highlight lines, and red and blue, magenta and cyan or black and white. See [The viewport](Develop#the-viewport).
 - **Raw clipping** (View › Show Raw Clipping) marks in magenta what the sensor clipped, apart from J's output clipping. See [The viewport](Develop#the-viewport).
 - **Focus peaking** (View › Focus Peaking) draws the sharpest edges in colour in Develop, Loupe, Compare and Survey. See [The viewport](Develop#the-viewport).
 - **Colour assessment** (View › Colour Assessment) frames the picture in 18% grey with a white border, as ISO 12646 asks. See [The viewport](Develop#the-viewport).
 - **High quality preview** (View › High Quality Preview, opt-in) draws the fitted view from a full-resolution render. See [The viewport](Develop#the-viewport).
 - **Navigator and zoom levels**: the whole picture with the view outlined at the top of Develop's panel, and a Fit, Fill, 25% to 400% menu in the status bar. See [The viewport](Develop#the-viewport).
-
 - **RGB parade**, the waveform's three channels side by side. See [The viewport](Develop#the-viewport).
 - **Two scopes at once**: Waveform + Vectorscope and Histogram + Vectorscope. See [The viewport](Develop#the-viewport).
 - **Vectorscope guides**: a skin tone line and colour-harmony spokes you can turn by dragging. See [The viewport](Develop#the-viewport).
 - **Colour picker sizes and spaces**: a 5, 15 or 31 px mean with its least and greatest values, in RGB, HSL, LCh or Lab, and Copy Value. See [The viewport](Develop#the-viewport).
 - **Pinned colour samples**: Option-click to pin up to eight, with live values, markers on the photo and dots on the vectorscope. See [The viewport](Develop#the-viewport).
-<!-- /RECONCILE -->
 
 ## Colour and tone
 
 - **Profiles**: Latent Standard, Neutral and Flat, the creative looks Vivid, Portrait and Landscape, and four black and white looks, each a starting point before any slider. See [Develop](Develop#modules).
 - **Camera profiles (DCP)** that you import yourself give your camera maker's colour. See [Develop](Develop#modules).
 - **White balance presets and the White Balance Selector** (W): Daylight, Cloudy, Tungsten and the rest, or click something neutral; Temperature now takes a typed Kelvin value. See [Develop](Develop#modules).
+- **Camera white balance presets**: the camera's own Daylight, Shade, Tungsten and Kelvin settings, when its raw records them. See [Develop](Develop#modules).
 - **Saturation** moves every colour by the same amount, beside Vibrance. See [Develop](Develop#modules).
 - **Black & White** treatment (V) with a B&W Mix that sets how light each colour turns, and an Auto mix. See [Develop](Develop#modules).
 - **Colour Grading** with shadow, midtone, highlight and global wheels replaces Split Toning; older edits look exactly as they did. See [Develop](Develop#modules).
@@ -99,15 +97,9 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **⌥-drag on an HSL slider** shows only the colours it changes, and the Colour Grading wheels take **⇧** (keep the hue) and **⌘** (fine moves). See [Develop](Develop#modules).
 - **HDR Limit** sets how far above white each photo's highlights may go on an HDR screen and in an HDR export. See [HDR Limit](Develop#hdr-limit).
 - **Visualise HDR Ranges** colours what lies above SDR white by stops, and the readout says how far above white a colour is. See [HDR Limit](Develop#hdr-limit).
-<!-- RECONCILE: two branches edited this; merge into one text -->
-- **Tone Equalizer** raises or lowers nine bands of brightness, −8 to 0 EV, through an edge-aware mask, so a sky or a shadowed face moves as a whole and keeps its local contrast. See [Tone Equalizer](Develop#tone-equalizer).
-- **The tone equalizer's Advanced tab** draws the bands as a curve over the histogram of its mask, with nodes to drag, the mask's spread and **Fit Mask**. See [Tone Equalizer](Develop#tone-equalizer).
-- **Show Mask and the on-image tool** show the tone equalizer's mask in grey, add the mask under the pointer to the readout, and raise or lower the band under the pointer by scrolling or dragging on the photo. See [Tone Equalizer](Develop#tone-equalizer).
+- **Tone Equalizer** raises or lowers nine bands of brightness, −8 to 0 EV, through an edge-aware mask, so a sky or a shadowed face moves as a whole and keeps its local contrast; its Advanced tab draws the bands as a curve over the mask's histogram, Show Mask shows the mask in grey, and the on-image tool raises or lowers the band under the pointer by scrolling or dragging. See [Tone Equalizer](Develop#tone-equalizer).
 - **Range compression presets**: Compress Shadows and Highlights (Soft and Strong) and Lift Shadows with the tone equalizer, and Compress Range with the Highlights, Shadows and Clarity sliders. See [Presets and clipboard](Develop#presets-and-clipboard).
-
 - **Highlight Reconstruction › Inpaint Opposed** rebuilds blown skies and skin from the colour around them instead of turning them white. See [Develop](Develop#modules).
-- **Camera white balance presets**: the camera's own Daylight, Shade, Tungsten and Kelvin settings, when its raw records them. See [Develop](Develop#modules).
-<!-- /RECONCILE -->
 - **Match Total Exposures** (⌥⇧⌘M) gives a selection one brightness from their shutter, aperture and ISO. See [Applying edits to many images](Library#applying-edits-to-many-images).
 - **Exposure eyedropper**: click or drag over something that should be middle grey and Exposure is set from it; Option-click for another target. See [Develop](Develop#modules).
 - **Black Offset**, under Exposure's Advanced, deepens or lifts the blacks in linear light. See [Develop](Develop#modules).
@@ -136,13 +128,10 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Remove chromatic aberration (automatic)** measures colour fringes on the photo itself, without a profile. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
 - **Defringe** with adjustable hue ranges and a fringe colour picker. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
 - **Post-crop vignetting and grain**. See [Effects](Develop#effects).
-<!-- RECONCILE: two branches edited this; merge into one text -->
 - **LMMSE demosaic**, for clean detail from high-ISO files. See [Sharpening and noise reduction](Develop#sharpening-and-noise-reduction).
 - **Embedded DNG corrections**: a DNG's own lens-shading map, vignetting and distortion, applied with one switch. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
-
 - **Hot pixel removal** replaces stuck and hot photosites on the sensor before demosaicing, with a threshold and an "N pixels fixed" count. See [Hot pixels](Develop#hot-pixels).
 - **Manual chromatic aberration**: Red and Blue sliders line up the colours by hand, on top of the profile or the automatic correction. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
-<!-- /RECONCILE -->
 
 ## Masks and retouching
 
