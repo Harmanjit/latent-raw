@@ -145,6 +145,8 @@ struct FractionMask: View {
 struct ImageCaption: View {
     let record: ImageRecord?
     var title: String? = nil
+    /// Settings › Library's info line (ImageCaptionTemplate).
+    @AppStorage(ImageCaptionTemplate.templateKey) private var template = ImageCaptionTemplate.defaultTemplate
 
     var body: some View {
         HStack(spacing: 10) {
@@ -156,8 +158,13 @@ struct ImageCaption: View {
                     .textCase(.uppercase)
             }
             if let record {
-                Text(record.fileName).font(.caption).lineLimit(1).truncationMode(.middle)
-                Text(record.exposureLine).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if ImageCaptionTemplate.isStandard(template) {
+                    Text(record.fileName).font(.caption).lineLimit(1).truncationMode(.middle)
+                    Text(record.exposureLine).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                } else {
+                    Text(ImageCaptionTemplate.text(template, for: record))
+                        .font(.caption).lineLimit(1).truncationMode(.middle)
+                }
                 Spacer()
                 if record.flag > 0 { Text("✓").foregroundStyle(.green) }
                 if record.flag < 0 { Text("✗").foregroundStyle(.red) }
@@ -174,8 +181,15 @@ struct ImageCaption: View {
         .background(Color(nsColor: .windowBackgroundColor))
         // One line, not scraps of glyphs: "Candidate, DSC_0107.NEF, 1/250 s, picked, 3 stars".
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(SpokenText.caption(title: title, name: record?.fileName,
-                                               exposure: record?.exposureLine ?? "",
-                                               rating: record?.rating ?? 0, flag: record?.flag ?? 0))
+        .accessibilityLabel(spokenCaption)
+    }
+
+    private var spokenCaption: String {
+        guard let record, !ImageCaptionTemplate.isStandard(template) else {
+            return SpokenText.caption(title: title, name: record?.fileName, exposure: record?.exposureLine ?? "",
+                                      rating: record?.rating ?? 0, flag: record?.flag ?? 0)
+        }
+        return SpokenText.caption(title: title, name: ImageCaptionTemplate.text(template, for: record), exposure: "",
+                                  rating: record.rating, flag: record.flag)
     }
 }

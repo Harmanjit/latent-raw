@@ -77,6 +77,10 @@ struct ExportPreset: Codable, Equatable {
     /// (ExportToCatalog.swift). Off in older presets.
     var addToCatalog = false
     var stackWithOriginal: ExportStackPlacement = .off
+    /// Add to This Catalog also gives each export its original's rating,
+    /// label, keywords and descriptive fields (ExportToCatalog.swift). On
+    /// unless switched off.
+    var copyMetadataToCatalog = true
 
     var settings: ExportSettings {
         var s = ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap,
@@ -144,6 +148,7 @@ struct ExportPreset: Codable, Equatable {
         openInAppPath = (try? c.decodeIfPresent(String.self, forKey: .openInAppPath)) ?? nil
         addToCatalog = (try? c.decodeIfPresent(Bool.self, forKey: .addToCatalog)) ?? false
         stackWithOriginal = (try? c.decodeIfPresent(ExportStackPlacement.self, forKey: .stackWithOriginal)) ?? .off
+        copyMetadataToCatalog = (try? c.decodeIfPresent(Bool.self, forKey: .copyMetadataToCatalog)) ?? true
     }
 
     var fileExtension: String {
@@ -153,7 +158,7 @@ struct ExportPreset: Codable, Equatable {
 
     /// What the batch planner needs; the sheet's preview and the queue use
     /// the same, so the names shown are the names written.
-    func planOptions(catalogName: String) -> ExportBatchPlanner.Options {
+    func planOptions(catalogName: String, keywords: [Int64: Set<String>] = [:]) -> ExportBatchPlanner.Options {
         var options = ExportBatchPlanner.Options(template: template, start: sequenceStart, step: sequenceStep,
                                                  padding: sequencePadding, letterCase: letterCase,
                                                  fileExtension: fileExtension, collision: collision,
@@ -161,6 +166,9 @@ struct ExportPreset: Codable, Equatable {
         options.originalFolders = location == .sameAsOriginal
         options.subfolder = subfolder
         options.keepsOriginalExtension = fileKind == .original
+        if template.range(of: "{keywords", options: .caseInsensitive) != nil {
+            options.keywordsByImage = keywords.mapValues { Array($0) }
+        }
         return options
     }
 
@@ -325,7 +333,7 @@ final class ExportQueue: ObservableObject {
             // Every name settled before the first file is written, so two
             // images whose template gives the same name never overwrite each
             // other, whatever the collision policy.
-            let options = preset.planOptions(catalogName: catalogName)
+            let options = preset.planOptions(catalogName: catalogName, keywords: library.keywordsByImage)
             let makesDestination = preset.location != .sameAsOriginal
             var plan = await Task.detached(priority: .userInitiated) {
                 // A multi-batch preset's own subfolder of the destination.

@@ -83,11 +83,15 @@ extension Library {
         /// The photo it was exported from.
         public var sourceID: Int64
         public var placement: Placement
+        /// Give it the original's rating, label, keywords and descriptive
+        /// fields once it is catalogued (`Library.copyMetadata(toExports:)`).
+        public var copiesMetadata = false
 
-        public init(url: URL, sourceID: Int64, placement: Placement) {
+        public init(url: URL, sourceID: Int64, placement: Placement, copiesMetadata: Bool = false) {
             self.url = url
             self.sourceID = sourceID
             self.placement = placement
+            self.copiesMetadata = copiesMetadata
         }
     }
 

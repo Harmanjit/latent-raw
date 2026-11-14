@@ -12,6 +12,19 @@ import Foundation
 ///   {camera}        camera model with spaces removed
 ///   {rating}        stars as a digit
 ///   {folder}        the image's subfolder inside the catalog, or the catalog name
+///   {lens} {maker} {model} {iso} {shutter} {aperture} {focal} {bias}
+///   {width} {height} {label} {stars} {title} {caption} {creator}
+///   {copyright} {headline} {city} {country} {keywords} {ext} {version}
+///   {original}      see `Field`
+///
+/// Modifiers (not for a date or time given its own format, whose colon is
+/// the format's):
+///   {token|text}    `text` when the token comes out empty
+///   {token:upper}, {token:lower}, {token:title}   letter case
+///   {token:1-8}     characters 1 to 8
+///   {token/old/new} every `old` replaced by `new`
+/// They combine in that written order, {title:upper/ /_|untitled}: the
+/// replacement first, then the characters, then the case, then the fallback.
 ///
 /// Dates are formatted in en_US_POSIX with the Gregorian calendar, so a
 /// template names files the same on every Mac whatever the user's region
@@ -30,7 +43,103 @@ public enum ExportNaming {
         ("{name}", "original name"), ("{seq}", "sequence number"), ("{date}", "capture date"),
         ("{date:yyyyMMdd}", "capture date, own format"), ("{time}", "capture time"),
         ("{camera}", "camera"), ("{rating}", "stars"), ("{folder}", "subfolder"),
-    ]
+    ] + fieldTokens
+
+    /// The tokens that read one value of the photo (`Field`), for the
+    /// Insert menus here, in Rename with Template and the watermark.
+    public static let fieldTokens: [(token: String, meaning: String)] = Field.allCases.map {
+        ("{\($0.rawValue)}", $0.meaning)
+    }
+
+    /// One value of the photo, by its token's keyword.
+    public enum Field: String, CaseIterable, Sendable {
+        case lens, maker, model, iso, shutter, aperture, focal, bias, width, height
+        case label, stars, title, caption, creator, copyright, headline, city, country
+        case keywords, ext, version, original
+
+        public var meaning: String {
+            switch self {
+            case .lens: "lens"
+            case .maker: "camera maker"
+            case .model: "camera model"
+            case .iso: "ISO"
+            case .shutter: "shutter speed"
+            case .aperture: "aperture"
+            case .focal: "focal length"
+            case .bias: "exposure bias"
+            case .width: "width"
+            case .height: "height"
+            case .label: "colour label"
+            case .stars: "stars as ★"
+            case .title: "title"
+            case .caption: "caption"
+            case .creator: "creator"
+            case .copyright: "copyright"
+            case .headline: "headline"
+            case .city: "city"
+            case .country: "country"
+            case .keywords: "keywords"
+            case .ext: "original extension"
+            case .version: "virtual copy number"
+            case .original: "original file name"
+            }
+        }
+
+        /// The value for `record`, as text; empty when the photo has none.
+        /// Numbers are written the way file names can hold them: 1/250 s
+        /// is "1-250", ƒ/2.8 is "f2.8", 50 mm is "50mm", +0.7 EV is "+0.7".
+        public func value(of record: ImageRecord, keywords: [String]) -> String {
+            switch self {
+            case .lens: return record.lens ?? ""
+            case .maker:
+                return (record.camera ?? "").split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
+            case .model:
+                let parts = (record.camera ?? "").split(separator: " ", maxSplits: 1)
+                return parts.count > 1 ? String(parts[1]) : ""
+            case .iso: return record.iso.map { $0 > 0 ? String($0) : "" } ?? ""
+            case .shutter:
+                guard let s = record.shutter, s > 0 else { return "" }
+                return s < 1 ? "1-\(Int((1 / s).rounded()))" : Self.number(s) + "s"
+            case .aperture:
+                guard let f = record.aperture, f > 0 else { return "" }
+                return "f" + Self.number(f)
+            case .focal:
+                guard let mm = record.focal, mm > 0 else { return "" }
+                return Self.number(mm) + "mm"
+            case .bias:
+                guard let ev = record.exposureBias else { return "" }
+                let text = Self.number(abs(ev))
+                return text == "0" ? "0" : (ev < 0 ? "-" : "+") + text
+            case .width: return record.width.map(String.init) ?? ""
+            case .height: return record.height.map(String.init) ?? ""
+            case .label: return record.label ?? ""
+            case .stars: return String(repeating: "★", count: min(max(record.rating, 0), 5))
+            case .title: return record.title ?? ""
+            case .caption: return record.caption ?? ""
+            case .creator: return record.creator ?? ""
+            case .copyright: return record.copyright ?? ""
+            case .headline: return record.headline ?? ""
+            case .city: return record.city ?? ""
+            case .country: return record.country ?? ""
+            case .keywords:
+                // The last level of each, "Places|France|Paris" as "Paris".
+                var seen = Set<String>()
+                return keywords.map { KeywordPath.components($0).last ?? $0 }
+                    .filter { seen.insert($0).inserted }.sorted().joined(separator: "_")
+            case .ext: return (record.fileRelPath as NSString).pathExtension
+            case .version: return String(VirtualCopy.parse(record.relPath)?.key.number ?? 0)
+            case .original:
+                let name = record.preservedName ?? (record.fileRelPath as NSString).lastPathComponent
+                return (name as NSString).deletingPathExtension
+            }
+        }
+
+        /// One decimal at most, none when it is zero, in POSIX digits.
+        static func number(_ value: Double) -> String {
+            let tenths = (value * 10).rounded() / 10
+            return tenths == tenths.rounded() ? String(Int(tenths)) : String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), tenths)
+        }
+    }
 
     /// File names hold at most 255 bytes of UTF-8. The stem stops short of
     /// that so a collision number ("-12") and the extension still fit.
@@ -54,6 +163,9 @@ public enum ExportNaming {
         public var catalogName: String
         public var step: Int
         public var letterCase: LetterCase
+        /// The photo's keywords, for {keywords}; empty when the caller
+        /// didn't look them up.
+        public var keywords: [String] = []
         public init(index: Int, start: Int = 1, padding: Int = 3, catalogName: String = "",
                     step: Int = 1, letterCase: LetterCase = .unchanged) {
             self.index = index; self.start = start; self.padding = padding; self.catalogName = catalogName
@@ -64,6 +176,14 @@ public enum ExportNaming {
     public static func fileName(template: String, record: ImageRecord, context: Context,
                                 timeZone: TimeZone = .current) -> String {
         Namer(template: template, timeZone: timeZone).stem(for: record, context: context)
+    }
+
+    /// `template` filled in for `record` as text, not a file name: what a
+    /// watermark or the image caption shows. An empty template stays empty.
+    public static func text(template: String, record: ImageRecord, context: Context,
+                            timeZone: TimeZone = .current) -> String {
+        guard !template.isEmpty else { return "" }
+        return Namer(template: template, timeZone: timeZone).text(for: record, context: context)
     }
 
     /// Tokens in `template` that aren't tokens, as typed ("{nmae}").
@@ -96,6 +216,40 @@ public enum ExportNaming {
         case name, seq, camera, rating, folder
         case date(format: String)
         case time(format: String)
+        case field(Field)
+        /// A token with modifiers (`Modifiers`).
+        indirect case modified(Token, Modifiers)
+    }
+
+    /// What `{token:upper/old/new|fallback}` asks for beyond the value.
+    struct Modifiers: Equatable {
+        enum Case: Equatable { case upper, lower, title }
+        var letterCase: Case?
+        /// 1-based, inclusive.
+        var characters: ClosedRange<Int>?
+        var replace: String?
+        var replacement = ""
+        var fallback: String?
+
+        func apply(_ value: String) -> String {
+            var out = value
+            if let replace { out = out.replacingOccurrences(of: replace, with: replacement) }
+            if let characters {
+                let chars = Array(out)
+                let lower = min(max(characters.lowerBound - 1, 0), chars.count)
+                let upper = min(max(characters.upperBound, lower), chars.count)
+                out = String(chars[lower..<upper])
+            }
+            let posix = Locale(identifier: "en_US_POSIX")
+            switch letterCase {
+            case .upper: out = out.uppercased(with: posix)
+            case .lower: out = out.lowercased(with: posix)
+            case .title: out = out.capitalized(with: posix)
+            case nil: break
+            }
+            if out.isEmpty, let fallback { out = fallback }
+            return out
+        }
     }
 
     /// The template's pieces, and the tokens it doesn't know, which stay in
@@ -138,21 +292,59 @@ public enum ExportNaming {
     }
 
     private static func token(for body: Substring) -> Token? {
-        let parts = body.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-        let keyword = parts[0].trimmingCharacters(in: .whitespaces).lowercased()
-        // A format is only for dates, and an empty one ("{date:}") is a typo.
-        guard parts.count == 1 || (keyword == "date" || keyword == "time") && !parts[1].isEmpty else { return nil }
-        let format = parts.count > 1 ? String(parts[1]) : nil
-        switch keyword {
-        case "name": return .name
-        case "seq": return .seq
-        case "date": return .date(format: format ?? "yyyy-MM-dd")
-        case "time": return .time(format: format ?? "HHmmss")
-        case "camera": return .camera
-        case "rating": return .rating
-        case "folder": return .folder
-        default: return nil
+        let stop = body.firstIndex { $0 == ":" || $0 == "|" || $0 == "/" } ?? body.endIndex
+        let keyword = body[..<stop].trimmingCharacters(in: .whitespaces).lowercased()
+        var rest = body[stop...]
+        // A date or time's colon starts its format, all the rest of the
+        // braces, as it always has; an empty one ("{date:}") is a typo.
+        if keyword == "date" || keyword == "time", rest.first == ":" {
+            let format = String(rest.dropFirst())
+            guard !format.isEmpty else { return nil }
+            return keyword == "date" ? .date(format: format) : .time(format: format)
         }
+        let base: Token
+        switch keyword {
+        case "name": base = .name
+        case "seq": base = .seq
+        case "date": base = .date(format: "yyyy-MM-dd")
+        case "time": base = .time(format: "HHmmss")
+        case "camera": base = .camera
+        case "rating": base = .rating
+        case "folder": base = .folder
+        default:
+            guard let field = Field(rawValue: keyword) else { return nil }
+            base = .field(field)
+        }
+        guard !rest.isEmpty else { return base }
+        var modifiers = Modifiers()
+        if let bar = rest.firstIndex(of: "|") {
+            modifiers.fallback = String(rest[rest.index(after: bar)...])
+            rest = rest[..<bar]
+        }
+        if rest.first == ":" {
+            let end = rest.firstIndex(of: "/") ?? rest.endIndex
+            let word = rest[rest.index(after: rest.startIndex)..<end].trimmingCharacters(in: .whitespaces).lowercased()
+            rest = rest[end...]
+            switch word {
+            case "upper": modifiers.letterCase = .upper
+            case "lower": modifiers.letterCase = .lower
+            case "title": modifiers.letterCase = .title
+            default:
+                let bounds = word.split(separator: "-", omittingEmptySubsequences: false).map { Int($0) }
+                guard bounds.count == 2, let first = bounds[0], let last = bounds[1], first >= 1, last >= first
+                else { return nil }
+                modifiers.characters = first...last
+            }
+        }
+        if rest.first == "/" {
+            let parts = rest.dropFirst().split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2, !parts[0].isEmpty else { return nil }
+            modifiers.replace = String(parts[0])
+            modifiers.replacement = String(parts[1])
+            rest = rest[rest.endIndex...]
+        }
+        guard rest.isEmpty else { return nil }
+        return .modified(base, modifiers)
     }
 
     /// Makes names from one template. Parses it and builds its date
@@ -175,24 +367,34 @@ public enum ExportNaming {
             self.timeZone = timeZone
         }
 
+        /// The template filled in for `record`, as typed: no letter case,
+        /// no cleaning for a file name. A watermark's text and the image
+        /// caption use this; file names use `stem`.
+        public func text(for record: ImageRecord, context: Context) -> String {
+            tokens.map { value(of: $0, record: record, context: context) }.joined()
+        }
+
+        private func value(of token: Token, record: ImageRecord, context: Context) -> String {
+            switch token {
+            case .literal(let text): return text
+            case .name: return (record.fileName as NSString).deletingPathExtension
+            case .seq: return Self.sequence(context)
+            case .date(let format), .time(let format): return formatted(ExportNaming.captureDate(of: record), format)
+            case .camera: return (record.camera ?? "").replacingOccurrences(of: " ", with: "")
+            case .rating: return String(record.rating)
+            case .folder:
+                let folder = (record.relPath as NSString).deletingLastPathComponent
+                return folder.isEmpty ? context.catalogName : folder.replacingOccurrences(of: "/", with: "_")
+            case .field(let field): return field.value(of: record, keywords: context.keywords)
+            case .modified(let inner, let modifiers):
+                return modifiers.apply(value(of: inner, record: record, context: context))
+            }
+        }
+
         /// The file name without its extension.
         public func stem(for record: ImageRecord, context: Context) -> String {
             let base = (record.fileName as NSString).deletingPathExtension
-            let date = ExportNaming.captureDate(of: record)
-            var out = ""
-            for token in tokens {
-                switch token {
-                case .literal(let text): out += text
-                case .name: out += base
-                case .seq: out += Self.sequence(context)
-                case .date(let format), .time(let format): out += formatted(date, format)
-                case .camera: out += (record.camera ?? "").replacingOccurrences(of: " ", with: "")
-                case .rating: out += String(record.rating)
-                case .folder:
-                    let folder = (record.relPath as NSString).deletingLastPathComponent
-                    out += folder.isEmpty ? context.catalogName : folder.replacingOccurrences(of: "/", with: "_")
-                }
-            }
+            var out = text(for: record, context: context)
             let posix = Locale(identifier: "en_US_POSIX")
             switch context.letterCase {
             case .unchanged: break

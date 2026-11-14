@@ -11,7 +11,9 @@ extension Library {
         let catalogued = Set(images.map { $0.relPath.lowercased() })
         let xmp = catalog?.containerPath.appendingPathComponent("xmp", isDirectory: true)
         return RenamePlan.make(records, template: template, customText: customText, start: start, padding: padding,
-                               catalogName: folderURL?.lastPathComponent ?? "", letterCase: letterCase) { relPath in
+                               catalogName: folderURL?.lastPathComponent ?? "", letterCase: letterCase,
+                               keywords: template.range(of: "{keywords", options: .caseInsensitive) == nil
+                                   ? [:] : keywordIndex.mapValues { Array($0) }) { relPath in
             if catalogued.contains(relPath.lowercased()) { return true }
             guard let root else { return false }
             // A file the catalog doesn't index (a JPEG beside the raws), or

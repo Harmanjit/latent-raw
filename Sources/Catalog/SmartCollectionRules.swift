@@ -151,6 +151,9 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
         // Added with per-line joins; old rules never name them.
         case title, caption, creator, copyright, folder, exposureTime, aspectRatio, modifiedDate
         case inStack, virtualCopy, kind, moduleUsed
+        /// From the EXIF extras (ExifExtras): compensation in stops,
+        /// whether the flash fired, whether the file holds a position.
+        case exposureBias, flashFired, hasGPS
 
         public var title: String {
             switch self {
@@ -180,14 +183,17 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             case .virtualCopy: "Virtual copy"
             case .kind: "Kind"
             case .moduleUsed: "Edit changes"
+            case .exposureBias: "Exposure bias"
+            case .flashFired: "Flash fired"
+            case .hasGPS: "Has GPS position"
             }
         }
 
         /// The comparisons that make sense for the field, the first the default.
         public var operators: [Operator] {
             switch self {
-            case .rating, .iso, .focalLength, .aperture, .exposureTime: [.atLeast, .atMost, .is, .isNot, .between]
-            case .flag, .edited, .inStack, .virtualCopy, .kind, .moduleUsed: [.is, .isNot]
+            case .rating, .iso, .focalLength, .aperture, .exposureTime, .exposureBias: [.atLeast, .atMost, .is, .isNot, .between]
+            case .flag, .edited, .inStack, .virtualCopy, .kind, .moduleUsed, .flashFired, .hasGPS: [.is, .isNot]
             case .label: [.is, .isNot]
             case .keyword: [.is, .isNot, .contains, .doesNotContain, .hasAnyKeyword, .hasNoKeywords]
             case .camera, .lens, .fileName, .finderTag, .title, .caption, .creator, .copyright:
@@ -203,9 +209,9 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
 
         public var valueKind: ValueKind {
             switch self {
-            case .rating, .iso, .focalLength, .aperture, .exposureTime: .number
+            case .rating, .iso, .focalLength, .aperture, .exposureTime, .exposureBias: .number
             case .flag: .flag
-            case .edited, .inStack, .virtualCopy: .yesNo
+            case .edited, .inStack, .virtualCopy, .flashFired, .hasGPS: .yesNo
             case .label, .keyword, .camera, .lens, .fileName, .fileType, .finderTag,
                  .title, .caption, .creator, .copyright, .folder: .text
             case .captureDate, .modifiedDate: .date
@@ -238,6 +244,8 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             case .aspectRatio: Shape.landscape.rawValue
             case .kind: Kind.virtualCopy.rawValue
             case .moduleUsed: "tone"
+            case .exposureBias: "0"
+            case .flashFired, .hasGPS: "true"
             default: ""
             }
         }
@@ -263,6 +271,9 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             case .aspectRatio:
                 old.width != new.width || old.height != new.height || old.orientation != new.orientation
                     || old.userRotation != new.userRotation
+            case .exposureBias: old.exposureBias != new.exposureBias
+            case .flashFired: old.flashFired != new.flashFired
+            case .hasGPS: old.hasGPS != new.hasGPS
             case .edited, .keyword, .modifiedDate, .inStack, .moduleUsed: false
             }
         }
@@ -373,6 +384,14 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
         case .focalLength: return compare(record.focal)
         case .aperture: return compare(record.aperture)
         case .exposureTime: return compare(record.shutter, parse: Self.exposureNumber)
+        case .exposureBias: return compare(record.exposureBias)
+        case .flashFired:
+            // Unknown counts as not fired.
+            let hit = (record.flashFired ?? false) == (value != "false")
+            return op == .isNot ? !hit : hit
+        case .hasGPS:
+            let hit = record.hasGPS == (value != "false")
+            return op == .isNot ? !hit : hit
         case .flag:
             let wanted = Set(value.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) })
             let hit = wanted.contains(record.flag)

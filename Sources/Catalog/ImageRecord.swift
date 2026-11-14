@@ -50,6 +50,35 @@ public struct ImageRecord: Codable, FetchableRecord, MutablePersistableRecord,
     public var caption: String? = nil
     public var creator: String? = nil
     public var copyright: String? = nil
+    /// The IPTC fields beyond those four (DescriptiveField's "More"):
+    /// photoshop:Headline, Iptc4xmpCore:Location, photoshop:City, State and
+    /// Country, Iptc4xmpCore:CountryCode, the creator's job title
+    /// (photoshop:AuthorsPosition), email and web address
+    /// (Iptc4xmpCore:CreatorContactInfo) and photoshop:Instructions.
+    public var headline: String? = nil
+    public var sublocation: String? = nil
+    public var city: String? = nil
+    public var state: String? = nil
+    public var country: String? = nil
+    public var countryCode: String? = nil
+    public var creatorJobTitle: String? = nil
+    public var creatorEmail: String? = nil
+    public var creatorURL: String? = nil
+    public var instructions: String? = nil
+    /// EXIF the raw reader doesn't give, read through ImageIO (ExifExtras):
+    /// position in degrees (south and west negative) and metres, whether
+    /// the flash fired, exposure compensation in stops, and the EXIF
+    /// metering mode and white balance mode codes. Nil for unknown.
+    public var gpsLatitude: Double? = nil
+    public var gpsLongitude: Double? = nil
+    public var gpsAltitude: Double? = nil
+    public var flashFired: Bool? = nil
+    public var exposureBias: Double? = nil
+    public var meteringMode: Int? = nil
+    public var whiteBalanceMode: Int? = nil
+    /// Which version of `ExifExtras` read the fields above; nil for a row
+    /// made before they existed, which the next reconcile fills in.
+    public var exifExtrasVersion: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, size, mtime, xxhash, camera, lens, iso, shutter, aperture, focal
@@ -58,6 +87,20 @@ public struct ImageRecord: Codable, FetchableRecord, MutablePersistableRecord,
         case finderTags = "finder_tags"
         case mergeJSON = "merge_json"
         case title, caption, creator, copyright
+        case headline, sublocation, city, state, country
+        case countryCode = "country_code"
+        case creatorJobTitle = "creator_job_title"
+        case creatorEmail = "creator_email"
+        case creatorURL = "creator_url"
+        case instructions
+        case gpsLatitude = "gps_latitude"
+        case gpsLongitude = "gps_longitude"
+        case gpsAltitude = "gps_altitude"
+        case flashFired = "flash_fired"
+        case exposureBias = "exposure_bias"
+        case meteringMode = "metering_mode"
+        case whiteBalanceMode = "white_balance_mode"
+        case exifExtrasVersion = "exif_extras_version"
         case relPath = "rel_path"
         case preservedName = "preserved_name"
         case captureTime = "capture_time"

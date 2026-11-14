@@ -229,6 +229,7 @@ struct PreferencesView: View {
                 .accessibilityLabel("Show JPEGs of RAW+JPEG pairs as separate photos")
             Text("Off, a JPEG (or HEIF) saved beside a raw of the same name is hidden and travels with the raw when it is moved, copied or renamed. On, it is a photo of its own in the grid.")
                 .font(.caption).foregroundStyle(.secondary)
+            LibraryInfoSettings()
         }
         .formStyle(.grouped)
     }

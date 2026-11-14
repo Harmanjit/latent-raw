@@ -121,6 +121,9 @@ public enum ExportBatchPlanner {
         /// Exporting originals: each file keeps its photo's own extension,
         /// in the case it has, and `fileExtension` is not used.
         public var keepsOriginalExtension = false
+        /// Each photo's keywords, for a template with {keywords}; empty
+        /// otherwise, so the options stay cheap to compare.
+        public var keywordsByImage: [Int64: [String]] = [:]
 
         public init(template: String, start: Int = 1, step: Int = 1, padding: Int = 3,
                     letterCase: ExportNaming.LetterCase = .unchanged, fileExtension: String,
@@ -208,9 +211,10 @@ public enum ExportBatchPlanner {
         let subfolder = Options.cleanSubfolder(options.subfolder)
 
         for (index, record) in records.enumerated() {
-            let context = ExportNaming.Context(index: index, start: options.start, padding: options.padding,
+            var context = ExportNaming.Context(index: index, start: options.start, padding: options.padding,
                                                catalogName: options.catalogName, step: options.step,
                                                letterCase: options.letterCase)
+            if let id = record.id, let keywords = options.keywordsByImage[id] { context.keywords = keywords }
             let stem = namer.stem(for: record, context: context)
             let ext = options.keepsOriginalExtension ? (record.relPath as NSString).pathExtension : options.fileExtension
             let name = ext.isEmpty ? stem : stem + "." + ext

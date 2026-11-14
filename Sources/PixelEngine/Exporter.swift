@@ -318,6 +318,8 @@ public struct ExportMetadata: Sendable, Equatable {
         let allKeywords = fileKeywords + Self.flattenedKeywords(keywords).filter { !fileKeywords.contains($0) }
         if !allKeywords.isEmpty { iptc[kCGImagePropertyIPTCKeywords as String] = allKeywords }
         if rating > 0 { iptc[kCGImagePropertyIPTCStarRating as String] = rating }
+        // Place names go with the location switch, as the GPS position does.
+        let descriptive = includeLocation ? descriptive : descriptive.withoutPlaces
         descriptive.apply(tiff: &tiff, iptc: &iptc)
 
         props[tiffKey] = tiff

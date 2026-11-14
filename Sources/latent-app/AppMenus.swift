@@ -210,6 +210,7 @@ struct CommandState: Equatable {
         case .back: canGoBack
         case .refreshFolder: hasFolder
         case .rebuildThumbnails: hasFolder && (hasSelection || selectionCount > 0) && mode != .survey
+        case .importForeignSidecars: hasFolder && mode == .library && hasVisibleImages && !fileOperationRunning
         case .forward: canGoForward
         // The grid goes to Loupe first, which needs a selection.
         case .fullScreenImage: fullScreenImage || hasSelection || (mode == .develop && hasImage)
@@ -347,6 +348,7 @@ struct LatentCommands: Commands {
             item("Open File…", .openFile)
             item("Refresh Folder", .refreshFolder)
             item("Rebuild Thumbnails", .rebuildThumbnails)
+            item("Import Ratings and Keywords from Other Apps’ Sidecars…", .importForeignSidecars)
             Divider()
             item(state.exportTitle, .export)
             item("Export with Previous", .exportWithPrevious)

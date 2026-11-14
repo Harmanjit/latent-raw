@@ -130,6 +130,10 @@ enum KeyCommand: Equatable, Sendable {
     /// File › Rebuild Thumbnails: the selection's thumbnails made again, at
     /// Settings › Performance's quality (`Library+ThumbnailCache.swift`).
     case rebuildThumbnails
+    /// File › Import Ratings and Keywords from Other Apps' Sidecars…: the
+    /// selection (or every photo) fills what it has empty from darktable's
+    /// or Lightroom's sidecars beside it (ForeignXMPImport.swift).
+    case importForeignSidecars
     /// Photo › Create Virtual Copy, Set Copy as Master, Remove Virtual Copy,
     /// and File › Duplicate (a true copy of the file beside it).
     case createVirtualCopy, setCopyAsMaster, removeVirtualCopy, duplicatePhoto

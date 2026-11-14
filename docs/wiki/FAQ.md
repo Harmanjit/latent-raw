@@ -51,7 +51,7 @@ In a `_latent` folder inside each photo folder. Each folder is its own catalog. 
 
 ### Can I import my Lightroom catalog?
 
-No. Latent can't read Lightroom catalogs, presets or edits, or the `.xmp` files Lightroom writes beside raws. See [Coming from Lightroom](Coming-from-Lightroom).
+No. Latent can't read Lightroom catalogs, presets or edits. It does read the ratings, labels, keywords and descriptive fields in the `.xmp` files Lightroom writes beside raws. See [Coming from Lightroom](Coming-from-Lightroom).
 
 ### How do I get photos off my memory card?
 

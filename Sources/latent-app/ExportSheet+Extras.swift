@@ -6,6 +6,10 @@ import Catalog
 /// The export sheet's watermark settings: a switch, then the text, corner,
 /// size, opacity and colour.
 struct ExportWatermarkSection: View {
+    /// The export naming tokens a watermark can use, less {name} and {seq}
+    /// ({name} is the watermark's own; a watermark has no sequence).
+    static let namingTokens = ExportNaming.tokens.filter { $0.token != "{name}" && $0.token != "{seq}" }
+
     @Binding var preset: ExportPreset
 
     var body: some View {
@@ -28,6 +32,12 @@ struct ExportWatermarkSection: View {
                             .accessibilityLabel("Watermark text")
                         Menu("Insert") {
                             ForEach(ExportWatermark.tokens, id: \.token) { t in
+                                Button("\(t.token)  \(t.meaning)") { preset.watermark.text += t.token }
+                            }
+                            Divider()
+                            // The naming tokens too, filled in per photo
+                            // (ExportPreset.watermark(_:filledFor:)).
+                            ForEach(Self.namingTokens, id: \.token) { t in
                                 Button("\(t.token)  \(t.meaning)") { preset.watermark.text += t.token }
                             }
                         }
