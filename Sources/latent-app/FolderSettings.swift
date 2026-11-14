@@ -48,6 +48,7 @@ struct FolderSettingsTab: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .accessibilityLabel("Auto Import status: \(autoImport.status)")
             }
+            CatalogBackupSection()
         }
         .formStyle(.grouped)
         .onAppear { presets = PresetStore.load() }

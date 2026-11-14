@@ -6,17 +6,21 @@ Swift 6 with strict concurrency, built with SwiftPM. No Xcode project.
 
 | Target | Role |
 |---|---|
-| `RawCore` | LibRaw behind a small C shim; the isolated decoder client; the reader for the metadata exports carry; the ImageIO reader that brings JPEG, HEIC, TIFF, PNG, WebP and AVIF in as linear sources (`RenderedImageFormat`) |
+| `RawCore` | LibRaw behind a small C shim; the isolated decoder client; the reader for the metadata exports carry; the ImageIO reader that brings JPEG, HEIC, TIFF, PNG, WebP, AVIF and JPEG XL in as linear sources (`RenderedImageFormat`) |
 | `latent-rawdecoder` | The XPC service that runs LibRaw in its own sandbox |
 | `PixelEngine` | The Metal render pipeline, edit stack, crop, healing and red-eye, tone ranges, presence, presenter and magnifier, what mouse and trackpad input means, exporter, resampler, watermark, HDR gain maps, page layout for prints and contact sheets, slideshow transitions, safe file writes, memory-pressure monitor. It also owns Photo Merge's GPU kernels, which MergeKit drives: `MergeHDR`, `MergeWarp`, `MergeDeghost`, `MergePanoPrep` and `MergePanoBlend` |
 | `ColorKit` | Colour science: camera matrices, white balance, working space (Rec.2020 linear), output transforms, rendering intents and ICC conversions through ColorSync (with black point compensation) for soft proofing and printing |
 | `LensKit` | A Lensfun database subset and a matcher, in pure Swift |
+<!-- RECONCILE: two branches edited this; merge into one text -->
 | `Catalog` | SQLite (GRDB) catalog, XMP sidecars (and reading, never writing, other applications' sidecars beside the photos, `ForeignSidecar`), reconciliation, EXIF the raw reader doesn't give through ImageIO (`ExifExtras`), thumbnails and the thumbnail loader, filtering and sorting (Custom order, Finder tags), moving, copying and renaming images with their sidecars, undo for library actions, folder history, folder access, export naming, batch planning and size estimates |
+
+| `Catalog` | SQLite (GRDB) catalog, XMP sidecars, reconciliation, thumbnails and the thumbnail loader, filtering and sorting (Custom order, Finder tags), moving, copying and renaming images with their sidecars, undo for library actions, folder history, folder access, export naming, batch planning and size estimates, daily and pre-migration catalog backups (`CatalogBackup`), and the photos and edits a headless export reads (`HeadlessSources`) |
+<!-- /RECONCILE -->
 | `MLKit` | Core ML: the model registry, manifests and importer (`ModelRegistry`, `ModelManifest`, `ModelImporter`), Segment Anything 2.1, SegFormer-B2, BiRefNet and other subject models (`SubjectSegmenter`), NAFNet, depth models and Lens Blur's depth map with its two-plane fallback from the subject mask (`DepthEstimator`, `LensBlurDepth`); one Vision face-landmark pass (`FaceLandmarker`) shared by red-eye, the touch-up regions (`TouchUpRegions`) and the blemish finder; the export worker, which also renders pixels for prints, contact sheets and slides and regenerates masks and touch-up regions for them |
 | `MergeKit` | Photo Merge, with no user interface of its own: frame alignment (`Align`), deghosting (`Deghost`), the HDR merge and its dialog preview (`HDR`), the panorama's geometry, prep and stitcher (`Pano`), the HDR panorama that composes the two (`HDRPano`), the float16 LinearRaw DNG writer (`DNG`) and the `latent:Merge` recipe and its XMP (`Recipe`). The app sees it only through the `HDRMerging`, `PanoramaMerging` and `HDRPanoramaMerging` protocols, so dialogs and jobs are tested with fake engines |
 | `HelpKit` | Help window: the wiki's Markdown as blocks, links between pages, search |
 | `latent-app` | SwiftUI and AppKit: the views, sidebar and filmstrip, Survey, full-screen image and the second display, editor model, menus and the one shortcut table, preferences, print, contact sheets, the slideshow, Edit in External Editor, the Help window |
-| `latent-cli` | Headless render for benchmarks and tests, plus the merge commands the engine is developed against: `merge-hdr` (with `--preview`), `pano-layout`, `merge-pano`, `merge-hdrpano` and `catalog` |
+| `latent-cli` | Headless render for benchmarks and tests, plus the merge commands the engine is developed against: `merge-hdr` (with `--preview`), `pano-layout`, `merge-pano`, `merge-hdrpano` and `catalog`; `export`, which renders photos with their saved edits through `ExportWorker`, and `thumbs`, which fills a folder's thumbnail cache |
 
 ## The render pipeline
 

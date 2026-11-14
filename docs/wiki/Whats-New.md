@@ -53,6 +53,9 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Recently Added** in the sidebar shows what the latest scan found. See [The sidebar](Library#the-sidebar).
 - **Find folder**, **Add Parent Folder…** and **volume meters** in the sidebar help you get around and keep an eye on free space. See [The sidebar](Library#the-sidebar).
 - **JPEG, HEIC, TIFF and PNG** (and WebP and AVIF where macOS reads them) are catalogued and open in Develop, looking exactly as they are. See [JPEG, TIFF and other pictures](Develop#jpeg-tiff-and-other-pictures).
+- **Catalog backups**: each folder's catalog is copied into `_latent/backups/` once a day and before any format change, keeping five, and **Settings › Folders › Restore Catalog Backup…** puts one back. See [The catalog](Library#the-catalog).
+- **More raw formats**: 22 rarer ones LibRaw reads, from Kodak KDC and DCR to GoPro GPR, Mamiya MEF and Panasonic RAW, are catalogued. See [Supported files](Library#supported-files).
+- **JPEG XL pictures** open where macOS reads them. See [Supported files](Library#supported-files).
 - **RAW+JPEG pairs** show as one photo, and the JPEG moves and renames with its raw. See [RAW+JPEG pairs](Library#rawjpeg-pairs).
 - **Verify Files** reads every file again and finds ones that were silently damaged (same size and date, different content), with a mark on their thumbnails. See [Verifying files](Library#verifying-files).
 - **Find Duplicates** groups photos whose files are identical, or taken at the same moment, and selects or rejects all but the one to keep. See [Finding duplicates](Library#finding-duplicates).
@@ -131,6 +134,8 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Tokens in the watermark text**, filled in for each photo. See [The sheet](Export#the-sheet).
 - **Add to this catalog copies the original's rating, label and keywords** onto the export. See [The sheet](Export#the-sheet).
 - **Export with Previous** (⌥⇧⌘E), **several presets in one run**, and new destinations: beside the original, or chosen when the export starts. See [Export with Previous](Export#export-with-previous).
+- **`latent-cli export`** renders a folder or files with their saved edits from Terminal, with a preset, format, size, colour space, naming and a dry run. See [From the command line](Export#from-the-command-line).
+- **`latent-cli thumbs`** makes a folder's thumbnails ahead of time so it opens with them ready. See [From the command line](Export#from-the-command-line).
 - **Soft proofing** with Perceptual and Relative Colorimetric intents, **Simulate Paper & Ink**, a monitor gamut warning and **proof copies**. See [Soft proofing](Develop#soft-proofing).
 - **Rendering intent when printing**, taken from the soft proof. See [Print](Export#print).
 - **Saturation and Absolute Colorimetric** intents in soft proofing and printing, beside Perceptual and Relative Colorimetric. See [Soft proofing](Develop#soft-proofing).

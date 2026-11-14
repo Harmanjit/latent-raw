@@ -31,6 +31,7 @@ _latent/
   catalog.sqlite     the database (a cache; rebuildable)
   xmp/               one sidecar per image (the source of truth)
   thumbnails/        512 px HEIC previews (excluded from Time Machine)
+  backups/           the last five copies of catalog.sqlite
   custom-order.json  your Custom sort arrangement, once you make one
   collections.json   a copy of your collections, once you make one
 ```
@@ -40,6 +41,8 @@ _latent/
 **Sidecars** are standard XMP. Rating, colour label, keywords, title, caption, creator and copyright are written in the fields Lightroom and others read (`xmp:Rating`, `xmp:Label`, `dc:subject`, `dc:title`, `dc:description`, `dc:creator`, `dc:rights`), keyword hierarchies included (`lr:hierarchicalSubject`). The edit, history and snapshots are under Latent's own namespace. A sidecar written by another application is read for whatever standard fields it has.
 
 **A damaged database** is not a lost catalog. If SQLite reports `catalog.sqlite` as damaged, Latent moves it aside as `catalog.damaged-<date>.sqlite` in the same `_latent/` folder, starts a new one that fills from the sidecars, and tells you. Ratings, keywords and edits come back, and collections come back from `collections.json`; the include-or-separate answers for subfolders were kept only in the database, so they are asked again.
+
+**Backups.** Latent copies a folder's `catalog.sqlite` into `_latent/backups/` once a day when the folder opens (once it holds photos), and always just before an update changes the catalog's format. It keeps five, `catalog-backup-1.sqlite` to `-5`, each new copy overwriting the oldest; nothing is deleted. The sidecars already hold every edit, rating and keyword, so a backup matters for what only the database keeps: collections, stacks, subfolder choices and the like. To go back to one, open the folder and choose **Settings › Folders › Restore Catalog Backup…**, which lists the backups by date. Latent saves the open edit, closes the catalog, keeps the current one as `catalog-replaced-<date>.sqlite` beside it, copies the backup in and opens the folder again; edits, ratings and keywords saved in sidecars after the backup are read back from the sidecars as it opens. Restoring waits until no export, move, copy, Photo Merge, print or contact sheet is running.
 
 **Network volumes** use SQLite's rollback journal instead of write-ahead logging, which is unreliable over SMB and NFS.
 
@@ -58,11 +61,13 @@ Thumbnails are made in the background as soon as a folder opens: from the camera
 
 Thumbnail progress reaches the status bar at most ten times a second, so a big folder filling in doesn't slow the window down.
 
+To have a large folder's thumbnails ready before you open it, run `latent-cli thumbs <folder>` in Terminal: it reads the folder as opening it would and makes every missing or out-of-date thumbnail, edited photos from their edits (see [From the command line](Export#from-the-command-line)).
+
 ## Supported files
 
-**Raw files:** NEF, NRW, ARW, SRF, SR2, CR2, CR3, CRW, DNG, RAF, ORF, RW2, PEF, SRW, 3FR, FFF, IIQ, MOS, MRW, X3F. Decoding is by LibRaw. Only Bayer-pattern sensors render; see [Limitations](Limitations).
+**Raw files:** NEF, NRW, ARW, SRF, SR2, CR2, CR3, CRW, DNG, RAF, ORF, RW2, PEF, SRW, 3FR, FFF, IIQ, MOS, MRW, X3F, and the rarer ARI, BAY, BMQ, CAP, CINE, CS1, DC2, DCR, ERF, GPR, IA, K25, KC2, KDC, MDC, MEF, PXN, QTK, RAW, RDC, RW1 and STI. Decoding is by LibRaw. Only Bayer-pattern sensors render; see [Limitations](Limitations).
 
-**Pictures:** JPEG, HEIC and HEIF, TIFF and PNG, and WebP and AVIF where this Mac's macOS can read them. They are catalogued, rated, keyworded, filtered and exported like raws, with their camera, lens, exposure and capture time read from their EXIF; a scan or screenshot with no capture time is dated by the file's modification date. Their thumbnails are made from the pictures themselves, turned upright by their orientation tag. They open in Develop too: see [Develop](Develop#jpeg-tiff-and-other-pictures).
+**Pictures:** JPEG, HEIC and HEIF, TIFF and PNG, and WebP, AVIF and JPEG XL where this Mac's macOS can read them. They are catalogued, rated, keyworded, filtered and exported like raws, with their camera, lens, exposure and capture time read from their EXIF; a scan or screenshot with no capture time is dated by the file's modification date. Their thumbnails are made from the pictures themselves, turned upright by their orientation tag. They open in Develop too: see [Develop](Develop#jpeg-tiff-and-other-pictures).
 
 ### RAW+JPEG pairs
 

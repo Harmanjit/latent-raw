@@ -112,7 +112,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "latent-cli",
-            dependencies: ["RawCore", "PixelEngine", "Catalog", "ColorKit", "MergeKit"],
+            dependencies: ["RawCore", "PixelEngine", "Catalog", "ColorKit", "MergeKit", "MLKit"],
             path: "Sources/latent-cli"
         ),
         .testTarget(

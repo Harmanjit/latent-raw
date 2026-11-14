@@ -22,6 +22,18 @@ import MergeKit
 
 let args = CommandLine.arguments
 
+// `export` subcommand: render photos with their saved edits, headless,
+// through the app's own export worker (ExportCommand.swift).
+if args.count >= 2, args[1] == "export" {
+    exit(await ExportCommand.run(Array(args.dropFirst(2))))
+}
+
+// `thumbs` subcommand: build or refresh a folder's thumbnail cache so it
+// opens with every thumbnail ready (ThumbsCommand.swift).
+if args.count >= 2, args[1] == "thumbs" {
+    exit(await ThumbsCommand.run(Array(args.dropFirst(2))))
+}
+
 // `catalog` subcommand: open (or create) the catalog for a folder,
 // reconcile it, and list what it holds. The command-line way to watch
 // Phase 2 work before there's a grid to look at.
@@ -757,6 +769,12 @@ guard args.count >= 3, args[1] == "render" else {
     Usage:
       latent-cli render <path-to-raw-file> [options]
       latent-cli catalog <folder> [--include-subfolders]
+      latent-cli export <folder | file…> --out-dir <folder> [--preset p.json]
+                        [--format jpeg|heic|tiff|png|avif|jxl] [--quality 0-100]
+                        [--long-edge N] [--space srgb|p3|adobergb]
+                        [--template naming] [--on-conflict number|skip|replace]
+                        [--no-metadata] [--dry-run]
+      latent-cli thumbs <folder> [--include-subfolders]
       latent-cli merge-hdr <output.dng> <raw> <raw> [...] [--reference N]
                            [--no-align] [--deghost none|low|medium|high]
                            [--auto-settings]

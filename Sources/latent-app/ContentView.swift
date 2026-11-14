@@ -307,6 +307,8 @@ struct ContentView: View {
             wireFileOperations()
             // The open folder's watch and the watched-folder import.
             FolderWatching.shared.start(library: library)
+            // Settings › Folders › Restore Catalog Backup… (CatalogRestore).
+            CatalogRestore.shared.attach(model: model, library: library, exportQueue: exportQueue)
             // Quitting flushes and waits for these (AppDelegate).
             AppDelegate.register(model: model, library: library, exportQueue: exportQueue)
             if let gpu = model.gpu {
