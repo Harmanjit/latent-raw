@@ -239,11 +239,16 @@ public enum ExportNaming {
 
     public enum Collision: String, CaseIterable, Codable, Sendable {
         case addNumber, replace, skip
+        /// Replace an existing file only when the photo's edit (its
+        /// sidecar) or the photo itself changed after the file was
+        /// written; skip it otherwise (ExportBatchPlanner).
+        case replaceIfChanged
         public var title: String {
             switch self {
             case .addNumber: "Add a number"
             case .replace: "Replace"
             case .skip: "Skip"
+            case .replaceIfChanged: "Overwrite if edit changed"
             }
         }
     }
