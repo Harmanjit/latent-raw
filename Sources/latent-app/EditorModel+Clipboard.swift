@@ -75,7 +75,7 @@ extension EditorModel {
         let preset = Preset(name: name, groups: groups, stack: EditStack(parameters: parameters))
         do {
             try PresetStore.save(preset)
-            presets = PresetStore.load()
+            reloadPresets()
             status = "Saved preset “\(name)”"
         } catch {
             status = "Could not save preset: \(error)"
@@ -85,6 +85,6 @@ extension EditorModel {
     func deletePreset(_ preset: Preset) {
         guard !preset.isBuiltIn else { return }
         do { try PresetStore.delete(named: preset.name) } catch { reportFailure("Deleting preset “\(preset.name)”", error) }
-        presets = PresetStore.load()
+        reloadPresets()
     }
 }

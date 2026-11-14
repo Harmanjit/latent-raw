@@ -52,12 +52,14 @@ public enum ICCTransform {
     /// keeps the destination's paper white as a colour of its own, which
     /// is what simulating paper on screen needs.
     public enum Intent: Sendable {
-        case perceptual, relativeColorimetric, absoluteColorimetric
+        case perceptual, relativeColorimetric, absoluteColorimetric, saturation
 
         public init(_ intent: RenderingIntent) {
             switch intent {
             case .perceptual: self = .perceptual
             case .relativeColorimetric: self = .relativeColorimetric
+            case .saturation: self = .saturation
+            case .absoluteColorimetric: self = .absoluteColorimetric
             }
         }
 
@@ -66,6 +68,7 @@ public enum ICCTransform {
             case .perceptual: ICCTransform.constant("kColorSyncRenderingIntentPerceptual")
             case .relativeColorimetric: ICCTransform.constant("kColorSyncRenderingIntentRelative")
             case .absoluteColorimetric: ICCTransform.constant("kColorSyncRenderingIntentAbsolute")
+            case .saturation: ICCTransform.constant("kColorSyncRenderingIntentSaturation")
             }
         }
     }

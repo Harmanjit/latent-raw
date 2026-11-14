@@ -81,6 +81,9 @@ struct ExportPreset: Codable, Equatable {
     /// label, keywords and descriptive fields (ExportToCatalog.swift). On
     /// unless switched off.
     var copyMetadataToCatalog = true
+    /// A develop preset applied to the files only (ExportPreset+Style.swift);
+    /// nil, the default and in older presets, applies none.
+    var presetStyle: PresetStyle?
 
     var settings: ExportSettings {
         var s = ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap,
@@ -149,6 +152,7 @@ struct ExportPreset: Codable, Equatable {
         addToCatalog = (try? c.decodeIfPresent(Bool.self, forKey: .addToCatalog)) ?? false
         stackWithOriginal = (try? c.decodeIfPresent(ExportStackPlacement.self, forKey: .stackWithOriginal)) ?? .off
         copyMetadataToCatalog = (try? c.decodeIfPresent(Bool.self, forKey: .copyMetadataToCatalog)) ?? true
+        presetStyle = (try? c.decodeIfPresent(PresetStyle.self, forKey: .presetStyle)) ?? nil
     }
 
     var fileExtension: String {
@@ -621,6 +625,7 @@ struct ExportSheet: View {
                 ExportSizingSection(preset: $preset)
                 ExportSharpeningSection(preset: $preset)
                 ExportWatermarkSection(preset: $preset)
+                ExportPresetStyleSection(preset: $preset)
                 ExportMetadataSection(preset: $preset)
             } else {
                 if preset.fileKind == .dng { ExportDNGSection(preset: $preset) }

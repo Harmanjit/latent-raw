@@ -161,6 +161,10 @@ enum KeyCommand: Equatable, Sendable {
     /// View › Loupe Overlay, and Develop's Before/After and Reference views
     /// (DevelopViews.swift).
     case view(ViewCommand)
+    /// Develop › Apply Preset, and a key given to a preset in Settings ›
+    /// Keyboard (PresetShortcuts.swift): the named preset on the selection
+    /// in the Library, on the open photo in Develop.
+    case applyPreset(String)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).
