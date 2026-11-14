@@ -152,6 +152,8 @@ enum Schema {
         migrator.registerMigration("stacks_v1_stack_tables") { db in
             try StackSchema.migrate(db)
         }
+        // Version names for virtual copies (VirtualCopySchema).
+        VirtualCopySchema.registerVersionNames(in: &migrator)
 
         return migrator
     }
