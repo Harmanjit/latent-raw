@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import PixelEngine
 
 /// The five stars under a grid thumbnail, for rating with the mouse.
 ///
@@ -144,5 +145,107 @@ final class TagDotsView: NSView {
                 ring.stroke()
             }
         }
+    }
+}
+
+/// A small tag in the badge row for a photo with keywords. Its tooltip
+/// lists them.
+final class KeywordBadgeView: NSView {
+    /// The keywords as shown, sorted; the badge hides with none.
+    private(set) var keywords: [String] = []
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override var isFlipped: Bool { true }
+
+    /// Sets the keywords (stored paths); true when they changed.
+    @discardableResult
+    func setKeywords(_ stored: Set<String>) -> Bool {
+        let shown = stored.map(KeywordPath.display).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        guard shown != keywords else { return false }
+        keywords = shown
+        toolTip = Self.toolTip(shown)
+        needsDisplay = true
+        return true
+    }
+
+    /// "Keywords: Paris, Places › France".
+    static func toolTip(_ keywords: [String]) -> String? {
+        keywords.isEmpty ? nil : "Keywords: " + keywords.joined(separator: ", ")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let colour = Contrast.isIncreased ? NSColor.labelColor : NSColor.secondaryLabelColor
+        let configuration = NSImage.SymbolConfiguration(pointSize: 7, weight: .regular)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [colour]))
+        guard !keywords.isEmpty,
+              let symbol = NSImage(systemSymbolName: "tag.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(configuration) else { return }
+        let size = symbol.size
+        let rect = CGRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
+                          width: size.width, height: size.height)
+        symbol.draw(in: rect)
+    }
+}
+
+/// An invisible patch over the edited pencil that carries its tooltip:
+/// the edit groups the photo's edit changes. They are read from the
+/// catalog when the pointer arrives, not for every cell scrolled past.
+final class EditedBadgeTipView: NSView {
+    /// Asked when the pointer comes over the pencil; calls back with the text.
+    var loadToolTip: ((@escaping @MainActor (String?) -> Void) -> Void)?
+    private var trackingArea: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        loadToolTip? { [weak self] text in self?.toolTip = text }
+    }
+
+    // No hitTest override: the tooltip needs the view found under the
+    // pointer. Clicks still reach the grid, since a plain NSView passes
+    // its mouse events on to the next responder.
+}
+
+/// The edit groups a stored edit changes from the defaults, for the edited
+/// pencil's tooltip: each group taken alone from the edit, compared with a
+/// fresh stack, the way copy and paste see the groups.
+enum EditedGroupsSummary {
+    static func changedGroups(json: String) -> [EditGroup] {
+        guard let stack = try? EditStack.decode(json: json) else { return [] }
+        let base = EditStack()
+        return EditGroup.allCases.filter { base.merged(with: stack, groups: [$0]) != base }
+    }
+
+    /// "Edited: White Balance, Tone, Crop & Straighten".
+    static func toolTip(_ groups: [EditGroup]) -> String {
+        guard !groups.isEmpty else { return "Edited" }
+        return "Edited: " + groups.map(shortName).joined(separator: ", ")
+    }
+
+    /// The group's name without the parenthesis that lists its sliders.
+    static func shortName(_ group: EditGroup) -> String {
+        group.displayName.components(separatedBy: " (").first ?? group.displayName
     }
 }

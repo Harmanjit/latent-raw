@@ -416,6 +416,7 @@ struct LatentCommands: Commands {
             item("Clear Filters", .clearFilter)
             LibraryViewMenuItems(state: state, item: { AnyView(item($0, $1)) },
                                  toggle: { AnyView(toolToggle($0, $1, isOn: $2)) })
+            GridMarksMenu()
             Divider()
         }
 
