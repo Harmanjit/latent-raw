@@ -37,24 +37,15 @@ A smart collection has a name and a list of rules. Choose whether a photo must m
 
 | Field | Comparisons |
 |---|---|
-<!-- RECONCILE: two branches edited this; merge into one text -->
-| Rating, ISO, Focal length, Aperture | is at least, is at most, is, is not, is between |
+| Rating, ISO, Focal length, Aperture, Exposure bias | is at least, is at most, is, is not, is between |
 | Exposure time | the same, in seconds: type `1/250`, `0.5` or `2` |
 | Flag | is or is not picked, unflagged or rejected |
 | Edited, In a stack, Virtual copy | is yes or no |
+| Flash fired, Has GPS position | is yes or no (a file that doesn't say counts as no) |
 | Keyword | is, is not (a keyword counts the keywords inside it), contains, doesn't contain, is not empty (has any keyword), is empty (has none) |
 | Camera, Lens, File name, Finder tag, Title, Caption, Creator, Copyright | contains, doesn't contain, is, is not, starts with, ends with |
 | Folder | starts with, is, is not, contains, doesn't contain, ends with (the folder inside the open one, such as `2026/Lisbon`) |
 | File type | is, is not (NEF, DNG and so on), is raw, is not raw (camera raws and DNGs are raw; JPEG, HEIF, TIFF and the like are not) |
-
-| Rating, ISO, Focal length, Aperture, Exposure bias | is at least, is at most, is, is not |
-| Flag | is or is not picked, unflagged or rejected |
-| Edited | is yes or no |
-| Flash fired, Has GPS position | is yes or no (a file that doesn't say counts as no) |
-| Keyword | is, is not (a keyword counts the keywords inside it), contains, doesn't contain |
-| Camera, Lens, File name, Finder tag | contains, doesn't contain, is, is not, starts with, ends with |
-| File type | is, is not (NEF, DNG and so on) |
-<!-- /RECONCILE -->
 | Colour label | is, is not (labels read from sidecars written by other applications) |
 | Capture date, Edit date | is in the last so many days, is, is before, is after, is between (both days included) |
 | Aspect ratio | is or is not landscape, portrait or square (within 1%), or at least, at most or between a width over height such as `1.5` or `3:2`; the camera's orientation and your quarter turns count, the crop doesn't |
