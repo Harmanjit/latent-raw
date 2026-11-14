@@ -299,6 +299,8 @@ struct ContentView: View {
         .onAppear {
             LensfunDatabase.warmUp()
             wireEditSaving()
+            // "Edit changes" smart collections (CollectionsSidebar.swift).
+            library.collections.editGroupsReader = SmartCollectionEditGroups.reader
             wireFileOperations()
             // The open folder's watch and the watched-folder import.
             FolderWatching.shared.start(library: library)
@@ -1413,6 +1415,8 @@ struct ContentView: View {
         case .newCollection, .newSmartCollection, .newCollectionSet, .saveFilterAsSmartCollection,
              .addToTargetCollection, .removeFromCollection:
             CollectionCommands.perform(command, library: library, onlyPrimary: mode != .library)
+        case .addKeywords:
+            KeywordEntryFocus.shared.requestFocus()
         case .view(let command):
             developViews.perform(command, load: { load($0) })
         }

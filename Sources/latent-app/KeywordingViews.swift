@@ -15,7 +15,10 @@ struct KeywordingField: View {
     @State private var text = ""
     @State private var suggestions: [String] = []
     @State private var highlighted = 0
+    /// Bumped after each add, so the Recent chips redraw.
+    @State private var added = 0
     @FocusState private var focused: Bool
+    @ObservedObject private var focus = KeywordEntryFocus.shared
 
     var body: some View {
         let usage = library.selectionKeywords()
@@ -65,9 +68,14 @@ struct KeywordingField: View {
             if focused, !suggestions.isEmpty {
                 suggestionList
             }
+            // Recent and "Often used with" chips (KeywordSuggestions.swift).
+            KeywordSuggestionChips(library: library, current: Set(usage.counts.keys), photos: usage.photos,
+                                   refresh: added)
         }
         // A draft typed for one selection is never added to the next.
         .onChange(of: library.selectedImageID) { text = "" }
+        // Photo › Add Keywords….
+        .onChange(of: focus.request) { focused = true }
     }
 
     private var suggestionList: some View {
@@ -105,7 +113,9 @@ struct KeywordingField: View {
     private func updateSuggestions(_ text: String) {
         let token = KeywordPath.lastToken(text)
         let already = Set(KeywordPath.parse(text).dropLast())
-        suggestions = KeywordPath.suggestions(for: token, in: library.availableKeywords, limit: 6)
+        // The folder's keywords and the app-wide dictionary's.
+        let available = Array(Set(library.availableKeywords).union(KeywordDictionaryStore.shared.completionPaths)).sorted()
+        suggestions = KeywordPath.suggestions(for: token, in: available, limit: 6)
             .filter { !already.contains($0) && KeywordPath.normalized(token) != $0 }
         highlighted = 0
     }
@@ -120,7 +130,8 @@ struct KeywordingField: View {
         text = ""
         suggestions = []
         guard !keywords.isEmpty else { return }
-        library.perform("Adding keywords") { try await library.addKeywords(keywords) }
+        KeywordAdding.add(keywords, library: library)
+        added += 1
     }
 }
 
@@ -216,6 +227,7 @@ final class KeywordListModel: ObservableObject {
     @Published private(set) var unkeywordedCount = 0
     private weak var library: Library?
     private var observation: AnyCancellable?
+    private var dictionaryObservation: AnyCancellable?
 
     func attach(to library: Library) {
         guard self.library !== library else { return }
@@ -225,11 +237,22 @@ final class KeywordListModel: ObservableObject {
             .dropFirst(2)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in MainActor.assumeIsolated { self?.rebuild() } }
+        // The dictionary, and whether its unused keywords show.
+        let store = KeywordDictionaryStore.shared
+        dictionaryObservation = Publishers.Merge(store.$dictionary.map { _ in () }, store.$showsDictionaryKeywords.map { _ in () })
+            .dropFirst(2)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in MainActor.assumeIsolated { self?.rebuild() } }
     }
 
     func rebuild() {
         guard let library else { return }
-        let next = library.keywordTree
+        let store = KeywordDictionaryStore.shared
+        // Every keyword the folder uses goes into the app-wide dictionary.
+        store.record(library.availableKeywords)
+        let next = store.showsDictionaryKeywords
+            ? KeywordTree.build(from: library.keywordsByImage, including: store.dictionary.paths)
+            : library.keywordTree
         if next != tree { tree = next }
         let count = library.unkeywordedCount(in: library.imagesInScope)
         if count != unkeywordedCount { unkeywordedCount = count }
@@ -247,14 +270,27 @@ struct KeywordListView: View {
     @State private var expanded: Set<String> = []
     @State private var renaming: String?
     @State private var newName = ""
+    @ObservedObject private var dictionary = KeywordDictionaryStore.shared
+    @State private var creating = false
+    @State private var createdName = ""
+    @State private var topDropTargeted = false
+    @State private var dropTarget: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            TextField("Find keyword", text: $search)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-                .accessibilityLabel("Find keyword")
-                .help("Show only keywords whose name contains this")
+            HStack(spacing: 4) {
+                TextField("Find keyword", text: $search)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .accessibilityLabel("Find keyword")
+                    .help("Show only keywords whose name contains this")
+                dictionaryMenu
+            }
+            // Dropping a keyword row here moves it to the top level.
+            .background(topDropTargeted ? Color.accentColor.opacity(0.25) : .clear, in: RoundedRectangle(cornerRadius: 4))
+            .onDrop(of: [.plainText, .utf8PlainText], isTargeted: $topDropTargeted) { providers in
+                KeywordDrag.accept(providers, onto: nil, library: library)
+            }
             if search.isEmpty, !model.tree.isEmpty {
                 KeywordListNoKeywordsRow(library: library, count: model.unkeywordedCount)
             }
@@ -274,10 +310,31 @@ struct KeywordListView: View {
             }
         }
         .onAppear { model.attach(to: library) }
+        .alert("New Keyword", isPresented: $creating) {
+            TextField("Name", text: $createdName)
+            Button("Add") {
+                if let path = KeywordPath.normalized(createdName) {
+                    dictionary.record([path])
+                    dictionary.showsDictionaryKeywords = true
+                    for ancestor in KeywordPath.ancestors(path) { expanded.insert(ancestor) }
+                }
+                creating = false
+            }
+            Button("Cancel", role: .cancel) { creating = false }
+        } message: {
+            Text("Adds the keyword to the keyword dictionary without putting it on any photo. Type a path such as “Places > France > Paris” to put it inside another.")
+        }
+        .alert("Keyword Dictionary", isPresented: Binding(get: { dictionary.lastError != nil },
+                                                          set: { if !$0 { dictionary.lastError = nil } })) {
+            Button("OK", role: .cancel) { dictionary.lastError = nil }
+        } message: {
+            Text(dictionary.lastError ?? "")
+        }
         .alert("Rename Keyword", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Rename") {
                 if let old = renaming, let new = KeywordPath.normalized(newName) {
+                    dictionary.rename(old, to: new)
                     library.perform("Renaming a keyword") { try await library.renameKeyword(old, to: new) }
                 }
                 renaming = nil
@@ -286,6 +343,28 @@ struct KeywordListView: View {
         } message: {
             Text("Every photo with this keyword gets the new name. Type a path such as “Places > France > Paris” to move it.")
         }
+    }
+
+    /// The keyword dictionary's commands (KeywordSuggestions.swift).
+    private var dictionaryMenu: some View {
+        Menu {
+            Toggle("Show Dictionary Keywords", isOn: $dictionary.showsDictionaryKeywords)
+            Button("New Keyword…") {
+                createdName = ""
+                creating = true
+            }
+            Divider()
+            Button("Import Keyword List…") { dictionary.importList() }
+            Button("Export Keyword List…") { dictionary.exportList() }
+                .disabled(dictionary.dictionary.paths.isEmpty)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("The keyword dictionary: keywords kept across every folder, a new keyword, and keyword lists as text files")
+        .accessibilityLabel("Keyword dictionary")
     }
 
     /// The tree as rows, expanded where the user opened it, or everywhere
@@ -355,7 +434,16 @@ struct KeywordListView: View {
         .font(.caption)
         .padding(.leading, CGFloat(depth) * 12)
         .padding(.vertical, 1)
-        .background(isFilter ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 3))
+        .background(dropTarget == tree.path ? Color.accentColor.opacity(0.35)
+                    : isFilter ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 3))
+        // Drag a row onto another to move it inside; drop photos from the
+        // grid on a row to give them the keyword (KeywordSuggestions.swift).
+        .onDrag { KeywordDrag.provider(for: tree.path) }
+        .onDrop(of: [.fileURL, .plainText, .utf8PlainText],
+                isTargeted: Binding(get: { dropTarget == tree.path },
+                                    set: { dropTarget = $0 ? tree.path : (dropTarget == tree.path ? nil : dropTarget) })) { providers in
+            KeywordDrag.accept(providers, onto: tree.path, library: library)
+        }
         .contextMenu {
             Button(isFilter ? "Show All Photos" : "Show Photos with This Keyword") {
                 library.filter.keyword = isFilter ? nil : tree.path
@@ -376,7 +464,13 @@ struct KeywordListView: View {
                 renaming = tree.path
             }
             Button("Delete Keyword") {
-                library.perform("Deleting a keyword") { try await library.deleteKeyword(tree.path) }
+                // Forgotten by the keyword dictionary too, or it would come
+                // back with a count of zero.
+                let path = tree.path
+                library.perform("Deleting a keyword") {
+                    try await library.deleteKeyword(path)
+                    KeywordDictionaryStore.shared.remove(path)
+                }
             }
         }
     }

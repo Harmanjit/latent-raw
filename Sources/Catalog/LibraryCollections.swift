@@ -30,13 +30,98 @@ public final class LibraryCollections: ObservableObject {
         // `contentDidChange`, called by the Library) their keywords.
         library.$images.dropFirst().sink { [weak self] _ in self?.contentDidChange() }.store(in: &observations)
         library.$editedImageIDs.dropFirst().sink { [weak self] _ in self?.contentDidChange() }.store(in: &observations)
+        // "In a stack" rules follow the stacks.
+        library.$stacks.dropFirst().sink { [weak self] _ in self?.contentDidChange() }.store(in: &observations)
     }
+
+    /// Turns a stored edit (its JSON) into the edit groups it changes, by
+    /// raw value. The app sets it (PixelEngine knows the groups); without
+    /// it "Edit changes" rules match nothing.
+    public var editGroupsReader: (@Sendable (String) -> Set<String>)?
+    /// What each stored edit changes and when it was saved, read only while
+    /// some smart collection asks (`SmartCollectionRules.readsEditDetails`).
+    private var editDetails: (groups: [Int64: Set<String>], times: [Int64: Int64])?
+    private var editDetailsTask: Task<Void, Never>?
+    private var editDetailsGeneration = 0
 
     // MARK: What the grid shows
 
     /// What the active collection lets through, nil when none is active.
     var activeScope: CollectionScope? {
-        activeID.flatMap(state.scope(for:))
+        guard var scope = activeID.flatMap(state.scope(for:)) else { return nil }
+        scope.extras = extras(stacks: scope.readsStacks, copies: scope.readsVirtualCopyMasters,
+                              edits: scope.readsEditDetails)
+        return scope
+    }
+
+    /// Whether `rules` match `record`, with everything they read; for the
+    /// smart collection sheet's running count.
+    public func matchContexts(for rules: SmartCollectionRules) -> (ImageRecord) -> SmartMatchContext {
+        let extras = extras(stacks: rules.readsStacks, copies: rules.readsVirtualCopyMasters, edits: rules.readsEditDetails)
+        let edited = library?.editedImageIDs ?? []
+        let keywords = library?.keywordIndex ?? [:]
+        let now = Date()
+        return { record in
+            extras.context(for: record, isEdited: record.id.map(edited.contains) ?? false,
+                           keywords: record.id.flatMap { keywords[$0] } ?? [], now: now)
+        }
+    }
+
+    /// The facts rules read beyond each row, only those asked for. Edit
+    /// details not read yet are started reading; rules that need them
+    /// match as for unedited photos until they land.
+    func extras(stacks: Bool, copies: Bool, edits: Bool) -> SmartScopeExtras {
+        guard let library else { return SmartScopeExtras() }
+        var extras = SmartScopeExtras()
+        if stacks { extras.stackedIDs = Set(library.stackMemberships.keys) }
+        if copies { extras.mastersWithCopies = SmartScopeExtras.masters(withCopiesIn: library.images) }
+        if edits {
+            if let details = editDetails {
+                extras.editGroups = details.groups
+                extras.editTimes = details.times
+            } else if editDetailsTask == nil {
+                reloadEditDetails()
+            }
+        }
+        return extras
+    }
+
+    /// The values a text field takes among the folder's photos, each once,
+    /// sorted, for the smart collection sheet's value menu.
+    public func existingValues(for field: SmartCriterion.Field) -> [String] {
+        guard let library else { return [] }
+        return SmartCriterion.existingValues(for: field, in: library.images, keywords: library.keywordIndex)
+    }
+
+    private var anyRulesReadEditDetails: Bool {
+        state.collections.contains { $0.rules?.readsEditDetails == true }
+    }
+
+    /// Reads every stored edit again for the rules that look at them.
+    private func reloadEditDetails() {
+        guard let library, let catalog = library.catalog else { return }
+        editDetailsGeneration += 1
+        let generation = editDetailsGeneration
+        let reader = editGroupsReader
+        editDetailsTask = Task { @MainActor [weak self] in
+            let rows = (try? await catalog.editDetailRows()) ?? []
+            let details = await Task.detached(priority: .utility) { () -> (groups: [Int64: Set<String>], times: [Int64: Int64]) in
+                var groups: [Int64: Set<String>] = [:]
+                var times: [Int64: Int64] = [:]
+                for row in rows {
+                    times[row.id] = row.updatedAt
+                    if let reader { groups[row.id] = reader(row.json) }
+                }
+                return (groups, times)
+            }.value
+            guard let self, generation == self.editDetailsGeneration, catalog === self.library?.catalog else { return }
+            self.editDetailsTask = nil
+            let changed = self.editDetails.map { $0.groups != details.groups || $0.times != details.times } ?? true
+            self.editDetails = details
+            guard changed else { return }
+            if self.activeScope?.readsEditDetails == true { self.library?.recomputeVisible() }
+            self.recount()
+        }
     }
 
     public var activeCollection: CatalogCollection? { state.collection(activeID) }
@@ -56,6 +141,10 @@ public final class LibraryCollections: ObservableObject {
             saveTask = nil
             state = loaded
             activeID = nil
+            editDetails = nil
+            editDetailsTask?.cancel()
+            editDetailsTask = nil
+            editDetailsGeneration += 1
         } else {
             // A refresh may have dropped photos; collections already shown
             // stay as they are, since a save of them may still be on its way.
@@ -74,6 +163,9 @@ public final class LibraryCollections: ObservableObject {
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
             self?.recount()
+            // An edit saved may change what "Edit changes" and "Edit
+            // date" rules say; read the edits again only if one asks.
+            if let self, self.anyRulesReadEditDetails { self.reloadEditDetails() }
         }
     }
 
@@ -84,9 +176,14 @@ public final class LibraryCollections: ObservableObject {
         let keywords = library.keywordIndex
         let images = library.images
         let now = Date()
+        let rules = state.collections.compactMap(\.rules)
+        let extras = extras(stacks: rules.contains(where: \.readsStacks),
+                            copies: rules.contains(where: \.readsVirtualCopyMasters),
+                            edits: rules.contains(where: \.readsEditDetails))
         var result: [Int64: Int] = [:]
         for collection in state.collections {
-            guard let scope = state.scope(for: collection.id) else { continue }
+            guard var scope = state.scope(for: collection.id) else { continue }
+            scope.extras = extras
             if scope.rules.isEmpty {
                 let present = Set(images.lazy.compactMap(\.id))
                 result[collection.id] = scope.ids.intersection(present).count

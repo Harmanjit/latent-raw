@@ -141,6 +141,8 @@ enum KeyCommand: Equatable, Sendable {
     /// target collection, and taking photos out of the collection shown.
     case newCollection, newSmartCollection, newCollectionSet, saveFilterAsSmartCollection
     case addToTargetCollection, removeFromCollection
+    /// Photo › Add Keywords…: the keywording field, focused (KeywordSuggestions.swift).
+    case addKeywords
     /// Crop guides, straighten, flips, Upright, and the camera's orientation.
     case geometry(GeometryCommand)
     /// Photo › Flip for the selection, View › Sort and Mirror Image Mode.

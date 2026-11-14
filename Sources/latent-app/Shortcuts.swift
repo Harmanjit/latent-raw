@@ -137,6 +137,8 @@ enum Shortcuts {
         // makes a collection.
         Shortcut(.addToTargetCollection, "b"),
         Shortcut(.newCollection, "n", .command),
+        // Lightroom's key for the keywording field.
+        Shortcut(.addKeywords, "k", .command),
         // Editing
         Shortcut(.undo, "z", .command),
         Shortcut(.redo, "z", [.shift, .command]),
@@ -354,6 +356,7 @@ extension Shortcuts {
             ShortcutPageRow([.clearFilter], "Clear the filter bar"),
             ShortcutPageRow([.addToTargetCollection], "Add the selection to the target collection (the Quick Collection unless you chose another), or take it out when it is all there already"),
             ShortcutPageRow([.newCollection], "New collection (with the selected photos, if you like)"),
+            ShortcutPageRow([.addKeywords], "Add keywords: the keywording field, ready to type in, for the selected photos"),
         ]),
         ("Editing", [
             ShortcutPageRow([.undo, .redo], "Undo, redo (in Develop, the image's edit history; elsewhere, what you did in the Library, moves and renames included)"),
