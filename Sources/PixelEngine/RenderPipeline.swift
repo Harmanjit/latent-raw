@@ -185,6 +185,9 @@ public struct EditParameters: Sendable, Equatable {
     /// Flat-field correction from a reference raw (FlatField.swift); nil
     /// for none, which every edit older than it has.
     public var flatField: FlatFieldCorrection? = nil
+    /// The tone equalizer (ToneEqualizer.swift, ToneEqualizerStage.swift);
+    /// neutral, and skipped, unless a band is moved.
+    public var toneEqualizer: ToneEqualizer = .neutral
     /// The rendering generation the edit was made with (`ProcessVersion`);
     /// a stage whose behaviour changed between versions branches on it.
     public var processVersion: String = EditStack.processVersion
@@ -316,6 +319,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.reflections == b.reflections
             && a.hdrLimitStops == b.hdrLimitStops
             && a.flatField == b.flatField
+            && a.toneEqualizer == b.toneEqualizer
     }
 }
 
@@ -384,6 +388,12 @@ public struct RenderOutput: Sendable, Equatable {
     /// magenta) whose colours stay while the rest of the picture goes grey
     /// (RenderPipeline+HueIsolation.swift). Viewport only; nil normally.
     public var hueIsolation: Int? = nil
+    /// Show Mask: the tone equalizer's mask in grey in place of the
+    /// picture (ToneEqualizerStage.swift). Viewport only.
+    public var toneEqualizerMaskView = false
+    /// Work out the tone equalizer's mask even while every band is at 0,
+    /// for its panel's histogram and the readout. Changes no pixel.
+    public var toneEqualizerAnalysis = false
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -419,6 +429,8 @@ public struct RenderOutput: Sendable, Equatable {
             && a.sharpenMaskPreview == b.sharpenMaskPreview
             && a.depthVisualisation == b.depthVisualisation
             && a.hueIsolation == b.hueIsolation
+            && a.toneEqualizerMaskView == b.toneEqualizerMaskView
+            && a.toneEqualizerAnalysis == b.toneEqualizerAnalysis
     }
 }
 
@@ -540,12 +552,13 @@ public final class RenderPipeline {
                          output: .sceneLinear, cameraRGBOnly: true, info: nil)
     }
 
-    private func renderStages(_ session: ImageSession,
-                              scale: RenderScale,
-                              parameters: EditParameters,
-                              output: RenderOutput,
-                              cameraRGBOnly: Bool,
-                              info: UnsafeMutablePointer<RenderInfo>?) throws -> MTLTexture {
+    func renderStages(_ session: ImageSession,
+                      scale: RenderScale,
+                      parameters: EditParameters,
+                      output: RenderOutput,
+                      cameraRGBOnly: Bool,
+                      stopAfterLens: Bool = false,
+                      info: UnsafeMutablePointer<RenderInfo>?) throws -> MTLTexture {
         let summary = session.file.summary
         // The Bayer order, or nil for a linear source; any other layout
         // can't be rendered.
@@ -587,6 +600,16 @@ public final class RenderPipeline {
             sourcePlan = .fullResolution(origin: (Int(window.minX), Int(window.minY)),
                                          size: (Int(window.width), Int(window.height)))
             widened = true
+        }
+
+        // The tone equalizer's whole-image mask, made first in a render of
+        // its own when this render covers only part of the image and the
+        // session has none for these settings (ToneEqualizerStage.swift).
+        let toneEqualizer = ToneEqualizerStage.Request(parameters: parameters, output: output,
+                                                       cameraRGBOnly: cameraRGBOnly || stopAfterLens)
+        if let toneEqualizer, case .fullResolution(_, let size) = plan, size.width < rawW || size.height < rawH {
+            try prepareToneEqualizerMask(session: session, parameters: parameters, request: toneEqualizer,
+                                         cameraToWorking: cameraToWorking, multipliers: multipliers)
         }
 
         // Every stage of this render is encoded into ONE command buffer and
@@ -768,6 +791,29 @@ public final class RenderPipeline {
                                                   source: sourceInfo, output: renderInfo, binSpan: binSpan)
         }
 
+        // A whole-image source for the tone equalizer's mask render.
+        if stopAfterLens {
+            cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
+            info?.pointee = renderInfo
+            return colourInput
+        }
+
+        // Stage 7b: the tone equalizer, a colour-neutral gain in scene-linear
+        // camera space (ToneEqualizerStage.swift). Its mask view, if asked
+        // for, replaces the picture at the end.
+        var toneEqualizerMaskView: MTLTexture?
+        if let toneEqualizer {
+            let applied = try applyToneEqualizer(session: session, cmdBuffer: cmdBuffer, input: colourInput,
+                                                 request: toneEqualizer, parameters: parameters,
+                                                 cameraToWorking: cameraToWorking, multipliers: multipliers,
+                                                 profile: profile, renderInfo: renderInfo, binSpan: binSpan,
+                                                 preview: displayRole != .display)
+            colourInput = applied.image
+            toneEqualizerMaskView = applied.maskView
+        }
+
         // Stages 8 to 15, in one kernel (Shaders/ColorPipeline.metal).
         var final = try applyColorAndTone(session: session, cmdBuffer: cmdBuffer,
                                           input: colourInput,
@@ -876,9 +922,17 @@ public final class RenderPipeline {
                                                       gpu: gpu, commandBuffer: cmdBuffer)
         }
 
+        // Display pass: the tone equalizer's Show Mask, last, like Show Depth.
+        if let toneEqualizerMaskView {
+            final = try ToneEqualizerStage.encodeMaskView(mask: toneEqualizerMaskView, like: final, output: output,
+                                                          session: session, preview: displayRole != .display,
+                                                          gpu: gpu, commandBuffer: cmdBuffer)
+        }
+
         cmdBuffer.commit()
         cmdBuffer.waitUntilCompleted()
         if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
+        if toneEqualizer != nil { session.toneEqualizerStore.renderDidComplete() }
 
         info?.pointee = renderInfo
         return final

@@ -218,6 +218,23 @@ public enum ViewerInteraction {
         }
     }
 
+    // MARK: - Scrolling to adjust (an on-image tool)
+
+    /// What one scroll event is worth to an on-image tool that adjusts a
+    /// value by scrolling (the tone equalizer's band under the pointer),
+    /// in EV: a twelfth of a stop per mouse wheel notch, a stop per 240
+    /// points of trackpad travel, scrolling up (away from you) raising it
+    /// whatever the natural scrolling setting. Momentum is ignored so the
+    /// change stops when the fingers lift; nil when the event is worth
+    /// nothing.
+    public static func toolScrollAmount(_ e: WheelEvent) -> Float? {
+        guard e.momentumPhase == .none else { return nil }
+        let dy = e.invertedFromDevice ? -e.delta.height : e.delta.height
+        guard dy != 0, dy.isFinite else { return nil }
+        if e.precise { return Float(dy) / 240 }
+        return dy > 0 ? 1.0 / 12 : -1.0 / 12
+    }
+
     // MARK: - Magnifier
 
     /// The round loupe shown while the mouse button is held on a fitted

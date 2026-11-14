@@ -15,6 +15,8 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     case profile
     case effects
     case lensBlur
+    /// The tone equalizer's bands and mask settings (ToneEqualizer.swift).
+    case toneEqualizer
 
     public var id: String { rawValue }
 
@@ -41,6 +43,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .profile:      return "Profile"
         case .effects:      return "Effects (post-crop vignetting, grain)"
         case .lensBlur:     return "Lens Blur (amount, bokeh, focus range)"
+        case .toneEqualizer: return "Tone Equalizer"
         }
     }
 
@@ -48,7 +51,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     /// masks (drawn for another frame) and not the lens correction
     /// switches (a property of the lens, already right per image).
     public static let lookGroups: Set<EditGroup> = [.whiteBalance, .tone, .presence, .toneCurve, .colour, .splitToning, .calibration, .detail,
-                                                    .profile, .effects]
+                                                    .profile, .effects, .toneEqualizer]
 }
 
 extension EditStack {
@@ -122,6 +125,8 @@ extension EditStack {
                 // The sliders and the focus range travel; the depth map is
                 // made again for the photo they land on.
                 result.modules.lensblur = other.modules.lensblur
+            case .toneEqualizer:
+                result.modules.toneEqualizer = other.modules.toneEqualizer
             }
         }
         result.modules.perspective = Self.mergedPerspective(modules.perspective, other.modules.perspective,
@@ -173,6 +178,7 @@ extension EditStack {
         if m.profile != nil { g.insert(.profile) }
         if m.vignette != nil || m.grain != nil { g.insert(.effects) }
         if m.lensblur != nil { g.insert(.lensBlur) }
+        if m.toneEqualizer != nil { g.insert(.toneEqualizer) }
         return g
     }
 }
@@ -254,7 +260,7 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
                 p.denoiseLuminance = 0.15; p.denoiseColor = 0.4
                 p.hsl.saturation[3] = 0.15; p.hsl.saturation[5] = 0.15   // green, blue
             },
-        ]
+        ] + rangeCompressionBuiltIns
     }
 }
 
