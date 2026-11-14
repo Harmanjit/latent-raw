@@ -129,11 +129,26 @@ public struct CollectionsState: Equatable, Sendable {
 public struct CollectionScope: Equatable, Sendable {
     public var ids: Set<Int64>
     public var rules: [SmartCollectionRules]
+    /// What the rules read beyond each photo's row and keywords, gathered
+    /// once for the whole list (`LibraryCollections` fills it in).
+    public var extras = SmartScopeExtras()
+
+    public init(ids: Set<Int64>, rules: [SmartCollectionRules], extras: SmartScopeExtras = SmartScopeExtras()) {
+        self.ids = ids
+        self.rules = rules
+        self.extras = extras
+    }
 
     public func includes(_ record: ImageRecord, isEdited: Bool, keywords: Set<String>, now: Date = Date()) -> Bool {
         if let id = record.id, ids.contains(id) { return true }
-        return rules.contains { $0.matches(record, isEdited: isEdited, keywords: keywords, now: now) }
+        guard !rules.isEmpty else { return false }
+        let context = extras.context(for: record, isEdited: isEdited, keywords: keywords, now: now)
+        return rules.contains { $0.matches(record, context: context) }
     }
+
+    public var readsStacks: Bool { rules.contains(where: \.readsStacks) }
+    public var readsVirtualCopyMasters: Bool { rules.contains(where: \.readsVirtualCopyMasters) }
+    public var readsEditDetails: Bool { rules.contains(where: \.readsEditDetails) }
 
     public func dependsOnChange(from old: ImageRecord, to new: ImageRecord) -> Bool {
         rules.contains { $0.dependsOnChange(from: old, to: new) }
@@ -141,6 +156,59 @@ public struct CollectionScope: Equatable, Sendable {
 
     public var readsKeywords: Bool { rules.contains(where: \.readsKeywords) }
     public var readsEdits: Bool { rules.contains(where: \.readsEdits) }
+}
+
+/// Facts about the folder's photos that smart collection rules may read
+/// and that live outside each photo's row: which are stacked, which have
+/// virtual copies, and what each stored edit changes and when it was saved.
+public struct SmartScopeExtras: Equatable, Sendable {
+    public var stackedIDs: Set<Int64> = []
+    /// Catalog-relative paths of masters with at least one virtual copy.
+    public var mastersWithCopies: Set<String> = []
+    /// Image id → the edit groups (raw values) its stored edit changes.
+    public var editGroups: [Int64: Set<String>] = [:]
+    /// Image id → when its stored edit was saved, in milliseconds since 1970.
+    public var editTimes: [Int64: Int64] = [:]
+
+    public init(stackedIDs: Set<Int64> = [], mastersWithCopies: Set<String> = [],
+                editGroups: [Int64: Set<String>] = [:], editTimes: [Int64: Int64] = [:]) {
+        self.stackedIDs = stackedIDs
+        self.mastersWithCopies = mastersWithCopies
+        self.editGroups = editGroups
+        self.editTimes = editTimes
+    }
+
+    public func context(for record: ImageRecord, isEdited: Bool, keywords: Set<String>, now: Date) -> SmartMatchContext {
+        let id = record.id
+        return SmartMatchContext(isEdited: isEdited, keywords: keywords,
+                                 isInStack: id.map(stackedIDs.contains) ?? false,
+                                 hasVirtualCopies: !record.isVirtualCopy && mastersWithCopies.contains(record.relPath),
+                                 editGroups: id.flatMap { editGroups[$0] } ?? [],
+                                 editedAt: id.flatMap { editTimes[$0] },
+                                 now: now)
+    }
+
+    /// The masters among `images` that have virtual copies.
+    public static func masters(withCopiesIn images: [ImageRecord]) -> Set<String> {
+        Set(images.lazy.compactMap { VirtualCopy.parse($0.relPath)?.masterRelPath })
+    }
+}
+
+/// The collections opened most recently in one folder, newest first, for
+/// the sidebar's Recent list. Kept per folder in the preferences, as ids:
+/// a collection deleted since simply drops out.
+public enum RecentCollections {
+    public static let limit = 8
+
+    /// `list` with `id` moved (or added) to the front, at most `limit` long.
+    public static func recording(_ id: Int64, in list: [Int64], limit: Int = RecentCollections.limit) -> [Int64] {
+        Array(([id] + list.filter { $0 != id }).prefix(limit))
+    }
+
+    /// The ids of `list` that still name a collection of `state`, in order.
+    public static func existing(_ list: [Int64], in state: CollectionsState) -> [Int64] {
+        list.filter { state.collection($0) != nil }
+    }
 }
 
 // MARK: - Schema
