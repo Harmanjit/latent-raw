@@ -23,6 +23,9 @@ struct LensBlurSection: View {
             row("Amount", value: Binding(get: { blur.amount }, set: { model.setLensBlurAmount($0) }),
                 hint: "How strongly everything outside the focus range is blurred; 0 turns Lens Blur off")
 
+            LensBlurTypePicker(model: model)
+
+            if blur.effectiveBlurType == .bokeh {
             HStack {
                 Text("Bokeh").font(.subheadline).accessibilityHidden(true)
                 Spacer()
@@ -43,6 +46,7 @@ struct LensBlurSection: View {
             row("Boost Highlights", value: $model.parameters.lensBlur.boost,
                 hint: "Brightens highlights in the blur so points of light open into visible discs")
                 .disabled(!blur.isActive)
+            }
 
             focusRange
 

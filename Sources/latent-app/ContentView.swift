@@ -2278,6 +2278,7 @@ struct ContentView: View {
 
             HealShapePicker(model: model)
             if model.activeHealMode == .remove { RemoveOptions(model: model) }
+            HealFillBlurOptions(model: model)
 
             sliderRow(title: "Size",
                       value: Binding(get: { model.activeHealRadiusPixels },

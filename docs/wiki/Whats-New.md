@@ -136,8 +136,13 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Remove chromatic aberration (automatic)** measures colour fringes on the photo itself, without a profile. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
 - **Defringe** with adjustable hue ranges and a fringe colour picker. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
 - **Post-crop vignetting and grain**. See [Effects](Develop#effects).
+<!-- RECONCILE: two branches edited this; merge into one text -->
 - **LMMSE demosaic**, for clean detail from high-ISO files. See [Sharpening and noise reduction](Develop#sharpening-and-noise-reduction).
 - **Embedded DNG corrections**: a DNG's own lens-shading map, vignetting and distortion, applied with one switch. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
+
+- **Hot pixel removal** replaces stuck and hot photosites on the sensor before demosaicing, with a threshold and an "N pixels fixed" count. See [Hot pixels](Develop#hot-pixels).
+- **Manual chromatic aberration**: Red and Blue sliders line up the colours by hand, on top of the profile or the automatic correction. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
+<!-- /RECONCILE -->
 
 ## Masks and retouching
 
@@ -151,6 +156,8 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Remove** takes a distraction out of the photo, filling it from its surroundings, and **Detect Objects** fills just the object you brushed over. See [Remove and Detect Objects](Develop#remove-and-detect-objects).
 - **One Remove tool** with Remove, Heal and Clone modes, per-patch **Opacity**, a **Tool Overlay** setting, a pin list with Select All and Delete All, and Option-drag to delete the spots inside a marquee. See [Develop](Develop#modules).
 - **Lens Blur** blurs the background (or foreground) from a depth map, with bokeh shapes and a focus range you pick on the photo. See [Lens Blur](Develop#lens-blur).
+- **Fill and Blur** modes for the Remove tool paint a colour over a spot or soften it, as a spot or a brush stroke. See [Fill and Blur](Develop#fill-and-blur).
+- **Gaussian and Motion blur types** for Lens Blur, a plain softening or a streak at any angle, which work with or without a depth map. See [Lens Blur](Develop#lens-blur).
 - **Distraction Removal › Reflections** takes window and glass reflections off the scene behind them, with a reflection removal model you add. See [Reflections](Develop#reflections).
 - **Pet Eye** fixes an animal's glowing green, yellow or white eyes with a dark pupil and an optional catchlight. See [Develop](Develop#modules).
 

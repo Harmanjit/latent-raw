@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import simd
 import PixelEngine
 
@@ -36,7 +37,7 @@ extension EditorModel {
                 var patch = parameters.heals[i]
                 patch.source = sourceForModeChange(of: patch, to: newValue)
                 patch.mode = newValue
-                parameters.heals[i] = patch
+                parameters.heals[i] = stampingModeSettings(patch)
             }
         }
     }
@@ -70,9 +71,9 @@ extension EditorModel {
         for i in order {
             let h = parameters.heals[i]
             let rPx = h.radius * short
-            // A Remove patch has no source to grab; with an outline, a
-            // click inside its box selects it too.
-            if h.mode == .remove {
+            // A Remove patch has no source to grab (nor Fill or Blur);
+            // with an outline, a click inside its box selects it too.
+            if !h.mode.usesSource {
                 if h.objectMask != nil, h.targetBounds(sensorSize: sensorSize).contains(
                     CGPoint(x: CGFloat(p.x) * sensorSize.width, y: CGFloat(p.y) * sensorSize.height)) {
                     return (i, false, p - h.target)
@@ -125,6 +126,14 @@ extension EditorModel {
             healDrag = .painting
             return
         }
+        if healMode == .fill || healMode == .blur {
+            // No source either: the click places the patch, a drag moves it.
+            parameters.heals.append(stampingModeSettings(stampingOpacity(
+                HealPatch(target: p, source: p, radius: healRadius, feather: healFeather, mode: healMode))))
+            selectedHealIndex = parameters.heals.count - 1
+            healDrag = .placing(parameters.heals.count - 1)
+            return
+        }
         if healMode == .remove {
             // Remove has no source: the click places the patch, a drag moves it.
             guard let patch = preparedRemovePatch(HealPatch(target: p, source: p, radius: healRadius,
@@ -151,7 +160,7 @@ extension EditorModel {
         guard let healDrag else { return }
         let p = simd_clamp(rawNormalized(sensorNormalized(screen)), SIMD2(0, 0), SIMD2(1, 1))
         switch healDrag {
-        case .placing(let i) where i < parameters.heals.count && parameters.heals[i].mode == .remove:
+        case .placing(let i) where i < parameters.heals.count && !parameters.heals[i].mode.usesSource:
             parameters.heals[i].target = p
             parameters.heals[i].source = p
         case .placing(let i) where i < parameters.heals.count:
@@ -159,8 +168,8 @@ extension EditorModel {
         case .movingTarget(let i, let off) where i < parameters.heals.count:
             var patch = parameters.heals[i]
             patch.target = simd_clamp(p - off, SIMD2(0, 0), SIMD2(1, 1))
-            // A Remove patch's source stays on its target.
-            if patch.mode == .remove { patch.source = patch.target }
+            // A Remove, Fill or Blur patch's source stays on its target.
+            if !patch.mode.usesSource { patch.source = patch.target }
             parameters.heals[i] = patch
         case .movingSource(let i, let off) where i < parameters.heals.count:
             parameters.heals[i].source = simd_clamp(p - off, SIMD2(0, 0), SIMD2(1, 1))
@@ -249,5 +258,93 @@ extension EditorModel {
         else if dustToolActive || touchUpToolActive { return }
         else if !maskToolActive && lensBlurState.pickingFocus { return }
         else { maskToolEnded() }
+    }
+}
+
+// MARK: - Fill and Blur
+
+extension EditorModel {
+    /// `patch` with Fill's or Blur's settings for its mode (the ones it
+    /// already has, else the next patch's), and the other mode's cleared,
+    /// so a Heal, Clone or Remove patch carries none and encodes as before.
+    func stampingModeSettings(_ patch: HealPatch) -> HealPatch {
+        var p = patch
+        switch p.mode {
+        case .fill:
+            p.fillColour = p.fillColour ?? HealModeDefaults.fillColour
+            let brightness = p.fillBrightness ?? HealModeDefaults.fillBrightness
+            p.fillBrightness = brightness == 0 ? nil : brightness
+            p.blurRadius = nil
+        case .blur:
+            p.blurRadius = p.blurRadius ?? HealModeDefaults.blurRadius
+            p.fillColour = nil
+            p.fillBrightness = nil
+        case .heal, .clone, .remove:
+            p.fillColour = nil
+            p.fillBrightness = nil
+            p.blurRadius = nil
+        }
+        return p
+    }
+
+    /// The selected patch's index when it is in `mode`.
+    private func selectedHealIndex(in mode: HealPatch.Mode) -> Int? {
+        guard let i = selectedHealIndex, i < parameters.heals.count, parameters.heals[i].mode == mode else { return nil }
+        return i
+    }
+
+    /// Fill's colour (linear Rec.2020) of the selected Fill patch, or the next one's.
+    var activeFillColour: SIMD3<Float> {
+        get { selectedHealIndex(in: .fill).map { parameters.heals[$0].effectiveFillColour } ?? HealModeDefaults.fillColour }
+        set {
+            objectWillChange.send()
+            HealModeDefaults.fillColour = newValue
+            if let i = selectedHealIndex(in: .fill) { parameters.heals[i].fillColour = newValue }
+        }
+    }
+
+    /// `activeFillColour` as the colour well's sRGB colour.
+    var activeFillCGColour: CGColor {
+        get {
+            let c = HealPatch.sRGB(fromFillColour: activeFillColour)
+            return CGColor(srgbRed: CGFloat(c.x), green: CGFloat(c.y), blue: CGFloat(c.z), alpha: 1)
+        }
+        set {
+            guard let srgb = CGColorSpace(name: CGColorSpace.sRGB),
+                  let converted = newValue.converted(to: srgb, intent: .defaultIntent, options: nil),
+                  let parts = converted.components, parts.count >= 3 else { return }
+            activeFillColour = HealPatch.fillColour(fromSRGB: SIMD3(Float(parts[0]), Float(parts[1]), Float(parts[2])))
+        }
+    }
+
+    /// Fill's brightness in stops, of the selected Fill patch or the next one.
+    var activeFillBrightness: Float {
+        get { selectedHealIndex(in: .fill).map { parameters.heals[$0].effectiveFillBrightness } ?? HealModeDefaults.fillBrightness }
+        set {
+            objectWillChange.send()
+            HealModeDefaults.fillBrightness = newValue
+            if let i = selectedHealIndex(in: .fill) { parameters.heals[i].fillBrightness = newValue == 0 ? nil : newValue }
+        }
+    }
+
+    /// The default Blur radius in sensor pixels, for the slider's reset.
+    var defaultBlurRadiusPixels: Float {
+        HealPatch.defaultBlurRadius * Float(min(sensorSize.width, sensorSize.height))
+    }
+
+    /// Blur's radius in sensor pixels, of the selected Blur patch or the next one.
+    var activeBlurRadiusPixels: Float {
+        get {
+            let fraction = selectedHealIndex(in: .blur).map { parameters.heals[$0].effectiveBlurRadius } ?? HealModeDefaults.blurRadius
+            return fraction * Float(min(sensorSize.width, sensorSize.height))
+        }
+        set {
+            let short = Float(min(sensorSize.width, sensorSize.height))
+            guard short > 0 else { return }
+            let r = max(0.0001, min(HealPatch.maximumBlurRadius, newValue / short))
+            objectWillChange.send()
+            HealModeDefaults.blurRadius = r
+            if let i = selectedHealIndex(in: .blur) { parameters.heals[i].blurRadius = r }
+        }
     }
 }

@@ -56,6 +56,7 @@ extension EditorModel {
                                      sensorSize: sensorSize)
         }
         guard var patch else { return }
+        patch = stampingModeSettings(patch)
         if healMode == .remove {
             guard let prepared = preparedRemovePatch(patch) else { return }
             patch = prepared

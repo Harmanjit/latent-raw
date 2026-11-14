@@ -26,8 +26,12 @@ Swift 6 with strict concurrency, built with SwiftPM. No Xcode project.
 
 One Metal command buffer per render, stages back to back:
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 1. Black level and white balance on the raw plane. A linear source (a merged DNG, or a JPEG or TIFF converted to linear Rec.2020 and unrolled through the default tone curve so its default render is the file itself) starts here already demosaiced, with only the white balance to apply.
 <!-- RECONCILE: two branches edited this; merge into one text -->
+
+1. Black level and white balance on the raw plane (with hot pixels replaced first when Hot Pixels is on: a whole-plane pass made once per setting and kept on the session, `HotPixels.metal`). A linear source (a merged DNG, or a JPEG or TIFF converted to linear Rec.2020 and unrolled through the default tone curve so its default render is the file itself) starts here already demosaiced, with only the white balance to apply.
+<!-- /RECONCILE -->
 2. Demosaic: RCD or bilinear at full resolution for tiles, or binning for previews. The result is cached per white balance and region, so tone edits skip it.
 3. Neural denoise blend (if run), classic denoise, spot removal (dust spots, then touch-up blemishes, then the user's patches, in order, heal by a ratio field; a brush stroke heals piece by piece along its path; Remove synthesises fill by PatchMatch, coarse to fine, from the region around the patch, `Remove.metal`), red-eye (flash-red pixels inside each circle turned a dark neutral), lens corrections, all in camera space. The healed result is cached per session, keyed by everything these stages read, so a slider move after a Find Spots with 200 patches skips them. Then the tone equalizer, when a band is moved: a colour-neutral gain read from nine bands at each pixel's smoothed brightness, the mask a fast guided filter of log luminance made once per session on a 512-cell whole-image grid (a tile makes it from a small whole-image render first) and refined at full resolution (`ToneEqualizerStage`).
 

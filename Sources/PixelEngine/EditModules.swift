@@ -95,6 +95,7 @@ extension EditStack {
                 result.modules.aidenoise = other.modules.aidenoise
                 result.modules.sharpen = other.modules.sharpen
                 result.modules.demosaic = other.modules.demosaic
+                result.modules.hotpixels = other.modules.hotpixels
             case .lens:
                 result.modules.lens = other.modules.lens
                 result.modules.defringe = other.modules.defringe
@@ -172,7 +173,8 @@ extension EditStack {
         if m.splittoning != nil || m.colorgrading != nil { g.insert(.splitToning) }
         if m.calibration != nil || m.adaptation != nil || m.channelmixer != nil || m.gamutcompression != nil
             || m.purity != nil { g.insert(.calibration) }
-        if m.denoise != nil || m.sharpen != nil || m.demosaic != nil || m.aidenoise != nil { g.insert(.detail) }
+        if m.denoise != nil || m.sharpen != nil || m.demosaic != nil || m.aidenoise != nil
+            || m.hotpixels != nil { g.insert(.detail) }
         if m.lens != nil || m.defringe != nil { g.insert(.lens) }
         if m.locals != nil { g.insert(.locals) }
         if m.crop != nil { g.insert(.crop) }

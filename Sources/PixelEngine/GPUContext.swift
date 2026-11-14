@@ -99,6 +99,8 @@ public final class GPUContext: @unchecked Sendable {
     enum LazyKernel: String, CaseIterable, Sendable {
         case linearUpload
         case linearBinned
+        // Hot pixel removal on the sensor plane (HotPixels.metal, HotPixels.swift).
+        case hotPixelsRemove
         // Photo Merge's HDR merge (MergeHDR.metal, HDRMergeKernels.swift).
         case mergeHDRBinnedAnalysis
         case mergeHDRRawPrepare
@@ -312,7 +314,7 @@ public final class GPUContext: @unchecked Sendable {
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
                             "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye", "Slideshow",
                             "LinearSource", "MergeHDR", "MergeWarp", "MergeDeghost", "MergePanoPrep", "MergePanoBlend",
-                            "Dust", "TouchUp", "DetailEffects", "LocalDetail", "Remove", "LensBlur",
+                            "Dust", "TouchUp", "DetailEffects", "LocalDetail", "Remove", "LensBlur", "HotPixels",
                             "ExportSharpen", "FlatField", "Reflections", "ToneEqualizer",
                             "HighlightInpaint", "LMMSE"]
         let kernelURLs = try kernelNames.map { name -> URL in

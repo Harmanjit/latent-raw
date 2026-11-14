@@ -19,6 +19,10 @@ struct HealGridGPU {
     /// own. Zero for a circle.
     var maskCount: Int32 = 0
     var ownIndex: Int32 = 0
+    /// 1 for a Blur patch: the gather takes every pixel, the patch's own
+    /// included, so the blurred grid is the area blurred. 0 otherwise.
+    var gatherAll: Int32 = 0
+    var padding: Int32 = 0
 }
 
 /// One pass of the heal loop: a circle, or a piece of a stroke with the
@@ -114,6 +118,10 @@ enum HealStage {
         // so no piece depends on another and a tile need only hold the
         // pieces it shows (`HealPatch.regionIncludingSources`).
         let readsBefore = perPatch.flatMap { group in group.map { _ in group.count > 1 } }
+        // Fill's colour per pass, through the camera matrix (HealModes.swift).
+        let fillColours = zip(patches, perPatch).flatMap { patch, group in
+            group.map { _ in patch.mode == .fill ? patch.fillCameraColour(cameraToWorking: cameraToWorking) : .zero }
+        }
         let startsStroke = perPatch.flatMap { group in group.indices.map { group.count > 1 && $0 == 0 } }
         let eyes = redEyes.prefix(RedEyeSpot.maximumCount).compactMap {
             RedEyeStage.place($0, width: input.width, height: input.height,
@@ -191,8 +199,11 @@ enum HealStage {
                 reads = output
             }
             var patch = item.patch, grid = item.grid
+            if patch.params.z == HealPatch.Mode.fill.gpuIndex {
+                patch.extra = SIMD4(fillColours[k], 0)
+            }
             let gridCells = (Int(grid.gridSize.x), Int(grid.gridSize.y))
-            if patch.params.z < 0.5 {
+            if patch.params.z < 0.5 || grid.gatherAll != 0 {
                 encoder.setComputePipelineState(gpu.healGatherPSO)
                 encoder.setTexture(reads, index: 0)
                 encoder.setTexture(fieldT, index: 1)
@@ -255,7 +266,8 @@ enum HealStage {
         let offset = (p.source - p.target) * sensorSize / binSpan
         let segments = HealPatch.strokeSegments(path, radius: radius)
         let bounds = segments.map { (lo: simd_min($0.0, $0.1), hi: simd_max($0.0, $0.1)) }
-        let layout = HealFieldLayout(radius: radius)
+        let layout = p.mode == .blur ? blurLayout(p, sensorSize: sensorSize, binSpan: binSpan)
+                                     : HealFieldLayout(radius: radius)
         let cell = Float(layout.cell), padding = Float(layout.paddingCells)
         var result: [HealPlacement] = []
         for k in segments.indices {
@@ -265,7 +277,7 @@ enum HealStage {
 
             var gridSize = SIMD2<Int32>(1, 1)
             var reachLo = lo, reachHi = hi
-            if p.mode == .heal {
+            if p.mode == .heal || p.mode == .blur {
                 let cells = ((hi - lo) / cell).rounded(.up)
                 gridSize = SIMD2(Int32(cells.x), Int32(cells.y)) &+ Int32(2 * layout.paddingCells + 1)
                 reachLo = lo - padding * cell
@@ -287,7 +299,8 @@ enum HealStage {
                                    gridOrigin: lo - padding * cell, gridSize: gridSize,
                                    boxOrigin: SIMD2(Int32(x0), Int32(y0)),
                                    boxSize: SIMD2(Int32(x1 - x0), Int32(y1 - y0)),
-                                   maskCount: Int32(list.count), ownIndex: Int32(ownIndex))
+                                   maskCount: Int32(list.count), ownIndex: Int32(ownIndex),
+                                   gatherAll: p.mode == .blur ? 1 : 0)
             result.append(HealPlacement(patch: HealPatchGPU(p), grid: grid, segments: list))
         }
         return result
@@ -304,10 +317,11 @@ enum HealStage {
         let hi = (target + radius + 1).rounded(.up)
         guard case let (x0, y0, x1, y1)? = box(lo, hi, width, height), radius > 0 else { return nil }
 
-        let layout = HealFieldLayout(radius: radius)
+        let layout = p.mode == .blur ? blurLayout(p, sensorSize: sensorSize, binSpan: binSpan)
+                                     : HealFieldLayout(radius: radius)
         let cell = Float(layout.cell), padding = Float(layout.paddingCells)
         var gridSize = SIMD2<Int32>(1, 1)
-        if p.mode == .heal {
+        if p.mode == .heal || p.mode == .blur {
             let cells = Int32(((hi.x - lo.x) / cell).rounded(.up)) + 2 * Int32(layout.paddingCells) + 1
             gridSize = SIMD2(cells, cells)
         }
@@ -315,8 +329,15 @@ enum HealStage {
                                cell: cell, sigma: layout.sigmaCells,
                                gridOrigin: lo - padding * cell, gridSize: gridSize,
                                boxOrigin: SIMD2(Int32(x0), Int32(y0)),
-                               boxSize: SIMD2(Int32(x1 - x0), Int32(y1 - y0)))
+                               boxSize: SIMD2(Int32(x1 - x0), Int32(y1 - y0)),
+                               gatherAll: p.mode == .blur ? 1 : 0)
         return (HealPatchGPU(p), grid)
+    }
+
+    /// A Blur patch's grid layout on this texture: its blur radius in
+    /// texture pixels (HealModes.swift).
+    static func blurLayout(_ p: HealPatch, sensorSize: SIMD2<Float>, binSpan: Float) -> HealFieldLayout {
+        HealFieldLayout(radius: p.effectiveBlurRadius * min(sensorSize.x, sensorSize.y) / max(binSpan, 1e-3))
     }
 
     /// The whole pixels from `lo` to `hi` on a `width` x `height` texture,

@@ -101,6 +101,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// The tone equalizer (ToneEqualizer.swift). Absent while neutral,
         /// so edits that never used it encode exactly as before.
         public var toneEqualizer: ToneEqualizer?
+        /// Hot pixel removal (HotPixels.swift). Absent while off, so
+        /// edits that never used it encode exactly as before.
+        public var hotpixels: HotPixelRemoval?
     }
 
     public struct HDR: Codable, Equatable, Sendable { public var limit: Float }
@@ -209,6 +212,10 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// Apply the DNG's own opcode corrections (DNGOpcodeCorrections.swift).
         /// Absent while off, so edits that never switched it on encode as before.
         public var embedded: Bool?
+        /// Manual red and blue chromatic aberration, in percent
+        /// (ManualTCA.swift), each absent at 0.
+        public var tcaRed: Float?
+        public var tcaBlue: Float?
 
         public init(distortion: Bool, tca: Bool, vignetting: Bool,
                     manualDistortion: Float, manualVignetting: Float,
@@ -233,6 +240,8 @@ public struct EditStack: Codable, Equatable, Sendable {
             autoCA = try c.decodeIfPresent(AutoChromaticAberration.self, forKey: .autoCA)
             manualProfile = try c.decodeIfPresent(String.self, forKey: .manualProfile)
             embedded = try c.decodeIfPresent(Bool.self, forKey: .embedded)
+            tcaRed = try c.decodeIfPresent(Float.self, forKey: .tcaRed)
+            tcaBlue = try c.decodeIfPresent(Float.self, forKey: .tcaBlue)
         }
     }
 
@@ -326,6 +335,7 @@ public struct EditStack: Codable, Equatable, Sendable {
             : Crop(cx: p.crop.centre.x, cy: p.crop.centre.y, w: p.crop.size.x, h: p.crop.size.y,
                    angle: p.crop.angle, aspect: p.crop.aspect)
         storeDetailEffects(from: p)
+        storeDetailExtras(from: p)
         modules.flatfield = p.flatField?.sanitized
         modules.toneEqualizer = p.toneEqualizer.isNeutral ? nil : p.toneEqualizer
         process = p.processVersion
@@ -420,6 +430,7 @@ public struct EditStack: Codable, Equatable, Sendable {
             p.crop = .none
         }
         restoreDetailEffects(into: &p)
+        restoreDetailExtras(into: &p)
         p.flatField = modules.flatfield?.sanitized
         p.toneEqualizer = (modules.toneEqualizer ?? .neutral).sanitized
         p.processVersion = process

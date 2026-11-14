@@ -374,7 +374,15 @@ public final class ImageSession {
         let quads: Int
         let multipliers: SIMD4<Float>
         let demosaic: DemosaicMethod
+        /// Hot pixel removal on the sensor plane before demosaic
+        /// (HotPixels.swift); nil for none, as every older edit has.
+        var hotPixels: HotPixelRemoval? = nil
     }
+
+    /// The sensor plane with hot pixels replaced, for the last setting a
+    /// render asked for, and its count (`HotPixelStage.sensorBuffer`).
+    /// Behind a lock because the panel reads the count while renders run.
+    let hotPixels = Mutex<HotPixelCleanPlane?>(nil)
 
     /// The camera-RGB texture last produced for each key. Values are
     /// pooled textures, so an entry is only trustworthy until something
@@ -601,6 +609,7 @@ public final class ImageSession {
         texturePool.removeAll()
         stageCache.removeAll()
         healCache.removeAll()
+        hotPixels.withLock { $0 = nil }
     }
 
     /// Runs `body` (normally one or more `RenderPipeline.render` calls) with
