@@ -223,6 +223,7 @@ extension EditorModel {
         analysisTexture = try pipeline.render(session, scale: .binned(quads: analysisQuads),
                                               parameters: renderParameters, output: displayOutput)
         updateScopes()
+        toneEqualizerRenderDidFinish()
         return "preview \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
 

@@ -45,6 +45,8 @@ extension EditorModel {
         output.sharpenMaskPreview = sharpenMaskPreview
         output.hueIsolation = hasImage ? hueIsolationBand : nil
         output.depthVisualisation = lensBlurState.showDepth
+        output.toneEqualizerMaskView = hasImage && toneEqualizerState.showMask
+        output.toneEqualizerAnalysis = hasImage && toneEqualizerWantsMask
         return output
     }
 

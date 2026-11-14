@@ -382,8 +382,10 @@ struct PixelReadoutText: View {
                 // Above SDR white (an HDR view), how far, as Lightroom's
                 // HDR readout does; RGB itself stays on the 0–100 scale.
                 let hdr = r.stopsAboveSDRWhite.map { String(format: "   +%.1f stops", $0) } ?? ""
+                // While the tone equalizer is in use, its mask under the pointer.
+                let mask = r.toneEqualizerText.isEmpty ? "" : "   " + r.toneEqualizerText
                 Text(String(format: "R %.0f  G %.0f  B %.0f %%   L %.0f  a %.0f  b %.0f",
-                            p.x, p.y, p.z, lab.x, lab.y, lab.z) + hdr)
+                            p.x, p.y, p.z, lab.x, lab.y, lab.z) + hdr + mask)
             } else {
                 Text("Point at the photo for its colour")
             }

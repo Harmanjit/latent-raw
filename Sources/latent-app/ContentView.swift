@@ -1912,6 +1912,10 @@ struct ContentView: View {
                     disclosureLabel("Tone Curve")
                 }
 
+                ToneEqualizerDisclosure(model: model) {
+                    disclosureLabel("Tone Equalizer")
+                }
+
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 8) {
                         HSLTargetRow(model: model)

@@ -76,7 +76,9 @@ struct ImageViewport: View {
                                 clipping: allowsTools ? model.clipping : [],
                                 onPointer: allowsTools ? { model.pointerMoved(to: $0) } : nil,
                                 mirrored: followsMirrorImageMode && mirrorImageMode.isOn,
-                                visibleFraction: visibleFraction)
+                                visibleFraction: visibleFraction,
+                                onToolScroll: allowsTools && model.toneTool == .toneEqualizer
+                                    ? { model.toneEqualizerScrolled(by: $0, at: $1, gestureEnded: $2) } : nil)
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isImage)
                     .accessibilityLabel(model.imageTitle ?? "Image")

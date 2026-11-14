@@ -416,6 +416,8 @@ final class EditorModel: ObservableObject {
     /// The colour under the pointer, in its own object so moving the
     /// pointer redraws the readout and not the whole window.
     let pixelProbe = PixelProbe()
+    /// The tone equalizer's panel and display state (EditorModel+ToneEqualizer.swift).
+    let toneEqualizerState = ToneEqualizerState()
 
     // MARK: - Local adjustments
 

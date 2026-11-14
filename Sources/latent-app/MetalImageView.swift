@@ -75,6 +75,12 @@ struct MetalImageView: NSViewRepresentable {
     /// Only this part of the view shows, as fractions of it (a
     /// Before/After split); nil, all of it.
     var visibleFraction: CGRect? = nil
+    /// An on-image tool that scrolling adjusts (the tone equalizer's):
+    /// while set, scrolling over the image goes to it, with the amount
+    /// (`ViewerInteraction.toolScrollAmount`, 0 for an event worth
+    /// nothing), the point and whether the gesture ended, instead of
+    /// panning, zooming or stepping. nil normally.
+    var onToolScroll: ((Float, CGPoint, Bool) -> Void)? = nil
 
     func makeNSView(context: Context) -> MetalLayerView {
         let view = MetalLayerView()
@@ -101,6 +107,7 @@ struct MetalImageView: NSViewRepresentable {
         view.onPointer = onPointer
         view.mirrored = mirrored
         view.visibleFraction = visibleFraction
+        view.onToolScroll = onToolScroll
         view.display(preview: preview, tile: tile, transform: transform, frame: frame,
                      magnifierTile: magnifierTile)
     }
@@ -194,6 +201,7 @@ final class MetalLayerView: NSView {
     var onDoubleClick: ((CGPoint) -> Void)?
     var atFit = true
     var onStep: ((Int) -> Void)?
+    var onToolScroll: ((Float, CGPoint, Bool) -> Void)?
     var allowsMagnifier = true
     var onMagnifier: ((ViewerInteraction.Magnifier?) -> Void)?
     var toolActive = false
@@ -466,6 +474,11 @@ final class MetalLayerView: NSView {
             phase: Self.phase(event.phase), momentumPhase: Self.phase(event.momentumPhase),
             zoomModifier: flags.contains(.option) || flags.contains(.command),
             atFit: atFit, canNavigate: onStep != nil && !toolActive)
+        if let onToolScroll, !scroll.zoomModifier {
+            onToolScroll(ViewerInteraction.toolScrollAmount(scroll) ?? 0, screenPoint(for: event),
+                         scroll.phase == .ended)
+            return
+        }
         switch wheel.interpret(scroll) {
         case .navigate(let offset):
             onStep?(offset)

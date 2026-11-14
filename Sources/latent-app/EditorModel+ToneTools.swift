@@ -11,6 +11,9 @@ enum ToneTool: Equatable {
     case curve
     /// The HSL panel's targeted tool, for one of its three sliders.
     case colour(HSLComponent)
+    /// The tone equalizer's on-image tool: scroll, or drag up or down, on
+    /// a tone to raise or lower its band (EditorModel+ToneEqualizer.swift).
+    case toneEqualizer
 
     /// What the hint over the image says while it's armed.
     var hint: String {
@@ -19,6 +22,7 @@ enum ToneTool: Equatable {
         case .whiteBalance: return "Click something that should be neutral grey or white. Esc cancels."
         case .curve: return "Drag up or down on a tone to lighten or darken it. Esc leaves the tool."
         case .colour(let c): return "Drag up or down on a colour to change its \(c.title.lowercased()). Esc leaves the tool."
+        case .toneEqualizer: return "Scroll, or drag up or down, on a tone to raise or lower its band. Esc leaves the tool."
         }
     }
 }
@@ -52,6 +56,8 @@ struct ToneToolDrag {
         case point(index: Int, start: Float)
         /// The HSL bands under a hue, each from its starting value.
         case bands(HSLComponent, weights: [Float], start: [Float])
+        /// One tone equalizer band, from its starting gain in EV.
+        case toneEqualizerBand(Int, start: Float)
     }
     var origin: CGPoint
     var target: Target
@@ -113,7 +119,11 @@ extension EditorModel {
     /// The pointer moved over the image (nil: it left).
     func pointerMoved(to screen: CGPoint?) {
         if pointerOverImage != (screen != nil) { pointerOverImage = screen != nil }
-        let readout = screen.flatMap { displayedPixel(atScreen: $0) }.map { PixelReadout(linearDisplayP3: $0) }
+        let readout = screen.flatMap { point in
+            displayedPixel(atScreen: point).map {
+                PixelReadout(linearDisplayP3: $0, toneEqualizerMaskEV: toneEqualizerMaskEV(atScreen: point))
+            }
+        }
         if pixelProbe.readout != readout { pixelProbe.readout = readout }
     }
 
@@ -224,6 +234,8 @@ extension EditorModel {
             let weights = HSLAdjustments.bandWeights(hue: hue)
             toneToolDrag = ToneToolDrag(origin: screen,
                                         target: .bands(component, weights: weights, start: hslValues(component)))
+        case .toneEqualizer:
+            toneEqualizerDragBegan(at: screen)
         }
     }
 
@@ -245,10 +257,15 @@ extension EditorModel {
             var values = start
             for i in values.indices { values[i] = min(max(start[i] + weights[i] * amount, -1), 1) }
             setHSLValues(values, component)
+        case .toneEqualizerBand(let band, let start):
+            // A drag of `targetedDragSpan` points moves the band 3 EV.
+            setToneEqualizerBand(band, to: start + amount * 1.5)
         }
     }
 
     func toneToolEnded() {
+        // One undo step per tone equalizer drag.
+        if case .toneEqualizerBand = toneToolDrag?.target { flushPendingSave() }
         toneToolDrag = nil
     }
 
