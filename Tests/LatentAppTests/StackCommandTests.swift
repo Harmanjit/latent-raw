@@ -63,7 +63,7 @@ final class StackCommandTests: XCTestCase {
         record.id = 7
         let url = URL(fileURLWithPath: "/tmp/A.jpg")
         XCTAssertEqual(back.exportedFile(url, from: record),
-                       Library.ExportedFile(url: url, sourceID: 7, placement: .below))
+                       Library.ExportedFile(url: url, sourceID: 7, placement: .below, copiesMetadata: true))
         XCTAssertNil(ExportPreset().exportedFile(url, from: record))
     }
 }
