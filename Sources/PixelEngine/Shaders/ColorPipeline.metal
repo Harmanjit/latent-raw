@@ -204,17 +204,20 @@ constant uint kExtraBlackAndWhite = 2;
 constant uint kExtraColourGrading = 4;
 constant uint kExtraPointColour   = 8;
 constant uint kExtraShadowTint    = 16;
+constant uint kExtraGamutCompress = 32;   // amount as float bits in info.z
+constant uint kExtraPurity        = 64;   // amount as float bits in info.w
+constant uint kExtraGradingStage  = 31;   // the flags stage 13 runs for
 constant int  kMaxPointColours    = 8;
 
 /// Mirror of `ColourExtrasGPU` in RenderPipeline+ColourControls.swift.
 struct ColourExtras {
-    uint4  info;          // flags, point colour count, -, -
+    uint4  info;          // flags, point colour count, gamut compression bits, purity bits
     float4 basics;        // saturation, blending, balance, shadow tint
     float4 bwMix[2];      // the eight band mixes, -1...1
-    float4 shadows;       // hue (degrees), saturation, luminance, -
-    float4 midtones;
-    float4 highlights;
-    float4 global;
+    float4 shadows;       // hue (degrees), saturation, luminance, range saturation (-1...1)
+    float4 midtones;      // the same
+    float4 highlights;    // the same
+    float4 global;        // hue, saturation, luminance, hue shift (degrees)
     float4 pointTarget[kMaxPointColours];  // hue, saturation, value, range
     float4 pointShift[kMaxPointColours];   // hue, saturation, luminance, variance
 };
@@ -312,12 +315,52 @@ inline float3 applyColourGrading(float3 p, float4 splitTint, float balance, cons
     float half_ = max(b, 0.02);
     float wH = smoothstep(0.5 - half_, 0.5 + half_, lb), wS = 1.0 - wH;
     float wM = 1.0 - smoothstep(0.0, 0.5 + b, abs(lb - 0.5) * 2.0);
+    // Per-range saturation, before the tints, by the same weights: each
+    // pixel moved towards or away from its own grey. Skipped while all
+    // three are 0, so older edits render exactly as they did.
+    if (e.shadows.w != 0.0 || e.midtones.w != 0.0 || e.highlights.w != 0.0) {
+        float k = 1.0 + e.shadows.w * wS + e.midtones.w * wM + e.highlights.w * wH;
+        p = max(mix(float3(l), p, max(k, 0.0)), 0.0);
+    }
     float3 shift = tintChroma(splitTint.x) * (splitTint.y * wS)
                  + tintChroma(splitTint.z) * (splitTint.w * wH)
                  + tintChroma(e.midtones.x) * (e.midtones.y * wM)
                  + tintChroma(e.global.x) * e.global.y;
     float lift = e.shadows.z * wS + e.midtones.z * wM + e.highlights.z * wH + e.global.z;
-    return max(p + shift * 0.25 + lift * 0.2, 0.0);
+    float3 graded = max(p + shift * 0.25 + lift * 0.2, 0.0);
+    // The global hue shift: every colour turned about the grey axis
+    // (Rodrigues' rotation), so greys stay put. Skipped at 0.
+    if (e.global.w != 0.0) {
+        float a = e.global.w * (M_PI_F / 180.0);
+        float3 n = float3(0.57735027);
+        graded = graded * cos(a) + cross(n, graded) * sin(a) + n * dot(n, graded) * (1.0 - cos(a));
+        graded = max(graded, 0.0);
+    }
+    return graded;
+}
+
+/// Gamut Compression: the distance of each channel from the pixel's
+/// largest, as a fraction of it, softly compressed past a threshold so
+/// distances up to `lim` (out of gamut: a negative channel) land inside
+/// the gamut and near-boundary colours are eased in, as the ACES
+/// reference gamut compression does. `amount` 0...1 lowers the threshold
+/// from 1 (nothing touched) to 0.65.
+inline float3 compressGamut(float3 rgb, float amount) {
+    float ach = max(rgb.r, max(rgb.g, rgb.b));
+    if (ach <= 1e-6 || amount <= 0.0) return rgb;
+    const float lim = 1.25;
+    const float pw = 1.2;
+    float t = 1.0 - 0.35 * clamp(amount, 0.0, 1.0);
+    float s = (lim - t) / pow(pow((1.0 - t) / (lim - t), -pw) - 1.0, 1.0 / pw);
+    float3 d = (ach - rgb) / ach;
+    float3 cd = d;
+    for (int c = 0; c < 3; c++) {
+        if (d[c] > t) {
+            float x = (d[c] - t) / s;
+            cd[c] = t + s * x / pow(1.0 + pow(x, pw), 1.0 / pw);
+        }
+    }
+    return ach - cd * ach;
 }
 
 /// Calibration's shadow tint: green (below zero) or magenta (above) in the
@@ -681,7 +724,7 @@ kernel void colorAndTone(
     texture2d<float, access::write> output       [[texture(1)]],
     constant float3x3 &cameraToWorking           [[buffer(0)]],
     constant float3x3 &workingToOutput           [[buffer(1)]],
-    constant float &exposureScale                [[buffer(2)]],
+    constant float2 &exposureScale               [[buffer(2)]],  // scale, black offset
     constant float &contrast                     [[buffer(3)]],
     constant float &greyPoint                    [[buffer(4)]],
     constant float3 &clipLevel                   [[buffer(5)]],
@@ -740,8 +783,15 @@ kernel void colorAndTone(
         working = applyProfileTable(working, profile, profile.hueSatDims, profileHueSat);
     }
 
-    // Stage 10: exposure, in linear light (the only place it's meaningful).
-    working *= exposureScale;
+    // Stage 9, continued: Gamut Compression, when switched on.
+    if ((extras.info.x & kExtraGamutCompress) != 0) {
+        working = compressGamut(working, as_type<float>(extras.info.z));
+    }
+
+    // Stage 10: exposure, in linear light (the only place it's meaningful),
+    // then Black Offset subtracted (y, 0 unless set).
+    working *= exposureScale.x;
+    if (exposureScale.y != 0.0) working -= exposureScale.y;
 
     // Stage 10, continued: the profile's look table, after exposure as the
     // DNG specification orders it, mixed in by the Amount slider.
@@ -797,6 +847,22 @@ kernel void colorAndTone(
         display = applyProfileTone(display / headroom, profileTone) * headroom;
     }
 
+    // Stage 12, continued: Highlight Purity. The sigmoid maps each channel
+    // on its own, so the brightest colours bleach towards white; mapping
+    // only the largest channel and scaling the others with it keeps their
+    // ratios (the colour). Mixed in by Amount, and only in the bright end.
+    if (applyToneMap != 0 && (extras.info.x & kExtraPurity) != 0) {
+        float amount = clamp(as_type<float>(extras.info.w), 0.0, 1.0);
+        float3 w = max(working, 0.0);
+        float mx = max(w.r, max(w.g, w.b));
+        if (mx > 1e-6) {
+            float mapped = toneMapSigmoid(float3(mx), contrast, greyPoint, headroom).x;
+            float3 pure = w * (mapped / mx);
+            float y = dot(display, float3(0.2627, 0.6780, 0.0593)) / headroom;
+            display = mix(display, pure, amount * smoothstep(0.35, 0.9, y));
+        }
+    }
+
     // Stage 13: colour grading, in a perceptual domain, on the display-
     // referred image scaled to [0,1] by the headroom so nothing clips in
     // HDR mode. Skipped entirely when every module is neutral, and for
@@ -805,7 +871,7 @@ kernel void colorAndTone(
     // otherwise depend on the look and lose everything above 1.0.
     // The colour controls in `extras` (flags in info.x) slot in around
     // these: with none in use every one of their branches is skipped.
-    uint extraFlags = extras.info.x;
+    uint extraFlags = extras.info.x & kExtraGradingStage;
     bool blackAndWhite = (extraFlags & kExtraBlackAndWhite) != 0;
     if (applyToneMap != 0 && (any(gradingFlags != uint3(0)) || vibrance != 0.0 || extraFlags != 0)) {
         float3 p = pow(max(display / headroom, 0.0), 1.0 / 2.2);

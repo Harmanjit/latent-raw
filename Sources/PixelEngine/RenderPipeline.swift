@@ -79,6 +79,9 @@ public struct EditParameters: Sendable, Equatable {
     public var whiteBalance: ColorKit.WhiteBalance
     /// Exposure adjustment in stops. 0 is as-shot.
     public var exposureEV: Float
+    /// Black Offset: subtracted in linear light right after exposure,
+    /// −0.05…0.05 (`clampedBlackOffset`). 0 leaves the render as it was.
+    public var blackOffset: Float = 0
     /// Tone curve contrast.
     public var contrast: Float
     /// Scene-linear value mapped to 0.5 output.
@@ -284,6 +287,7 @@ public struct EditParameters: Sendable, Equatable {
     public static func == (a: EditParameters, b: EditParameters) -> Bool {
         a.whiteBalance == b.whiteBalance
             && a.exposureEV == b.exposureEV && a.contrast == b.contrast
+            && a.blackOffset == b.blackOffset
             && a.greyPoint == b.greyPoint
             && a.highlightRecovery == b.highlightRecovery
             && a.highlightThreshold == b.highlightThreshold
@@ -384,6 +388,11 @@ public struct RenderOutput: Sendable, Equatable {
     /// magenta) whose colours stay while the rest of the picture goes grey
     /// (RenderPipeline+HueIsolation.swift). Viewport only; nil normally.
     public var hueIsolation: Int? = nil
+    /// Option-drag on a Colour Grading luminance slider: that range's
+    /// weight (0 shadows, 1 midtones, 2 highlights) shown in grey in place
+    /// of the picture (RenderPipeline+GradingRange.swift). Viewport only;
+    /// nil normally.
+    public var gradingRangePreview: Int? = nil
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -419,6 +428,7 @@ public struct RenderOutput: Sendable, Equatable {
             && a.sharpenMaskPreview == b.sharpenMaskPreview
             && a.depthVisualisation == b.depthVisualisation
             && a.hueIsolation == b.hueIsolation
+            && a.gradingRangePreview == b.gradingRangePreview
     }
 }
 
@@ -864,6 +874,13 @@ public final class RenderPipeline {
         if let band = output.hueIsolation {
             final = try applyHueIsolation(session: session, cmdBuffer: cmdBuffer, input: final, band: band,
                                           outputRole: displayRole == .display ? .hueIsolated : .hueIsolatedPreview)
+        }
+
+        // Display pass: Colour Grading's Option-drag range preview.
+        if let range = output.gradingRangePreview {
+            final = try applyGradingRangePreview(session: session, cmdBuffer: cmdBuffer, input: final, range: range,
+                                                 parameters: parameters, headroom: output.headroom,
+                                                 outputRole: displayRole == .display ? .gradingRange : .gradingRangePreview)
         }
 
         // Display pass: Show Depth, for the viewport only, last so it
@@ -1512,12 +1529,13 @@ public final class RenderPipeline {
         encoder.setTexture(input, index: 0)
         encoder.setTexture(outputTexture, index: 1)
 
-        var camToWorking = Self.calibrated(cameraToWorking, parameters.colour.calibration)
+        var camToWorking = Self.calibrated(cameraToWorking, parameters.colour)
         var workingToOut = ColorKit.workingToOutput(output.space)
-        var exposureScale = powf(2.0, parameters.exposureEV)
+        // The scale, then Black Offset subtracted after it.
+        var exposureScale = SIMD2<Float>(powf(2.0, parameters.exposureEV), parameters.blackOffset)
         var contrast = parameters.contrast
         if let profile {
-            exposureScale = powf(2.0, parameters.exposureEV + profile.exposureOffset)
+            exposureScale.x = powf(2.0, parameters.exposureEV + profile.exposureOffset)
             contrast *= profile.contrastScale
         }
         var greyPoint = parameters.greyPoint
@@ -1534,7 +1552,7 @@ public final class RenderPipeline {
 
         encoder.setBytes(&camToWorking, length: MemoryLayout<simd_float3x3>.size, index: 0)
         encoder.setBytes(&workingToOut, length: MemoryLayout<simd_float3x3>.size, index: 1)
-        encoder.setBytes(&exposureScale, length: 4, index: 2)
+        encoder.setBytes(&exposureScale, length: MemoryLayout<SIMD2<Float>>.size, index: 2)
         encoder.setBytes(&contrast, length: 4, index: 3)
         encoder.setBytes(&greyPoint, length: 4, index: 4)
         encoder.setBytes(&clipLevel, length: MemoryLayout<SIMD3<Float>>.size, index: 5)

@@ -72,6 +72,13 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var colorgrading: ColourGrading?
         public var calibration: Calibration?
         public var pointcolor: [PointColour]?
+        /// Calibration's Adaptation, the Channel Mixer, Gamut Compression
+        /// and Highlight Purity (ChromaticAdaptation.swift,
+        /// ChannelMixer.swift). Each absent while neutral.
+        public var adaptation: ChromaticAdaptation?
+        public var channelmixer: ChannelMixer?
+        public var gamutcompression: ColourAmount?
+        public var purity: ColourAmount?
         /// The camera or creative profile. Absent for Latent Standard, so
         /// edits that never chose one encode exactly as before.
         public var profile: ProfileChoice?
@@ -243,7 +250,12 @@ public struct EditStack: Codable, Equatable, Sendable {
         public var temperature: Float?
         public var tint: Float?
     }
-    public struct Exposure: Codable, Equatable, Sendable { public var ev: Float }
+    public struct Exposure: Codable, Equatable, Sendable {
+        public var ev: Float
+        /// Black Offset, a linear subtract after exposure; absent at 0, so
+        /// edits that never touched it encode exactly as before.
+        public var blackOffset: Float? = nil
+    }
     public struct Tone: Codable, Equatable, Sendable {
         public var method: String
         public var contrast: Float
@@ -262,7 +274,7 @@ public struct EditStack: Codable, Equatable, Sendable {
             ? WhiteBalance(mode: "asShot", temperature: nil, tint: nil)
             : WhiteBalance(mode: "custom", temperature: p.whiteBalance.temperature,
                            tint: p.whiteBalance.tint)
-        modules.exposure = Exposure(ev: p.exposureEV)
+        modules.exposure = Exposure(ev: p.exposureEV, blackOffset: p.blackOffset == 0 ? nil : p.blackOffset)
         modules.tone = Tone(method: "sigmoid", contrast: p.contrast, grey: p.greyPoint)
         modules.highlights = Highlights(strength: p.highlightRecovery, threshold: p.highlightThreshold)
         modules.demosaic = Demosaic(method: p.demosaic.rawValue)
@@ -325,7 +337,10 @@ public struct EditStack: Codable, Equatable, Sendable {
                 p.whiteBalance = .asShot
             }
         }
-        if let e = modules.exposure { p.exposureEV = e.ev }
+        if let e = modules.exposure {
+            p.exposureEV = e.ev
+            p.blackOffset = EditParameters.clampedBlackOffset(e.blackOffset ?? 0)
+        }
         if let t = modules.tone { p.contrast = t.contrast; p.greyPoint = t.grey }
         if let h = modules.highlights {
             p.highlightRecovery = h.strength

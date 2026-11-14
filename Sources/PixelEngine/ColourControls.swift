@@ -58,6 +58,15 @@ public struct ColourGrading: Equatable, Sendable, Codable {
     /// reaches well into the others). 0.5 is the overlap Split Toning
     /// always had.
     public var blending: Float
+    /// Per-range saturation, −1…1 (shown as −100…100): how much more or
+    /// less colourful the shadows, midtones and highlights become, by the
+    /// same weights as the wheels. 0 in every edit older than them.
+    public var shadowSaturation: Float = 0
+    public var midtoneSaturation: Float = 0
+    public var highlightSaturation: Float = 0
+    /// Degrees, −180…180: every colour turned round the hue circle after
+    /// the wheels' tints. 0 in every edit older than it.
+    public var hueShift: Float = 0
 
     public static let defaultBlending: Float = 0.5
 
@@ -76,11 +85,33 @@ public struct ColourGrading: Equatable, Sendable, Codable {
     /// count: a wheel with no strength tints nothing.
     public var isNeutral: Bool {
         midtones.isNeutral && global.isNeutral && shadowLuminance == 0 && highlightLuminance == 0
-            && blending == Self.defaultBlending
+            && blending == Self.defaultBlending && !hasRangeExtras
+    }
+
+    /// Whether the per-range saturation or the hue shift is in use.
+    public var hasRangeExtras: Bool {
+        shadowSaturation != 0 || midtoneSaturation != 0 || highlightSaturation != 0 || hueShift != 0
     }
 
     private enum CodingKeys: String, CodingKey {
         case midtones, global, shadowLuminance, highlightLuminance, blending
+        case shadowSaturation, midtoneSaturation, highlightSaturation, hueShift
+    }
+
+    /// The original five keys always, as the synthesised encoder wrote
+    /// them; the newer ones only when set, so an older edit encodes byte
+    /// for byte as it did.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(midtones, forKey: .midtones)
+        try c.encode(global, forKey: .global)
+        try c.encode(shadowLuminance, forKey: .shadowLuminance)
+        try c.encode(highlightLuminance, forKey: .highlightLuminance)
+        try c.encode(blending, forKey: .blending)
+        if shadowSaturation != 0 { try c.encode(shadowSaturation, forKey: .shadowSaturation) }
+        if midtoneSaturation != 0 { try c.encode(midtoneSaturation, forKey: .midtoneSaturation) }
+        if highlightSaturation != 0 { try c.encode(highlightSaturation, forKey: .highlightSaturation) }
+        if hueShift != 0 { try c.encode(hueShift, forKey: .hueShift) }
     }
 
     public init(from decoder: Decoder) throws {
@@ -90,13 +121,22 @@ public struct ColourGrading: Equatable, Sendable, Codable {
         shadowLuminance = try c.decodeIfPresent(Float.self, forKey: .shadowLuminance) ?? 0
         highlightLuminance = try c.decodeIfPresent(Float.self, forKey: .highlightLuminance) ?? 0
         blending = try c.decodeIfPresent(Float.self, forKey: .blending) ?? Self.defaultBlending
+        shadowSaturation = try c.decodeIfPresent(Float.self, forKey: .shadowSaturation) ?? 0
+        midtoneSaturation = try c.decodeIfPresent(Float.self, forKey: .midtoneSaturation) ?? 0
+        highlightSaturation = try c.decodeIfPresent(Float.self, forKey: .highlightSaturation) ?? 0
+        hueShift = try c.decodeIfPresent(Float.self, forKey: .hueShift) ?? 0
     }
 
     var sanitized: ColourGrading {
-        ColourGrading(midtones: midtones.sanitized, global: global.sanitized,
-                      shadowLuminance: clamped(shadowLuminance, -1...1),
-                      highlightLuminance: clamped(highlightLuminance, -1...1),
-                      blending: clamped(blending, 0...1, fallback: Self.defaultBlending))
+        var g = ColourGrading(midtones: midtones.sanitized, global: global.sanitized,
+                              shadowLuminance: clamped(shadowLuminance, -1...1),
+                              highlightLuminance: clamped(highlightLuminance, -1...1),
+                              blending: clamped(blending, 0...1, fallback: Self.defaultBlending))
+        g.shadowSaturation = clamped(shadowSaturation, -1...1)
+        g.midtoneSaturation = clamped(midtoneSaturation, -1...1)
+        g.highlightSaturation = clamped(highlightSaturation, -1...1)
+        g.hueShift = clamped(hueShift, -180...180)
+        return g
     }
 }
 
@@ -303,6 +343,18 @@ public struct ColourControls: Equatable, Sendable {
     public var grading: ColourGrading = .neutral
     public var calibration: Calibration = .neutral
     public var pointColours: [PointColour] = []
+    /// Calibration › Adaptation (ChromaticAdaptation.swift): a matrix
+    /// folded into the camera matrix, identity while neutral.
+    public var adaptation: ChromaticAdaptation = .neutral
+    /// The Channel Mixer (ChannelMixer.swift), likewise a matrix.
+    public var channelMixer: ChannelMixer = .identity
+    /// Gamut Compression, 0 (off) … 1: out-of-gamut and nearly
+    /// out-of-gamut colours squeezed softly towards the working space's
+    /// edge, right after the camera matrix.
+    public var gamutCompression: Float = 0
+    /// Highlight Purity, 0 (off) … 1: colour the tone curve bleaches out of
+    /// the brightest tones given back.
+    public var purity: Float = 0
 
     public static let neutral = ColourControls()
 
@@ -328,14 +380,29 @@ public struct ColourControls: Equatable, Sendable {
         }
         if !grading.isNeutral { f |= Self.flagColourGrading }
         if calibration.shadowTint != 0 { f |= Self.flagShadowTint }
+        if gamutCompression > 0 { f |= Self.flagGamutCompression }
+        if purity > 0 { f |= Self.flagPurity }
         return f
     }
+
+    /// The flags the grading block (stage 13) runs for; gamut compression
+    /// and purity act elsewhere and leave it skipped.
+    static let gradingStageFlags: UInt32 = 31
 
     static let flagSaturation: UInt32 = 1
     static let flagBlackAndWhite: UInt32 = 2
     static let flagColourGrading: UInt32 = 4
     static let flagPointColour: UInt32 = 8
     static let flagShadowTint: UInt32 = 16
+    static let flagGamutCompression: UInt32 = 32
+    static let flagPurity: UInt32 = 64
+
+    /// The amounts' range in the panel's terms.
+    public static let amountRange: ClosedRange<Float> = 0...1
+
+    /// Whether anything is folded into the camera matrix besides
+    /// Calibration's primaries.
+    var movesMatrix: Bool { !adaptation.isIdentity || !channelMixer.isNeutral }
 }
 
 fileprivate extension Float {

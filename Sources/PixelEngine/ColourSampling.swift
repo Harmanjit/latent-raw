@@ -34,7 +34,14 @@ public struct GradingImage: Sendable {
         p.vibrance = 0
         p.splitToning = .neutral
         let calibration = p.colour.calibration
+        let (adaptation, mixer, gamut) = (p.colour.adaptation, p.colour.channelMixer, p.colour.gamutCompression)
         p.colour = ColourControls(calibration: calibration)
+        // The other controls folded into the camera matrix (or acting
+        // right after it) shape the colours the pickers see, as
+        // Calibration's primaries do.
+        p.colour.adaptation = adaptation
+        p.colour.channelMixer = mixer
+        p.colour.gamutCompression = gamut
         let output = RenderOutput(space: .rec2020, headroom: 1, encoded: false, toneMapped: true)
         let texture = try pipeline.render(session, scale: .binned(quads: 4), parameters: p, output: output)
         let halfs = try TextureReadback.float16Pixels(of: texture, gpu: gpu)
