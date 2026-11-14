@@ -17,10 +17,27 @@ struct WhiteBalancePresetRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Picker("White balance", selection: Binding(
-                get: { model.whiteBalancePreset?.rawValue ?? "custom" },
-                set: { raw in WhiteBalancePreset(rawValue: raw).map(model.applyWhiteBalancePreset) })) {
+                get: { model.whiteBalancePreset?.rawValue ?? model.cameraWhiteBalanceTag ?? "custom" },
+                set: { raw in
+                    if raw.hasPrefix(EditorModel.cameraWhiteBalanceTagPrefix) {
+                        model.applyCameraWhiteBalance(tag: raw)
+                    } else {
+                        WhiteBalancePreset(rawValue: raw).map(model.applyWhiteBalancePreset)
+                    }
+                })) {
                 ForEach(WhiteBalancePreset.allCases) { Text($0.title).tag($0.rawValue) }
-                if model.whiteBalancePreset == nil {
+                // The camera's own presets, when its file records them
+                // (RawReconstructionViews.swift).
+                let cameraChoices = model.cameraWhiteBalanceChoices
+                if !cameraChoices.isEmpty {
+                    Divider()
+                    Section("Camera presets") {
+                        ForEach(cameraChoices) { choice in
+                            Text(choice.title).tag(EditorModel.cameraWhiteBalanceTagPrefix + choice.id)
+                        }
+                    }
+                }
+                if model.whiteBalancePreset == nil && model.cameraWhiteBalanceTag == nil {
                     Divider()
                     Text("Custom").tag("custom")
                 }

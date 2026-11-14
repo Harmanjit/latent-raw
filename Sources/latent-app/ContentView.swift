@@ -1866,6 +1866,7 @@ struct ContentView: View {
                 if !model.isRenderedImage {
                     DisclosureGroup {
                         VStack(alignment: .leading, spacing: 10) {
+                            HighlightMethodPicker(model: model)
                             sliderRow(title: "Recovery",
                                        value: $model.parameters.highlightRecovery,
                                        range: 0...1, format: "%.2f", defaultValue: 1.0)
