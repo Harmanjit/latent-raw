@@ -68,6 +68,12 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Reference view** (⇧R) edits one photo beside another, dragged in from the filmstrip, with Lock and Swap. See [Before/After and Reference view](Develop#beforeafter-and-reference-view).
 - **Loupe overlay** (⌥⌘O): a grid, draggable guides and a layout image over the photo in Loupe and Develop. See [Loupe overlay](Develop#loupe-overlay).
 - **Clipping overlay** (J), a colour readout under the pointer and a histogram you can drag. See [The viewport](Develop#the-viewport).
+- **Clipping warning options**: Any channel, Luminance or Saturation (gamut), shadow and highlight lines, and red and blue, magenta and cyan or black and white. See [The viewport](Develop#the-viewport).
+- **Raw clipping** (View › Show Raw Clipping) marks in magenta what the sensor clipped, apart from J's output clipping. See [The viewport](Develop#the-viewport).
+- **Focus peaking** (View › Focus Peaking) draws the sharpest edges in colour in Develop, Loupe, Compare and Survey. See [The viewport](Develop#the-viewport).
+- **Colour assessment** (View › Colour Assessment) frames the picture in 18% grey with a white border, as ISO 12646 asks. See [The viewport](Develop#the-viewport).
+- **High quality preview** (View › High Quality Preview, opt-in) draws the fitted view from a full-resolution render. See [The viewport](Develop#the-viewport).
+- **Navigator and zoom levels**: the whole picture with the view outlined at the top of Develop's panel, and a Fit, Fill, 25% to 400% menu in the status bar. See [The viewport](Develop#the-viewport).
 
 ## Colour and tone
 
@@ -93,6 +99,7 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Flips** and **Constrain Crop**. See [Transform and Upright](Develop#transform-and-upright).
 - **Copy Settings' Upright choices**: Upright Mode (analysed again on each photo), Upright Transforms, Transform Adjustments and Constrain Crop are separate groups, as in Lightroom. See [Presets and clipboard](Develop#presets-and-clipboard).
 - **Flat-field correction** takes a reference frame's vignetting and colour cast out of a whole selection. See [Flat-field correction](Develop#flat-field-correction).
+- **Fine straightening**: ⌥[ and ⌥] turn the picture a tenth of a degree, with ⇧ a whole degree. See [Modules](Develop#modules).
 - **Crop guides** (O) such as thirds, golden ratio and golden spiral, and a **Surround** that sets how dark the area outside the crop is. See [Crop guides and the surround](Develop#crop-guides-and-the-surround).
 
 ## Detail and effects
@@ -163,8 +170,11 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Compare as Before** shows a snapshot beside the current edit in a split. See [History and snapshots](Develop#history-and-snapshots).
 - **A draggable split line** in Before/After's split layouts; double-click it for the middle. See [Before/After](Develop#beforeafter-and-reference-view).
 - **Process versions**: each edit records which rendering it was made with, shown in Calibration, ready for an Update Process Version dialog when the rendering next changes. See [Process versions](Develop#process-versions).
+- **Shortcuts overlay** (?, Help › Show Shortcuts Overlay) lists the keys of the mode you are in over the window. See [Keyboard Shortcuts](Keyboard-Shortcuts).
+- **Focus Exposure** (Develop menu, no key until you give it one) puts the keyboard in the Exposure value. See [The viewport](Develop#the-viewport).
 - **Customisable shortcuts**: Settings › Keyboard lists every command, searchable and grouped, with click-to-record keys, a warning (and an offer to reassign) when keys are taken, reset one or all, and keymap import and export as JSON. Menu commands without a key can be given one. See [Customising the keys](Keyboard-Shortcuts#customising-the-keys).
 
 ## Help
 
+- **A welcome sheet** on first launch, with Open Folder… and links to Getting Started and Keyboard Shortcuts; Help › Show Welcome brings it back. See [Getting Started](Getting-Started#first-launch).
 - These help pages gained a [Getting Started](Getting-Started) rewrite, three tutorials, [Coming from Lightroom](Coming-from-Lightroom), a [Glossary](Glossary) and an [FAQ](FAQ). The same pages are in the app under **Help › Latent Help** (⌘?).

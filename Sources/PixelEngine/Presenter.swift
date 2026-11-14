@@ -21,6 +21,10 @@ public struct PresentLayer {
     /// used; the texture's identity can't tell a view there is something
     /// new to draw, but this can.
     public let generation: UInt64
+    /// View › Show Raw Clipping: an r8 mask the same size as `texture`,
+    /// 1 where a sensor channel reached its clip level before highlight
+    /// reconstruction (`RenderOutput.rawClipMask`). nil, none.
+    public var rawClipMask: MTLTexture?
 
     private static let generations = Atomic<UInt64>(0)
 
@@ -184,11 +188,12 @@ public final class Presenter {
                          backgroundLevel: Float = 0.12,
                          displayHeadroom: Float = 1,
                          magnifier: PresentMagnifier? = nil,
-                         clipping: ClippingIndicators = []) {
+                         clipping: ClippingIndicators = [],
+                         overlays: PresentOverlays = .none) {
         guard let cmdBuffer = encode(base: base, tile: tile, transform: transform, frame: frame,
                                      into: drawable.texture, backgroundLevel: backgroundLevel,
                                      displayHeadroom: displayHeadroom, magnifier: magnifier,
-                                     clipping: clipping) else { return }
+                                     clipping: clipping, overlays: overlays) else { return }
         cmdBuffer.present(drawable)
         cmdBuffer.commit()
     }
@@ -203,7 +208,8 @@ public final class Presenter {
                 backgroundLevel: Float,
                 displayHeadroom: Float,
                 magnifier: PresentMagnifier? = nil,
-                clipping: ClippingIndicators = []) -> MTLCommandBuffer? {
+                clipping: ClippingIndicators = [],
+                overlays: PresentOverlays = .none) -> MTLCommandBuffer? {
         let drawableSize = CGSize(width: target.width, height: target.height)
         let baseMap = transform.screenToTextureMap(coverage: base.coverage, frame: frame,
                                                    drawableSize: drawableSize)
@@ -214,6 +220,12 @@ public final class Presenter {
         var flags: UInt32 = clipping.rawValue << 4
         // Full-resolution layers show square pixels past 200%.
         if ViewerInteraction.samplesNearest(zoom: transform.zoom) { flags |= PresentFlags.tileNearest }
+        // The viewing overlays (PresentOverlays.swift), above the clipping bits.
+        if overlays.focusPeaking != nil { flags |= PresentFlags.focusPeaking }
+        if overlays.rawClipping {
+            if base.rawClipMask != nil { flags |= PresentFlags.baseRawClip }
+            if tile?.rawClipMask != nil { flags |= PresentFlags.tileRawClip }
+        }
         var loupe = PresentLoupe(baseMap: baseMap, tileMap: tileMap, tileSource: tileSource,
                                  circle: SIMD4<Float>(0, 0, -1, 0))
         if let magnifier {
@@ -236,7 +248,9 @@ public final class Presenter {
         return draw(base: base.texture, baseMap: baseMap,
                     tile: tile?.texture, tileMap: tileMap, tileSource: tileSource,
                     loupeTile: magnifier?.tile?.texture, loupe: loupe, flags: flags,
-                    into: target, backgroundLevel: backgroundLevel, headrooms: headrooms)
+                    into: target, backgroundLevel: backgroundLevel, headrooms: headrooms,
+                    options: PresentOptionsGPU(overlays),
+                    baseRawClip: base.rawClipMask, tileRawClip: tile?.rawClipMask)
     }
 
     /// A full-resolution layer's screen-to-texture map, and the part of the
@@ -258,6 +272,10 @@ public final class Presenter {
         static let magnifier: UInt32 = 1 << 1
         static let magnifierHasTile: UInt32 = 1 << 2
         static let magnifierNearest: UInt32 = 1 << 3
+        // 4 to 6 are the clipping overlay's (ClippingIndicators << 4).
+        static let focusPeaking: UInt32 = 1 << 7
+        static let baseRawClip: UInt32 = 1 << 8
+        static let tileRawClip: UInt32 = 1 << 9
     }
 
     /// The magnifier's placement, laid out as the kernel's `Loupe` struct.
@@ -273,7 +291,8 @@ public final class Presenter {
                       tile: MTLTexture?, tileMap: simd_float3x2, tileSource: SIMD4<Float>,
                       loupeTile: MTLTexture?, loupe: PresentLoupe, flags: UInt32,
                       into target: MTLTexture, backgroundLevel: Float,
-                      headrooms: SIMD4<Float>) -> MTLCommandBuffer? {
+                      headrooms: SIMD4<Float>, options: PresentOptionsGPU,
+                      baseRawClip: MTLTexture?, tileRawClip: MTLTexture?) -> MTLCommandBuffer? {
         guard let cmdBuffer = gpu.commandQueue.makeCommandBuffer(),
               let encoder = cmdBuffer.makeComputeCommandEncoder() else { return nil }
 
@@ -301,6 +320,11 @@ public final class Presenter {
         encoder.setBytes(&loupeV, length: MemoryLayout<PresentLoupe>.stride, index: 6)
         var flagsV = flags
         encoder.setBytes(&flagsV, length: 4, index: 7)
+        var optionsV = options
+        encoder.setBytes(&optionsV, length: MemoryLayout<PresentOptionsGPU>.stride, index: 8)
+        // Unused slots are bound to something, as Metal requires.
+        encoder.setTexture(baseRawClip ?? base, index: 4)
+        encoder.setTexture(tileRawClip ?? baseRawClip ?? base, index: 5)
 
         let pso = gpu.presentPSO
         let tw = pso.threadExecutionWidth

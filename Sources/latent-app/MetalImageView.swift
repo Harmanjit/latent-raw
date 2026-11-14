@@ -75,6 +75,9 @@ struct MetalImageView: NSViewRepresentable {
     /// Only this part of the view shows, as fractions of it (a
     /// Before/After split); nil, all of it.
     var visibleFraction: CGRect? = nil
+    /// Focus peaking, raw clipping and the clipping overlay's options
+    /// (ViewingSettings). Display only; the default draws nothing new.
+    var overlays: PresentOverlays = .none
 
     func makeNSView(context: Context) -> MetalLayerView {
         let view = MetalLayerView()
@@ -101,6 +104,7 @@ struct MetalImageView: NSViewRepresentable {
         view.onPointer = onPointer
         view.mirrored = mirrored
         view.visibleFraction = visibleFraction
+        view.overlays = overlays
         view.display(preview: preview, tile: tile, transform: transform, frame: frame,
                      magnifierTile: magnifierTile)
     }
@@ -121,6 +125,7 @@ private struct PresentedFrame: Equatable {
     var magnifier: ViewerInteraction.Magnifier?
     var magnifierTile: UInt64?
     var clipping: ClippingIndicators = []
+    var overlays: PresentOverlays = .none
 }
 
 final class MetalLayerView: NSView {
@@ -139,6 +144,9 @@ final class MetalLayerView: NSView {
     }
     var clipping: ClippingIndicators = [] {
         didSet { if clipping != oldValue { setNeedsRedraw() } }
+    }
+    var overlays: PresentOverlays = .none {
+        didSet { if overlays != oldValue { setNeedsRedraw() } }
     }
     /// See `MetalImageView.onPointer`. Setting it adds or removes the
     /// tracking area that reports pointer moves.
@@ -407,7 +415,7 @@ final class MetalLayerView: NSView {
                                     drawableSize: metalLayer.drawableSize,
                                     displayHeadroom: headroom,
                                     magnifier: magnifier, magnifierTile: magnifierTile?.generation,
-                                    clipping: clipping)
+                                    clipping: clipping, overlays: overlays)
         guard wanted != presented, let drawable = metalLayer.nextDrawable() else { return }
         presented = wanted
         presenter.present(base: preview, tile: currentTile,
@@ -417,7 +425,7 @@ final class MetalLayerView: NSView {
                           magnifier: magnifier.map {
                               PresentMagnifier(loupe: $0, ringWidth: magnifierRingWidth, tile: magnifierTile)
                           },
-                          clipping: clipping)
+                          clipping: clipping, overlays: overlays)
         #if DEBUG
         SnapshotHarness.noteDrawable(drawable.texture, presentedBy: self)
         #endif

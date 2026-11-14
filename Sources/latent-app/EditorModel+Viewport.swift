@@ -101,6 +101,34 @@ extension EditorModel {
         rerenderForViewport()
     }
 
+    // MARK: - Navigator and zoom levels
+
+    /// The Navigator: the view moved so `canvasPoint` (in rotated image
+    /// space, as the viewport works) is at its centre, at the same zoom.
+    func centreView(on canvasPoint: CGPoint) {
+        guard hasImage, !fitMode else { return }
+        apply(ViewportTransform(zoom: viewport.zoom, center: canvasPoint))
+    }
+
+    /// The zoom-level menu: Fit, Fill, or a percentage of actual size
+    /// (100% is one image pixel per screen pixel, as Actual Size), about
+    /// the centre of the view. A level below Fit shows the image fitted.
+    func setZoomLevel(_ level: ZoomLevel) {
+        guard hasImage else { return }
+        switch level {
+        case .fit:
+            zoomToFit()
+            return
+        case .fill:
+            guard imageSize.width > 0, imageSize.height > 0 else { return }
+            let zoom = max(drawableSize.width / imageSize.width, drawableSize.height / imageSize.height)
+            apply(ViewportTransform(zoom: zoom, center: viewport.center))
+        case .percent(let percent):
+            apply(ViewportTransform(zoom: CGFloat(percent) / 100, center: viewport.center))
+        }
+        rerenderForViewport()
+    }
+
     /// Every gesture lands here: clamp, publish (the view redraws at once),
     /// and queue a render for when the gesture settles.
     private func apply(_ proposed: ViewportTransform) {
@@ -167,5 +195,21 @@ extension EditorModel {
         let peer = linkedGroup?.linkedPanes.first { $0 !== self && $0.hasImage && !$0.fitMode }
         guard let other = linkedPane ?? peer, other.hasImage, !other.fitMode else { return }
         show(other.relativeView)
+    }
+}
+
+/// The zoom-level menu's choices (NavigatorView.swift).
+enum ZoomLevel: Hashable, Identifiable {
+    case fit, fill, percent(Int)
+
+    static let menu: [ZoomLevel] = [.fit, .fill, .percent(25), .percent(50), .percent(100), .percent(200), .percent(400)]
+
+    var id: String { title }
+    var title: String {
+        switch self {
+        case .fit: "Fit"
+        case .fill: "Fill"
+        case .percent(let p): "\(p)%"
+        }
     }
 }

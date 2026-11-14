@@ -484,6 +484,17 @@ extension Keymap {
             c("resetEdits", .history(.resetEdits), "Reset Edits", editing),
             c("loadSettingsFromFile", .history(.loadSettingsFromFile), "Load Settings from File…", editing),
             c("newBlankCopy", .history(.newBlankCopy), "New Blank Copy", files),
+            c("straightenFineLeft", .viewing(.straighten(tenths: -1)), "Straighten −0.1°", develop, in: .develop),
+            c("straightenFineRight", .viewing(.straighten(tenths: 1)), "Straighten +0.1°", develop, in: .develop),
+            c("straightenLeft", .viewing(.straighten(tenths: -10)), "Straighten −1°", develop, in: .develop),
+            c("straightenRight", .viewing(.straighten(tenths: 10)), "Straighten +1°", develop, in: .develop),
+            c("focusExposure", .viewing(.focusExposure), "Focus Exposure", develop, in: .develop),
+            c("shortcutsOverlay", .viewing(.toggleShortcutsOverlay), "Show Shortcuts Overlay", views),
+            c("showWelcome", .viewing(.showWelcome), "Show Welcome", views),
+            c("focusPeaking", .viewing(.toggleFocusPeaking), "Focus Peaking", views),
+            c("rawClipping", .viewing(.toggleRawClipping), "Show Raw Clipping", editing, in: .develop),
+            c("colourAssessment", .viewing(.toggleColourAssessment), "Colour Assessment", views),
+            c("highQualityPreview", .viewing(.toggleHighQualityPreview), "High Quality Preview", views),
         ]
         return list
     }()

@@ -175,6 +175,7 @@ public final class ImageSession {
         case depthView, depthViewPreview   // the viewport's Show Depth pass
         case hueIsolated, hueIsolatedPreview // the Colour Mixer's Option-drag preview
         case flatField, flatFieldPreview   // camera RGB after flat-field correction
+        case rawClip, rawClipPreview       // View › Show Raw Clipping's mask (r8)
         case reflections, reflectionsPreview // output of the reflection removal stage
     }
 
@@ -548,7 +549,24 @@ public final class ImageSession {
 
     /// Drops pooled textures, keeping the session usable (the sensor buffer
     /// stays). For memory pressure, or when a zoom level won't return.
+    /// The raw clipping masks the last renders that asked for one wrote
+    /// (`RenderOutput.rawClipMask`), the binned preview's and the tile's.
+    private var rawClipMasks: [Bool: MTLTexture] = [:]
+
+    func noteRawClipMask(_ mask: MTLTexture, preview: Bool) {
+        rawClipMasks[preview] = mask
+    }
+
+    /// The mask the last render with `RenderOutput.rawClipMask` wrote, for
+    /// the binned preview (`preview`) or a full-resolution render. Read it
+    /// straight after that render: a pooled texture, the next one
+    /// overwrites it, as it does the render itself.
+    public func rawClipMask(preview: Bool) -> MTLTexture? {
+        rawClipMasks[preview]
+    }
+
     public func releasePooledTextures() {
+        rawClipMasks.removeAll()
         texturePool.removeAll()
         stageCache.removeAll()
         healCache.removeAll()

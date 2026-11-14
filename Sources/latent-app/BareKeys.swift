@@ -169,6 +169,10 @@ enum KeyCommand: Equatable, Sendable {
     /// Overwrite, the selective sheet, Load Settings from File, New Blank
     /// Copy (LibraryBatchEdits.swift).
     case history(HistoryCommand)
+    /// The viewing aids: focus peaking, raw clipping, colour assessment,
+    /// the high-quality preview, fine straightening, Focus Exposure, the
+    /// shortcuts overlay and the welcome sheet (ViewingCommands.swift).
+    case viewing(ViewingCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).

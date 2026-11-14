@@ -384,6 +384,11 @@ public struct RenderOutput: Sendable, Equatable {
     /// magenta) whose colours stay while the rest of the picture goes grey
     /// (RenderPipeline+HueIsolation.swift). Viewport only; nil normally.
     public var hueIsolation: Int? = nil
+    /// View › Show Raw Clipping: also write a mask of the pixels where a
+    /// sensor channel reached its clip level before highlight
+    /// reconstruction (RenderPipeline+RawClipping.swift), read back with
+    /// `ImageSession.rawClipMask(preview:)`. Viewport only; off normally.
+    public var rawClipMask = false
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -766,6 +771,13 @@ public final class RenderPipeline {
             colourInput = try applyLensCorrection(session: session, cmdBuffer: cmdBuffer,
                                                   input: colourInput, parameters: parameters,
                                                   source: sourceInfo, output: renderInfo, binSpan: binSpan)
+        }
+
+        // Display pass: the raw clipping mask, from what the colour stage
+        // is about to read, so it lines up with the render.
+        if output.rawClipMask {
+            try encodeRawClipMask(session: session, cmdBuffer: cmdBuffer, input: colourInput,
+                                  multipliers: multipliers, preview: displayRole != .display)
         }
 
         // Stages 8 to 15, in one kernel (Shaders/ColorPipeline.metal).

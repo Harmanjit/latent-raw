@@ -85,6 +85,24 @@ constant uint kMagnifierNearest = 1u << 3;
 constant uint kClipShadows      = 1u << 4;
 constant uint kClipHighlights   = 1u << 5;
 constant uint kHDRRanges        = 1u << 6;
+// The viewing overlays (PresentOverlays.swift).
+constant uint kFocusPeaking     = 1u << 7;
+constant uint kBaseRawClip      = 1u << 8;
+constant uint kTileRawClip      = 1u << 9;
+
+// Laid out as PresentOptionsGPU in PresentOverlays.swift. The standard
+// values reproduce the clipping overlay exactly as it was drawn before
+// it had options: red at 0.9955 of the ceiling, blue under 0.000152.
+struct PresentOptions {
+    float4 peak;      // focus peaking colour, threshold in w
+    float4 clipHigh;  // highlight colour, linear threshold in w
+    float4 clipLow;   // shadow colour, linear threshold in w
+    float4 raw;       // raw clipping colour
+    uint clipMode;    // 0 any channel, 1 luminance, 2 saturation (gamut)
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
 
 // The clipping overlay (J). Same lines as the histogram's end bins
 // (Histogram.metal), so what turns red is what the clipped readout counts:
@@ -111,12 +129,71 @@ inline float3 hdrRangeIndicator(float3 c, float contentHeadroom) {
     return float3(1.0, 0.5, 0.0);
 }
 
-inline float3 clippingIndicator(float3 c, float contentHeadroom, uint flags) {
+inline float3 clippingIndicator(float3 c, float contentHeadroom, uint flags, constant PresentOptions &o) {
     if ((flags & kHDRRanges) != 0) return hdrRangeIndicator(c, contentHeadroom);
     float peak = max(c.r, max(c.g, c.b));
-    if ((flags & kClipHighlights) != 0 && peak >= 0.9955 * contentHeadroom) return float3(1.0, 0.0, 0.0);
-    if ((flags & kClipShadows) != 0 && peak < 0.000152) return float3(0.0, 0.3, 1.0);
+    float high = o.clipHigh.w * contentHeadroom;
+    float low = o.clipLow.w;
+    bool highlights = (flags & kClipHighlights) != 0;
+    bool shadows = (flags & kClipShadows) != 0;
+    if (o.clipMode == 1u) {
+        // Luminance (Display P3's Y) against the two lines.
+        float y = dot(c, float3(0.2290, 0.6917, 0.0793));
+        if (highlights && y >= high) return o.clipHigh.rgb;
+        if (shadows && y < low) return o.clipLow.rgb;
+        return c;
+    }
+    if (o.clipMode == 2u) {
+        // Saturation: a channel at the top while the colour is far from
+        // grey, or a channel outside Display P3; a channel at the bottom
+        // while another still has light.
+        float least = min(c.r, min(c.g, c.b));
+        if (highlights && ((peak >= high && least < 0.5 * peak) || least < -0.001)) return o.clipHigh.rgb;
+        if (shadows && least < low && peak >= low) return o.clipLow.rgb;
+        return c;
+    }
+    if (highlights && peak >= high) return o.clipHigh.rgb;
+    if (shadows && peak < low) return o.clipLow.rgb;
     return c;
+}
+
+// Focus peaking: the Sobel gradient of the layer's lightness around `st`,
+// one texel each way, as a share of a black-to-white step (0 to 1). The
+// lightness is a square root of luminance, near enough to how the eye
+// spaces tones that a soft edge in the shadows counts as one in the
+// highlights does.
+inline float peakingStrength(texture2d<float, access::sample> layer, float2 st) {
+    constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::nearest);
+    float2 t = 1.0 / float2(layer.get_width(), layer.get_height());
+    float3 w = float3(0.2290, 0.6917, 0.0793);
+    float l[9];
+    for (int j = -1; j <= 1; j++) {
+        for (int i = -1; i <= 1; i++) {
+            float3 c = layer.sample(s, st + float2(i, j) * t).rgb;
+            l[(j + 1) * 3 + (i + 1)] = sqrt(clamp(dot(c, w), 0.0, 1.0));
+        }
+    }
+    float gx = (l[2] + 2.0 * l[5] + l[8]) - (l[0] + 2.0 * l[3] + l[6]);
+    float gy = (l[6] + 2.0 * l[7] + l[8]) - (l[0] + 2.0 * l[1] + l[2]);
+    return length(float2(gx, gy)) * 0.25;
+}
+
+// What the view draws for one sample of a layer: the clipping overlay,
+// then raw clipping from the layer's mask, then focus peaking on top.
+inline float3 decorate(float3 c, texture2d<float, access::sample> layer, float2 st,
+                       texture2d<float, access::sample> rawMask, bool hasRawMask,
+                       float contentHeadroom, uint flags, constant PresentOptions &o) {
+    float3 shown = (flags & (kClipShadows | kClipHighlights | kHDRRanges)) != 0
+        ? clippingIndicator(c, contentHeadroom, flags, o) : c;
+    if (hasRawMask) {
+        constexpr sampler nearestSampler(coord::normalized, address::clamp_to_edge, filter::nearest);
+        if (rawMask.sample(nearestSampler, st).r > 0.5) shown = o.raw.rgb;
+    }
+    if ((flags & kFocusPeaking) != 0 && o.peak.w > 0.0) {
+        float g = peakingStrength(layer, st);
+        shown = mix(shown, o.peak.rgb, smoothstep(o.peak.w, o.peak.w * 1.4, g));
+    }
+    return shown;
 }
 
 // One screen pixel of the picture: the full-resolution tile where it
@@ -131,7 +208,10 @@ inline float3 composite(float3 p,
                         texture2d<float, access::sample> tile, float3x2 tileMap, float4 tileSource,
                         bool hasTile, bool tileNearest,
                         float backgroundLevel, float displayHeadroom,
-                        float baseHeadroom, float tileHeadroom, uint flags)
+                        float baseHeadroom, float tileHeadroom, uint flags,
+                        texture2d<float, access::sample> baseRawMask,
+                        texture2d<float, access::sample> tileRawMask,
+                        constant PresentOptions &o)
 {
     constexpr sampler linearSampler(coord::normalized, address::clamp_to_edge, filter::linear);
     constexpr sampler nearestSampler(coord::normalized, address::clamp_to_edge, filter::nearest);
@@ -141,8 +221,8 @@ inline float3 composite(float3 p,
         if (uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= 1.0 && uv.y <= 1.0) {
             float2 st = tileSource.xy + uv * tileSource.zw;
             float4 c = tileNearest ? tile.sample(nearestSampler, st) : tile.sample(linearSampler, st);
-            float3 shown = (flags & (kClipShadows | kClipHighlights | kHDRRanges)) != 0
-                ? clippingIndicator(c.rgb, tileHeadroom, flags) : c.rgb;
+            float3 shown = (flags & (kClipShadows | kClipHighlights | kHDRRanges | kFocusPeaking | kTileRawClip)) != 0
+                ? decorate(c.rgb, tile, st, tileRawMask, (flags & kTileRawClip) != 0, tileHeadroom, flags, o) : c.rgb;
             return toneMapToHeadroom(shown, displayHeadroom, tileHeadroom);
         }
     }
@@ -155,8 +235,8 @@ inline float3 composite(float3 p,
         return float3(backgroundLevel);
     }
     float4 c = base.sample(linearSampler, uv);
-    float3 shown = (flags & (kClipShadows | kClipHighlights | kHDRRanges)) != 0
-        ? clippingIndicator(c.rgb, baseHeadroom, flags) : c.rgb;
+    float3 shown = (flags & (kClipShadows | kClipHighlights | kHDRRanges | kFocusPeaking | kBaseRawClip)) != 0
+        ? decorate(c.rgb, base, uv, baseRawMask, (flags & kBaseRawClip) != 0, baseHeadroom, flags, o) : c.rgb;
     return toneMapToHeadroom(shown, displayHeadroom, baseHeadroom);
 }
 
@@ -173,6 +253,9 @@ kernel void presentToScreen(
     constant float4 &headrooms                [[buffer(5)]],  // display, base, tile, loupe tile content
     constant Loupe  &loupe                    [[buffer(6)]],
     constant uint   &flags                    [[buffer(7)]],
+    constant PresentOptions &options          [[buffer(8)]],
+    texture2d<float, access::sample> baseRawMask [[texture(4)]],
+    texture2d<float, access::sample> tileRawMask [[texture(5)]],
     uint2 gid                                 [[thread_position_in_grid]])
 {
     if (gid.x >= drawable.get_width() || gid.y >= drawable.get_height()) return;
@@ -192,14 +275,16 @@ kernel void presentToScreen(
     if (outside > 0.0) {
         color = composite(p, base, baseMap, tile, tileMap, tileSource,
                           hasTile != 0, (flags & kTileNearest) != 0,
-                          backgroundLevel, headrooms.x, headrooms.y, headrooms.z, flags);
+                          backgroundLevel, headrooms.x, headrooms.y, headrooms.z, flags,
+                          baseRawMask, tileRawMask, options);
     }
     if (outside < 1.0) {
         float3 inside = float3(0.8);
         if (inRing < 1.0) {
             float3 magnified = composite(p, base, loupe.baseMap, loupeTile, loupe.tileMap, loupe.tileSource,
                                          (flags & kMagnifierHasTile) != 0, (flags & kMagnifierNearest) != 0,
-                                         backgroundLevel, headrooms.x, headrooms.y, headrooms.w, flags);
+                                         backgroundLevel, headrooms.x, headrooms.y, headrooms.w,
+                                         flags & ~kTileRawClip, baseRawMask, tileRawMask, options);
             inside = mix(magnified, inside, inRing);
         }
         inside = mix(inside, float3(0.0), inHairline);
@@ -263,4 +348,23 @@ kernel void hueIsolate(
     float keep = isolationBandWeight(hue, params.band) * smoothstep(0.0, 0.15, saturation);
     float y = dot(max(c.rgb, 0.0), float3(0.2290, 0.6917, 0.0793));
     output.write(float4(mix(float3(y), c.rgb, keep), c.a), gid);
+}
+
+// View › Show Raw Clipping: 1 where any channel of the camera-space image
+// the colour stage is about to read (demosaiced, white balanced, before
+// highlight reconstruction) has reached its clip level, else 0. The
+// colour kernel rebuilds highlights from the same input against the same
+// levels (`reconstructHighlights`), so what turns magenta is what the
+// sensor clipped, whatever the tone curve later does with it. 0.995
+// leaves room for the rounding of the black level and the scale.
+kernel void rawClipMask(
+    texture2d<float, access::read>  input   [[texture(0)]],
+    texture2d<float, access::write> output  [[texture(1)]],
+    constant float4 &clipLevel              [[buffer(0)]],
+    uint2 gid                               [[thread_position_in_grid]])
+{
+    if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
+    float3 c = input.read(gid).rgb;
+    bool clipped = any(c >= clipLevel.rgb * 0.995);
+    output.write(float4(clipped ? 1.0 : 0.0), gid);
 }
