@@ -45,6 +45,10 @@ extension EditorModel {
         output.sharpenMaskPreview = sharpenMaskPreview
         output.hueIsolation = hasImage ? hueIsolationBand : nil
         output.depthVisualisation = lensBlurState.showDepth
+        // View › Show Raw Clipping, for Develop's own editor only. A JPEG
+        // or TIFF has no sensor clip level to compare with.
+        output.rawClipMask = hasImage && session?.isRenderedImage != true
+            && ViewingSettings.shared.rendersRawClipping(for: self)
         return output
     }
 

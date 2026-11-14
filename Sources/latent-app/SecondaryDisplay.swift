@@ -261,13 +261,16 @@ struct SecondaryLoupeView: View {
     @ObservedObject var library: Library
     @ObservedObject var display: SecondaryDisplay
     @ObservedObject private var prefs = AppPreferences.shared
+    /// Colour assessment and focus peaking follow the main window's.
+    @ObservedObject private var viewing = ViewingSettings.shared
     /// The image view's drawable, in pixels, for the fit.
     @State private var drawableSize: CGSize = .zero
 
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
-                prefs.surroundColor
+                ColourAssessment.surroundColor(viewing, prefs)
+                Group {
                 if let device = model.device, let presenter = model.presenter, let preview = model.preview, model.hasImage {
                     let model = model
                     MetalImageView(preview: preview,
@@ -281,13 +284,14 @@ struct SecondaryLoupeView: View {
                                        model.secondaryViewportDidResize(to: size)
                                    },
                                    onHeadroomChange: { model.secondaryDisplayHeadroomDidChange(to: $0) },
-                                   backgroundLevel: prefs.surroundLinear,
+                                   backgroundLevel: ColourAssessment.surroundLinear(viewing, prefs),
                                    // A view to look at: zoom, pan and the tools stay in the main window.
                                    onZoom: { _, _ in }, onPan: { _ in }, onDoubleClick: { _ in },
                                    atFit: true, onStep: nil,
                                    allowsMagnifier: false, magnifierTile: nil, onMagnifier: { _ in },
                                    toolActive: false,
-                                   onToolBegan: { _, _ in }, onToolMoved: { _ in }, onToolEnded: {})
+                                   onToolBegan: { _, _ in }, onToolMoved: { _ in }, onToolEnded: {},
+                                   overlays: viewing.overlays(developTools: false))
                         .accessibilityElement(children: .ignore)
                         .accessibilityAddTraits(.isImage)
                         .accessibilityLabel(model.imageTitle ?? "Image")
@@ -296,11 +300,15 @@ struct SecondaryLoupeView: View {
                     Text(model.isReady ? "No image open" : "Starting…")
                         .foregroundStyle(.secondary)
                 }
+                }
+                .modifier(ColourAssessmentInset(settings: viewing, imageRect: { [model] inner in
+                    model.hasImage ? Presenter.fitRect(imageSize: model.imageSize, drawableSize: inner) : nil
+                }))
             }
             ImageCaption(record: library.selectedImage)
         }
         .padding(display.contentInsets)
-        .background(prefs.surroundColor)
+        .background(ColourAssessment.surroundColor(viewing, prefs))
         .motionFollowsAccessibility()
     }
 }

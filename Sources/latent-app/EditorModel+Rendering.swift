@@ -26,7 +26,7 @@ extension EditorModel {
     /// sensor pixels per screen pixel or more, binning whole quads is both
     /// cheaper and *more* correct than demosaicing — it's a box filter,
     /// which is what a downscale should be.
-    private var wantsTile: Bool {
+    var wantsTile: Bool {
         drawableSize.width > 0 && (1 / viewport.zoom) < 1.5
     }
 
@@ -167,6 +167,9 @@ extension EditorModel {
         } else {
             renderReport = "view moved · no render"
         }
+        // A new binned preview, or the tile let go at fit: the high-quality
+        // one follows once the view settles.
+        if didWork || !wantsTile { scheduleHighQualityPreview() }
     }
 
     /// Re-renders after an edit. Both layers show the edit, so both go.
@@ -194,6 +197,7 @@ extension EditorModel {
         lastRenderMs = Date().timeIntervalSince(start) * 1000
         renderReport = what.joined(separator: " + ") + String(format: " · %.1f ms", lastRenderMs)
         refreshMagnifier()
+        scheduleHighQualityPreview()
     }
 
     /// Returns a short description of what ran, for the status bar.
@@ -209,8 +213,10 @@ extension EditorModel {
         let rendered = try pipeline.render(session, scale: .binned(quads: quads),
                                             parameters: renderParameters, output: displayOutput,
                                             info: &info)
-        preview = PresentLayer(texture: rendered, coverage: info.sensorRect,
-                               headroom: displayOutput.headroom)
+        var layer = PresentLayer(texture: rendered, coverage: info.sensorRect,
+                                 headroom: displayOutput.headroom)
+        if displayOutput.rawClipMask { layer.rawClipMask = session.rawClipMask(preview: true) }
+        preview = layer
         previewQuads = quads
 
         // Scopes always describe the whole image, whatever's on screen —
@@ -220,8 +226,10 @@ extension EditorModel {
         // Bigger quads than the preview only when the preview is itself
         // large; a tiny preview is already an analysis-sized image.
         let analysisQuads = max(quads, 4)
+        var analysisOutput = displayOutput
+        analysisOutput.rawClipMask = false
         analysisTexture = try pipeline.render(session, scale: .binned(quads: analysisQuads),
-                                              parameters: renderParameters, output: displayOutput)
+                                              parameters: renderParameters, output: analysisOutput)
         updateScopes()
         return "preview \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
@@ -234,8 +242,10 @@ extension EditorModel {
             session,
             scale: .region(x: region.x, y: region.y, width: region.width, height: region.height),
             parameters: renderParameters, output: displayOutput, info: &info)
-        tile = PresentLayer(texture: rendered, coverage: info.sensorRect, inset: Self.tileInset,
-                            headroom: displayOutput.headroom)
+        var layer = PresentLayer(texture: rendered, coverage: info.sensorRect, inset: Self.tileInset,
+                                 headroom: displayOutput.headroom)
+        if displayOutput.rawClipMask { layer.rawClipMask = session.rawClipMask(preview: false) }
+        tile = layer
         // Past the view region the tile can hold a patch that reads outside
         // it (it wasn't needed for the view), which a pan must not reveal.
         tileHealedCoverage = HealPatch.isSelfContained(info.sensorRect, patches: renderParameters.allHealPatches,

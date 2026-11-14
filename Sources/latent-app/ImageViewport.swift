@@ -29,6 +29,8 @@ struct ImageViewport: View {
     /// fractions of it, the pane under it showing through the rest.
     var visibleFraction: CGRect? = nil
     @ObservedObject private var overlay = LoupeOverlaySettings.shared
+    /// Focus peaking, raw clipping, the clipping options and colour assessment.
+    @ObservedObject private var viewing = ViewingSettings.shared
 
     /// A Develop tool owns clicks and drags on the image, so there's no
     /// swipe to another image and no magnifier while one is armed.
@@ -39,11 +41,12 @@ struct ImageViewport: View {
     var body: some View {
         ZStack {
             if let visibleFraction {
-                prefs.surroundColor.mask(FractionMask(fraction: visibleFraction))
+                ColourAssessment.surroundColor(viewing, prefs).mask(FractionMask(fraction: visibleFraction))
             } else {
-                prefs.surroundColor
+                ColourAssessment.surroundColor(viewing, prefs)
             }
 
+            Group {
             if let device = model.device, let presenter = model.presenter,
                let preview = model.preview {
                 MetalImageView(preview: preview,
@@ -54,7 +57,7 @@ struct ImageViewport: View {
                                 device: device,
                                 onResize: { model.viewportDidResize(to: $0) },
                                 onHeadroomChange: { model.displayHeadroomDidChange(to: $0) },
-                                backgroundLevel: prefs.surroundLinear,
+                                backgroundLevel: ColourAssessment.surroundLinear(viewing, prefs),
                                 onZoom: { factor, point in
                                     model.zoom(by: factor, about: point)
                                 },
@@ -76,7 +79,8 @@ struct ImageViewport: View {
                                 clipping: allowsTools ? model.clipping : [],
                                 onPointer: allowsTools ? { model.pointerMoved(to: $0) } : nil,
                                 mirrored: followsMirrorImageMode && mirrorImageMode.isOn,
-                                visibleFraction: visibleFraction)
+                                visibleFraction: visibleFraction,
+                                overlays: viewing.overlays(developTools: allowsTools))
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isImage)
                     .accessibilityLabel(model.imageTitle ?? "Image")
@@ -123,6 +127,10 @@ struct ImageViewport: View {
                     }
                 }
             }
+            }
+            .modifier(ColourAssessmentInset(settings: viewing, imageRect: { inner in
+                ColourAssessment.imageRect(model: model, innerSize: inner)
+            }))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

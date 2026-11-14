@@ -342,6 +342,8 @@ private struct Triangle: Shape {
 /// clipping switches (J turns both on or off).
 struct PixelReadoutBar: View {
     @ObservedObject var model: EditorModel
+    /// The clipping warning's options (ViewingSettingsViews.swift).
+    @State private var showsClippingOptions = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -351,6 +353,16 @@ struct PixelReadoutBar: View {
             Spacer(minLength: 0)
             clipToggle(.highlights, title: "Highlights", systemImage: "triangle.tophalf.filled",
                        help: "Show clipped highlights in red (J shows both)")
+            Button { showsClippingOptions.toggle() } label: {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.mini)
+            .accessibilityLabel("Clipping warning options")
+            .help("How the clipping warning marks the image: mode, thresholds and colours")
+            .popover(isPresented: $showsClippingOptions, arrowEdge: .bottom) {
+                ClippingOptionsPopover(settings: ViewingSettings.shared)
+            }
         }
         .disabled(!model.hasImage)
     }
