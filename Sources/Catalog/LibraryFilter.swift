@@ -26,19 +26,64 @@ public struct LibraryFilter: Equatable, Sendable {
     /// shows every photo.
     public var recentlyAddedIDs: Set<Int64>?
 
+    // The criteria below were added later (LibraryFilter+Criteria.swift
+    // has their types and tests). Each one's default means "don't filter
+    // on this", so a filter that leaves them alone behaves as it always did.
+
+    /// How `minRating` and `maxRating` are read. At least (the default)
+    /// reads only `minRating`, exactly as the stars always have.
+    public var ratingOperator: RatingOperator = .atLeast
+    /// The top of the rating range, for At most and Between.
+    public var maxRating = 5
+    /// Colour labels a photo must not have (Option-click in the Label menu).
+    public var excludedLabels: Set<LabelFilterChoice> = []
+    /// Show only images without a stored edit (Option-click on Edited).
+    public var uneditedOnly = false
+    /// Show only images that carry no keyword at all.
+    public var noKeywords = false
+    /// Where the search box looks: file name, title and caption (the
+    /// default, as before), or every searchable field with search syntax.
+    public var textScope: TextSearchScope = .names
+    /// Ranges of the shooting data; nil = no constraint. Photos without
+    /// the value are hidden only while its range is set.
+    public var isoRange: ClosedRange<Double>?
+    public var focalRange: ClosedRange<Double>?
+    public var apertureRange: ClosedRange<Double>?
+    /// Exposure time, in seconds.
+    public var shutterRange: ClosedRange<Double>?
+    /// Capture date range; photos without a capture date are hidden only
+    /// while it is set.
+    public var captureDateRange: ClosedRange<Date>?
+    /// Raw files, other files, or the raws of RAW+JPEG pairs.
+    public var fileKind: FileKindFilter = .any
+    /// Masters, virtual copies, or masters that have copies.
+    public var copyKind: CopyKindFilter = .any
+
     public init() {}
 
     public var isActive: Bool {
         minRating > 0 || !flags.isEmpty || editedOnly || camera != nil
             || lens != nil || keyword != nil || !text.trimmingCharacters(in: .whitespaces).isEmpty
             || finderTag != nil || !labels.isEmpty || recentlyAddedIDs != nil
+            || hasAddedCriteria
     }
 
     /// Whether `record` passes every active criterion. Keywords and the
     /// edited flag live outside the record, so the caller supplies them.
     public func matches(_ record: ImageRecord, isEdited: Bool, keywords: Set<String>) -> Bool {
+        matches(record, isEdited: isEdited, keywords: keywords, context: .empty)
+    }
+
+    /// The same, with what the newer criteria need from outside the record
+    /// worked out once for the whole list (`LibraryFilterContext`).
+    public func matches(_ record: ImageRecord, isEdited: Bool, keywords: Set<String>,
+                        context: LibraryFilterContext) -> Bool {
         if let recentlyAddedIDs, !(record.id.map(recentlyAddedIDs.contains) ?? false) { return false }
-        if record.rating < minRating { return false }
+        if ratingOperator == .atLeast {
+            if record.rating < minRating { return false }
+        } else if !ratingPasses(record.rating) {
+            return false
+        }
         if !flags.isEmpty, !flags.contains(ImageFlag(rawValue: record.flag) ?? .none) { return false }
         if editedOnly, !isEdited { return false }
         if let camera, record.camera != camera { return false }
@@ -47,6 +92,12 @@ public struct LibraryFilter: Equatable, Sendable {
         if let keyword, !keywords.contains(where: { KeywordPath.path($0, isWithin: keyword) }) { return false }
         if let finderTag, !FinderTag.stored(record.finderTags, contains: finderTag) { return false }
         if !labels.isEmpty, !labels.contains(where: { $0.matches(record.label) }) { return false }
+        if hasAddedCriteria, !passesAddedCriteria(record, isEdited: isEdited, keywords: keywords, context: context) {
+            return false
+        }
+        if textScope == .everything {
+            return passesSearch(record, keywords: keywords, context: context)
+        }
         let needle = text.isEmpty ? "" : text.trimmingCharacters(in: .whitespaces)
         // The name, or the title or caption the photographer gave it.
         // Tested one at a time, without building an array per record: this

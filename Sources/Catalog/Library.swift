@@ -94,7 +94,7 @@ public final class Library: ObservableObject {
     /// and whenever keywords are edited.
     var keywordIndex: [Int64: Set<String>] = [:] {
         didSet {
-            if filter.keyword != nil || collections.activeScope?.readsKeywords == true, !isPatchingRecords {
+            if filter.readsKeywords || collections.activeScope?.readsKeywords == true, !isPatchingRecords {
                 recomputeVisible()
             }
             collections.contentDidChange()
@@ -139,7 +139,7 @@ public final class Library: ObservableObject {
     /// Images that have a stored edit, so the grid can badge them.
     @Published public internal(set) var editedImageIDs: Set<Int64> = [] {
         didSet {
-            if filter.editedOnly || collections.activeScope?.readsEdits == true, !isPatchingRecords { recomputeVisible() }
+            if filter.readsEdits || collections.activeScope?.readsEdits == true, !isPatchingRecords { recomputeVisible() }
             if !isPatchingRecords { refreshEditStatsIfSorted() }
         }
     }
@@ -291,12 +291,15 @@ public final class Library: ObservableObject {
         // The collection shown in the grid, if any (LibraryCollections).
         let scope = collections.activeScope
         let now = Date()
+        // What the newer criteria read from outside each record, once.
+        let context = filter.isActive
+            ? LibraryFilterContext(filter: filter, images: images, pairedCompanions: pairedCompanions) : .empty
         let passing = filter.isActive || scope != nil
             ? shown.filter { record in
                 let isEdited = record.id.map(edited.contains) ?? false
                 let keywords = record.id.flatMap { index[$0] } ?? []
                 return (scope?.includes(record, isEdited: isEdited, keywords: keywords, now: now) ?? true)
-                    && (!filter.isActive || filter.matches(record, isEdited: isEdited, keywords: keywords))
+                    && (!filter.isActive || filter.matches(record, isEdited: isEdited, keywords: keywords, context: context))
             }
             : shown
         let next = StackLayout.arrange(passing.sorted(by: sort, customPositions: customPositions, editStats: editStats),
