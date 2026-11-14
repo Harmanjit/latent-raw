@@ -33,6 +33,7 @@ These are the default keys. Settings › Keyboard changes any of them, gives key
 | ⌥⌘←, ⌥⌘→ | Back / forward through the folders opened, back to the images you had selected |
 | ⌘, | Settings |
 | ⌘? | Latent Help (these pages) |
+| ⇧? | Show or hide the keys of the current mode over the window (Esc closes it too) |
 
 ## Rating and metadata
 
@@ -72,6 +73,7 @@ These are the default keys. Settings › Keyboard changes any of them, gives key
 | V | Develop: switch the treatment between Color and Black & White |
 | W | White Balance Selector: click something neutral in the photo |
 | J | Show or hide clipping on the image: highlights red, crushed shadows blue |
+| ⌥[, ⌥], ⌥⇧{, ⌥⇧} | Develop: straighten by a tenth of a degree, or a whole degree, either way (one undo step each) |
 | S | Turn Soft Proofing on or off in Develop |
 | [, ] | Smaller, larger brush or spot (while the mask brush, spot removal or red-eye is on) |
 | ⌫ | Delete the selected spot patch or red-eye spot |

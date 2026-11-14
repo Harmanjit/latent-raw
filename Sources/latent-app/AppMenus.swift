@@ -96,6 +96,8 @@ struct CommandState: Equatable {
     var stacking = StackCommandState()
     /// The loupe overlay, and Develop's Before/After and Reference views.
     var views = ViewCommandState()
+    /// Focus peaking, raw clipping and the other viewing aids (ViewingCommands.swift).
+    var viewing = ViewingCommandState()
 
     /// Whether the arrow keys pan the image rather than step through images
     /// (Loupe and Develop only; Compare keeps them for the candidate).
@@ -228,6 +230,7 @@ struct CommandState: Equatable {
         case .select, .refinePhotos: mode == .library && hasVisibleImages
         case .stack(let stack): isEnabled(stack)
         case .view(let command): isEnabled(command)
+        case .viewing(let command): isEnabled(command)
         }
     }
 
@@ -408,6 +411,7 @@ struct LatentCommands: Commands {
             ViewModesMenus(state: state.views, item: { AnyView(item($0, $1)) },
                            toggle: { AnyView(toolToggle($0, $1, isOn: $2)) })
             item(state.clippingTitle, .toggleClipping)
+            ViewingMenuItems(state: state.viewing, toggle: { AnyView(toolToggle($0, $1, isOn: $2)) })
             toolToggle("Soft Proofing", .toggleSoftProof, isOn: state.softProofing)
             item("Make Select", .makeSelect)
             item("Swap Select and Candidate", .swapCompare)
@@ -491,6 +495,13 @@ struct LatentCommands: Commands {
             item("Larger Brush", .toolSize(1))
             item("Delete Spot", .deleteHeal)
             item("Leave Tool", .disarmTools)
+            Divider()
+            StraightenMenuItems { AnyView(item($0, $1)) }
+        }
+
+        CommandGroup(after: .help) {
+            ViewingHelpMenuItems(state: state.viewing, item: { AnyView(item($0, $1)) },
+                                 toggle: { AnyView(toolToggle($0, $1, isOn: $2)) })
         }
     }
 

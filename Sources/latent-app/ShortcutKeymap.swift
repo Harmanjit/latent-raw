@@ -459,6 +459,17 @@ extension Keymap {
             c("copyAfterToBefore", .view(.copyAfterToBefore), "Copy After's Settings to Before", develop, in: .develop),
             c("copyBeforeToAfter", .view(.copyBeforeToAfter), "Copy Before's Settings to After", develop, in: .develop),
             c("swapBeforeAfter", .view(.swapBeforeAfter), "Swap Before and After Settings", develop, in: .develop),
+            c("straightenFineLeft", .viewing(.straighten(tenths: -1)), "Straighten −0.1°", develop, in: .develop),
+            c("straightenFineRight", .viewing(.straighten(tenths: 1)), "Straighten +0.1°", develop, in: .develop),
+            c("straightenLeft", .viewing(.straighten(tenths: -10)), "Straighten −1°", develop, in: .develop),
+            c("straightenRight", .viewing(.straighten(tenths: 10)), "Straighten +1°", develop, in: .develop),
+            c("focusExposure", .viewing(.focusExposure), "Focus Exposure", develop, in: .develop),
+            c("shortcutsOverlay", .viewing(.toggleShortcutsOverlay), "Show Shortcuts Overlay", views),
+            c("showWelcome", .viewing(.showWelcome), "Show Welcome", views),
+            c("focusPeaking", .viewing(.toggleFocusPeaking), "Focus Peaking", views),
+            c("rawClipping", .viewing(.toggleRawClipping), "Show Raw Clipping", editing, in: .develop),
+            c("colourAssessment", .viewing(.toggleColourAssessment), "Colour Assessment", views),
+            c("highQualityPreview", .viewing(.toggleHighQualityPreview), "High Quality Preview", views),
         ]
         return list
     }()

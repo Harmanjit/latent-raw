@@ -54,6 +54,8 @@ struct ContentView: View {
     @ObservedObject private var navigator = FolderNavigator.shared
     @ObservedObject private var fullScreen = FullScreenImageMode.shared
     @ObservedObject private var mirrorImageMode = MirrorImageMode.shared
+    /// Focus peaking, colour assessment, the shortcuts overlay and the welcome sheet.
+    @ObservedObject private var viewing = ViewingSettings.shared
     @ObservedObject private var secondDisplay = SecondaryDisplay.shared
     /// Develop's Before/After and Reference views (DevelopViews.swift).
     @ObservedObject private var developViews = DevelopViewState.shared
@@ -198,6 +200,7 @@ struct ContentView: View {
                                    .frame(height: FilmstripView.height)
                            })
         .background(navigationShortcuts)
+        .overlay { ShortcutsOverlay(mode: mode) }
         .focusedSceneValue(\.commandContext, CommandContext(state: commandState) { command in
             // A sheet over the window has the keyboard; menus wait, as keys do.
             guard NSApp.mainWindow?.attachedSheet == nil else { return }
@@ -284,6 +287,23 @@ struct ContentView: View {
                                     }
                                 })
             .motionFollowsAccessibility()
+        }
+        .sheet(isPresented: $viewing.welcomeShown, onDismiss: { viewing.dismissWelcome() }) {
+            WelcomeSheet(onOpenFolder: {
+                viewing.dismissWelcome()
+                // Once the sheet has gone, so the panel isn't run over it.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    showOpenFolderPanel()
+                }
+            }, onOpenHelp: { page in
+                HelpWindow.show(page: page)
+            }, onClose: { viewing.dismissWelcome() })
+            .motionFollowsAccessibility()
+        }
+        .onAppear {
+            viewing.setPrimaryEditor(model)
+            viewing.showWelcomeIfFirstRun()
         }
         .sheet(item: $renaming) { record in
             RenameSheet(record: record) { name in
@@ -1252,8 +1272,11 @@ struct ContentView: View {
             guard model.healToolActive else { return false }
             model.deleteSelectedHeal()
         case .disarmTools:
-            // Esc leaves the tool first, then the full-screen image.
-            if fullScreen.isActive, !model.imageToolActive, !model.cropToolActive {
+            // Esc closes the shortcuts overlay first, then leaves the tool,
+            // then the full-screen image.
+            if viewing.shortcutsOverlayShown {
+                viewing.shortcutsOverlayShown = false
+            } else if fullScreen.isActive, !model.imageToolActive, !model.cropToolActive {
                 fullScreen.leave()
             } else {
                 model.disarmTools()
@@ -1415,6 +1438,8 @@ struct ContentView: View {
             CollectionCommands.perform(command, library: library, onlyPrimary: mode != .library)
         case .view(let command):
             developViews.perform(command, load: { load($0) })
+        case .viewing(let command):
+            ViewingCommands.perform(command, editor: model, expandTone: { toneExpanded = true })
         }
         return true
     }
@@ -1499,6 +1524,7 @@ struct ContentView: View {
         state.sortKey = library.sort.key
         state.mirrorImageMode = mirrorImageMode.isOn
         state.views = developViews.commandState(main: model)
+        state.viewing = ViewingCommandState(viewing)
         return state
     }
 
@@ -1793,6 +1819,7 @@ struct ContentView: View {
         ScrollView {
             ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 20) {
+                NavigatorSection(model: model)
                 ScopePanel(model: model)
 
                 if let title = model.imageTitle {
@@ -2364,6 +2391,7 @@ struct ContentView: View {
                     .accessibilityLabel("Zoom to fit")
                 Button("100%") { viewedModel.zoomToActualSize(); mirrorModel?.zoomToActualSize() }
                     .accessibilityLabel("Actual size")
+                ZoomLevelMenu(model: viewedModel, mirror: mirrorModel)
             }
             .controlSize(.small)
             .disabled(!viewedModel.hasImage || !mode.showsImage)

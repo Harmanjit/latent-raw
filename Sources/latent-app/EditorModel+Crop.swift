@@ -44,6 +44,16 @@ extension EditorModel {
         parameters = p
     }
 
+    /// Develop › Straighten ±0.1° and ±1° (⌥[ ⌥], with ⇧ a degree): the
+    /// angle moved by `degrees`, rounded to a tenth so repeated presses
+    /// don't drift, and recorded as its own undo step straight away.
+    func nudgeStraighten(by degrees: Float) {
+        guard hasImage else { return }
+        let current = (straightenBase ?? parameters.crop).angle
+        setStraighten(((current + degrees) * 10).rounded() / 10)
+        flushPendingSave()
+    }
+
     /// Locks the crop to `ratio` (width:height as displayed, so a
     /// portrait-oriented image's "3:2" is tall), or frees it with nil.
     func setCropAspect(displayRatio ratio: Float?) {

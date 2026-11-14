@@ -155,6 +155,10 @@ enum KeyCommand: Equatable, Sendable {
     /// View › Loupe Overlay, and Develop's Before/After and Reference views
     /// (DevelopViews.swift).
     case view(ViewCommand)
+    /// The viewing aids: focus peaking, raw clipping, colour assessment,
+    /// the high-quality preview, fine straightening, Focus Exposure, the
+    /// shortcuts overlay and the welcome sheet (ViewingCommands.swift).
+    case viewing(ViewingCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).
