@@ -128,21 +128,40 @@ struct ColorLabelPicker: View {
 /// Custom Label; an image passes with any one of those chosen.
 struct LabelFilterMenu: View {
     @Binding var selection: Set<LabelFilterChoice>
+    /// Labels a photo must not have, when the menu offers exclusion:
+    /// Option-click a label to toggle it here (LabelFilterExclusion.swift).
+    var excluded: Binding<Set<LabelFilterChoice>>?
 
     var body: some View {
         Menu {
-            Button("Any") { selection = [] }
+            Button("Any") {
+                selection = []
+                excluded?.wrappedValue = []
+            }
             Divider()
             ForEach(LabelFilterChoice.all, id: \.self) { choice in
                 Button {
-                    if selection.contains(choice) { selection.remove(choice) } else { selection.insert(choice) }
+                    if let excluded, LabelFilterExclusion.optionHeld {
+                        LabelFilterExclusion.toggleExcluded(choice, selection: $selection, excluded: excluded)
+                    } else if selection.contains(choice) {
+                        selection.remove(choice)
+                    } else {
+                        selection.insert(choice)
+                        excluded?.wrappedValue.remove(choice)
+                    }
                 } label: {
                     if selection.contains(choice) {
                         Label(choice.title, systemImage: "checkmark")
+                    } else if excluded?.wrappedValue.contains(choice) == true {
+                        Label(LabelFilterExclusion.excludedTitle(choice), systemImage: "minus")
                     } else {
                         Text(choice.title)
                     }
                 }
+            }
+            if excluded != nil {
+                Divider()
+                Text("Option-click a label to hide photos with it")
             }
         } label: {
             Text(summary)
@@ -156,6 +175,9 @@ struct LabelFilterMenu: View {
 
     /// "Label", "Red", "Red, Blue", "3 labels".
     private var summary: String {
+        if let excluded, !excluded.wrappedValue.isEmpty {
+            return LabelFilterExclusion.summary(selection: selection, excluded: excluded.wrappedValue)
+        }
         let chosen = LabelFilterChoice.all.filter(selection.contains)
         switch chosen.count {
         case 0: return "Label"
@@ -165,7 +187,10 @@ struct LabelFilterMenu: View {
     }
 
     private var spokenSelection: String {
-        selection.isEmpty ? "Any"
+        if let excluded, !excluded.wrappedValue.isEmpty {
+            return LabelFilterExclusion.spoken(selection: selection, excluded: excluded.wrappedValue)
+        }
+        return selection.isEmpty ? "Any"
             : LabelFilterChoice.all.filter(selection.contains).map(\.title).joined(separator: ", ")
     }
 }

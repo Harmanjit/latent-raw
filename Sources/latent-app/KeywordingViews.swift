@@ -27,6 +27,7 @@ struct KeywordingField: View {
                             library.perform("Removing a keyword") { try await library.removeKeywords([path]) }
                         } onShow: {
                             library.filter.keyword = path
+                            library.filter.noKeywords = false
                         }
                     }
                 }
@@ -210,6 +211,9 @@ struct FlowLayout: Layout {
 @MainActor
 final class KeywordListModel: ObservableObject {
     @Published private(set) var tree: [KeywordTree] = []
+    /// Photos in the folder (or collection) with no keyword, for the
+    /// No Keywords row (KeywordListNoKeywordsRow).
+    @Published private(set) var unkeywordedCount = 0
     private weak var library: Library?
     private var observation: AnyCancellable?
 
@@ -227,6 +231,8 @@ final class KeywordListModel: ObservableObject {
         guard let library else { return }
         let next = library.keywordTree
         if next != tree { tree = next }
+        let count = library.unkeywordedCount(in: library.imagesInScope)
+        if count != unkeywordedCount { unkeywordedCount = count }
     }
 }
 
@@ -249,6 +255,9 @@ struct KeywordListView: View {
                 .controlSize(.small)
                 .accessibilityLabel("Find keyword")
                 .help("Show only keywords whose name contains this")
+            if search.isEmpty, !model.tree.isEmpty {
+                KeywordListNoKeywordsRow(library: library, count: model.unkeywordedCount)
+            }
             let trees = KeywordTree.filter(model.tree, matching: search)
             if trees.isEmpty {
                 Text(model.tree.isEmpty ? "No keywords in this folder yet. Add some to the selected photos above."
@@ -326,6 +335,7 @@ struct KeywordListView: View {
             .accessibilityValue(state == true ? "On all" : state == nil ? "On some" : "Off")
             Button {
                 library.filter.keyword = isFilter ? nil : tree.path
+                library.filter.noKeywords = false
             } label: {
                 HStack(spacing: 4) {
                     Text(tree.name).lineLimit(1).truncationMode(.middle)
@@ -349,6 +359,7 @@ struct KeywordListView: View {
         .contextMenu {
             Button(isFilter ? "Show All Photos" : "Show Photos with This Keyword") {
                 library.filter.keyword = isFilter ? nil : tree.path
+                library.filter.noKeywords = false
             }
             Divider()
             Button("Add to Selected Photos") {

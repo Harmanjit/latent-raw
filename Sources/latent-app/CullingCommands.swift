@@ -161,6 +161,7 @@ struct CullingSelectMenu: View {
             Divider()
             item("No Label", .select(.label(nil)))
         }
+        item("Select Unedited", .select(.unedited))
         item("Deselect Unflagged", .select(.deselectUnflagged))
     }
 }
