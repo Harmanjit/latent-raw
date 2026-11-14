@@ -61,6 +61,13 @@ struct ToneToolDrag {
 @MainActor
 final class PixelProbe: ObservableObject {
     @Published var readout: PixelReadout?
+    /// The square around the pointer, when the picker's sample size is
+    /// larger than a point (Scope settings); nil otherwise.
+    @Published var area: PixelAreaStatistics?
+    /// The last reading over the picture, kept after the pointer leaves
+    /// so the picker's Copy Value has something to copy.
+    var lastReadout: PixelReadout?
+    var lastArea: PixelAreaStatistics?
     /// The texture pixel last read, by layer generation, and its colour:
     /// pointer moves within one pixel don't read the GPU again.
     var last: (generation: UInt64, x: Int, y: Int, colour: SIMD3<Float>)?
@@ -115,6 +122,7 @@ extension EditorModel {
         if pointerOverImage != (screen != nil) { pointerOverImage = screen != nil }
         let readout = screen.flatMap { displayedPixel(atScreen: $0) }.map { PixelReadout(linearDisplayP3: $0) }
         if pixelProbe.readout != readout { pixelProbe.readout = readout }
+        updateAreaReadout(atScreen: screen)
     }
 
     // MARK: - Clipping overlay

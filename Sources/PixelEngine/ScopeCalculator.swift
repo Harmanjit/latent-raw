@@ -97,3 +97,31 @@ public final class ScopeCalculator {
         return cmdBuffer.status != .error
     }
 }
+
+extension Vectorscope {
+    /// Where a colour lands on the vectorscope, as fractions of its side
+    /// (0…1 each way, y down): the same sRGB encoding, Rec.709 chroma and
+    /// scaling as `computeVectorscope` in Scopes.metal, so a colour sample
+    /// plotted here sits on the pixels it was read from.
+    public static func position(ofLinear linear: SIMD3<Float>) -> SIMD2<Float> {
+        func encode(_ v: Float) -> Float {
+            let c = min(max(v, 0), 1)
+            return c <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1 / 2.4) - 0.055
+        }
+        let r = encode(linear.x), g = encode(linear.y), b = encode(linear.z)
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        let cb = (b - y) / 1.8556, cr = (r - y) / 1.5748
+        return SIMD2(min(max(cb + 0.5, 0), 1), min(max(0.5 - cr, 0), 1))
+    }
+
+    /// The angle of a colour on the scope in degrees, counter-clockwise
+    /// from the +Cb axis (right), as broadcast scopes measure it; nil for
+    /// a neutral.
+    public static func angle(ofLinear linear: SIMD3<Float>) -> Float? {
+        let p = position(ofLinear: linear) - 0.5
+        guard (p.x * p.x + p.y * p.y) > 1e-8 else { return nil }
+        var a = atan2(-p.y, p.x) * 180 / .pi
+        if a < 0 { a += 360 }
+        return a
+    }
+}

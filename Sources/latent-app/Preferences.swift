@@ -162,6 +162,7 @@ struct PreferencesView: View {
             FolderSettingsTab().tabItem { Label("Folders", systemImage: "folder.badge.gearshape") }
             aiTab.tabItem { Label("AI", systemImage: "cpu") }
             ViewingSettingsTab().tabItem { Label("Viewing", systemImage: "eye") }
+            ScopeSettingsTab().tabItem { Label("Scopes", systemImage: "waveform.path.ecg") }
             PerformanceSettingsTab().tabItem { Label("Performance", systemImage: "gauge.with.dots.needle.67percent") }
             SlideshowSettingsTab().tabItem { Label("Slideshow", systemImage: "play.rectangle") }
             ExternalEditorSettingsTab().tabItem { Label("External Editor", systemImage: "arrow.up.forward.app") }

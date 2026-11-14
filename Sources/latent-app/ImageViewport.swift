@@ -80,7 +80,9 @@ struct ImageViewport: View {
                                 onPointer: allowsTools ? { model.pointerMoved(to: $0) } : nil,
                                 mirrored: followsMirrorImageMode && mirrorImageMode.isOn,
                                 visibleFraction: visibleFraction,
-                                overlays: viewing.overlays(developTools: allowsTools))
+                                overlays: viewing.overlays(developTools: allowsTools),
+                                onOptionClick: allowsTools && !toolArmed && !model.defringePickerActive
+                                    ? { model.pinColourSample(atScreen: $0) } : nil)
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isImage)
                     .accessibilityLabel(model.imageTitle ?? "Image")
@@ -112,6 +114,9 @@ struct ImageViewport: View {
                 }
                 if allowsTools && model.showsMaskShapeOverlay {
                     MaskShapeOverlay(model: model)
+                }
+                if allowsTools {
+                    ColourSampleMarkers(model: model, samples: model.colourSamples)
                 }
                 if showsLoupeOverlay && overlay.isShown {
                     LoupeOverlayView(model: model)

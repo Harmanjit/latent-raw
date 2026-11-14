@@ -78,6 +78,9 @@ struct MetalImageView: NSViewRepresentable {
     /// Focus peaking, raw clipping and the clipping overlay's options
     /// (ViewingSettings). Display only; the default draws nothing new.
     var overlays: PresentOverlays = .none
+    /// An Option-click with no tool armed (pins a colour sample in
+    /// Develop); nil, Option-click does what a click does.
+    var onOptionClick: ((CGPoint) -> Void)? = nil
 
     func makeNSView(context: Context) -> MetalLayerView {
         let view = MetalLayerView()
@@ -105,6 +108,7 @@ struct MetalImageView: NSViewRepresentable {
         view.mirrored = mirrored
         view.visibleFraction = visibleFraction
         view.overlays = overlays
+        view.onOptionClick = onOptionClick
         view.display(preview: preview, tile: tile, transform: transform, frame: frame,
                      magnifierTile: magnifierTile)
     }
@@ -208,6 +212,10 @@ final class MetalLayerView: NSView {
     var onToolBegan: ((CGPoint, Bool) -> Void)?
     var onToolMoved: ((CGPoint) -> Void)?
     var onToolEnded: (() -> Void)?
+    var onOptionClick: ((CGPoint) -> Void)?
+    /// Where an Option-press began, in view points, until it moves away
+    /// (a drag) or ends (a click).
+    private var optionPressLocation: CGPoint?
 
     /// Top-left origin, like the Metal drawable. Without this AppKit puts
     /// (0,0) at the bottom-left and every y coordinate would need
@@ -532,6 +540,8 @@ final class MetalLayerView: NSView {
             return
         }
         cancelPress()
+        optionPressLocation = onOptionClick != nil && event.clickCount == 1 && event.modifierFlags.contains(.option)
+            ? convert(event.locationInWindow, from: nil) : nil
         if event.clickCount == 2 {
             onDoubleClick?(screenPoint(for: event))
             return
@@ -551,6 +561,10 @@ final class MetalLayerView: NSView {
             onToolMoved?(screenPoint(for: event))
             return
         }
+        if let start = optionPressLocation {
+            let now = convert(event.locationInWindow, from: nil)
+            if hypot(now.x - start.x, now.y - start.y) > 3 { optionPressLocation = nil }
+        }
         if var current = press {
             let location = convert(event.locationInWindow, from: nil)
             let state = current.moved(to: location, time: event.timestamp)
@@ -568,6 +582,10 @@ final class MetalLayerView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         if toolActive { onToolEnded?() }
+        if !toolActive, optionPressLocation != nil, magnifier == nil {
+            onOptionClick?(screenPoint(for: event))
+        }
+        optionPressLocation = nil
         cancelPress()
     }
 

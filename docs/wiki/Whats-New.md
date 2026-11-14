@@ -68,12 +68,20 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Reference view** (⇧R) edits one photo beside another, dragged in from the filmstrip, with Lock and Swap. See [Before/After and Reference view](Develop#beforeafter-and-reference-view).
 - **Loupe overlay** (⌥⌘O): a grid, draggable guides and a layout image over the photo in Loupe and Develop. See [Loupe overlay](Develop#loupe-overlay).
 - **Clipping overlay** (J), a colour readout under the pointer and a histogram you can drag. See [The viewport](Develop#the-viewport).
+<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Clipping warning options**: Any channel, Luminance or Saturation (gamut), shadow and highlight lines, and red and blue, magenta and cyan or black and white. See [The viewport](Develop#the-viewport).
 - **Raw clipping** (View › Show Raw Clipping) marks in magenta what the sensor clipped, apart from J's output clipping. See [The viewport](Develop#the-viewport).
 - **Focus peaking** (View › Focus Peaking) draws the sharpest edges in colour in Develop, Loupe, Compare and Survey. See [The viewport](Develop#the-viewport).
 - **Colour assessment** (View › Colour Assessment) frames the picture in 18% grey with a white border, as ISO 12646 asks. See [The viewport](Develop#the-viewport).
 - **High quality preview** (View › High Quality Preview, opt-in) draws the fitted view from a full-resolution render. See [The viewport](Develop#the-viewport).
 - **Navigator and zoom levels**: the whole picture with the view outlined at the top of Develop's panel, and a Fit, Fill, 25% to 400% menu in the status bar. See [The viewport](Develop#the-viewport).
+
+- **RGB parade**, the waveform's three channels side by side. See [The viewport](Develop#the-viewport).
+- **Two scopes at once**: Waveform + Vectorscope and Histogram + Vectorscope. See [The viewport](Develop#the-viewport).
+- **Vectorscope guides**: a skin tone line and colour-harmony spokes you can turn by dragging. See [The viewport](Develop#the-viewport).
+- **Colour picker sizes and spaces**: a 5, 15 or 31 px mean with its least and greatest values, in RGB, HSL, LCh or Lab, and Copy Value. See [The viewport](Develop#the-viewport).
+- **Pinned colour samples**: Option-click to pin up to eight, with live values, markers on the photo and dots on the vectorscope. See [The viewport](Develop#the-viewport).
+<!-- /RECONCILE -->
 
 ## Colour and tone
 

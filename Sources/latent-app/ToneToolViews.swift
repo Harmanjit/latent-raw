@@ -351,6 +351,7 @@ struct PixelReadoutBar: View {
                        help: "Show crushed shadows in blue (J shows both)")
             PixelReadoutText(probe: model.pixelProbe)
             Spacer(minLength: 0)
+            PixelReadoutMenu(probe: model.pixelProbe)
             clipToggle(.highlights, title: "Highlights", systemImage: "triangle.tophalf.filled",
                        help: "Show clipped highlights in red (J shows both)")
             Button { showsClippingOptions.toggle() } label: {
@@ -386,10 +387,14 @@ struct PixelReadoutBar: View {
 /// redraw the panel around it.
 struct PixelReadoutText: View {
     @ObservedObject var probe: PixelProbe
+    @ObservedObject private var settings = ScopeSettings.shared
 
     var body: some View {
         Group {
-            if let r = probe.readout {
+            if settings.sampleSize != .point || settings.readoutSpace != .standard {
+                // The picker's other sizes and spaces (PixelReadoutMenu).
+                PixelReadoutLines(readout: probe.readout, area: probe.area, settings: settings)
+            } else if let r = probe.readout {
                 let p = r.percent, lab = r.lab
                 // Above SDR white (an HDR view), how far, as Lightroom's
                 // HDR readout does; RGB itself stays on the 0–100 scale.

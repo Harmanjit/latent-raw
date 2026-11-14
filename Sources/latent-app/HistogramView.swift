@@ -17,6 +17,8 @@ import PixelEngine
 /// precision the scaling doesn't have. The shape is what's useful.
 struct HistogramView: View {
     let histogram: Histogram?
+    /// The plot's height; less when it shares the panel with another scope.
+    var height: CGFloat = 90
 
     /// Tick positions along the tonal axis, as fractions of full scale.
     private let xTicks: [(position: Double, label: String)] = [
@@ -52,7 +54,7 @@ struct HistogramView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(height: 90)
+        .frame(height: height)
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isImage)
         .accessibilityLabel("Histogram")
