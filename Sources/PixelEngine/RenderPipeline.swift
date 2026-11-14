@@ -813,8 +813,11 @@ public final class RenderPipeline {
         // adjustments, over the session's depth map (LensBlurStage.swift).
         // Skipped outright while the amount is 0 or there is no depth
         // map yet (a thumbnail, the CLI), so it costs nothing then.
-        if parameters.lensBlur.isActive, output.toneMapped, let depth = session.depthTexture() {
-            final = try LensBlurStage.encode(input: final, depth: depth, blur: parameters.lensBlur,
+        // Gaussian and Motion blur the whole frame until a depth map exists.
+        let lensBlurDepth = parameters.lensBlur.isActive && output.toneMapped ? session.depthTexture() : nil
+        if parameters.lensBlur.isActive, output.toneMapped,
+           lensBlurDepth != nil || parameters.lensBlur.blursWithoutDepth {
+            final = try LensBlurStage.encode(input: final, depth: lensBlurDepth, blur: parameters.lensBlur,
                                              geometry: lensBlurGeometry(session: session, output: output,
                                                                         renderInfo: renderInfo, binSpan: binSpan),
                                              session: session, preview: displayRole != .display,

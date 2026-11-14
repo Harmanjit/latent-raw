@@ -17,7 +17,14 @@ struct LensBlurParamsGPU {
     var headroom: Float
     var shape: UInt32
     var tapCount: UInt32
+    /// The blur type (LensBlurTypes.swift): 0 bokeh, 1 gaussian, 2 motion.
+    var kind: UInt32 = 0
+    /// 1 when there is no depth map: every pixel is fully blurred and the
+    /// depth texture (a stand-in) is never read.
+    var wholeFrame: UInt32 = 0
     var padding: Float = 0
+    /// Motion's unit direction on the render grid.
+    var motionDirection: SIMD2<Float> = .zero
 }
 
 /// Encodes Lens Blur (Shaders/LensBlur.metal) onto a command buffer: the
@@ -66,20 +73,33 @@ enum LensBlurStage {
         return taps
     }()
 
-    static func params(blur: LensBlur, geometry g: Geometry, factor: Int, maxRadiusRender: Float) -> LensBlurParamsGPU {
+    static func params(blur: LensBlur, geometry g: Geometry, factor: Int, maxRadiusRender: Float,
+                       wholeFrame: Bool = false) -> LensBlurParamsGPU {
         let b = blur.sanitized
-        return LensBlurParamsGPU(
+        let type = b.effectiveBlurType
+        // Boost Highlights and the bokeh's shape belong to Bokeh alone.
+        var p = LensBlurParamsGPU(
             tileOrigin: g.tileOrigin, sensorSize: g.sensorSize, binSpan: g.binSpan, factor: Float(factor),
             maxRadius: maxRadiusRender / Float(factor), focusFar: b.focusFar, focusNear: b.focusNear,
-            fullBlurDepth: LensBlur.fullBlurDepth, boost: b.boost / 100, isLinear: g.isLinear ? 1 : 0,
-            headroom: g.headroom, shape: b.bokeh.gpuIndex, tapCount: UInt32(taps.count))
+            fullBlurDepth: LensBlur.fullBlurDepth, boost: type == .bokeh ? b.boost / 100 : 0,
+            isLinear: g.isLinear ? 1 : 0,
+            headroom: g.headroom, shape: type == .bokeh ? b.bokeh.gpuIndex : 0,
+            tapCount: UInt32(type == .motion ? motionTapCount : taps.count))
+        p.kind = type.gpuIndex
+        p.wholeFrame = wholeFrame ? 1 : 0
+        p.motionDirection = b.motionDirection
+        return p
     }
+
+    /// Motion's taps: evenly along the streak, one shrunk pixel apart over
+    /// the gather's whole reach either side.
+    static let motionTapCount = 2 * Int(gatherRadius) + 1
 
     /// Blurs `input` by `blur` over `depth` (the session's r8Unorm depth
     /// map) and returns the result, a texture of the session's in the
     /// lensBlur role (lensBlurPreview for the binned preview, so a tile
     /// never overwrites the preview it is drawn over).
-    static func encode(input: MTLTexture, depth: MTLTexture, blur: LensBlur, geometry: Geometry,
+    static func encode(input: MTLTexture, depth: MTLTexture?, blur: LensBlur, geometry: Geometry,
                        session: ImageSession, preview: Bool, gpu: GPUContext,
                        commandBuffer: MTLCommandBuffer) throws -> MTLTexture {
         let output = try session.texture(width: input.width, height: input.height, pixelFormat: .rgba16Float,
@@ -90,7 +110,10 @@ enum LensBlurStage {
     }
 
     /// The same into a texture the caller owns (the tests' entry point).
-    static func encode(input: MTLTexture, output: MTLTexture, depth: MTLTexture, blur: LensBlur, geometry g: Geometry,
+    /// Without `depth` (Gaussian and Motion before a depth map exists) the
+    /// whole frame is blurred; each pass binds one of its own textures in
+    /// the depth slot, which the kernels then never read.
+    static func encode(input: MTLTexture, output: MTLTexture, depth: MTLTexture?, blur: LensBlur, geometry g: Geometry,
                        session: ImageSession, gpu: GPUContext, commandBuffer: MTLCommandBuffer) throws {
         guard input.width == output.width, input.height == output.height else {
             throw RenderError.commandBufferFailed
@@ -102,19 +125,19 @@ enum LensBlurStage {
         let rw = max(1, (w + factor - 1) / factor), rh = max(1, (h + factor - 1) / factor)
         let reduced = try session.texture(width: rw, height: rh, pixelFormat: .rgba16Float, role: .lensBlurReduced)
         let gathered = try session.texture(width: rw, height: rh, pixelFormat: .rgba16Float, role: .lensBlurGathered)
-        var p = params(blur: blur, geometry: g, factor: factor, maxRadiusRender: radius)
+        var p = params(blur: blur, geometry: g, factor: factor, maxRadiusRender: radius, wholeFrame: depth == nil)
         var tapList = taps
 
-        try pass(try gpu.lazyPipeline(.lensBlurPrepare), [input, reduced, depth], size: (rw, rh),
+        try pass(try gpu.lazyPipeline(.lensBlurPrepare), [input, reduced, depth ?? input], size: (rw, rh),
                  commandBuffer: commandBuffer) { e in
             e.setBytes(&p, length: MemoryLayout<LensBlurParamsGPU>.stride, index: 0)
         }
-        try pass(try gpu.lazyPipeline(.lensBlurGather), [reduced, gathered, depth], size: (rw, rh),
+        try pass(try gpu.lazyPipeline(.lensBlurGather), [reduced, gathered, depth ?? reduced], size: (rw, rh),
                  commandBuffer: commandBuffer) { e in
             e.setBytes(&p, length: MemoryLayout<LensBlurParamsGPU>.stride, index: 0)
             e.setBytes(&tapList, length: tapList.count * MemoryLayout<SIMD2<Float>>.stride, index: 1)
         }
-        try pass(try gpu.lazyPipeline(.lensBlurComposite), [input, output, gathered, depth], size: (w, h),
+        try pass(try gpu.lazyPipeline(.lensBlurComposite), [input, output, gathered, depth ?? gathered], size: (w, h),
                  commandBuffer: commandBuffer) { e in
             e.setBytes(&p, length: MemoryLayout<LensBlurParamsGPU>.stride, index: 0)
         }
