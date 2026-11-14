@@ -16,6 +16,7 @@ extension LocalAdjustment {
         case highlights, shadows, whites, blacks, tint, hue
         case texture, clarity, dehaze, sharpness, noise, defringe
         case curve, channelCurves, pointColours, grain
+        case blendMode, smooth, edgeRefine
     }
 
     public init(from decoder: Decoder) throws {
@@ -52,6 +53,10 @@ extension LocalAdjustment {
         pointColours = Array((try c.decodeIfPresent([PointColour].self, forKey: .pointColours) ?? [])
             .prefix(Self.maximumPointColours).map(\.sanitized))
         grain = try c.decodeIfPresent(Grain.self, forKey: .grain)?.sanitized
+        // A blend mode this build doesn't know reads as Normal.
+        blendMode = (try c.decodeIfPresent(String.self, forKey: .blendMode)).flatMap(LocalBlendMode.init) ?? .normal
+        smooth = try slider(.smooth)
+        edgeRefine = try slider(.edgeRefine)
     }
 
     /// Points stored as [x, y] pairs, as the global curve is; fewer than
@@ -98,5 +103,8 @@ extension LocalAdjustment {
         }
         if !pointColours.isEmpty { try c.encode(pointColours, forKey: .pointColours) }
         if let grain, grain.isActive { try c.encode(grain, forKey: .grain) }
+        if blendMode != .normal { try c.encode(blendMode.rawValue, forKey: .blendMode) }
+        if smooth != 0 { try c.encode(smooth, forKey: .smooth) }
+        if edgeRefine != 0 { try c.encode(edgeRefine, forKey: .edgeRefine) }
     }
 }

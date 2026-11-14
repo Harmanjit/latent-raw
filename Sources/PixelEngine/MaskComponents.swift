@@ -8,14 +8,38 @@ import simd
 ///   never add up past full strength.
 /// - Subtract: takes the component out, in proportion to its value.
 /// - Intersect: keeps only what is in both (the product).
+/// - Sum: adds the two values, up to full strength, so overlapping soft
+///   edges build up (darktable's "sum").
+/// - Exclusion: what is in one or the other but not both (m + v − 2mv).
 public enum MaskCombineMode: String, Codable, Sendable, CaseIterable {
-    case add, subtract, intersect
+    case add, subtract, intersect, sum, exclusion
+
+    /// The modes the Add, Subtract and Intersect buttons above the list
+    /// offer; Sum and Exclusion are chosen from a component's mode menu.
+    public static let addButtons: [MaskCombineMode] = [.add, .subtract, .intersect]
 
     public var displayName: String {
         switch self {
         case .add: return "Add"
         case .subtract: return "Subtract"
         case .intersect: return "Intersect"
+        case .sum: return "Sum"
+        case .exclusion: return "Exclusion"
+        }
+    }
+
+    /// Whether the mode can put pixels into an empty mask (Add, Sum and
+    /// Exclusion), for Delete Empty Masks.
+    public var addsCoverage: Bool { self == .add || self == .sum || self == .exclusion }
+
+    /// `MaskComponentGPU.info.w`: the code the colour kernel switches on.
+    var gpuCode: Int32 {
+        switch self {
+        case .add: return 0
+        case .subtract: return 1
+        case .intersect: return 2
+        case .sum: return 3
+        case .exclusion: return 4
         }
     }
 
@@ -25,6 +49,8 @@ public enum MaskCombineMode: String, Codable, Sendable, CaseIterable {
         case .add: return max(mask, component)
         case .subtract: return mask * (1 - component)
         case .intersect: return mask * component
+        case .sum: return min(1, mask + component)
+        case .exclusion: return mask + component - 2 * mask * component
         }
     }
 }
@@ -35,6 +61,9 @@ public enum MaskComponentSource: Equatable, Sendable, Codable {
     case shape(MaskShape)
     case luminance(LuminanceRange)
     case colour(ColourRange)
+    /// Another mask of the same edit, by its id, used as it is now: its
+    /// shape, components, invert and ranges (MaskLinks.swift).
+    case mask(id: UUID)
 }
 
 /// One part of a local adjustment's mask after its first shape
@@ -49,11 +78,15 @@ public struct MaskComponent: Equatable, Sendable, Codable, Identifiable {
     /// Feather (0…1) and Edge (−1…1) of a model mask, as on the local.
     public var feather: Float
     public var edge: Float
+    /// 0…1: Edge refine of a brush or model mask (MaskRefine.swift).
+    /// nil is off, as every component was before, and is not written.
+    public var edgeRefine: Float?
 
     public init(id: UUID = UUID(), mode: MaskCombineMode, source: MaskComponentSource,
-                invert: Bool = false, feather: Float = 0, edge: Float = 0) {
+                invert: Bool = false, feather: Float = 0, edge: Float = 0, edgeRefine: Float? = nil) {
         self.id = id; self.mode = mode; self.source = source; self.invert = invert
         self.feather = feather; self.edge = edge
+        self.edgeRefine = edgeRefine.flatMap { $0 > 0 ? $0 : nil }
     }
 
     /// Components a mask may have after its first shape. The GPU packs
@@ -72,7 +105,14 @@ public struct MaskComponent: Equatable, Sendable, Codable, Identifiable {
         case .shape(let shape): return shape.componentName
         case .luminance: return "Luminance Range"
         case .colour: return "Colour Range"
+        case .mask: return "Linked Mask"
         }
+    }
+
+    /// The mask a linked component uses, when it is one.
+    public var linkedMaskID: UUID? {
+        if case .mask(let id) = source { return id }
+        return nil
     }
 }
 
@@ -205,18 +245,22 @@ public struct MaskElement: Equatable, Sendable {
     /// Feather and Edge, which matter only for a model mask.
     public let feather: Float
     public let edge: Float
+    /// Edge refine, 0…1, for a brush or model mask (MaskRefine.swift).
+    public let refine: Float
 
-    public init(id: UUID, shape: MaskShape, feather: Float = 0, edge: Float = 0) {
-        self.id = id; self.shape = shape; self.feather = feather; self.edge = edge
+    public init(id: UUID, shape: MaskShape, feather: Float = 0, edge: Float = 0, refine: Float = 0) {
+        self.id = id; self.shape = shape; self.feather = feather; self.edge = edge; self.refine = refine
     }
 }
 
 extension LocalAdjustment {
     /// The local's own shape, then each shape component, in order.
     public var maskElements: [MaskElement] {
-        var out = [MaskElement(id: id, shape: shape, feather: modelFeather, edge: modelEdge)]
+        var out = [MaskElement(id: id, shape: shape, feather: modelFeather, edge: modelEdge, refine: edgeRefine)]
         for c in components {
-            if let s = c.shape { out.append(MaskElement(id: c.id, shape: s, feather: c.feather, edge: c.edge)) }
+            if let s = c.shape {
+                out.append(MaskElement(id: c.id, shape: s, feather: c.feather, edge: c.edge, refine: c.edgeRefine ?? 0))
+            }
         }
         return out
     }
@@ -248,9 +292,12 @@ extension LocalAdjustment {
     public var isEmptyMask: Bool {
         shape.isEmpty && components.allSatisfy { c in
             switch c.source {
-            case .shape(let s): return s.isEmpty || c.mode != .add
-            case .colour(let r): return r.samples.isEmpty || c.mode != .add
-            case .luminance: return c.mode != .add
+            case .shape(let s): return s.isEmpty || !c.mode.addsCoverage
+            case .colour(let r): return r.samples.isEmpty || !c.mode.addsCoverage
+            case .luminance: return !c.mode.addsCoverage
+            // Whether the linked mask has anything in it is that mask's
+            // business; adding one never counts as empty.
+            case .mask: return !c.mode.addsCoverage
             }
         }
     }

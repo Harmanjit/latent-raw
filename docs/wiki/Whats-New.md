@@ -153,6 +153,12 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Auto Mask** for the brush: strokes paint only where the photo is like the colour under the brush, so they stop at edges. See [Auto Mask](Masking#auto-mask).
 - **Edge and Feather** refine the outline of subject, class and selection masks. See [Feather and Edge](Masking#feather-and-edge-for-model-masks).
 - **Select Objects (Box)**, mask renaming, hiding, **Duplicate and Invert** and **Delete Empty Masks**. See [Masking](Masking#looking-after-masks).
+- **Blend: Colour Only and Lightness Only** keep just a mask's change of colour or of lightness. See [Blend](Masking#blend).
+- **Sum and Exclusion** join a mask component by adding its value or keeping only what isn't in both. See [Components](Masking#components-add-subtract-intersect).
+- **Reorder masks and components** by dragging, or with Move Up and Move Down. See [Reordering](Masking#reordering).
+- **Use Mask** adds another mask of the photo as a component, kept in step as that mask is edited. See [Using another mask](Masking#using-another-mask).
+- **Edge refine** snaps brush and model masks to edges in the photo. See [Edge refine](Masking#edge-refine).
+- **Smooth** inside a mask: an edge-preserving blur for skin or sky. See [The sliders](Masking#the-sliders).
 - **Remove** takes a distraction out of the photo, filling it from its surroundings, and **Detect Objects** fills just the object you brushed over. See [Remove and Detect Objects](Develop#remove-and-detect-objects).
 - **One Remove tool** with Remove, Heal and Clone modes, per-patch **Opacity**, a **Tool Overlay** setting, a pin list with Select All and Delete All, and Option-drag to delete the spots inside a marquee. See [Develop](Develop#modules).
 - **Lens Blur** blurs the background (or foreground) from a depth map, with bokeh shapes and a focus range you pick on the photo. See [Lens Blur](Develop#lens-blur).
