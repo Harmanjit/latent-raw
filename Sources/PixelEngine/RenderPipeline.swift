@@ -185,6 +185,14 @@ public struct EditParameters: Sendable, Equatable {
     /// Flat-field correction from a reference raw (FlatField.swift); nil
     /// for none, which every edit older than it has.
     public var flatField: FlatFieldCorrection? = nil
+    /// Hot pixel removal on the sensor plane (HotPixels.swift); nil for
+    /// off, which every edit older than it has.
+    public var hotPixels: HotPixelRemoval? = nil
+    /// Manual lateral chromatic aberration (ManualTCA.swift), in percent
+    /// of radius, −0.5…+0.5 each: how much larger the red and blue images
+    /// are made, on top of the profile's or the measured correction.
+    public var manualTCARed: Float = 0
+    public var manualTCABlue: Float = 0
     /// The rendering generation the edit was made with (`ProcessVersion`);
     /// a stage whose behaviour changed between versions branches on it.
     public var processVersion: String = EditStack.processVersion
@@ -316,6 +324,8 @@ public struct EditParameters: Sendable, Equatable {
             && a.reflections == b.reflections
             && a.hdrLimitStops == b.hdrLimitStops
             && a.flatField == b.flatField
+            && a.hotPixels == b.hotPixels
+            && a.manualTCARed == b.manualTCARed && a.manualTCABlue == b.manualTCABlue
     }
 }
 
@@ -601,9 +611,17 @@ public final class RenderPipeline {
         // demosaiced result for exactly these inputs, skip straight to the
         // colour stage. Exposure and tone edits hit this every time; white
         // balance and zoom changes miss.
-        let stageKey = Self.stageKey(plan: sourcePlan, source: summary.sourceKind, multipliers: multipliers,
+        // Hot pixels are replaced on the sensor plane itself, so the
+        // demosaic's key carries the setting (HotPixels.swift).
+        let hotPixels = HotPixelStage.activeRemoval(session: session, parameters: parameters)
+        var stageKey = Self.stageKey(plan: sourcePlan, source: summary.sourceKind, multipliers: multipliers,
                                      demosaic: parameters.demosaic)
+        stageKey.hotPixels = hotPixels
         let cached = session.cachedCameraRGB(for: stageKey)
+        var sensor: MTLBuffer?
+        if cached == nil, hotPixels != nil {
+            sensor = try HotPixelStage.sensorBuffer(session: session, removal: hotPixels, gpu: gpu)
+        }
 
         // THE CAMERA-RGB SEAM. Whatever the source, what comes out of this
         // switch is the same thing: an rgba16Float texture of linear camera
@@ -624,7 +642,7 @@ public final class RenderPipeline {
                 cameraRGB = try cached ?? renderFullResolution(
                     session: session, cmdBuffer: cmdBuffer, order: bayerOrder,
                     multipliers: multipliers, method: parameters.demosaic,
-                    origin: origin, size: size)
+                    origin: origin, size: size, sensor: sensor)
             } else {
                 cameraRGB = try cached ?? renderLinearUpload(
                     session: session, cmdBuffer: cmdBuffer, multipliers: multipliers,
@@ -643,7 +661,7 @@ public final class RenderPipeline {
             if let bayerOrder {
                 cameraRGB = try cached ?? renderBinned(
                     session: session, cmdBuffer: cmdBuffer, order: bayerOrder,
-                    binQuads: quads, multipliers: multipliers)
+                    binQuads: quads, multipliers: multipliers, sensor: sensor)
             } else {
                 cameraRGB = try cached ?? renderLinearBinned(
                     session: session, cmdBuffer: cmdBuffer, binQuads: quads, multipliers: multipliers)
@@ -903,7 +921,7 @@ public final class RenderPipeline {
 
     static func wantsLensCorrection(session: ImageSession, parameters p: EditParameters) -> Bool {
         if p.manualDistortion != 0 || p.manualVignetting != 0 || !p.perspective.isIdentity { return true }
-        if p.autoCA != nil { return true }
+        if p.autoCA != nil || ManualTCA.isActive(p) { return true }
         guard let c = session.lensCorrection(for: p) else { return false }
         return (p.lensDistortion && c.distortion != nil)
             || (p.lensTCA && c.tca != nil)
@@ -954,6 +972,8 @@ public final class RenderPipeline {
             // A measured correction replaces the profile's: it was fitted
             // to this photo, uncorrected.
             if let auto = p.autoCA { tca = auto.tcaModel }
+            // The manual sliders go on top of whichever is in use.
+            tca = ManualTCA.adding(red: p.manualTCARed, blue: p.manualTCABlue, to: tca)
             vignetting = p.lensVignetting ? c?.vignetting : nil
             manualVignetting = p.manualVignetting
             manualVignettingPower = ManualVignettingShape.exponent(midpoint: p.manualVignettingMidpoint)
@@ -1614,10 +1634,11 @@ public final class RenderPipeline {
                                        multipliers: SIMD4<Float>,
                                        method: DemosaicMethod,
                                        origin: (x: Int, y: Int),
-                                       size: (width: Int, height: Int)) throws -> MTLTexture {
+                                       size: (width: Int, height: Int),
+                                       sensor: MTLBuffer? = nil) throws -> MTLTexture {
         let cfaTex = try prepareCFA(session: session, cmdBuffer: cmdBuffer,
                                     multipliers: multipliers, order: order,
-                                    origin: origin, size: size)
+                                    origin: origin, size: size, sensor: sensor)
         switch method {
         case .bilinear:
             return try demosaicBilinear(session: session, cmdBuffer: cmdBuffer,
@@ -1639,7 +1660,8 @@ public final class RenderPipeline {
                              multipliers: SIMD4<Float>,
                              order: UInt8,
                              origin: (x: Int, y: Int),
-                             size: (width: Int, height: Int)) throws -> MTLTexture {
+                             size: (width: Int, height: Int),
+                             sensor: MTLBuffer? = nil) throws -> MTLTexture {
         let summary = session.file.summary
         let w = size.width, h = size.height
         let cfaTex = try session.texture(width: w, height: h, pixelFormat: .r32Float, role: .cfa)
@@ -1648,7 +1670,7 @@ public final class RenderPipeline {
             throw RenderError.commandBufferFailed
         }
         encoder.setComputePipelineState(gpu.whiteBalanceBlackLevelPSO)
-        encoder.setBuffer(session.sensorBuffer, offset: 0, index: 0)
+        encoder.setBuffer(sensor ?? session.sensorBuffer, offset: 0, index: 0)
         // The sensor buffer's row stride is always the full raw width,
         // even when only a sub-rectangle is being rendered.
         var rawWidth = UInt32(summary.rawWidth)
@@ -1775,7 +1797,7 @@ public final class RenderPipeline {
     /// sensor data, not the arithmetic.
     private func renderBinned(session: ImageSession, cmdBuffer: MTLCommandBuffer,
                                order: UInt8, binQuads: Int,
-                               multipliers: SIMD4<Float>) throws -> MTLTexture {
+                               multipliers: SIMD4<Float>, sensor: MTLBuffer? = nil) throws -> MTLTexture {
         let summary = session.file.summary
         let rawW = summary.rawWidth, rawH = summary.rawHeight
         let span = binQuads * 2
@@ -1789,7 +1811,7 @@ public final class RenderPipeline {
         }
 
         encoder.setComputePipelineState(gpu.demosaicBinnedPSO)
-        encoder.setBuffer(session.sensorBuffer, offset: 0, index: 0)
+        encoder.setBuffer(sensor ?? session.sensorBuffer, offset: 0, index: 0)
         var rawWidth = UInt32(rawW)
         var rawHeight = UInt32(rawH)
         var black = summary.blackLevel

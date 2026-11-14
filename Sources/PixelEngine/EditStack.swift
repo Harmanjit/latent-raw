@@ -91,6 +91,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// Flat-field correction (FlatField.swift). Absent when there is
         /// none, so edits that never used it encode exactly as before.
         public var flatfield: FlatFieldCorrection?
+        /// Hot pixel removal (HotPixels.swift). Absent while off, so
+        /// edits that never used it encode exactly as before.
+        public var hotpixels: HotPixelRemoval?
     }
 
     public struct HDR: Codable, Equatable, Sendable { public var limit: Float }
@@ -196,6 +199,10 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// The Lensfun model picked by hand for this photo, absent for the
         /// automatic profile. `profile` records which one was used.
         public var manualProfile: String?
+        /// Manual red and blue chromatic aberration, in percent
+        /// (ManualTCA.swift), each absent at 0.
+        public var tcaRed: Float?
+        public var tcaBlue: Float?
 
         public init(distortion: Bool, tca: Bool, vignetting: Bool,
                     manualDistortion: Float, manualVignetting: Float,
@@ -219,6 +226,8 @@ public struct EditStack: Codable, Equatable, Sendable {
             vignettingMidpoint = try c.decodeIfPresent(Float.self, forKey: .vignettingMidpoint)
             autoCA = try c.decodeIfPresent(AutoChromaticAberration.self, forKey: .autoCA)
             manualProfile = try c.decodeIfPresent(String.self, forKey: .manualProfile)
+            tcaRed = try c.decodeIfPresent(Float.self, forKey: .tcaRed)
+            tcaBlue = try c.decodeIfPresent(Float.self, forKey: .tcaBlue)
         }
     }
 
@@ -298,6 +307,7 @@ public struct EditStack: Codable, Equatable, Sendable {
             : Crop(cx: p.crop.centre.x, cy: p.crop.centre.y, w: p.crop.size.x, h: p.crop.size.y,
                    angle: p.crop.angle, aspect: p.crop.aspect)
         storeDetailEffects(from: p)
+        storeDetailExtras(from: p)
         modules.flatfield = p.flatField?.sanitized
         process = p.processVersion
         // Parameters always measure the sensor plane as it is now.
@@ -386,6 +396,7 @@ public struct EditStack: Codable, Equatable, Sendable {
             p.crop = .none
         }
         restoreDetailEffects(into: &p)
+        restoreDetailExtras(into: &p)
         p.flatField = modules.flatfield?.sanitized
         p.processVersion = process
         return p

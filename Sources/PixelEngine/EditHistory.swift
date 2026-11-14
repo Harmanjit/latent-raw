@@ -90,6 +90,7 @@ public struct EditHistory: Equatable, Sendable, Codable {
         if a.modules.sharpen != b.modules.sharpen { names.append("Sharpening") }
         if a.modules.denoise != b.modules.denoise { names.append("Noise Reduction") }
         if a.modules.demosaic != b.modules.demosaic { names.append("Demosaic") }
+        if a.modules.hotpixels != b.modules.hotpixels { names.append("Hot Pixels") }
         if a.modules.lens != b.modules.lens { names.append("Lens") }
         if a.modules.locals != b.modules.locals { names.append("Local Adjustments") }
         if a.modules.heal != b.modules.heal { names.append("Spot Removal") }
