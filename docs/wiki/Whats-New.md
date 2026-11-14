@@ -58,6 +58,8 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **⌥-drag on an HSL slider** shows only the colours it changes, and the Colour Grading wheels take **⇧** (keep the hue) and **⌘** (fine moves). See [Develop](Develop#modules).
 - **HDR Limit** sets how far above white each photo's highlights may go on an HDR screen and in an HDR export. See [HDR Limit](Develop#hdr-limit).
 - **Visualise HDR Ranges** colours what lies above SDR white by stops, and the readout says how far above white a colour is. See [HDR Limit](Develop#hdr-limit).
+- **Highlight Reconstruction › Inpaint Opposed** rebuilds blown skies and skin from the colour around them instead of turning them white. See [Develop](Develop#modules).
+- **Camera white balance presets**: the camera's own Daylight, Shade, Tungsten and Kelvin settings, when its raw records them. See [Develop](Develop#modules).
 - **Match Total Exposures** (⌥⇧⌘M) gives a selection one brightness from their shutter, aperture and ISO. See [Applying edits to many images](Library#applying-edits-to-many-images).
 
 ## Geometry
@@ -76,6 +78,8 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Remove chromatic aberration (automatic)** measures colour fringes on the photo itself, without a profile. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
 - **Defringe** with adjustable hue ranges and a fringe colour picker. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
 - **Post-crop vignetting and grain**. See [Effects](Develop#effects).
+- **LMMSE demosaic**, for clean detail from high-ISO files. See [Sharpening and noise reduction](Develop#sharpening-and-noise-reduction).
+- **Embedded DNG corrections**: a DNG's own lens-shading map, vignetting and distortion, applied with one switch. See [Lens corrections in detail](Develop#lens-corrections-in-detail).
 
 ## Masks and retouching
 
