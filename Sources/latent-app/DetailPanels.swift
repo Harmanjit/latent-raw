@@ -149,6 +149,7 @@ struct LensCorrectionsPanel: View {
                     .help("Lines up red and blue with green using the profile's measurements")
                 Toggle("Vignetting", isOn: $model.parameters.lensVignetting)
                     .help("Brightens the corners the lens darkened, from the profile")
+                EmbeddedDNGCorrectionsToggle(model: model)
             }
             Toggle("Remove chromatic aberration (automatic)", isOn: Binding(
                 get: { model.parameters.autoCA != nil },

@@ -80,6 +80,11 @@ public final class ImageSession {
     /// uses the exact multipliers instead of routing through this.
     public let asShotWhiteBalance: ColorKit.WhiteBalance
 
+    /// The camera's own white balance presets as temperature and tint,
+    /// for the White Balance menu (CameraWhiteBalanceChoices.swift). Empty
+    /// when the file records none or there is no camera profile.
+    public let cameraWhiteBalanceChoices: [CameraWhiteBalanceChoice]
+
     /// Camera RGB -> linear Rec.2020.
     public var cameraToWorkingMatrix: simd_float3x3? { profile?.cameraToWorking }
 
@@ -104,6 +109,10 @@ public final class ImageSession {
     /// when there is one and the database has it, else `lensCorrection`.
     /// None for a merge whose corrections are already in its pixels.
     public func lensCorrection(for p: EditParameters) -> LensCorrection? {
+        // A DNG's own lens corrections, while switched on, replace the profile.
+        if p.embeddedDNGCorrections, !lensCorrectionAlreadyApplied, let embedded = dngCorrections?.lens {
+            return embedded
+        }
         guard let model = p.lensProfile, !lensCorrectionAlreadyApplied else { return lensCorrection }
         let summary = file.summary
         return lensState.withLock { state -> LensCorrection? in
@@ -180,6 +189,10 @@ public final class ImageSession {
         case reflections, reflectionsPreview // output of the reflection removal stage
         case toneEqualized, toneEqualizedPreview // camera RGB after the tone equalizer
         case toneEqualizerMask, toneEqualizerView, toneEqualizerViewPreview // its mask, and Show Mask
+        case highlightInpaint, highlightInpaintPreview // camera RGB after Inpaint Opposed
+        case lmmseDiff      // LMMSE: horizontal and vertical colour differences
+        case lmmseSmooth    // LMMSE: the same, low-passed
+        case lmmseScratch   // LMMSE: ping-pong partner for the RGB passes
     }
 
     /// Which set of pooled textures a render draws from. Pools never share
@@ -212,6 +225,14 @@ public final class ImageSession {
     /// The tone equalizer's whole-image mask and its scratch textures
     /// (ToneEqualizerStage.swift), kept apart from the pools.
     let toneEqualizerStore = ToneEqualizerMaskStore()
+    /// Inpaint Opposed's whole-frame estimates, by threshold
+    /// (HighlightInpaint.swift): made from the sensor plane once each.
+    var highlightInpaintEstimates: [Float: HighlightInpaintEstimate] = [:]
+
+    /// A DNG's own corrections, read from its opcode lists
+    /// (DNGOpcodeCorrections.swift); nil for every other file and a DNG
+    /// without any Latent can apply.
+    public let dngCorrections: DNGEmbeddedCorrections?
 
     /// Rasterized brush masks, created on first use.
     private var brushMasks: BrushMaskSet?
@@ -443,7 +464,10 @@ public final class ImageSession {
         self.profile = cameraProfile
         self.asShotWhiteBalance = cameraProfile?.whiteBalance(fromMultipliers: asShot)
             ?? ColorKit.WhiteBalance()
+        self.cameraWhiteBalanceChoices = CameraWhiteBalanceChoice.choices(
+            for: file.summary.cameraWhiteBalancePresets, profile: cameraProfile)
 
+        self.dngCorrections = file.dngOpcodes.flatMap { DNGEmbeddedCorrections(opcodes: $0, summary: file.summary) }
         self.lensState = Mutex(LensState(automatic: Self.resolveLensCorrection(
             file.summary, alreadyApplied: lensCorrectionAlreadyApplied)))
     }

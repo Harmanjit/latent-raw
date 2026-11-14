@@ -128,6 +128,23 @@ final class GoldenImageTests: XCTestCase {
         })
     }
 
+    /// LMMSE, the high-ISO demosaic. Like bilinear, only the
+    /// full-resolution window can show it.
+    func testLMMSEDemosaic() throws {
+        try check(Recipe(name: "demosaic-lmmse", overview: false, detail: Self.ballCentre) {
+            $0.demosaic = .lmmse
+        })
+    }
+
+    /// Highlight Reconstruction's Inpaint Opposed, over the whole frame
+    /// (the binned path) and the ball's bright studs at full resolution.
+    func testHighlightInpaint() throws {
+        try check(Recipe(name: "highlight-inpaint", detail: Self.ballCentre) {
+            $0.highlightMethod = .inpaintOpposed
+            $0.highlightThreshold = 0.8
+        })
+    }
+
     /// Crop, straighten, perspective, manual lens controls and a quarter
     /// turn: everything that moves pixels rather than recolouring them.
     func testGeometry() throws {

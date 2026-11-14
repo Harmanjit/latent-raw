@@ -61,11 +61,17 @@ public enum DemosaicMethod: String, Sendable, CaseIterable {
     /// Ratio Corrected Demosaicing, ported from RawTherapee. Finds the
     /// local direction of detail and interpolates along it.
     case rcd
+    /// Linear minimum mean square-error estimation (Shaders/LMMSE.metal):
+    /// weighs a horizontal and a vertical estimate by how far each stands
+    /// above its own noise, so high-ISO files get smooth answers instead
+    /// of the mazes a gradient-led method can make of noise.
+    case lmmse
 
     public var displayName: String {
         switch self {
         case .bilinear: return "Bilinear (fast)"
         case .rcd:      return "RCD (quality)"
+        case .lmmse:    return "LMMSE (better for high ISO)"
         }
     }
 }
@@ -191,6 +197,13 @@ public struct EditParameters: Sendable, Equatable {
     /// The tone equalizer (ToneEqualizer.swift, ToneEqualizerStage.swift);
     /// neutral, and skipped, unless a band is moved.
     public var toneEqualizer: ToneEqualizer = .neutral
+    /// How Highlight Reconstruction rebuilds clipped channels
+    /// (HighlightInpaint.swift). `.blend` for every edit older than it.
+    public var highlightMethod: HighlightReconstructionMethod = .blend
+    /// Whether a DNG's own corrections (its OpcodeList GainMap,
+    /// FixVignetteRadial and WarpRectilinear; DNGOpcodeCorrections.swift)
+    /// are applied. Off unless switched on, so no existing edit changes.
+    public var embeddedDNGCorrections: Bool = false
     /// The rendering generation the edit was made with (`ProcessVersion`);
     /// a stage whose behaviour changed between versions branches on it.
     public var processVersion: String = EditStack.processVersion
@@ -324,6 +337,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.hdrLimitStops == b.hdrLimitStops
             && a.flatField == b.flatField
             && a.toneEqualizer == b.toneEqualizer
+            && a.highlightMethod == b.highlightMethod && a.embeddedDNGCorrections == b.embeddedDNGCorrections
     }
 }
 
@@ -785,6 +799,15 @@ public final class RenderPipeline {
         }
         renderInfo = renderInfo.markingHealCached(cachedHealed != nil)
 
+        // Stage 6a: Highlight Reconstruction by Inpaint Opposed, while the
+        // clip levels still hold: before the flat field and the lens
+        // stage's vignetting scale pixels (HighlightInpaint.swift).
+        if HighlightInpaintStage.isActive(parameters, session: session) {
+            colourInput = try HighlightInpaintStage.encode(input: colourInput, session: session, multipliers: multipliers,
+                                                           parameters: parameters, preview: displayRole != .display,
+                                                           gpu: gpu, commandBuffer: cmdBuffer)
+        }
+
         // Stage 6b: flat-field correction, on the sensor grid before the
         // lens stage moves pixels (FlatField.swift). Only once this Mac
         // holds the reference's gain map: whoever opens or exports the
@@ -793,6 +816,14 @@ public final class RenderPipeline {
            let gain = FlatFieldCache.shared.texture(for: flat.hash, gpu: gpu),
            gain.map.fits(aspect: Float(rawW) / Float(max(1, rawH))) {
             colourInput = try FlatFieldStage.encode(input: colourInput, gain: gain.texture, amount: flat.amount,
+                                                    sensorSize: SIMD2(Float(rawW), Float(rawH)),
+                                                    sensorRect: sourceInfo.sensorRect, binSpan: binSpan,
+                                                    session: session, preview: displayRole != .display,
+                                                    gpu: gpu, commandBuffer: cmdBuffer)
+        } else if let embedded = session.embeddedGainMapTexture(for: parameters) {
+            // A DNG's own GainMap, while its corrections are switched on
+            // and no reference flat field replaces it (DNGOpcodeCorrections.swift).
+            colourInput = try FlatFieldStage.encode(input: colourInput, gain: embedded, amount: 1,
                                                     sensorSize: SIMD2(Float(rawW), Float(rawH)),
                                                     sensorRect: sourceInfo.sensorRect, binSpan: binSpan,
                                                     session: session, preview: displayRole != .display,
@@ -1614,7 +1645,8 @@ public final class RenderPipeline {
         // is 1 and this is the multipliers themselves.
         var clipLevel = session.highlightClipLevel(multipliers: multipliers)
         var highlightThreshold = parameters.highlightThreshold
-        var highlightStrength = parameters.highlightRecovery
+        // Off while Inpaint Opposed has already rebuilt the highlights (stage 6a).
+        var highlightStrength = HighlightInpaintStage.blendStrength(parameters, session: session)
 
         encoder.setBytes(&camToWorking, length: MemoryLayout<simd_float3x3>.size, index: 0)
         encoder.setBytes(&workingToOut, length: MemoryLayout<simd_float3x3>.size, index: 1)
@@ -1709,6 +1741,9 @@ public final class RenderPipeline {
         case .rcd:
             return try demosaicRCD(session: session, cmdBuffer: cmdBuffer,
                                    cfa: cfaTex, order: order)
+        case .lmmse:
+            return try demosaicLMMSE(session: session, cmdBuffer: cmdBuffer,
+                                     cfa: cfaTex, order: order)
         }
     }
 

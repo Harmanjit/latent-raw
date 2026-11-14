@@ -206,6 +206,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// The Lensfun model picked by hand for this photo, absent for the
         /// automatic profile. `profile` records which one was used.
         public var manualProfile: String?
+        /// Apply the DNG's own opcode corrections (DNGOpcodeCorrections.swift).
+        /// Absent while off, so edits that never switched it on encode as before.
+        public var embedded: Bool?
 
         public init(distortion: Bool, tca: Bool, vignetting: Bool,
                     manualDistortion: Float, manualVignetting: Float,
@@ -229,6 +232,7 @@ public struct EditStack: Codable, Equatable, Sendable {
             vignettingMidpoint = try c.decodeIfPresent(Float.self, forKey: .vignettingMidpoint)
             autoCA = try c.decodeIfPresent(AutoChromaticAberration.self, forKey: .autoCA)
             manualProfile = try c.decodeIfPresent(String.self, forKey: .manualProfile)
+            embedded = try c.decodeIfPresent(Bool.self, forKey: .embedded)
         }
     }
 
@@ -267,6 +271,13 @@ public struct EditStack: Codable, Equatable, Sendable {
     public struct Highlights: Codable, Equatable, Sendable {
         public var strength: Float
         public var threshold: Float
+        /// `HighlightReconstructionMethod`'s raw value, absent for the
+        /// blend, so every edit older than Inpaint Opposed encodes as before.
+        public var method: String?
+
+        public init(strength: Float, threshold: Float, method: String? = nil) {
+            self.strength = strength; self.threshold = threshold; self.method = method
+        }
     }
     public struct Demosaic: Codable, Equatable, Sendable { public var method: String }
 
@@ -279,7 +290,8 @@ public struct EditStack: Codable, Equatable, Sendable {
                            tint: p.whiteBalance.tint)
         modules.exposure = Exposure(ev: p.exposureEV, blackOffset: p.blackOffset == 0 ? nil : p.blackOffset)
         modules.tone = Tone(method: "sigmoid", contrast: p.contrast, grey: p.greyPoint)
-        modules.highlights = Highlights(strength: p.highlightRecovery, threshold: p.highlightThreshold)
+        modules.highlights = Highlights(strength: p.highlightRecovery, threshold: p.highlightThreshold,
+                                        method: p.highlightMethod == .blend ? nil : p.highlightMethod.rawValue)
         modules.demosaic = Demosaic(method: p.demosaic.rawValue)
         modules.denoise = Denoise(luminance: p.denoiseLuminance, color: p.denoiseColor)
         modules.sharpen = Sharpen(amount: p.sharpenAmount, radius: p.sharpenRadius,
@@ -287,6 +299,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.lens = Lens(distortion: p.lensDistortion, tca: p.lensTCA, vignetting: p.lensVignetting,
                             manualDistortion: p.manualDistortion, manualVignetting: p.manualVignetting,
                             profile: nil, lensfunDb: nil)
+        if p.embeddedDNGCorrections { modules.lens?.embedded = true }
         modules.curve = Curve(master: p.toneCurve, channels: p.channelCurves,
                               parametric: p.parametricCurve, saturation: p.curveSaturation)
         modules.toneranges = p.toneRanges.isNeutral ? nil : p.toneRanges
@@ -349,6 +362,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         if let h = modules.highlights {
             p.highlightRecovery = h.strength
             p.highlightThreshold = h.threshold
+            p.highlightMethod = h.method.flatMap(HighlightReconstructionMethod.init(rawValue:)) ?? .blend
         }
         if let d = modules.demosaic, let method = DemosaicMethod(rawValue: d.method) {
             p.demosaic = method
@@ -360,6 +374,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         if let l = modules.lens {
             p.lensDistortion = l.distortion; p.lensTCA = l.tca; p.lensVignetting = l.vignetting
             p.manualDistortion = l.manualDistortion; p.manualVignetting = l.manualVignetting
+            p.embeddedDNGCorrections = l.embedded ?? false
         }
         if let c = modules.curve {
             let pts = c.points.compactMap { $0.count == 2 ? SIMD2<Float>($0[0], $0[1]) : nil }

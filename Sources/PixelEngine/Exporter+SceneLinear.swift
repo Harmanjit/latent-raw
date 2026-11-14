@@ -58,6 +58,8 @@ extension ExportPlan {
         p.exposureEV = edit.exposureEV
         p.highlightRecovery = edit.highlightRecovery
         p.highlightThreshold = edit.highlightThreshold
+        p.highlightMethod = edit.highlightMethod
+        p.embeddedDNGCorrections = edit.embeddedDNGCorrections
         p.demosaic = edit.demosaic
         p.denoiseLuminance = edit.denoiseLuminance
         p.denoiseColor = edit.denoiseColor
