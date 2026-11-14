@@ -37,6 +37,13 @@ extension ExportWorker {
         /// contact sheet's small cells can't show it (thumbnails skip it for
         /// the same reason); a print can.
         public var runsAIDenoise: Bool
+        /// A develop preset applied to this render only (a print's), merged
+        /// into a copy of the edit just before rendering; nil for none.
+        public var presetStyle: PresetStyle?
+        /// Output sharpening after the resize (a print's Matte or Glossy
+        /// paper), at `outputPPI`; nil for none, as before it existed.
+        public var outputSharpening: OutputSharpening?
+        public var outputPPI: Double?
 
         public init(sourceURL: URL, editStackJSON: String?, userRotation: Int, colorSpace: ColorKit.OutputSpace,
                     maxLongEdge: Int?, bitsPerComponent: Int = 16, runsAIDenoise: Bool = true) {
@@ -61,8 +68,10 @@ extension ExportWorker {
         let pipeline = RenderPipeline(gpu: gpu)
 
         let parameters: EditParameters
+        // The style goes into a copy of the edit; the stored one is untouched.
+        let editStackJSON = request.presetStyle.map { $0.applied(to: request.editStackJSON) } ?? request.editStackJSON
         do {
-            parameters = try ExportPlan.parameters(editStackJSON: request.editStackJSON, session: session,
+            parameters = try ExportPlan.parameters(editStackJSON: editStackJSON, session: session,
                                                    colorSpace: request.colorSpace)
         } catch {
             throw ExportWorkerError.unreadableEdit(error)
@@ -89,7 +98,8 @@ extension ExportWorker {
         let image = try Exporter(gpu: gpu).cgImage(from: texture, colorSpace: request.colorSpace,
                                                    rotation: rotation, crop: parameters.crop,
                                                    bitsPerComponent: request.bitsPerComponent == 16 ? 16 : 8,
-                                                   maxLongEdge: request.maxLongEdge)
+                                                   maxLongEdge: request.maxLongEdge,
+                                                   sharpening: request.outputSharpening, ppi: request.outputPPI)
         return RenderedImage(image, maskSubstitutions: masks.substituted)
     }
 }

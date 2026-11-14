@@ -14,23 +14,36 @@ final class PrintJob: @unchecked Sendable {
     private var paper: PrintPaper
     private var layout: PageLayout
     private var renderer: SheetRenderer
-    private let makeRenderer: @Sendable (SheetProfile?) -> SheetRenderer
+    /// What `renderer` was made for.
+    private var options: PrintRenderOptions
+    private let makeRenderer: @Sendable (PrintRenderOptions) -> SheetRenderer
     private(set) var preview: SheetPreviewImages!
     private var previewReady: (@MainActor @Sendable () -> Void)?
     private var printingStarted: (@Sendable () -> Void)?
 
     /// `makeRenderer` builds the renderer for a colour choice (the proof
     /// profile or none); `preview` supplies the panel's small pictures.
+    convenience init(items: [SheetItem], settings: PrintLayoutSettings, paper: PrintPaper, proofProfile: SheetProfile?,
+                     makeRenderer: @escaping @Sendable (SheetProfile?) -> SheetRenderer,
+                     makePreview: (_ job: PrintJob) -> SheetPreviewImages) {
+        self.init(items: items, settings: settings, paper: paper, proofProfile: proofProfile,
+                  makeOptionsRenderer: { makeRenderer($0.profile) }, makePreview: makePreview)
+    }
+
+    /// `makeOptionsRenderer` builds the renderer for everything a render
+    /// depends on (`PrintRenderOptions`): the profile, a print-only preset
+    /// and output sharpening.
     init(items: [SheetItem], settings: PrintLayoutSettings, paper: PrintPaper, proofProfile: SheetProfile?,
-         makeRenderer: @escaping @Sendable (SheetProfile?) -> SheetRenderer,
+         makeOptionsRenderer: @escaping @Sendable (PrintRenderOptions) -> SheetRenderer,
          makePreview: (_ job: PrintJob) -> SheetPreviewImages) {
         self.items = items
         self.proofProfile = proofProfile
         self.settings = settings.validated
         self.paper = paper
-        self.makeRenderer = makeRenderer
+        self.makeRenderer = makeOptionsRenderer
         layout = paper.layout(for: self.settings, imageCount: items.count)
-        renderer = makeRenderer(self.settings.profile(proof: proofProfile))
+        options = PrintRenderOptions(settings: self.settings, proofProfile: proofProfile, paper: paper)
+        renderer = makeOptionsRenderer(options)
         preview = makePreview(self)
     }
 
@@ -62,16 +75,18 @@ final class PrintJob: @unchecked Sendable {
 
     func update(settings newValue: PrintLayoutSettings) {
         let newValue = newValue.validated
-        let profileChanged = lock.withLock {
-            let before = settings.profile(proof: proofProfile), after = newValue.profile(proof: proofProfile)
-            return before == nil ? after != nil : !before!.rendersLike(after)
-        }
-        // Renders made for one colour choice mustn't print for another.
-        let fresh = profileChanged ? makeRenderer(newValue.profile(proof: proofProfile)) : nil
+        let after = PrintRenderOptions(settings: newValue, proofProfile: proofProfile, paper: currentPaper)
+        let changed = lock.withLock { !options.rendersLike(after) }
+        // Renders made for one colour choice (or preset, or sharpening)
+        // mustn't print for another.
+        let fresh = changed ? makeRenderer(after) : nil
         lock.withLock {
             settings = newValue
             layout = paper.layout(for: settings, imageCount: items.count)
-            if let fresh { renderer = fresh }
+            if let fresh {
+                renderer = fresh
+                options = after
+            }
         }
     }
 
@@ -79,13 +94,22 @@ final class PrintJob: @unchecked Sendable {
     /// orientation or printer changed) and returns the layout.
     @discardableResult
     func update(paper newPaper: PrintPaper) -> PageLayout {
-        lock.withLock {
-            if newPaper != paper {
-                paper = newPaper
-                layout = paper.layout(for: settings, imageCount: items.count)
-            }
-            return layout
+        let (result, resharpen) = lock.withLock { () -> (PageLayout, PrintRenderOptions?) in
+            guard newPaper != paper else { return (layout, nil) }
+            paper = newPaper
+            layout = paper.layout(for: settings, imageCount: items.count)
+            // Sharpening is worked out for the printer's resolution.
+            let after = PrintRenderOptions(settings: settings, proofProfile: proofProfile, paper: newPaper)
+            return (layout, options.rendersLike(after) ? nil : after)
         }
+        if let resharpen {
+            let fresh = makeRenderer(resharpen)
+            lock.withLock {
+                renderer = fresh
+                options = resharpen
+            }
+        }
+        return result
     }
 
     var pageCount: Int { max(1, currentLayout.pageCount(forImageCount: items.count)) }
