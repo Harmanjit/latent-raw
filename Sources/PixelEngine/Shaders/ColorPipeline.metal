@@ -403,7 +403,7 @@ struct LocalAdjust {
     float4 adjust;     // ev, contrast, saturation, warmth
     float4 lumRange;   // low, high, feather, enabled
     float4 hueRange;   // centre, width, minSat, enabled
-    int4   info;       // type (1 linear, 2 radial, 3 brush, 4 whole), brushSlice, invert
+    int4   info;       // type (1 linear, 2 radial, 3 brush, 4 whole), brushSlice, invert, blend (MaskBlend.swift)
     float4 adjust2;    // tint, highlights, shadows, whites
     float4 adjust3;    // amount, blacks, unused, hue (degrees)
     int4   info2;      // componentStart, componentCount, detailSlot (-1 none), invertMask
@@ -422,7 +422,8 @@ struct MaskComponentGPU {
     float4 geometry0;  // shape geometry | luminance: low, high, feather | colour: h,s,h,s
     float4 geometry1;  // radial feather | colour: h,s,h,s
     float4 extra;      // colour: h, s, radius, sample count
-    int4   info;       // type (1-4 shapes, 5 luminance, 6 colour), slice, invert, mode
+    int4   info;       // type (1-4 shapes, 5 luminance, 6 colour, 7 hue), slice,
+                       // invert (bit 0) and a linked mask's group flags (MaskLinks.swift), mode
 };
 
 constant int kMaxLocals = 8;
@@ -507,8 +508,28 @@ inline float colourRangeWeight(constant MaskComponentGPU &c, float3 perceptual) 
     return 1.0 - smoothstep(r * 0.5, r, d);
 }
 
+// How a component joins the mask so far (MaskCombineMode.combine).
+inline float maskCombine(int mode, float m, float v) {
+    if (mode == 0)      return max(m, v);              // add
+    else if (mode == 1) return m * (1.0 - v);          // subtract
+    else if (mode == 3) return min(1.0, m + v);        // sum
+    else if (mode == 4) return m + v - 2.0 * m * v;    // exclusion
+    else                return m * v;                  // intersect
+}
+
+// A local's own hue range, as a weight (also component type 7, a linked
+// mask's hue range).
+inline float hueRangeWeight(float centre, float width, float minSat, float3 perceptual) {
+    float3 hsv = rgbToHSV(perceptual);
+    float dh = abs(fmod(hsv.x - centre + 540.0, 360.0) - 180.0);
+    float hueW = 1.0 - smoothstep(width * 0.7, width, dh);
+    float satW = smoothstep(minSat * 0.5, minSat, hsv.y);
+    return hueW * satW;
+}
+
 // The mask with its components: the first shape, then each component
-// added, subtracted or intersected in order, then the whole inverted if
+// added, subtracted or intersected in order (a linked mask's group built
+// on its own, then joined, MaskLinks.swift), then the whole inverted if
 // asked, then the original luminance and hue ranges. With no components
 // and no whole-mask invert it is exactly `localMask`.
 inline float combinedLocalMask(constant LocalAdjust &l, constant MaskComponentGPU *components,
@@ -520,6 +541,8 @@ inline float combinedLocalMask(constant LocalAdjust &l, constant MaskComponentGP
     }
     float m = shapeMask(l.info.x, l.info.y, l.geometry0, l.geometry1, pNorm, sensorSize, brushes);
     if (m < 0.0) m = 0.0; else if (l.info.z != 0) m = 1.0 - m;
+    float outer = 0.0;     // the mask set aside while a linked group builds
+    int outerMode = 0;
     for (int k = 0; k < l.info2.y; k++) {
         constant MaskComponentGPU &c = components[l.info2.x + k];
         float v;
@@ -527,14 +550,24 @@ inline float combinedLocalMask(constant LocalAdjust &l, constant MaskComponentGP
             v = luminanceRangeWeight(c.geometry0.x, c.geometry0.y, c.geometry0.z, displayLuma);
         } else if (c.info.x == 6) {
             v = colourRangeWeight(c, perceptual);
+        } else if (c.info.x == 7) {
+            v = hueRangeWeight(c.geometry0.x, c.geometry0.y, c.geometry0.z, perceptual);
         } else {
             v = shapeMask(c.info.x, c.info.y, c.geometry0, c.geometry1, pNorm, sensorSize, brushes);
         }
-        if (v < 0.0) v = 0.0; else if (c.info.z != 0) v = 1.0 - v;
+        if (v < 0.0) v = 0.0; else if ((c.info.z & 1) != 0) v = 1.0 - v;
         v = clamp(v, 0.0, 1.0);
-        if (c.info.w == 0)      m = max(m, v);        // add
-        else if (c.info.w == 1) m = m * (1.0 - v);    // subtract
-        else                    m = m * v;            // intersect
+        if ((c.info.z & 2) != 0) {          // a linked mask's group starts
+            outer = m; outerMode = c.info.w; m = v;
+        } else {
+            m = maskCombine(c.info.w, m, v);
+        }
+        if ((c.info.z & 4) != 0) m = 1.0 - clamp(m, 0.0, 1.0);
+        if ((c.info.z & 8) != 0) {          // and closes, joining the mask so far
+            float g = clamp(m, 0.0, 1.0);
+            if ((c.info.z & 16) != 0) g = 1.0 - g;
+            m = maskCombine(outerMode, outer, g);
+        }
     }
     if (l.info2.w != 0) m = 1.0 - clamp(m, 0.0, 1.0);
     if (l.lumRange.w != 0.0) {
@@ -588,6 +621,16 @@ inline float3 applyLocalMore(float3 working, constant LocalAdjust &l, float m,
         working = max(working * cs + kxv * sn + k * dot(k, working) * (1.0 - cs), 0.0);
     }
     return working;
+}
+
+// Colour only (1) or Lightness only (2): the mask's result recombined
+// with the picture under it by linear luminance (LocalBlendMode.blend).
+inline float3 localBlend(float3 before, float3 after, int mode) {
+    float3 w = float3(0.2627, 0.6780, 0.0593);
+    float yIn = dot(before, w), yOut = dot(after, w);
+    if (mode == 1) return yOut > 1e-6 ? after * (yIn / yOut) : before;
+    if (mode == 2) return yIn > 1e-6 ? before * (yOut / yIn) : float3(yOut);
+    return after;
 }
 
 inline float3 applyLocal(float3 working, constant LocalAdjust &l, float m, float greyPoint) {
@@ -774,8 +817,10 @@ kernel void colorAndTone(
             if (i == maskOverlayIndex) overlay = m;
             // Mask Amount scales the whole effect; a hidden mask has none.
             if (locals[i].adjust3.x != 1.0) m *= max(locals[i].adjust3.x, 0.0);
+            float3 beforeLocal = working;
             working = applyLocal(working, locals[i], m, greyPoint);
             working = applyLocalMore(working, locals[i], m, contrast, greyPoint);
+            if (locals[i].info.w != 0 && m > 0.0) working = localBlend(beforeLocal, working, locals[i].info.w);
             int slot = locals[i].info2.z;
             if (slot >= 0 && slot < 8) detailMasks[slot] = m;
         }

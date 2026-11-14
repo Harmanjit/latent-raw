@@ -49,7 +49,48 @@ struct LocalDetailParams {
     float4 grain;     // amount, size (sensor px), roughness, Point Colour swatch count
     float4 pointTarget[4];   // hue, saturation, value, range
     float4 pointShift[4];    // hue, saturation, luminance, variance
+    float4 extra;            // Smooth radius (render px), Smooth amount, blend mode (MaskBlend.swift), unused
 };
+
+// Colour only (1) or Lightness only (2), on display-linear light: the
+// mask's result recombined with the pixel as it came into the mask
+// (LocalBlendMode.blend, with Rec. 709 weights as this stage uses).
+inline float3 ldBlend(float3 before, float3 after, int mode) {
+    float3 w = float3(0.2126, 0.7152, 0.0722);
+    float yIn = dot(before, w), yOut = dot(after, w);
+    if (mode == 1) return yOut > 1e-6 ? after * (yIn / yOut) : before;
+    if (mode == 2) return yIn > 1e-6 ? before * (yOut / yIn) : float3(yOut);
+    return after;
+}
+
+// Smooth: an edge-preserving (bilateral) average of the stage's input
+// over a disc of `radius` render pixels, 9×9 taps spread over the disc;
+// neighbours count less the further their perceptual lightness is from
+// the centre's, so edges stay. Returns display-linear light.
+inline float3 ldBilateral(texture2d<float, access::read> image, uint2 gid, float radius, float amount,
+                          bool isLinear, float headroom, float3 centre) {
+    float3 w709 = float3(0.2126, 0.7152, 0.0722);
+    float lc = ldPerceptual(dot(centre, w709));
+    float sigma = 0.05 + 0.1 * clamp(amount, 0.0, 1.0);
+    float step = max(radius / 4.0, 1.0);
+    int2 size = int2(image.get_width(), image.get_height());
+    float3 sum = float3(0.0);
+    float total = 0.0;
+    for (int j = -4; j <= 4; j++) {
+        for (int i = -4; i <= 4; i++) {
+            float2 o = float2(i, j) * step;
+            float d2 = dot(o, o) / max(radius * radius, 1e-3);
+            if (d2 > 1.0) continue;
+            int2 q = clamp(int2(gid) + int2(round(o)), int2(0), size - 1);
+            float3 c = ldToLinear(image.read(uint2(q)).rgb, isLinear, headroom);
+            float dl = (ldPerceptual(dot(c, w709)) - lc) / sigma;
+            float wt = exp(-2.0 * d2 - 0.5 * dl * dl);
+            sum += c * wt;
+            total += wt;
+        }
+    }
+    return total > 0.0 ? sum / total : centre;
+}
 
 // Mirror of LocalDetailFrameGPU in LocalToneColour.swift.
 struct LocalDetailFrame {
@@ -199,12 +240,22 @@ kernel void localDetailApply(
     float2 bS = small.sample(s, uv).rg;
     float2 bM = medium.sample(s, uv).rg;
     float2 bL = large.sample(s, uv).rg;
+    float3 sourceLin = lin;
 
     for (int i = 0; i < count && i < 8; i++) {
         constant LocalDetailParams &p = params[i];
         float m = masks[clamp(int(p.detail.z), 0, 7)];
         if (m <= 0.0) continue;
         touched = true;
+        float3 maskBefore = lin;
+
+        // Smooth: the bilateral average's change to the incoming pixel,
+        // scaled by the slider and the mask.
+        float smoothAmount = p.extra.y * m;
+        if (smoothAmount > 0.0 && p.extra.x >= 0.5) {
+            float3 smoothed = ldBilateral(image, gid, p.extra.x, p.extra.y, isLinear, headroom, sourceLin);
+            lin = max(lin + (smoothed - sourceLin) * min(smoothAmount, 1.0), 0.0);
+        }
 
         // Dehaze, as the global slider (dark-channel prior), scaled by the mask.
         float dehaze = p.effects.z * m;
@@ -268,6 +319,7 @@ kernel void localDetailApply(
             lin = ldGrain(lin, sensor, p.grain.x * m, p.grain.y, p.grain.z, frame.binSpan,
                           frame.seed ^ uint(int(p.detail.z) * 7919));
         }
+        if (int(p.extra.z) != 0) lin = max(ldBlend(maskBefore, lin, int(p.extra.z)), 0.0);
     }
 
     output.write(touched ? float4(ldFromLinear(lin, isLinear, headroom), 1.0) : float4(source.rgb, 1.0), gid);

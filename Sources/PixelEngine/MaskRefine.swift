@@ -70,3 +70,103 @@ extension MaskBitmap {
         return out
     }
 }
+
+// MARK: - Edge refine
+
+/// Edge refine for brush and model masks: a guided filter (He, Sun and
+/// Tang) that pulls the mask's edge onto the picture's own edges, so a
+/// loosely painted sky or a model's soft outline follows the treeline.
+///
+/// The guide is the picture Auto Mask already builds (`BrushGuide`, the
+/// raw at the masks' quarter resolution with the as-shot white balance
+/// and no other edit), so a slider move never changes the result and the
+/// preview and the export build the same one. Done on the CPU once per
+/// change of the mask, the amount or the guide, before the slice goes to
+/// the GPU (`BrushMaskSet.sync`); geometric shapes have no slice and are
+/// never refined. Without a guide yet the mask is used as it is and
+/// refined when the guide arrives.
+extension MaskBitmap {
+    /// The filter's radius, in fractions of the short side, at 1.
+    public static let edgeRefineReach: Float = 0.02
+
+    /// The mask filtered against `guide` (same size, or it is returned
+    /// unchanged). `amount` (0…1) sets the radius and how far edges may
+    /// move; 0 is exactly nothing.
+    public func edgeRefined(_ amount: Float, guide: BrushGuide) -> MaskBitmap {
+        let a = min(max(amount, 0), 1)
+        guard a > 0, guide.width == width, guide.height == height else { return self }
+        let n = width * height
+        var luma = [Float](repeating: 0, count: n)
+        for i in 0..<n { luma[i] = Float(guide.data[i * 3]) / 255 }
+        let p = data.map { Float($0) / 255 }
+        let radius = max(1, Int((1 + a * Self.edgeRefineReach * Float(min(width, height))).rounded()))
+        // ε in the guide's units (13 stops over 0…1): a smaller one
+        // follows fainter edges. About a third of a stop at full strength.
+        let eps: Float = 0.0004 + (1 - a) * 0.004
+        let q = Self.guidedFilter(p, guide: luma, width: width, height: height, radius: radius, eps: eps)
+        return MaskBitmap(width: width, height: height,
+                          data: q.map { UInt8(min(max($0 * 255, 0), 255).rounded()) })
+    }
+
+    /// The grey guided filter: per window, the mask as a linear function
+    /// of the guide (least squares, regularised by `eps`), averaged.
+    static func guidedFilter(_ p: [Float], guide i: [Float], width w: Int, height h: Int,
+                             radius r: Int, eps: Float) -> [Float] {
+        let n = p.count
+        var ii = [Float](repeating: 0, count: n), ip = [Float](repeating: 0, count: n)
+        for k in 0..<n { ii[k] = i[k] * i[k]; ip[k] = i[k] * p[k] }
+        let meanI = boxBlur(i, width: w, height: h, radius: r)
+        let meanP = boxBlur(p, width: w, height: h, radius: r)
+        let corrI = boxBlur(ii, width: w, height: h, radius: r)
+        let corrIP = boxBlur(ip, width: w, height: h, radius: r)
+        var a = [Float](repeating: 0, count: n), b = [Float](repeating: 0, count: n)
+        for k in 0..<n {
+            let variance = max(corrI[k] - meanI[k] * meanI[k], 0)
+            let covariance = corrIP[k] - meanI[k] * meanP[k]
+            a[k] = covariance / (variance + eps)
+            b[k] = meanP[k] - a[k] * meanI[k]
+        }
+        let meanA = boxBlur(a, width: w, height: h, radius: r)
+        let meanB = boxBlur(b, width: w, height: h, radius: r)
+        var q = [Float](repeating: 0, count: n)
+        for k in 0..<n { q[k] = min(max(meanA[k] * i[k] + meanB[k], 0), 1) }
+        return q
+    }
+}
+
+/// What a mask slice was last refined with: the amount and the guide.
+/// nil (no key) is no refinement, so an element that never used the
+/// slider uploads exactly as before.
+struct MaskEdgeRefineKey: Equatable {
+    let amount: Float
+    let guide: UUID?
+
+    init?(_ amount: Float, guide: BrushGuide?) {
+        guard amount > 0 else { return nil }
+        self.amount = amount
+        self.guide = guide?.id
+    }
+}
+
+extension BrushMaskRasterizer {
+    /// The bitmap as drawn, rows packed to the width.
+    func bitmap() -> MaskBitmap? {
+        guard let data else { return nil }
+        var out = [UInt8](repeating: 0, count: width * height)
+        let rowBytes = bytesPerRow
+        out.withUnsafeMutableBytes { dst in
+            for y in 0..<height {
+                dst.baseAddress!.advanced(by: y * width).copyMemory(from: data.advanced(by: y * rowBytes), byteCount: width)
+            }
+        }
+        return MaskBitmap(width: width, height: height, data: out)
+    }
+}
+
+extension LocalAdjustment {
+    /// Whether any brush or model element has Edge refine on (and so the
+    /// session needs the Auto Mask guide).
+    public var usesEdgeRefine: Bool {
+        maskElements.contains { $0.refine > 0 && $0.shape.usesMaskSlice }
+    }
+}

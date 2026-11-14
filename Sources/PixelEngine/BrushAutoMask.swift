@@ -134,12 +134,13 @@ extension LocalAdjustment {
 
 extension RenderPipeline {
     /// Builds the session's Auto Mask guide the first time an edit needs
-    /// one, before the render that needs it starts encoding. A failure
+    /// one (Auto Mask strokes, or Edge refine, MaskRefine.swift), before the render that needs it starts encoding. A failure
     /// leaves the strokes drawn as plain strokes, and is tried again next
     /// render.
     func prepareBrushGuide(_ session: ImageSession, parameters: EditParameters) {
         guard session.brushGuide == nil,
-              parameters.locals.prefix(LocalAdjustment.maximumCount).contains(where: \.usesAutoMask) else { return }
+              parameters.locals.prefix(LocalAdjustment.maximumCount)
+                  .contains(where: { $0.usesAutoMask || $0.usesEdgeRefine }) else { return }
         session.brushGuide = try? BrushGuide.build(session: session, pipeline: self)
     }
 }

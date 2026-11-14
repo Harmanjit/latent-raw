@@ -74,6 +74,20 @@ public struct LocalAdjustment: Equatable, Sendable, Codable, Identifiable {
     /// of any global grain. nil is none.
     public var grain: Grain?
 
+    // Added with mask blending and management (MaskBlend.swift,
+    // MaskLinks.swift, MaskRefine.swift). Each is neutral by default and
+    // written to the edit only when set, so older edits are unchanged.
+
+    /// How the mask's result joins the picture: Normal, or keeping only
+    /// its change of colour or only its change of lightness.
+    public var blendMode: LocalBlendMode = .normal
+    /// 0…1: an edge-preserving smoothing inside the mask
+    /// (LocalDetailStage.swift), up to about 20 sensor pixels.
+    public var smooth: Float = 0
+    /// 0…1: snaps a brush or model mask in `shape` to the picture's edges
+    /// with a guided filter (MaskRefine.swift). Components carry their own.
+    public var edgeRefine: Float = 0
+
     public init(id: UUID = UUID(), name: String, shape: MaskShape, invert: Bool = false,
                 exposureEV: Float = 0, contrast: Float = 0, saturation: Float = 0, warmth: Float = 0,
                 luminanceRange: LuminanceRange? = nil, hueRange: HueRange? = nil) {
@@ -98,7 +112,7 @@ public struct LocalAdjustment: Equatable, Sendable, Codable, Identifiable {
     /// detail stage runs after the colour kernel for this mask.
     public var wantsDetailStage: Bool {
         !hidden && amount > 0 && (texture != 0 || clarity != 0 || dehaze != 0 || sharpness != 0
-            || noise > 0 || defringe > 0 || wantsToneColourStage)
+            || noise > 0 || defringe > 0 || smooth > 0 || wantsToneColourStage)
     }
 
     /// Limited by the GPU-side array; more would need a different layout.
@@ -267,7 +281,7 @@ struct LocalAdjustGPU {
     var adjust = SIMD4<Float>(repeating: 0)     // ev, contrast, saturation, warmth
     var lumRange = SIMD4<Float>(repeating: 0)   // low, high, feather, enabled
     var hueRange = SIMD4<Float>(repeating: 0)   // centre, width, minSat, enabled
-    var info = SIMD4<Int32>(repeating: 0)       // type, brushSlice, invert, 0
+    var info = SIMD4<Int32>(repeating: 0)       // type, brushSlice, invert, blend mode
     var adjust2 = SIMD4<Float>(repeating: 0)    // tint, highlights, shadows, whites
     var adjust3 = SIMD4<Float>(1, 0, 1, 0)      // amount, blacks, (unused), hue (degrees)
     var info2 = SIMD4<Int32>(0, 0, -1, 0)       // componentStart, componentCount, detailSlot, invertMask
@@ -278,7 +292,7 @@ struct LocalAdjustGPU {
         adjust = SIMD4(local.exposureEV, local.contrast, local.saturation, local.warmth)
         if let l = local.luminanceRange { lumRange = SIMD4(l.low, l.high, l.feather, 1) }
         if let h = local.hueRange { hueRange = SIMD4(h.centre, h.width, h.minimumSaturation, 1) }
-        info = SIMD4(local.shape.typeCode, brushSlice, local.invert ? 1 : 0, 0)
+        info = SIMD4(local.shape.typeCode, brushSlice, local.invert ? 1 : 0, local.blendMode.gpuCode)
         adjust2 = SIMD4(local.tint, local.highlights, local.shadows, local.whites)
         // A hidden mask applies nothing; its shape still shows as an overlay.
         adjust3 = SIMD4(local.hidden ? 0 : min(max(local.amount, 0), 1), local.blacks, 0, local.hue)
@@ -291,7 +305,9 @@ struct MaskComponentGPU {
     var geometry0 = SIMD4<Float>(repeating: 0)  // shape geometry | lum: low, high, feather | colour: h,s,h,s
     var geometry1 = SIMD4<Float>(repeating: 0)  // radial feather | colour: h,s,h,s
     var extra = SIMD4<Float>(repeating: 0)      // colour: h, s, radius, sample count
-    var info = SIMD4<Int32>(repeating: 0)       // type, slice, invert, mode (0 add, 1 subtract, 2 intersect)
+    /// z: bit 0 invert; bits 1-4 a linked mask's group (MaskLinks.swift).
+    /// w: 0 add, 1 subtract, 2 intersect, 3 sum, 4 exclusion.
+    var info = SIMD4<Int32>(repeating: 0)       // type, slice, invert and group flags, mode
 
     /// Every mask's components, flattened, fit one `setBytes` (4 KB).
     static let maximumTotal = LocalAdjustment.maximumCount * MaskComponent.maximumPerMask
@@ -318,14 +334,12 @@ struct MaskComponentGPU {
             geometry0 = SIMD4(hs[0], hs[1], hs[2], hs[3])
             geometry1 = SIMD4(hs[4], hs[5], hs[6], hs[7])
             extra = SIMD4(hs[8], hs[9], r.radius, Float(min(r.samples.count, ColourRange.maximumSamples)))
+        case .mask:
+            // Inlined by `LocalsGPUPlan` (MaskLinks.swift); never packed
+            // itself. Type 0 masks nothing.
+            type = 0
         }
-        let mode: Int32
-        switch component.mode {
-        case .add: mode = 0
-        case .subtract: mode = 1
-        case .intersect: mode = 2
-        }
-        info = SIMD4(type, slice, component.invert ? 1 : 0, mode)
+        info = SIMD4(type, slice, component.invert ? 1 : 0, component.mode.gpuCode)
     }
 
     static func geometry0(_ shape: MaskShape) -> SIMD4<Float> {
@@ -358,11 +372,14 @@ struct LocalsGPUPlan {
         for (index, local) in locals.enumerated() {
             var packed = LocalAdjustGPU(local, brushSlice: slices[local.id] ?? -1)
             let room = MaskComponentGPU.maximumTotal - components.count
-            let own = local.components.prefix(min(MaskComponent.maximumPerMask, max(room, 0)))
+            // Each component packs as one entry, a linked mask as its
+            // inlined group (MaskLinks.swift); whole groups only.
+            let own = MaskLinks.packedComponents(of: local, in: locals, slices: slices,
+                                                 limit: min(MaskComponent.maximumPerMask, max(room, 0)))
             if !own.isEmpty {
                 packed.info2.x = Int32(components.count)
                 packed.info2.y = Int32(own.count)
-                components += own.map { MaskComponentGPU($0, slice: slices[$0.id] ?? -1) }
+                components += own
             }
             if local.wantsDetailStage {
                 let slot = detailSlots.count
@@ -517,6 +534,10 @@ final class BrushMaskSet {
     /// Model masks already uploaded: element id -> (slice, the bitmap as
     /// made, the feather and edge it was refined with).
     private var uploadedAI: [UUID: (slice: Int, bitmap: MaskBitmap, feather: Float, edge: Float)] = [:]
+    /// Edge refine (MaskRefine.swift) each slice was last uploaded with:
+    /// the amount and the guide it was filtered against. Absent is off,
+    /// which is every element until the slider is used.
+    private var refinedWith: [UUID: MaskEdgeRefineKey] = [:]
 
     static let maximumSlices = LocalAdjustment.maximumCount * (1 + MaskComponent.maximumPerMask)
 
@@ -566,6 +587,7 @@ final class BrushMaskSet {
                 texture = bigger
                 rasterizers.removeAll()
                 uploadedAI.removeAll()
+                refinedWith.removeAll()
             }
         }
 
@@ -574,6 +596,7 @@ final class BrushMaskSet {
         let live = Set(elements.map(\.id))
         for id in rasterizers.keys where !live.contains(id) { rasterizers[id] = nil }
         for id in uploadedAI.keys where !live.contains(id) { uploadedAI[id] = nil }
+        for id in refinedWith.keys where !live.contains(id) { refinedWith[id] = nil }
 
         for element in elements {
             switch element.shape {
@@ -588,17 +611,26 @@ final class BrushMaskSet {
                     entry = (slice, raster)
                     rasterizers[element.id] = entry
                 }
-                if entry.raster.update(strokes: strokes, guide: guide), let bytes = entry.raster.data {
-                    texture.replace(region: MTLRegionMake2D(0, 0, entry.raster.width, entry.raster.height),
-                                    mipmapLevel: 0, slice: entry.slice, withBytes: bytes,
-                                    bytesPerRow: entry.raster.bytesPerRow, bytesPerImage: 0)
+                let drew = entry.raster.update(strokes: strokes, guide: guide)
+                let refineKey = MaskEdgeRefineKey(element.refine, guide: guide)
+                if drew || refinedWith[element.id] != refineKey, let bytes = entry.raster.data {
+                    if refineKey != nil, let guide, let refined = entry.raster.bitmap()?.edgeRefined(element.refine, guide: guide) {
+                        upload(refined, slice: entry.slice)
+                    } else {
+                        texture.replace(region: MTLRegionMake2D(0, 0, entry.raster.width, entry.raster.height),
+                                        mipmapLevel: 0, slice: entry.slice, withBytes: bytes,
+                                        bytesPerRow: entry.raster.bytesPerRow, bytesPerImage: 0)
+                    }
+                    refinedWith[element.id] = refineKey
                 }
                 assignment[element.id] = Int32(entry.slice)
 
             case .ai, .prompted:
                 guard let bitmap = aiMasks[element.id] else { continue }
+                let refineKey = MaskEdgeRefineKey(element.refine, guide: guide)
                 if let existing = uploadedAI[element.id], existing.bitmap == bitmap,
-                   existing.feather == element.feather, existing.edge == element.edge {
+                   existing.feather == element.feather, existing.edge == element.edge,
+                   refinedWith[element.id] == refineKey {
                     assignment[element.id] = Int32(existing.slice)
                     continue
                 }
@@ -606,14 +638,12 @@ final class BrushMaskSet {
                 guard let slice else { continue }
                 // Refined at the slice's size, where the frame's aspect
                 // is true, so Edge and Feather are round.
-                let fitted = bitmap.resampled(width: texture.width, height: texture.height)
+                var fitted = bitmap.resampled(width: texture.width, height: texture.height)
                     .refined(feather: element.feather, edge: element.edge)
-                fitted.data.withUnsafeBytes { bytes in
-                    texture.replace(region: MTLRegionMake2D(0, 0, fitted.width, fitted.height),
-                                    mipmapLevel: 0, slice: slice, withBytes: bytes.baseAddress!,
-                                    bytesPerRow: fitted.width, bytesPerImage: 0)
-                }
+                if refineKey != nil, let guide { fitted = fitted.edgeRefined(element.refine, guide: guide) }
+                upload(fitted, slice: slice)
                 uploadedAI[element.id] = (slice, bitmap, element.feather, element.edge)
+                refinedWith[element.id] = refineKey
                 assignment[element.id] = Int32(slice)
 
             default:
@@ -621,5 +651,15 @@ final class BrushMaskSet {
             }
         }
         return assignment
+    }
+
+    /// Writes a mask bitmap of the slices' size into `slice`.
+    private func upload(_ bitmap: MaskBitmap, slice: Int) {
+        guard bitmap.width == texture.width, bitmap.height == texture.height else { return }
+        bitmap.data.withUnsafeBytes { bytes in
+            texture.replace(region: MTLRegionMake2D(0, 0, bitmap.width, bitmap.height),
+                            mipmapLevel: 0, slice: slice, withBytes: bytes.baseAddress!,
+                            bytesPerRow: bitmap.width, bytesPerImage: 0)
+        }
     }
 }
