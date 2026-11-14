@@ -376,6 +376,7 @@ extension Keymap {
             c("clearFilter", .clearFilter, "Clear Filters", rating),
             c("addToTargetCollection", .addToTargetCollection, "Add to Target Collection", rating),
             c("newCollection", .newCollection, "New Collection…", rating),
+            c("addKeywords", .addKeywords, "Add Keywords…", rating),
             c("undo", .undo, "Undo", editing),
             c("redo", .redo, "Redo", editing),
             c("beforeAfter", .beforeAfter, "Before / After", editing),

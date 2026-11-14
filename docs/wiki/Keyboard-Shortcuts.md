@@ -48,6 +48,7 @@ These are the default keys. Settings › Keyboard changes any of them, gives key
 | ⇧⌘L | Clear the filter bar |
 | B | Add the selection to the target collection (the Quick Collection unless you chose another), or take it out when it is all there already |
 | ⌘N | New collection (with the selected photos, if you like) |
+| ⌘K | Add keywords: the keywording field, ready to type in, for the selected photos |
 
 ## Editing
 

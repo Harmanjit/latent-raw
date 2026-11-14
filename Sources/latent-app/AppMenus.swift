@@ -219,6 +219,7 @@ struct CommandState: Equatable {
         case .saveFilterAsSmartCollection: hasCatalog && filterActive
         case .addToTargetCollection: hasCatalog && (hasSelection || selectionCount > 0)
         case .removeFromCollection: showsRegularCollection && (hasSelection || selectionCount > 0)
+        case .addKeywords: hasCatalog && (hasSelection || selectionCount > 0) && !fullScreenImage
         case .geometry(let geometry): isEnabled(geometry)
         case .libraryView(let command): isEnabled(command)
         // Culling (CullingCommands.swift). The Select commands and Refine
@@ -461,6 +462,8 @@ struct LatentCommands: Commands {
             Divider()
             item(state.targetCollectionTitle, .addToTargetCollection)
             item("Remove from Collection", .removeFromCollection)
+            Divider()
+            item("Add Keywords…", .addKeywords)
         }
 
         CommandMenu("Develop") {
