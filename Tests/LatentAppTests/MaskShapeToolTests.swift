@@ -22,7 +22,6 @@ final class MaskShapeToolTests: XCTestCase {
 
     override func tearDown() async throws {
         UserDefaults.standard.removeObject(forKey: EditorModel.keepMaskToolArmedKey)
-        try await super.tearDown()
     }
 
     private func placeRadial(_ model: EditorModel) {
