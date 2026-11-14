@@ -48,7 +48,7 @@ A keyword inside others (Places › France › Paris) is written as each of its 
 
 Tags that only describe the raw's storage (orientation, sensor layout, autofocus points), makers' private data and Camera Raw's edit settings are never written. **Include location** (off by default, and in presets saved before it existed) also keeps the **GPS position**, place names, and the camera body's and lens's serial numbers, at All and All except camera info; see [Security and Privacy](Security-and-Privacy#location-in-exports).
 
-**Watermark.** Off by default. Switch it on to stamp **Text** or a **Graphic** into a corner of every exported file. Text: one line, where `{year}` becomes the capture year and `{name}` the original file name, in any letter case, in the system font or any font installed on the Mac; its size is a share of the picture's short edge (1–20%) and its colour is picked as sRGB and converted for the file's colour space. Graphic: a PNG logo (up to 4 MB; transparent parts stay transparent), sized by its longer side as a share of the picture's short edge (2–50%). The PNG is kept in the preset, so it still works after the original file moves. Either can be turned 90°, 180° or 270° (270° runs text up the side of the picture), and has an opacity. It is drawn into the file after the resize, never into the photo or its edit, so it looks the same at any export size. In a file with an HDR gain map it is not brightened on HDR screens. Presets remember the watermark even while the switch is off.
+**Watermark.** Off by default. Switch it on to stamp **Text** or a **Graphic** into a corner of every exported file. Text: one line, where `{year}` becomes the capture year and `{name}` the original file name, in any letter case; the naming tokens below work too, filled in for each photo (`© {year} {creator|Ann Smith}`, `{lens} · {iso}`), and Insert lists them, in the system font or any font installed on the Mac; its size is a share of the picture's short edge (1–20%) and its colour is picked as sRGB and converted for the file's colour space. Graphic: a PNG logo (up to 4 MB; transparent parts stay transparent), sized by its longer side as a share of the picture's short edge (2–50%). The PNG is kept in the preset, so it still works after the original file moves. Either can be turned 90°, 180° or 270° (270° runs text up the side of the picture), and has an opacity. It is drawn into the file after the resize, never into the photo or its edit, so it looks the same at any export size. In a file with an HDR gain map it is not brightened on HDR screens. Presets remember the watermark even while the switch is off.
 
 **Naming.** A template with tokens, expanded per image. Tokens can be typed in any letter case, or picked from Insert:
 
@@ -62,6 +62,17 @@ Tags that only describe the raw's storage (orientation, sensor layout, autofocus
 | `{camera}` | camera model, spaces removed |
 | `{rating}` | stars as a digit |
 | `{folder}` | the image's subfolder, or the catalog name |
+| `{lens}`, `{maker}`, `{model}` | the lens; the camera's maker and model (the camera name split at its first space) |
+| `{iso}`, `{shutter}`, `{aperture}`, `{focal}`, `{bias}` | 400, 1-250 (2.5s for long exposures), f2.8, 50mm, +0.7 |
+| `{width}`, `{height}` | the raw's size in pixels |
+| `{label}`, `{stars}` | the colour label's name; the rating as ★★★ |
+| `{title}`, `{caption}`, `{creator}`, `{copyright}`, `{headline}`, `{city}`, `{country}` | the descriptive fields |
+| `{keywords}` | the keywords' last levels, sorted, joined by `_` |
+| `{ext}` | the original's extension, NEF |
+| `{version}` | a virtual copy's number, 0 for the original |
+| `{original}` | the name the file had when first renamed by Latent (its preserved name), else its name |
+
+A token takes modifiers, written in this order: `{token/old/new}` replaces every `old` with `new` (`{title/ /_}`), `{token:upper}`, `{token:lower}` or `{token:title}` changes the letter case, `{token:1-8}` keeps characters 1 to 8, and `{token|text}` gives `text` when the token comes out empty (`{city|nowhere}`). They combine: `{title:upper/ /-|untitled}`. A date or time with its own format (`{date:yyyy/MM}`) keeps its colon for the format, as before. A modifier Latent doesn't know shows in red like an unknown token. The preview in the sheet leaves `{keywords}` empty; the exported names have them.
 
 Dates are written the same on every Mac, whatever its region or calendar. The whole name can be made lowercase or UPPERCASE, and the extension `.jpg` or `.JPG`. A token the template doesn't know, such as `{nmae}`, is shown in red and Export stays off until it is fixed.
 
@@ -71,7 +82,7 @@ Every file name is planned before anything is written. A line shows the first fi
 
 **After export.** **Show in Finder when done**, and **Open in** an application you choose (Choose App…), which opens the exported files in it, as Lightroom's Open in Other Application does.
 
-**Add to this catalog.** When an export writes into the open folder (or a subfolder it includes, as with Same folder as original), **Add to this catalog** indexes the new files as soon as the export finishes, rather than when the folder watcher next notices them, and selects them in the grid. **Stack** then puts each one in a stack with the photo it was exported from, just **above** or **below** it; the stack is left expanded so the new file shows. Files written elsewhere are left alone, and the status bar says how many. Not for Original + XMP sidecar, which is the same photo again. See [Stacks](Library#stacks).
+**Add to this catalog.** When an export writes into the open folder (or a subfolder it includes, as with Same folder as original), **Add to this catalog** indexes the new files as soon as the export finishes, rather than when the folder watcher next notices them, and selects them in the grid. **Stack** then puts each one in a stack with the photo it was exported from, just **above** or **below** it; the stack is left expanded so the new file shows. Files written elsewhere are left alone, and the status bar says how many. Not for Original + XMP sidecar, which is the same photo again. See [Stacks](Library#stacks). **Copy rating, label and keywords from the original** (on unless switched off) gives each added file the stars, colour label, keywords, title, caption and the other descriptive fields of the photo it came from, but not a reject flag.
 
 **Presets.** Save the current sheet under a name; four built-ins cover web at 2048 px, full-size JPEG, print TIFF in P3, and proofs by date. A preset keeps every setting above, including its location.
 

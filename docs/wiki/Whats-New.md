@@ -12,6 +12,11 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Colour labels** with Lightroom's keys, 6 to 9, a label filter and a dot on each thumbnail. See [Colour labels](Library#colour-labels).
 - **Title, caption, creator and copyright** for one photo or many, carried into every export. See [Title, caption, creator and copyright](Library#title-caption-creator-and-copyright).
 - **Rename with Template** renames a whole selection from tokens such as `{date}` and `{seq}`, with every new name shown first. See [Moving, copying and renaming](Library#moving-copying-and-renaming).
+- **Ratings and keywords from darktable, Lightroom and Capture One sidecars** come across when a photo is first catalogued, and File › Import Ratings and Keywords from Other Apps' Sidecars… fills in photos already there. See [Ratings and keywords from other apps](Library#ratings-and-keywords-from-other-apps).
+- **Headline, location, contact details and instructions** under Title & Copyright's More, in sidecars and exports. See [Title, caption, creator and copyright](Library#title-caption-creator-and-copyright).
+- **Metadata presets and existing-value menus** fill descriptive fields in one step. See [Title, caption, creator and copyright](Library#title-caption-creator-and-copyright).
+- **Exposure bias, flash, metering, white balance and GPS** in the Metadata panel, with Various for mixed selections, Copy Coordinates and a choice of rows; smart collections can match exposure bias, flash fired and has GPS. See [Metadata panel](Library#metadata-panel).
+- **A configurable info line** under the image in Loupe and Compare, above or below it. See [Loupe, Compare and Survey](Library#loupe-compare-and-survey).
 - **Virtual copies** (⌘') give one photo several versions with their own edits, sharing the raw file; **Duplicate** makes a real second file. See [Virtual copies](Library#virtual-copies).
 - **Stacks**: Group into Stack (⌘G), Unstack (⇧⌘G), S to expand or collapse, Move to Top of Stack, and Auto-Stack by Capture Time, with the stack's count on its thumbnail. Exports can be added to the catalog and stacked with their originals. See [Stacks](Library#stacks).
 
@@ -103,6 +108,9 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **DNG export** writes a DNG with the corrections baked in and the look left open, the full look baked in, or the original raw as a linear DNG. See [DNG export](Export#dng-export-render-to-dng).
 - **HDR Output** on export: a gain map in JPEG, HEIC and now AVIF, or with **Maximize compatibility** off a full 10-bit PQ HEIC or AVIF, up to each photo's HDR Limit. Formats this Mac can't write, such as JPEG XL on macOS 27.2, are shown greyed out with the reason. See [The sheet](Export#the-sheet).
 - **Original + XMP sidecar** copies the raw with a sidecar other applications read. See [Exporting originals](Export#exporting-originals).
+- **Twenty-three more naming tokens** such as `{lens}`, `{iso}`, `{city}`, `{keywords}` and `{version}`, and **token modifiers** for fallbacks, letter case, character ranges and replacing. See [The sheet](Export#the-sheet).
+- **Tokens in the watermark text**, filled in for each photo. See [The sheet](Export#the-sheet).
+- **Add to this catalog copies the original's rating, label and keywords** onto the export. See [The sheet](Export#the-sheet).
 - **Export with Previous** (⌥⇧⌘E), **several presets in one run**, and new destinations: beside the original, or chosen when the export starts. See [Export with Previous](Export#export-with-previous).
 - **Soft proofing** with Perceptual and Relative Colorimetric intents, **Simulate Paper & Ink**, a monitor gamut warning and **proof copies**. See [Soft proofing](Develop#soft-proofing).
 - **Rendering intent when printing**, taken from the soft proof. See [Print](Export#print).

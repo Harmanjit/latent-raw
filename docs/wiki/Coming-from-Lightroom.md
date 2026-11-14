@@ -6,7 +6,7 @@ Latent is an independent open-source project. It is not made by, affiliated with
 
 ## Moving your photos across
 
-**Latent can't import a Lightroom catalog.** It doesn't read `.lrcat` files, Lightroom's collections or its develop settings, and it doesn't read the `.xmp` files Lightroom writes beside raws. Your raw files themselves open in Latent as they are, but ratings, flags, labels, keywords and edits made in Lightroom don't come across.
+**Latent can't import a Lightroom catalog.** It doesn't read `.lrcat` files, Lightroom's collections or its develop settings. Your raw files themselves open in Latent as they are, and when Lightroom has written `.xmp` files beside them (Catalog Settings › Automatically write changes into XMP), the ratings, rejects, colour labels, keywords, title, caption and copyright in them come across the first time Latent catalogues each photo; edits don't. See [Ratings and keywords from other apps](Library#ratings-and-keywords-from-other-apps).
 
 What you can do:
 

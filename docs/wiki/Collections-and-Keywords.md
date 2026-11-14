@@ -35,9 +35,10 @@ A smart collection has a name and a list of rules. Choose whether a photo must m
 
 | Field | Comparisons |
 |---|---|
-| Rating, ISO, Focal length, Aperture | is at least, is at most, is, is not |
+| Rating, ISO, Focal length, Aperture, Exposure bias | is at least, is at most, is, is not |
 | Flag | is or is not picked, unflagged or rejected |
 | Edited | is yes or no |
+| Flash fired, Has GPS position | is yes or no (a file that doesn't say counts as no) |
 | Keyword | is, is not (a keyword counts the keywords inside it), contains, doesn't contain |
 | Camera, Lens, File name, Finder tag | contains, doesn't contain, is, is not, starts with, ends with |
 | File type | is, is not (NEF, DNG and so on) |
