@@ -59,6 +59,15 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **HDR Limit** sets how far above white each photo's highlights may go on an HDR screen and in an HDR export. See [HDR Limit](Develop#hdr-limit).
 - **Visualise HDR Ranges** colours what lies above SDR white by stops, and the readout says how far above white a colour is. See [HDR Limit](Develop#hdr-limit).
 - **Match Total Exposures** (⌥⇧⌘M) gives a selection one brightness from their shutter, aperture and ISO. See [Applying edits to many images](Library#applying-edits-to-many-images).
+- **Exposure eyedropper**: click or drag over something that should be middle grey and Exposure is set from it; Option-click for another target. See [Develop](Develop#modules).
+- **Black Offset**, under Exposure's Advanced, deepens or lifts the blacks in linear light. See [Develop](Develop#modules).
+- **Match Exposures by Histogram** evens out a selection's brightness from the pictures themselves, by a percentile you choose. See [Applying edits to many images](Library#applying-edits-to-many-images).
+- **Adaptation** in Calibration carries colours lit by a CIE standard light (tungsten, fluorescent, LED and more) to daylight, by CAT16, Bradford or XYZ scaling. See [Develop](Develop#modules).
+- **Channel Mixer** builds each output channel from the red, green and blue sources, with Normalise and a Monochrome preset. See [Develop](Develop#modules).
+- **Gamut Compression** eases out-of-gamut colours softly back inside. See [Develop](Develop#modules).
+- **Highlight Purity** gives back the colour the tone curve bleaches out of the brightest tones. See [Develop](Develop#modules).
+- **Colour Grading per-range saturation and Hue Shift**: a saturation slider for shadows, midtones and highlights, and one hue turn for the whole picture. See [Develop](Develop#modules).
+- **Colour Grading range graph and preview**: a graph of where each range reaches, and ⌥-drag on a luminance slider to see that range on the photo. See [Develop](Develop#modules).
 
 ## Geometry
 
