@@ -61,11 +61,17 @@ public enum DemosaicMethod: String, Sendable, CaseIterable {
     /// Ratio Corrected Demosaicing, ported from RawTherapee. Finds the
     /// local direction of detail and interpolates along it.
     case rcd
+    /// Linear minimum mean square-error estimation (Shaders/LMMSE.metal):
+    /// weighs a horizontal and a vertical estimate by how far each stands
+    /// above its own noise, so high-ISO files get smooth answers instead
+    /// of the mazes a gradient-led method can make of noise.
+    case lmmse
 
     public var displayName: String {
         switch self {
         case .bilinear: return "Bilinear (fast)"
         case .rcd:      return "RCD (quality)"
+        case .lmmse:    return "LMMSE (better for high ISO)"
         }
     }
 }
@@ -185,6 +191,13 @@ public struct EditParameters: Sendable, Equatable {
     /// Flat-field correction from a reference raw (FlatField.swift); nil
     /// for none, which every edit older than it has.
     public var flatField: FlatFieldCorrection? = nil
+    /// How Highlight Reconstruction rebuilds clipped channels
+    /// (HighlightInpaint.swift). `.blend` for every edit older than it.
+    public var highlightMethod: HighlightReconstructionMethod = .blend
+    /// Whether a DNG's own corrections (its OpcodeList GainMap,
+    /// FixVignetteRadial and WarpRectilinear; DNGOpcodeCorrections.swift)
+    /// are applied. Off unless switched on, so no existing edit changes.
+    public var embeddedDNGCorrections: Bool = false
     /// The rendering generation the edit was made with (`ProcessVersion`);
     /// a stage whose behaviour changed between versions branches on it.
     public var processVersion: String = EditStack.processVersion
@@ -316,6 +329,7 @@ public struct EditParameters: Sendable, Equatable {
             && a.reflections == b.reflections
             && a.hdrLimitStops == b.hdrLimitStops
             && a.flatField == b.flatField
+            && a.highlightMethod == b.highlightMethod && a.embeddedDNGCorrections == b.embeddedDNGCorrections
     }
 }
 
@@ -746,6 +760,15 @@ public final class RenderPipeline {
             }
         }
         renderInfo = renderInfo.markingHealCached(cachedHealed != nil)
+
+        // Stage 6a: Highlight Reconstruction by Inpaint Opposed, while the
+        // clip levels still hold: before the flat field and the lens
+        // stage's vignetting scale pixels (HighlightInpaint.swift).
+        if HighlightInpaintStage.isActive(parameters, session: session) {
+            colourInput = try HighlightInpaintStage.encode(input: colourInput, session: session, multipliers: multipliers,
+                                                           parameters: parameters, preview: displayRole != .display,
+                                                           gpu: gpu, commandBuffer: cmdBuffer)
+        }
 
         // Stage 6b: flat-field correction, on the sensor grid before the
         // lens stage moves pixels (FlatField.swift). Only once this Mac
@@ -1530,7 +1553,8 @@ public final class RenderPipeline {
         // is 1 and this is the multipliers themselves.
         var clipLevel = session.highlightClipLevel(multipliers: multipliers)
         var highlightThreshold = parameters.highlightThreshold
-        var highlightStrength = parameters.highlightRecovery
+        // Off while Inpaint Opposed has already rebuilt the highlights (stage 6a).
+        var highlightStrength = HighlightInpaintStage.blendStrength(parameters, session: session)
 
         encoder.setBytes(&camToWorking, length: MemoryLayout<simd_float3x3>.size, index: 0)
         encoder.setBytes(&workingToOut, length: MemoryLayout<simd_float3x3>.size, index: 1)
@@ -1625,6 +1649,9 @@ public final class RenderPipeline {
         case .rcd:
             return try demosaicRCD(session: session, cmdBuffer: cmdBuffer,
                                    cfa: cfaTex, order: order)
+        case .lmmse:
+            return try demosaicLMMSE(session: session, cmdBuffer: cmdBuffer,
+                                     cfa: cfaTex, order: order)
         }
     }
 

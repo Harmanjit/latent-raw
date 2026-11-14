@@ -252,6 +252,13 @@ public struct EditStack: Codable, Equatable, Sendable {
     public struct Highlights: Codable, Equatable, Sendable {
         public var strength: Float
         public var threshold: Float
+        /// `HighlightReconstructionMethod`'s raw value, absent for the
+        /// blend, so every edit older than Inpaint Opposed encodes as before.
+        public var method: String?
+
+        public init(strength: Float, threshold: Float, method: String? = nil) {
+            self.strength = strength; self.threshold = threshold; self.method = method
+        }
     }
     public struct Demosaic: Codable, Equatable, Sendable { public var method: String }
 
@@ -264,7 +271,8 @@ public struct EditStack: Codable, Equatable, Sendable {
                            tint: p.whiteBalance.tint)
         modules.exposure = Exposure(ev: p.exposureEV)
         modules.tone = Tone(method: "sigmoid", contrast: p.contrast, grey: p.greyPoint)
-        modules.highlights = Highlights(strength: p.highlightRecovery, threshold: p.highlightThreshold)
+        modules.highlights = Highlights(strength: p.highlightRecovery, threshold: p.highlightThreshold,
+                                        method: p.highlightMethod == .blend ? nil : p.highlightMethod.rawValue)
         modules.demosaic = Demosaic(method: p.demosaic.rawValue)
         modules.denoise = Denoise(luminance: p.denoiseLuminance, color: p.denoiseColor)
         modules.sharpen = Sharpen(amount: p.sharpenAmount, radius: p.sharpenRadius,
@@ -330,6 +338,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         if let h = modules.highlights {
             p.highlightRecovery = h.strength
             p.highlightThreshold = h.threshold
+            p.highlightMethod = h.method.flatMap(HighlightReconstructionMethod.init(rawValue:)) ?? .blend
         }
         if let d = modules.demosaic, let method = DemosaicMethod(rawValue: d.method) {
             p.demosaic = method

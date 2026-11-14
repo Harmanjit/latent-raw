@@ -176,6 +176,10 @@ public final class ImageSession {
         case hueIsolated, hueIsolatedPreview // the Colour Mixer's Option-drag preview
         case flatField, flatFieldPreview   // camera RGB after flat-field correction
         case reflections, reflectionsPreview // output of the reflection removal stage
+        case highlightInpaint, highlightInpaintPreview // camera RGB after Inpaint Opposed
+        case lmmseDiff      // LMMSE: horizontal and vertical colour differences
+        case lmmseSmooth    // LMMSE: the same, low-passed
+        case lmmseScratch   // LMMSE: ping-pong partner for the RGB passes
     }
 
     /// Which set of pooled textures a render draws from. Pools never share
@@ -204,6 +208,15 @@ public final class ImageSession {
     /// The pool `texture(width:height:pixelFormat:role:)` hands out from;
     /// set around a render by `withTexturePool`.
     private var currentPool = TexturePool.view
+
+    /// Inpaint Opposed's whole-frame estimates, by threshold
+    /// (HighlightInpaint.swift): made from the sensor plane once each.
+    var highlightInpaintEstimates: [Float: HighlightInpaintEstimate] = [:]
+
+    /// A DNG's own corrections, read from its opcode lists
+    /// (DNGOpcodeCorrections.swift); nil for every other file and a DNG
+    /// without any Latent can apply.
+    public let dngCorrections: DNGEmbeddedCorrections?
 
     /// Rasterized brush masks, created on first use.
     private var brushMasks: BrushMaskSet?
