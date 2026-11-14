@@ -109,6 +109,31 @@ Quitting during an export asks whether to finish the image being written and qui
 
 Model-generated masks and AI denoise are recomputed at export time, for the queue and for Export open image alike, so the file matches the screen.
 
+## From the command line
+
+`latent-cli`, built with the app's sources (`swift build`, then `.build/debug/latent-cli`), exports without opening the app:
+
+```
+latent-cli export ~/Photos/Brittany --out-dir ~/Desktop/Web --long-edge 2048 --quality 85
+latent-cli export a.NEF b.NEF --out-dir out --preset web.json --template "{date}-{name}" --dry-run
+```
+
+Each photo gets its saved edit: from the folder's catalog when it has one (opened as it is, not re-read), otherwise from its sidecar in `_latent/xmp/`, otherwise Latent's defaults. A folder gives the photos its catalog lists, leaving out the JPEG half of RAW+JPEG pairs; files name themselves. The render is the export queue's own, model masks and AI noise reduction included, so a file matches what the sheet writes with the same settings. When an edit uses AI noise reduction and its model isn't available, the photo is exported without it and a warning says so.
+
+The options:
+
+- `--out-dir <folder>` (required): where the files go; made if missing.
+- `--preset <file.json>`: start from an export preset in the app's JSON form (one preset, or `{"name": …, "preset": {…}}`). Flags given as well win over it. A preset that writes DNGs or originals is refused.
+- `--format jpeg|heic|tiff|png|avif|jxl`, `--quality 0-100`, `--long-edge <pixels>` (never enlarging), `--space srgb|p3|adobergb`.
+- `--template <naming>`: the sheet's naming tokens, such as `{name}`, `{seq}` and `{date}`.
+- `--on-conflict number|skip|replace`: what happens to a name already taken in the destination, as in the sheet.
+- `--no-metadata`: pixels only.
+- `--dry-run`: lists each photo, the file it would become, what would happen there and where its edit comes from, and writes nothing.
+
+It prints one line per photo and a summary, and exits with 1 if any photo failed.
+
+`latent-cli thumbs <folder>` builds or refreshes the folder's thumbnail cache, creating its catalog if it has none, so a large folder opens in the app with every thumbnail ready. `--include-subfolders` includes subfolders still awaiting a decision.
+
 ## Print
 
 **File > Print…** (⌘P) prints the selection in the Library and Survey, and the image shown in Loupe, Compare and Develop, with its current edit, saved or not.

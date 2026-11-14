@@ -162,7 +162,7 @@ The model runs on this Mac when the amount first leaves 0, on the same analysis 
 
 ## JPEG, TIFF and other pictures
 
-JPEG, HEIC, TIFF, PNG, WebP and AVIF files open in Develop like raws, and every edit is stored the same way, in the catalog and its sidecar, never in the file.
+JPEG, HEIC, TIFF, PNG, WebP, AVIF and JPEG XL files (the last three where macOS reads them) open in Develop like raws, and every edit is stored the same way, in the catalog and its sidecar, never in the file.
 
 **They open looking exactly as they are.** Such a file was already developed by a camera, phone, scanner or another editor, so its colours and tones are finished. Latent converts it from its own colour profile (sRGB when it has none) into its working space and works out the light that its default tone curve would turn into those pixels, so the unedited picture shows as the file does and every slider moves from there. Exposure brightens in light rather than lifting a grey veil, and highlights roll off softly, as they do on a raw. White Balance starts at about 6500 K, meaning "as the file is": lower values cool the picture and higher ones warm it, relative to that.
 
