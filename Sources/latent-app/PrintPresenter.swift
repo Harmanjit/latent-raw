@@ -318,7 +318,7 @@ final class PrintAccessoryController: NSViewController, NSPrintPanelAccessorizin
           + PrintExtrasSection.summary(settings)
     }
 
-    static func colorTitle(_ choice: PrintLayoutSettings.ColorChoice, proofProfileName: String?) -> String {
+    nonisolated static func colorTitle(_ choice: PrintLayoutSettings.ColorChoice, proofProfileName: String?) -> String {
         switch choice {
         case .displayP3: "Display P3 (wide gamut)"
         case .proofProfile: proofProfileName.map { "Soft proof profile: \($0)" } ?? "Display P3 (wide gamut)"
