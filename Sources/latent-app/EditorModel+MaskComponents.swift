@@ -82,8 +82,10 @@ extension EditorModel {
     // MARK: - Components
 
     var canAddMaskComponent: Bool {
-        guard let local = selectedLocal else { return false }
+        guard let local = selectedLocal, let i = selectedLocalIndex else { return false }
+        // A linked mask packs as its whole group (MaskLinks.swift).
         return local.components.count < MaskComponent.maximumPerMask
+            && parameters.packedComponentCount(ofLocal: i) < MaskComponent.maximumPerMask
     }
 
     /// Adds a component to the selected local, selects it and arms the
@@ -124,6 +126,48 @@ extension EditorModel {
             }
         }
         maskTool = tool
+    }
+
+    /// Adds a component that uses mask `target` of this edit as it is now
+    /// (MaskLinks.swift), when the panel's rules allow it.
+    func addLinkedMaskComponent(_ target: UUID, mode: MaskCombineMode) {
+        guard let i = selectedLocalIndex, i < parameters.locals.count,
+              parameters.canLink(mask: target, intoLocal: i) else { return }
+        let component = MaskComponent(mode: mode, source: .mask(id: target))
+        parameters.locals[i].components.append(component)
+        selectedMaskComponentID = component.id
+        showMaskOverlay = true
+        maskTool = .none
+    }
+
+    // MARK: - Order
+
+    /// Moves the mask at `source` to end up at `destination`, in one
+    /// undoable step (masks apply in order, so order changes the result).
+    /// The selection follows the mask it was on.
+    func moveLocal(from source: Int, to destination: Int) {
+        let count = parameters.locals.count
+        guard source != destination, (0..<count).contains(source), (0..<count).contains(destination) else { return }
+        let selectedID = selectedLocal?.id
+        let selectedComponent = selectedMaskComponentID
+        var locals = parameters.locals
+        locals.insert(locals.remove(at: source), at: destination)
+        parameters.locals = locals
+        if let selectedID, let now = parameters.locals.firstIndex(where: { $0.id == selectedID }), now != selectedLocalIndex {
+            selectedLocalIndex = now
+            selectedMaskComponentID = selectedComponent
+        }
+    }
+
+    /// Moves component `id` of the selected mask's list (or of mask
+    /// `localIndex`) to end up at `destination`, in one undoable step.
+    func moveMaskComponent(_ id: UUID, to destination: Int, inLocal localIndex: Int? = nil) {
+        guard let i = localIndex ?? selectedLocalIndex, i < parameters.locals.count,
+              let source = parameters.locals[i].components.firstIndex(where: { $0.id == id }),
+              source != destination, parameters.locals[i].components.indices.contains(destination) else { return }
+        var components = parameters.locals[i].components
+        components.insert(components.remove(at: source), at: destination)
+        parameters.locals[i].components = components
     }
 
     func removeMaskComponent(_ id: UUID) {
