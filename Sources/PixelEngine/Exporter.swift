@@ -38,6 +38,10 @@ public struct ExportSettings: Sendable {
         /// encode them (`isAvailable`); they are not in `allCases`.
         case avif
         case jxl
+        /// OpenEXR, scene-linear half or float (ExportEXR.swift). Offered
+        /// only where ImageIO can encode it, in `menu`; not in `allCases`
+        /// or `available`.
+        case exr
 
         /// The formats every supported macOS writes. AVIF and JPEG XL
         /// depend on the system (`available` adds them when they work).
@@ -49,6 +53,14 @@ public struct ExportSettings: Sendable {
             allCases + [.avif, .jxl].filter(\.isAvailable)
         }
 
+        /// The export sheet's format menu: `available`, then OpenEXR when
+        /// ImageIO can encode it. OpenEXR is scene-linear and written its
+        /// own way (ExportEXR.swift), so it is kept out of `available`,
+        /// which lists the formats any rendered image can be encoded in.
+        public static var menu: [Format] {
+            available + [.exr].filter(\.isAvailable)
+        }
+
         public var displayName: String {
             switch self {
             case .jpeg: return "JPEG"
@@ -57,6 +69,7 @@ public struct ExportSettings: Sendable {
             case .tiff: return "TIFF"
             case .avif: return "AVIF"
             case .jxl:  return "JPEG XL"
+            case .exr:  return "OpenEXR"
             }
         }
 
@@ -68,6 +81,7 @@ public struct ExportSettings: Sendable {
             case .tiff: return "tif"
             case .avif: return "avif"
             case .jxl:  return "jxl"
+            case .exr:  return "exr"
             }
         }
 
@@ -79,6 +93,7 @@ public struct ExportSettings: Sendable {
             case .tiff: return .tiff
             case .avif: return UTType("public.avif") ?? UTType(filenameExtension: "avif") ?? .data
             case .jxl:  return UTType("public.jpeg-xl") ?? UTType(filenameExtension: "jxl") ?? .data
+            case .exr:  return UTType("com.ilm.openexr-image") ?? UTType(filenameExtension: "exr") ?? .data
             }
         }
 
@@ -102,7 +117,7 @@ public struct ExportSettings: Sendable {
         var bitsPerComponent: Int {
             switch self {
             case .jpeg, .heic, .png, .avif, .jxl: return 8
-            case .tiff:                           return 16
+            case .tiff, .exr:                     return 16
             }
         }
 
@@ -156,7 +171,9 @@ public struct ExportSettings: Sendable {
     /// Output sharpening after the resize (ExportOutputSharpening.swift).
     /// Nil, the default, sharpens nothing and costs nothing.
     public var outputSharpening: OutputSharpening?
-    /// TIFF only: 8 or 16 bits per channel, and the compression.
+    /// TIFF only: 8 or 16 bits per channel, or 32 for linear floating
+    /// point (rendered at 16 and widened as it is encoded, Exporter+Output),
+    /// and the compression.
     public var tiffBitDepth: Int = 16
     public var tiffCompression: TIFFCompression = .none
     /// Allow the long edge asked for to be larger than the picture
@@ -166,6 +183,24 @@ public struct ExportSettings: Sendable {
     /// instead of SDR with a gain map: 10-bit Rec. 2100 PQ, HEIC or AVIF
     /// (ExportFullHDR.swift). Off, the default, is Maximize Compatibility.
     public var hdrFull = false
+    /// PNG only: 8 (the default, as PNG always was) or 16 bits per channel.
+    public var pngBitDepth: Int = 8
+    /// HEIC only: 8 (the default) or 10 bits per channel. Ten-bit SDR is
+    /// handed to ImageIO as 16-bit pixels, as the full HDR path does.
+    public var heicBitDepth: Int = 8
+    /// TIFF only: write one grey channel when the edit is black and white
+    /// (`editIsMonochrome`, which the export worker sets from the edit).
+    public var greyscaleWhenMonochrome = false
+    public var editIsMonochrome = false
+    /// A border, or a canvas enlarged to an aspect ratio, after the resize
+    /// and before the watermark (ExportBorder.swift). Nil adds nothing.
+    public var border: ExportBorder?
+    /// OpenEXR only: half or full float (ExportEXR.swift).
+    public var exr = EXROptions()
+    /// Metadata extras the export worker copies into `ExportMetadata`:
+    /// lr:hierarchicalSubject, and the edit itself (ExportKeywords.swift).
+    public var keywordHierarchy = false
+    public var embedsEdit = false
 
     public init(format: Format = .jpeg, quality: Float = 0.92, hdrGainMap: Bool = false,
                 watermark: ExportWatermark? = nil) {
@@ -180,7 +215,11 @@ public struct ExportSettings: Sendable {
     /// primaries. Not when the file is full HDR instead.
     public var writesGainMap: Bool {
         hdrGainMap && format.supportsGainMap && !(colorProfile?.needsConversion ?? false) && !writesFullHDR
+            && !hasBorder
     }
+
+    /// Whether a border or enlarged canvas is drawn round the picture.
+    public var hasBorder: Bool { border?.isActive ?? false }
 
     /// Whether this export is a full HDR (PQ) file: HDR Output on with
     /// Maximize Compatibility off, in HEIC or AVIF. Not with a converted
@@ -188,13 +227,25 @@ public struct ExportSettings: Sendable {
     /// SDR pixels; those exports get a gain map instead.
     public var writesFullHDR: Bool {
         hdrGainMap && hdrFull && format.supportsFullHDR && !(colorProfile?.needsConversion ?? false)
-            && watermark == nil && outputSharpening == nil
+            && watermark == nil && outputSharpening == nil && !hasBorder
     }
 
-    /// Bits per channel of the file's pixels: 16 for a 16-bit TIFF, else 8.
+    /// Bits per channel of the rendered pixels: 16 for a 16-bit (or
+    /// float) TIFF, a 16-bit PNG or a 10-bit HEIC, else 8.
     public var bitsPerComponent: Int {
-        format == .tiff ? (tiffBitDepth == 8 ? 8 : 16) : format.bitsPerComponent
+        switch format {
+        case .tiff: tiffBitDepth == 8 ? 8 : 16
+        case .png: pngBitDepth == 16 ? 16 : 8
+        case .heic: heicBitDepth == 10 ? 16 : 8
+        default: format.bitsPerComponent
+        }
     }
+
+    /// A 32-bit floating-point TIFF, in linear light.
+    public var writesFloatTIFF: Bool { format == .tiff && tiffBitDepth == 32 }
+
+    /// A single-channel grey TIFF: asked for, and the edit is monochrome.
+    public var writesGreyscale: Bool { format == .tiff && greyscaleWhenMonochrome && editIsMonochrome }
 }
 
 /// How a TIFF's pixels are compressed. All three are lossless.
@@ -260,6 +311,12 @@ public struct ExportMetadata: Sendable, Equatable {
     /// How much of the above is written (ExportMetadataLevel.swift). All,
     /// the default, is everything described here.
     public var level: ExportMetadataLevel = .all
+    /// Also write the keywords whole in lr:hierarchicalSubject, as
+    /// Lightroom does ("Places|France|Paris"). Off by default.
+    public var writesKeywordHierarchy = false
+    /// The Latent edit (EditStack JSON) to embed as latent:EditStack, so
+    /// the edit can be recovered from the exported file. Nil embeds none.
+    public var embeddedEditJSON: String?
 
     public init() {}
 
@@ -342,7 +399,14 @@ public struct ExportMetadata: Sendable, Equatable {
                                                              kCGImagePropertyIPTCStarRating, rating as CFNumber)
             }
         }
-        let (keptProps, keptXMP) = level.filtered(properties: props, xmp: xmp)
+        if writesKeywordHierarchy, !keywords.isEmpty {
+            if xmp == nil { xmp = CGImageMetadataCreateMutable() }
+            if let xmp { Self.addKeywordHierarchy(keywords, to: xmp) }
+        }
+        let (keptProps, filteredXMP) = level.filtered(properties: props, xmp: xmp)
+        // The edit goes in after the level's filter: it is Latent's own
+        // block, asked for by its own switch.
+        let keptXMP = embeddedEditJSON.map { Self.addingEmbeddedEdit($0, to: filteredXMP) } ?? filteredXMP
         return (Dictionary(uniqueKeysWithValues: keptProps.map { ($0.key as CFString, $0.value) }), keptXMP)
     }
 
@@ -430,6 +494,19 @@ public final class Exporter {
                                maxLongEdge: Int? = nil,
                                hdrHeadroom: Float = GainMap.exportHeadroom,
                                hdrRender: ((RenderOutput) throws -> MTLTexture)? = nil) throws -> EncodableImage {
+        if let border = settings.border, border.isActive {
+            // The picture as it would be without the border, then the
+            // canvas round it, then the watermark on the whole canvas.
+            var plain = settings
+            plain.border = nil
+            plain.watermark = nil
+            plain.hdrGainMap = false
+            let inner = try encodableImage(texture, settings: plain, colorSpace: colorSpace, rotation: rotation,
+                                           crop: crop, maxLongEdge: maxLongEdge, hdrHeadroom: hdrHeadroom,
+                                           hdrRender: hdrRender)
+            return try EncodableImage(image: try border.apply(to: inner.image))
+                .watermarked(settings.watermark, colorSpace: colorSpace)
+        }
         if settings.writesFullHDR, let hdrRender {
             return try fullHDRImage(settings: settings, colorSpace: colorSpace, rotation: rotation, crop: crop,
                                     maxLongEdge: maxLongEdge, headroom: hdrHeadroom, hdrRender: hdrRender)
@@ -515,6 +592,9 @@ public final class Exporter {
     /// a destination: shared by the file and in-memory encodes.
     static func addImage(_ cgImage: CGImage, to destination: CGImageDestination, settings: ExportSettings,
                          metadata: ExportMetadata?, gainMap: GainMap?) {
+        // A grey or floating-point file is converted here, as it is encoded,
+        // so the size estimate and the written file agree.
+        let cgImage = finalPixels(cgImage, settings: settings)
         let encoding = metadata?.encoding(for: cgImage)
         var properties: [CFString: Any] = encoding?.properties ?? [:]
         // An embedded thumbnail would be a second, smaller copy of the
