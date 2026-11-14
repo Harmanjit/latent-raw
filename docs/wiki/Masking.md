@@ -15,9 +15,18 @@ Local adjustments change part of the picture: a mask says where, and the mask's 
 - **Select Objects (Box)** also uses Segment Anything: drag a rectangle around the object and it is selected. You can add clicks to the same selection afterwards with **Click to select**, and **Draw box** draws the box again.
 - **Select by Class** picks sky, people, vegetation, water, buildings, ground, mountains, animals or vehicles.
 - **Colour Range** selects colours you pick from the image (below).
-- **Luminance Range** selects a band of tones, from **Low** to **High**, with a **Feather**.
+- **Luminance Range** selects a band of tones, from **Low** to **High**, with a **Feather**. See [Luminance and Channel Range](#luminance-and-channel-range).
 
 Model masks (subject, class, selection) are made again from the photo when needed rather than stored, and each records the model that made it; see [Models](Models).
+
+## Editing gradients and radials
+
+While a gradient's or radial's tool is armed (**Place gradient** or **Place or move**), the shape shows handles you can drag, so you can reshape it instead of drawing it again:
+
+- A **Linear Gradient** has a handle where the effect is full, one where it ends, and one in the middle that moves the whole gradient.
+- A **Radial** has a handle on the edge of each of its two axes (width and height), a ring handle on the dashed inner line that sets the **Feather**, and a ring above the ellipse that **turns** it. Drag inside the ellipse to move it, as before. **Angle** in the panel turns it too.
+- Over the selected shape, the **mouse wheel** changes its feather (a gradient's fade gets longer or shorter about its middle); with **⇧** it changes the mask's **Amount**. A trackpad's scroll still pans.
+- Tick **Keep tool armed** and the tool stays armed after you place a shape: drag away from it to place another mask of the same kind (or, when the selected row is a component, another component in the same mode), as many as you like in a row.
 
 ## Components: add, subtract, intersect
 
@@ -43,6 +52,18 @@ Both work on the mask itself, before the adjustments, and are stored with the ed
 Add a Colour Range mask (or component) and the eyedropper is armed: click a colour on the image. Each click adds a colour, up to five; the swatches show what is picked and **Clear** starts over. **Refine** sets how far from the picked colours the selection reaches. Colours are judged as the mask sees them, before any mask changes the picture, by hue and saturation together, so pale and vivid versions of a colour are close but not the same, and greys can be picked too.
 
 The older **Hue range** tickbox under the sliders still narrows any mask to a band of hues by centre and width.
+
+## Luminance and Channel Range
+
+A **Luminance Range** component selects pixels by how bright they look; a **Channel Range** component (in the **+**, **−** and **◎** menus) selects by one channel you choose: **Red**, **Green**, **Blue**, **Saturation**, Lab **Lightness**, Lab **a** (green to magenta), Lab **b** (blue to yellow) or Lab **Chroma**. Both read the picture as the mask sees it, before any mask changes it.
+
+- The **range control** shows the channel as a gradient with four handles: where the fade below the band starts, **Low**, **High**, and where the fade above it ends. Drag the outer handles to give the two sides different fades. The **Low**, **High** and **Feather** sliders below still work; Feather sets both fades at once.
+- **Pick Range** arms an eyedropper: click the image and the band is set 10% either side of the value there; drag a rectangle and it spans the darkest to the brightest (least to most) inside it. The eyedropper puts itself away after one pick.
+- **Under pointer** reads the value under the pointer live, and a mark on the gradient shows where it falls.
+
+The **Luminance range** tickbox under a mask's sliders has the same range control, eyedropper and readout while no component is selected.
+
+To see what a range is reading, click the half-filled circle on its component row (**Show Channel**): the image shows that component's input as a grey, the luminance or the channel, or for a Colour Range how near each pixel is to the picked colours. Click it again to go back. **Develop ▸ Masks ▸ Show Mask Channel** does the same, and can be given a key in Settings ▸ Keyboard.
 
 ## The sliders
 

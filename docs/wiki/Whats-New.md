@@ -86,6 +86,12 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Auto Mask** for the brush: strokes paint only where the photo is like the colour under the brush, so they stop at edges. See [Auto Mask](Masking#auto-mask).
 - **Edge and Feather** refine the outline of subject, class and selection masks. See [Feather and Edge](Masking#feather-and-edge-for-model-masks).
 - **Select Objects (Box)**, mask renaming, hiding, **Duplicate and Invert** and **Delete Empty Masks**. See [Masking](Masking#looking-after-masks).
+- **Turn a radial** with the handle above it or the **Angle** slider, so an ellipse can lie at any angle. See [Editing gradients and radials](Masking#editing-gradients-and-radials).
+- **Shape handles**: drag a gradient's ends or middle and a radial's edges and feather instead of drawing them again; the mouse wheel changes the feather (⇧ the Amount), and **Keep tool armed** places several shapes in a row. See [Editing gradients and radials](Masking#editing-gradients-and-radials).
+- **Pick Range** for Luminance Range: click to centre the band on a spot or drag a rectangle to span it, with a live readout of the value under the pointer. See [Luminance and Channel Range](Masking#luminance-and-channel-range).
+- **Channel Range** components select by red, green, blue, saturation, Lab lightness, a, b or chroma. See [Luminance and Channel Range](Masking#luminance-and-channel-range).
+- **Separate fades** below and above a Luminance or Channel Range, set with a four-handle range control. See [Luminance and Channel Range](Masking#luminance-and-channel-range).
+- **Show Channel** draws what a range component reads as a grey on the image. See [Luminance and Channel Range](Masking#luminance-and-channel-range).
 - **Remove** takes a distraction out of the photo, filling it from its surroundings, and **Detect Objects** fills just the object you brushed over. See [Remove and Detect Objects](Develop#remove-and-detect-objects).
 - **One Remove tool** with Remove, Heal and Clone modes, per-patch **Opacity**, a **Tool Overlay** setting, a pin list with Select All and Delete All, and Option-drag to delete the spots inside a marquee. See [Develop](Develop#modules).
 - **Lens Blur** blurs the background (or foreground) from a depth map, with bokeh shapes and a focus range you pick on the photo. See [Lens Blur](Develop#lens-blur).
