@@ -177,6 +177,16 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **AVIF and JPEG XL** where macOS can write them, 8-bit and compressed TIFF, and **Limit file size**. See [The sheet](Export#the-sheet).
 - **DNG export** writes a DNG with the corrections baked in and the look left open, the full look baked in, or the original raw as a linear DNG. See [DNG export](Export#dng-export-render-to-dng).
 - **HDR Output** on export: a gain map in JPEG, HEIC and now AVIF, or with **Maximize compatibility** off a full 10-bit PQ HEIC or AVIF, up to each photo's HDR Limit. Formats this Mac can't write, such as JPEG XL on macOS 27.2, are shown greyed out with the reason. See [The sheet](Export#the-sheet).
+- **Borders and enlarged canvas** on export: a border in any colour, a canvas grown to 1:1, 4:5, 3:2, 16:9 or a ratio of your own, and an inner line. See [The sheet](Export#the-sheet).
+- **16-bit PNG** export. See [The sheet](Export#the-sheet).
+- **10-bit HEIC** for SDR exports. See [The sheet](Export#the-sheet).
+- **32-bit float TIFF** in linear light, and **greyscale TIFF** for black and white edits. See [The sheet](Export#the-sheet).
+- **OpenEXR** export, scene-linear in half or full float, where macOS can write it. See [The sheet](Export#the-sheet).
+- **PDF export**, one page per photo, fitted to the image or on A4, Letter or A3, with a margin and a caption from tokens. See [PDF export](Export#pdf-export).
+- **Sizes in centimetres and inches** on the export sizing row, turned into pixels at the resolution. See [The sheet](Export#the-sheet).
+- **Rendering intent on export** for Adobe RGB, ProPhoto and printer profiles. See [The sheet](Export#the-sheet).
+- **Overwrite if edit changed** re-exports only photos edited since their file was written. See [The sheet](Export#the-sheet).
+- **Keyword hierarchy and the Latent edit in exported files**, each with its own switch. See [The sheet](Export#the-sheet).
 - **Original + XMP sidecar** copies the raw with a sidecar other applications read. See [Exporting originals](Export#exporting-originals).
 - **Twenty-three more naming tokens** such as `{lens}`, `{iso}`, `{city}`, `{keywords}` and `{version}`, and **token modifiers** for fallbacks, letter case, character ranges and replacing. See [The sheet](Export#the-sheet).
 - **Tokens in the watermark text**, filled in for each photo. See [The sheet](Export#the-sheet).

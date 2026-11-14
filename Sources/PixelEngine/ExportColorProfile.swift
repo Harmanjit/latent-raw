@@ -25,6 +25,9 @@ public struct ExportColorProfile: Sendable, Hashable, Codable {
     public var name: String
     /// The ICC profile's bytes, for `.icc` only.
     public var iccData: Data?
+    /// The rendering intent chosen in the export sheet; nil, the default
+    /// (and what older presets decode to), is `defaultIntent(for:)`.
+    public var intent: RenderingIntent?
 
     public init(kind: Kind, name: String? = nil, iccData: Data? = nil) {
         self.kind = kind
@@ -77,7 +80,26 @@ public struct ExportColorProfile: Sendable, Hashable, Codable {
     /// Matrix spaces hold the render's colours with a plain clip at their
     /// edge; a printer or paper profile's table is made for perceptual
     /// mapping, which compresses the gamut instead, as Print does.
-    public var renderingIntent: CGColorRenderingIntent { kind == .icc ? .perceptual : .relativeColorimetric }
+    public var renderingIntent: CGColorRenderingIntent { Self.cgIntent(intent ?? Self.defaultIntent(for: kind)) }
+
+    /// What a conversion into `kind` used before the intent could be
+    /// chosen: perceptual for an ICC profile, relative colorimetric for the
+    /// built-in matrix spaces.
+    public static func defaultIntent(for kind: Kind) -> RenderingIntent {
+        kind == .icc ? .perceptual : .relativeColorimetric
+    }
+
+    /// Core Graphics' intent for one of ColorKit's, by name, so an intent
+    /// ColorKit adds later maps without this switch knowing it first.
+    static func cgIntent(_ intent: RenderingIntent) -> CGColorRenderingIntent {
+        switch intent.rawValue {
+        case "perceptual": .perceptual
+        case "relativeColorimetric": .relativeColorimetric
+        case "absoluteColorimetric": .absoluteColorimetric
+        case "saturation": .saturation
+        default: .defaultIntent
+        }
+    }
 
     /// The colour space a Rec. 2020 render is encoded in: Rec. 2020
     /// primaries with the sRGB curve, which is what the output stage

@@ -26,9 +26,11 @@ enum ExportStackPlacement: String, Codable, CaseIterable {
 extension ExportPreset {
     /// The file an export just wrote, for Add to This Catalog; nil when the
     /// option is off. Copies of the original file stay out: they are the
-    /// same photo again, which a catalog would only show twice.
+    /// same photo again, which a catalog would only show twice. PDFs and
+    /// OpenEXR files stay out too: a catalog can't open them.
     func exportedFile(_ url: URL, from record: ImageRecord) -> Library.ExportedFile? {
-        guard addToCatalog, fileKind != .original, let id = record.id else { return nil }
+        guard addToCatalog, fileKind != .original, fileKind != .pdf,
+              !(fileKind == .image && format == .exr), let id = record.id else { return nil }
         return Library.ExportedFile(url: url, sourceID: id, placement: stackWithOriginal.placement,
                                     copiesMetadata: copyMetadataToCatalog)
     }

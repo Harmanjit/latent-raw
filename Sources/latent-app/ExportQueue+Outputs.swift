@@ -33,9 +33,32 @@ struct ExportFileJob: Sendable {
     var sidecar: XMPSidecar.Fields?
     /// For a DNG: the scene-referred edit, the full look, or the original.
     var dngContent: DNGExportContent = .sceneReferred
+    /// For a PDF: the page, the caption and the size to render at.
+    var pdf: ExportPDFJob?
 
     func run(gpu: GPUContext) async throws -> ExportFileResult {
         switch kind {
+        case .image where request.settings.format == .exr:
+            // OpenEXR is scene-linear, rendered as a DNG's pixels are.
+            let rendered = try await ExportWorker.renderSceneLinear(
+                sourceURL: request.sourceURL, editStackJSON: request.editStackJSON,
+                userRotation: request.userRotation, gpu: gpu, content: .sceneReferred)
+            let size = try Exporter.writeEXR(linearRec2020: rendered.texture, commandQueue: gpu.commandQueue,
+                                             settings: request.settings, to: request.destinationURL,
+                                             replacingExisting: request.replacesExisting)
+            return ExportFileResult(pixelCount: size.width * size.height,
+                                    maskSubstitutions: rendered.maskSubstitutions)
+        case .pdf:
+            let job = pdf ?? ExportPDFJob()
+            let image = try await ExportWorker.renderImage(
+                ExportWorker.ImageRequest(sourceURL: request.sourceURL, editStackJSON: request.editStackJSON,
+                                          userRotation: request.userRotation, colorSpace: request.colorSpace,
+                                          maxLongEdge: job.maxLongEdge, bitsPerComponent: 8),
+                gpu: gpu)
+            try Exporter.writePDF(image.cgImage, options: job.options, caption: job.caption, ppi: job.ppi,
+                                  to: request.destinationURL, replacingExisting: request.replacesExisting)
+            return ExportFileResult(pixelCount: image.cgImage.width * image.cgImage.height,
+                                    maskSubstitutions: image.maskSubstitutions)
         case .image:
             let outcome = try await ExportWorker.export(request, gpu: gpu)
             return ExportFileResult(pixelCount: outcome.pixelWidth * outcome.pixelHeight,

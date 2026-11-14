@@ -67,9 +67,10 @@ public struct ExportBatchPlan: Sendable {
         switch (output.action, item) {
         case (.write, .some), (.replace, .some(.folder)):
             switch collision {
-            case .skip where item == .file: output.action = .skip
+            // A file that appeared since planning is newer than any edit.
+            case .skip where item == .file, .replaceIfChanged where item == .file: output.action = .skip
             case .replace where item == .file: output.action = .replace
-            case .replace, .skip:
+            case .replace, .skip, .replaceIfChanged:
                 output.action = .fail(reason: "a folder named “\(output.url.lastPathComponent)” is in the way")
             case .addNumber:
                 let folderPath = folder.standardizedFileURL.path
@@ -155,9 +156,21 @@ public enum ExportBatchPlanner {
         public var item: @Sendable (URL) -> Item?
         /// Whether "IMG.JPG" and "img.jpg" are different names in this folder.
         public var isCaseSensitive: @Sendable (URL) -> Bool
+        /// When the file at a path was last modified, for Overwrite if
+        /// edit changed; nil when it can't be told.
+        public var modificationDate: @Sendable (URL) -> Date?
 
-        public init(item: @escaping @Sendable (URL) -> Item?, isCaseSensitive: @escaping @Sendable (URL) -> Bool) {
-            self.item = item; self.isCaseSensitive = isCaseSensitive
+        public init(item: @escaping @Sendable (URL) -> Item?, isCaseSensitive: @escaping @Sendable (URL) -> Bool,
+                    modificationDate: @escaping @Sendable (URL) -> Date? = Probe.fileModificationDate) {
+            self.item = item; self.isCaseSensitive = isCaseSensitive; self.modificationDate = modificationDate
+        }
+
+        /// The file's modification time, read with `stat`.
+        public static let fileModificationDate: @Sendable (URL) -> Date? = { url in
+            var info = stat()
+            guard stat(url.path, &info) == 0 else { return nil }
+            return Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)
+                        + TimeInterval(info.st_mtimespec.tv_nsec) / 1_000_000_000)
         }
 
         public static let system = Probe(
@@ -260,6 +273,13 @@ public enum ExportBatchPlanner {
                     action = item == .folder ? .fail(reason: "a folder named “\(candidate)” is in the way") : .replace
                 case .skip:
                     action = .skip
+                case .replaceIfChanged:
+                    if item == .folder {
+                        action = .fail(reason: "a folder named “\(candidate)” is in the way")
+                    } else {
+                        let existing = probe.modificationDate(folder.appendingPathComponent(candidate))
+                        action = ExportBatchPlanner.editChanged(record, since: existing) ? .replace : .skip
+                    }
                 }
             }
             guard let final = chosen else {
@@ -276,6 +296,18 @@ public enum ExportBatchPlanner {
         }
         return ExportBatchPlan(outputs: outputs, destination: destination, unknownTokens: namer.unknownTokens, collision: options.collision,
                                claimed: claimed, caseSensitive: caseSensitive)
+    }
+
+    /// Whether `record` changed after a file written at `fileDate`: its
+    /// sidecar (where every edit is saved) or the photo itself is newer.
+    /// With no date for the file, it counts as changed, so the export is
+    /// redone rather than silently skipped.
+    public static func editChanged(_ record: ImageRecord, since fileDate: Date?) -> Bool {
+        guard let fileDate else { return true }
+        let edited = max(record.sidecarMtime ?? 0, record.mtime)
+        // Milliseconds, as the catalog stores them; a file system that keeps
+        // whole seconds can't tell an edit made in the same second.
+        return edited > Int64((fileDate.timeIntervalSince1970 * 1000).rounded())
     }
 
     /// Names as the file system compares them, within their folder (a
