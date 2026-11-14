@@ -29,7 +29,8 @@ extension ExportPreset {
     /// same photo again, which a catalog would only show twice.
     func exportedFile(_ url: URL, from record: ImageRecord) -> Library.ExportedFile? {
         guard addToCatalog, fileKind != .original, let id = record.id else { return nil }
-        return Library.ExportedFile(url: url, sourceID: id, placement: stackWithOriginal.placement)
+        return Library.ExportedFile(url: url, sourceID: id, placement: stackWithOriginal.placement,
+                                    copiesMetadata: copyMetadataToCatalog)
     }
 }
 
@@ -41,6 +42,8 @@ enum ExportToCatalog {
     static func add(_ files: [Library.ExportedFile], to library: Library) {
         library.perform("Adding exported files to the catalog") {
             let report = try await library.addExportedFiles(files)
+            let copying = files.filter(\.copiesMetadata).map { (url: $0.url, sourceID: $0.sourceID) }
+            if report.added > 0, !copying.isEmpty { try await library.copyMetadata(toExports: copying) }
             if report.outside > 0 {
                 let what = report.outside == 1 ? "1 exported file isn’t" : "\(report.outside) exported files aren’t"
                 library.lastError = "\(what) in the open folder (or in a subfolder it includes), so it wasn’t "
@@ -59,19 +62,25 @@ struct ExportCatalogSection: View {
     @Binding var preset: ExportPreset
 
     var body: some View {
-        HStack {
-            Toggle("Add to this catalog", isOn: $preset.addToCatalog)
-                .disabled(preset.fileKind == .original)
-                .help("Indexes the exported files as soon as they are written, when they land in the open folder "
-                      + "or a subfolder it includes, and selects them.")
-            Picker("Stack", selection: $preset.stackWithOriginal) {
-                ForEach(ExportStackPlacement.allCases, id: \.self) { Text($0.title).tag($0) }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Toggle("Add to this catalog", isOn: $preset.addToCatalog)
+                    .disabled(preset.fileKind == .original)
+                    .help("Indexes the exported files as soon as they are written, when they land in the open folder "
+                          + "or a subfolder it includes, and selects them.")
+                Picker("Stack", selection: $preset.stackWithOriginal) {
+                    ForEach(ExportStackPlacement.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .frame(width: 220)
+                .disabled(!preset.addToCatalog || preset.fileKind == .original)
+                .accessibilityLabel("Add to stack with original")
+                .help("Stacks each exported file with the photo it came from, just above or below it.")
+                Spacer()
             }
-            .frame(width: 220)
-            .disabled(!preset.addToCatalog || preset.fileKind == .original)
-            .accessibilityLabel("Add to stack with original")
-            .help("Stacks each exported file with the photo it came from, just above or below it.")
-            Spacer()
+            Toggle("Copy rating, label and keywords from the original", isOn: $preset.copyMetadataToCatalog)
+                .disabled(!preset.addToCatalog || preset.fileKind == .original)
+                .help("Each exported file added to the catalog gets the stars, colour label, keywords, title, caption "
+                      + "and the other descriptive fields of the photo it was exported from.")
         }
     }
 }

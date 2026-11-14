@@ -25,9 +25,34 @@ extension ExportPreset {
             includeLocation: includeMetadata && includeLocation,
             replacesExisting: collision == .replace)
         if includeMetadata { request.descriptive = record.exportDescription }
+        if let mark = request.settings.watermark {
+            request.settings.watermark = Self.watermark(mark, filledFor: record, keywords: keywords,
+                                                        catalogName: root.lastPathComponent)
+        }
         request.sizing = sizing
         request.sizeLimitBytes = sizeLimitBytes
         request.metadataLevel = metadataLevel
         return request
+    }
+
+    /// The watermark with the naming tokens ({lens}, {iso}, {title},
+    /// {date:yyyy}, with their modifiers; ExportNaming) filled in for one
+    /// photo. {year} and {name} are left for the export worker, which has
+    /// always filled them, so a watermark using them comes out as before.
+    static func watermark(_ mark: ExportWatermark, filledFor record: ImageRecord, keywords: [String],
+                          catalogName: String) -> ExportWatermark {
+        guard mark.style == .text, mark.text.contains("{") else { return mark }
+        let kept = [("{year}", "\u{E010}"), ("{name}", "\u{E011}")]
+        var template = mark.text
+        for (token, stand) in kept {
+            template = template.replacingOccurrences(of: token, with: stand, options: .caseInsensitive)
+        }
+        var context = ExportNaming.Context(index: 0, catalogName: catalogName)
+        context.keywords = keywords
+        var text = ExportNaming.text(template: template, record: record, context: context)
+        for (token, stand) in kept { text = text.replacingOccurrences(of: stand, with: token) }
+        var filled = mark
+        filled.text = text
+        return filled
     }
 }
