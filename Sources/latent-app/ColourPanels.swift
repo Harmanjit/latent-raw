@@ -39,7 +39,7 @@ struct ColourSections: View {
                 .disabled(!model.hasImage)
                 .padding(.top, 8)
         } label: {
-            ColourSectionLabel(title: "Colour Grading")
+            HStack { ColourSectionLabel(title: "Colour Grading"); PanelPresetsMenu(model: model, groups: [.splitToning], panel: "Colour Grading") }
         }
 
         DisclosureGroup(isExpanded: $calibrationExpanded) {
@@ -50,7 +50,7 @@ struct ColourSections: View {
             .disabled(!model.hasImage)
             .padding(.top, 8)
         } label: {
-            ColourSectionLabel(title: "Calibration")
+            HStack { ColourSectionLabel(title: "Calibration"); PanelPresetsMenu(model: model, groups: [.calibration], panel: "Calibration") }
         }
     }
 

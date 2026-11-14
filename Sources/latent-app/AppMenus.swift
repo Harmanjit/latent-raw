@@ -228,6 +228,7 @@ struct CommandState: Equatable {
         case .select, .refinePhotos: mode == .library && hasVisibleImages
         case .stack(let stack): isEnabled(stack)
         case .view(let command): isEnabled(command)
+        case .applyPreset: hasImage || selectionCount > 0
         }
     }
 
@@ -469,6 +470,7 @@ struct LatentCommands: Commands {
             // No key and no window state needed: it only copies files into
             // Latent's profile folder (EditorModel+Profiles.swift).
             Button("Import Camera Profile…") { CameraProfileImport.run() }
+            ApplyPresetMenu(catalog: PresetCatalog.shared) { AnyView(item($0, $1)) }
             Divider()
             toolToggle("Crop & Straighten", .crop, isOn: state.cropToolActive)
             TransformMenu { AnyView(item($0, $1)) }

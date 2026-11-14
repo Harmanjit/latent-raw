@@ -31,6 +31,9 @@ struct LibraryPanel: View {
     var exportsOpenImage = true
     /// A colour label chosen in the panel (nil removes it).
     var onLabel: (ColorLabel?) -> Void = { _ in }
+    /// Overwrite (Option) and Apply as New Virtual Copy (PresetApplyMode.swift).
+    var onApplyPresetMode: (Preset, PresetApplyMode) -> Void = { _, _ in }
+    @ObservedObject private var presetCatalog = PresetCatalog.shared
 
     /// The selected photo's merge recipe, when it is one Photo Merge made;
     /// read from the catalog when the selection settles.
@@ -421,8 +424,9 @@ struct LibraryPanel: View {
             // Presets and pasted settings apply to the whole selection.
             HStack {
                 Menu("Apply preset") {
-                    ForEach(presets) { preset in
-                        Button(preset.name) { onApplyPreset(preset) }
+                    PresetMenuItems(presets: presets, favourites: presets.filter { presetCatalog.favourites.contains($0.name) },
+                                    virtualCopies: true) { preset, mode in
+                        if mode == .append { onApplyPreset(preset) } else { onApplyPresetMode(preset, mode) }
                     }
                 }
                 .menuStyle(.borderlessButton).fixedSize()

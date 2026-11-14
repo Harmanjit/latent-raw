@@ -18,6 +18,8 @@ struct GridActions {
     var canPasteSettings: () -> Bool = { false }
     var presets: () -> [Preset] = { [] }
     var applyPreset: (Preset) -> Void = { _ in }
+    /// Overwrite (Option) and Apply as New Virtual Copy (PresetApplyMode.swift).
+    var applyPresetMode: (Preset, PresetApplyMode) -> Void = { _, _ in }
     var export: () -> Void = {}
     var canExport: () -> Bool = { true }
     var rename: () -> Void = {}
@@ -77,8 +79,11 @@ enum GridContextMenu {
         menu.addItem(ClosureMenuItem("Paste Settings", enabled: count > 0 && actions.canPasteSettings(),
                                      actions.pasteSettings))
         let presets = actions.presets()
-        let presetItem = submenu("Apply Preset", presets.map { preset in
-            ClosureMenuItem(preset.name, enabled: count > 0) { actions.applyPreset(preset) }
+        let presetItem = submenu("Apply Preset", PresetNSMenu.items(
+            presets: presets, favourites: presets.filter { PresetCatalog.shared.favourites.contains($0.name) },
+            enabled: count > 0, virtualCopies: actions.canRun(.createVirtualCopy)
+        ) { preset, mode in
+            if mode == .append { actions.applyPreset(preset) } else { actions.applyPresetMode(preset, mode) }
         })
         presetItem.isEnabled = !presets.isEmpty && count > 0
         menu.addItem(presetItem)

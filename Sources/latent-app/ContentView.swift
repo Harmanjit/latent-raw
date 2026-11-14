@@ -361,7 +361,8 @@ struct ContentView: View {
                      onApplyPreset: { applyPresetToSelection($0) },
                      onPaste: { pasteSettings() },
                      exportsOpenImage: mode != .survey,
-                     onLabel: { chooseLabel($0) })
+                     onLabel: { chooseLabel($0) },
+                     onApplyPresetMode: applyPreset)
     }
 
     // MARK: - Library wiring
@@ -602,7 +603,7 @@ struct ContentView: View {
             rate: rate, flag: flag, rotate: { rotate(by: $0) },
             copySettings: copySettings, pasteSettings: pasteSettings,
             canPasteSettings: { EditorModel.clipboardStack() != nil },
-            presets: { model.presets }, applyPreset: applyPresetToSelection,
+            presets: { model.presets }, applyPreset: applyPresetToSelection, applyPresetMode: applyPreset,
             export: { showingExportSheet = true },
             // Not while a merge or dust job holds the GPU slot either: the
             // queue would refuse to start.
@@ -1324,6 +1325,9 @@ struct ContentView: View {
             pasteSettings()
         case .pasteFromPrevious:
             pasteFromPrevious()
+        case .applyPreset(let name):
+            if let preset = model.presets.first(where: { $0.name == name }) { applyPresetToSelection(preset) }
+            else { model.status = "There is no preset called “\(name)” any more" }
         case .rotate(let quarterTurns):
             rotate(by: quarterTurns)
         case .geometry(.resetOrientation):
@@ -1752,6 +1756,13 @@ struct ContentView: View {
         }
     }
 
+    /// A preset with a mode: Append as `applyPresetToSelection`, Overwrite
+    /// or as a new virtual copy through `PresetApplier`.
+    private func applyPreset(_ preset: Preset, _ applyMode: PresetApplyMode) {
+        PresetApplier(library: library, model: model, mode: mode, open: { load($0) },
+                      append: { applyPresetToSelection($0) }).apply(preset, mode: applyMode)
+    }
+
     private func applyPresetToSelection(_ preset: Preset) {
         let amount = PresetAmountSession.amount
         let editorBase = SettingsTarget.choose(mode: mode, editorHasImage: model.hasImage) == .editor
@@ -1813,7 +1824,7 @@ struct ContentView: View {
                 DisclosureGroup(isExpanded: $toneExpanded) {
                     toneSection.padding(.top, 8)
                 } label: {
-                    disclosureLabel("Tone")
+                    HStack { disclosureLabel("Tone"); PanelPresetsMenu(model: model, groups: [.tone], panel: "Tone") }
                 }
 
                 DisclosureGroup(isExpanded: $presenceExpanded) {
@@ -1880,7 +1891,7 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
-                    PresetsPanel(model: model, onApply: { applyPresetToSelection($0) })
+                    PresetsPanel(model: model, onApply: { applyPresetToSelection($0) }, onApplyMode: applyPreset)
                         .padding(.top, 8)
                 } label: {
                     disclosureLabel("Presets & Clipboard")
@@ -1909,7 +1920,7 @@ struct ContentView: View {
                     ToneCurveControls(model: model)
                         .padding(.top, 8)
                 } label: {
-                    disclosureLabel("Tone Curve")
+                    HStack { disclosureLabel("Tone Curve"); PanelPresetsMenu(model: model, groups: [.toneCurve], panel: "Tone Curve") }
                 }
 
                 DisclosureGroup {
@@ -1920,7 +1931,7 @@ struct ContentView: View {
                     }
                     .padding(.top, 8)
                 } label: {
-                    disclosureLabel("HSL / Colour")
+                    HStack { disclosureLabel("HSL / Colour"); PanelPresetsMenu(model: model, groups: [.colour], panel: "HSL / Colour") }
                 }
 
                 // Black & White, Point Colour, Colour Grading (which took
@@ -1931,21 +1942,21 @@ struct ContentView: View {
                     LensCorrectionsPanel(model: model)
                         .padding(.top, 8)
                 } label: {
-                    disclosureLabel("Lens Corrections")
+                    HStack { disclosureLabel("Lens Corrections"); PanelPresetsMenu(model: model, groups: [.lens], panel: "Lens Corrections") }
                 }
 
                 DisclosureGroup {
                     DetailPanel(model: model)
                         .padding(.top, 8)
                 } label: {
-                    disclosureLabel("Detail")
+                    HStack { disclosureLabel("Detail"); PanelPresetsMenu(model: model, groups: [.detail], panel: "Detail") }
                 }
 
                 DisclosureGroup {
                     EffectsPanel(model: model)
                         .padding(.top, 8)
                 } label: {
-                    disclosureLabel("Effects")
+                    HStack { disclosureLabel("Effects"); PanelPresetsMenu(model: model, groups: [.effects], panel: "Effects") }
                 }
 
                 DisclosureGroup {

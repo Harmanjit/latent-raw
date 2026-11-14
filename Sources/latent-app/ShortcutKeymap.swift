@@ -82,6 +82,11 @@ final class Keymap: @unchecked Sendable {
         }
     }
 
+    /// Forgets the table worked out, for when the presets change.
+    func invalidate() {
+        lock.withLock { cachedEffective = nil }
+    }
+
     /// Replaces every override, dropping any that only restate a default,
     /// and saves them.
     func setOverrides(_ overrides: [String: ShortcutOverride]) {
@@ -102,7 +107,13 @@ final class Keymap: @unchecked Sendable {
     /// Every command the Keyboard tab lists, `Shortcuts.all`'s first and in
     /// its order. A command added to the table without an entry below
     /// still gets a row (titled by its case), so it can be rebound.
-    static let commands: [ShortcutCommandInfo] = {
+    /// Then one row per user preset (PresetShortcuts.swift).
+    static var commands: [ShortcutCommandInfo] {
+        staticCommands + PresetShortcuts.infos(overrides: Keymap.shared.overrides)
+    }
+
+    /// The fixed commands, without the presets.
+    static let staticCommands: [ShortcutCommandInfo] = {
         var known = Dictionary(catalog.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         var result: [ShortcutCommandInfo] = []
         for shortcut in Shortcuts.all {
@@ -131,7 +142,7 @@ final class Keymap: @unchecked Sendable {
     /// keep their default scope; a key given to a command with no default
     /// takes the command's own.
     static func effective(overrides: [String: ShortcutOverride]) -> [Shortcut] {
-        commands.compactMap { info in
+        (staticCommands + PresetShortcuts.infos(overrides: overrides)).compactMap { info in
             let fallback = Shortcuts.defaultShortcut(for: info.command)
             switch overrides[info.id] {
             case nil: return fallback
@@ -146,6 +157,12 @@ final class Keymap: @unchecked Sendable {
     /// than its default, or a default taken away.
     static func normalised(_ overrides: [String: ShortcutOverride]) -> [String: ShortcutOverride] {
         overrides.filter { id, override in
+            // A preset's keys are kept even while it is missing, so they
+            // come back if it does; it has no default to take away.
+            if PresetShortcuts.isPresetID(id) {
+                if case .keys = override { return true }
+                return false
+            }
             guard let info = info(id: id) else { return false }
             let fallback = Shortcuts.defaultShortcut(for: info.command)
             switch override {
