@@ -15,6 +15,8 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     case profile
     case effects
     case lensBlur
+    /// The tone equalizer's bands and mask settings (ToneEqualizer.swift).
+    case toneEqualizer
 
     public var id: String { rawValue }
 
@@ -41,6 +43,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
         case .profile:      return "Profile"
         case .effects:      return "Effects (post-crop vignetting, grain)"
         case .lensBlur:     return "Lens Blur (amount, bokeh, focus range)"
+        case .toneEqualizer: return "Tone Equalizer"
         }
     }
 
@@ -48,7 +51,7 @@ public enum EditGroup: String, CaseIterable, Codable, Sendable, Identifiable {
     /// masks (drawn for another frame) and not the lens correction
     /// switches (a property of the lens, already right per image).
     public static let lookGroups: Set<EditGroup> = [.whiteBalance, .tone, .presence, .toneCurve, .colour, .splitToning, .calibration, .detail,
-                                                    .profile, .effects]
+                                                    .profile, .effects, .toneEqualizer]
 }
 
 extension EditStack {
@@ -83,11 +86,16 @@ extension EditStack {
                 result.modules.colorgrading = other.modules.colorgrading
             case .calibration:
                 result.modules.calibration = other.modules.calibration
+                result.modules.adaptation = other.modules.adaptation
+                result.modules.channelmixer = other.modules.channelmixer
+                result.modules.gamutcompression = other.modules.gamutcompression
+                result.modules.purity = other.modules.purity
             case .detail:
                 result.modules.denoise = other.modules.denoise
                 result.modules.aidenoise = other.modules.aidenoise
                 result.modules.sharpen = other.modules.sharpen
                 result.modules.demosaic = other.modules.demosaic
+                result.modules.hotpixels = other.modules.hotpixels
             case .lens:
                 result.modules.lens = other.modules.lens
                 result.modules.defringe = other.modules.defringe
@@ -122,6 +130,8 @@ extension EditStack {
                 // The sliders and the focus range travel; the depth map is
                 // made again for the photo they land on.
                 result.modules.lensblur = other.modules.lensblur
+            case .toneEqualizer:
+                result.modules.toneEqualizer = other.modules.toneEqualizer
             }
         }
         result.modules.perspective = Self.mergedPerspective(modules.perspective, other.modules.perspective,
@@ -161,8 +171,10 @@ extension EditStack {
             g.insert(.colour)
         }
         if m.splittoning != nil || m.colorgrading != nil { g.insert(.splitToning) }
-        if m.calibration != nil { g.insert(.calibration) }
-        if m.denoise != nil || m.sharpen != nil || m.demosaic != nil || m.aidenoise != nil { g.insert(.detail) }
+        if m.calibration != nil || m.adaptation != nil || m.channelmixer != nil || m.gamutcompression != nil
+            || m.purity != nil { g.insert(.calibration) }
+        if m.denoise != nil || m.sharpen != nil || m.demosaic != nil || m.aidenoise != nil
+            || m.hotpixels != nil { g.insert(.detail) }
         if m.lens != nil || m.defringe != nil { g.insert(.lens) }
         if m.locals != nil { g.insert(.locals) }
         if m.crop != nil { g.insert(.crop) }
@@ -173,6 +185,7 @@ extension EditStack {
         if m.profile != nil { g.insert(.profile) }
         if m.vignette != nil || m.grain != nil { g.insert(.effects) }
         if m.lensblur != nil { g.insert(.lensBlur) }
+        if m.toneEqualizer != nil { g.insert(.toneEqualizer) }
         return g
     }
 }
@@ -183,6 +196,9 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
     public var groups: Set<EditGroup>
     public var stack: EditStack
     public var isBuiltIn: Bool = false
+    /// An optional note shown in Manage Presets. Absent when empty, so a
+    /// preset without one encodes exactly as before it existed.
+    public var details: String?
 
     public var id: String { name }
 
@@ -193,7 +209,10 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
         self.isBuiltIn = isBuiltIn
     }
 
-    private enum CodingKeys: String, CodingKey { case name, groups, stack, isBuiltIn, groupsVersion }
+    private enum CodingKeys: String, CodingKey {
+        case name, groups, stack, isBuiltIn, groupsVersion
+        case details = "description"
+    }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -202,6 +221,7 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
         try c.encode(stack, forKey: .stack)
         try c.encode(isBuiltIn, forKey: .isBuiltIn)
         try c.encode(2, forKey: .groupsVersion)
+        if let details, !details.isEmpty { try c.encode(details, forKey: .details) }
     }
 
     /// `groups` decodes leniently: a group this build doesn't know (a
@@ -218,6 +238,8 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
         groups = split >= 2 ? known : EditGroup.upgradingLegacy(known)
         stack = try c.decode(EditStack.self, forKey: .stack)
         isBuiltIn = try c.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
+        // Lenient: a note of the wrong type is dropped, never the preset.
+        details = ((try? c.decodeIfPresent(String.self, forKey: .details)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// A few starting points. Deliberately mild: a preset that a user
@@ -254,7 +276,7 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
                 p.denoiseLuminance = 0.15; p.denoiseColor = 0.4
                 p.hsl.saturation[3] = 0.15; p.hsl.saturation[5] = 0.15   // green, blue
             },
-        ]
+        ] + rangeCompressionBuiltIns
     }
 }
 

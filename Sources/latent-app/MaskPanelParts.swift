@@ -78,6 +78,8 @@ struct LocalSliderGroups: View {
                                    help: "Smooths luminance noise in flat areas inside the mask")
                     LocalSliderRow(title: "Defringe", value: $local.defringe, range: 0...1, format: "%.2f",
                                    help: "Removes purple and green fringes on edges inside the mask")
+                    LocalSliderRow(title: "Smooth", value: $local.smooth, range: 0...1, format: "%.2f",
+                                   help: "Smooths the picture inside the mask while keeping its edges, such as skin or sky")
                 }
                 .padding(.top, 4)
             } label: { Text("Detail").font(.caption.weight(.semibold)) }
@@ -86,7 +88,9 @@ struct LocalSliderGroups: View {
     }
 
     private var effectsUsed: Bool { local.texture != 0 || local.clarity != 0 || local.dehaze != 0 }
-    private var detailUsed: Bool { local.sharpness != 0 || local.noise != 0 || local.defringe != 0 }
+    private var detailUsed: Bool {
+        local.sharpness != 0 || local.noise != 0 || local.defringe != 0 || local.smooth != 0
+    }
 
     private func group(_ title: String) -> some View {
         Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -108,14 +112,16 @@ struct MaskComponentList: View {
                 Text("Components").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
-                ForEach(MaskCombineMode.allCases, id: \.self) { mode in
+                ForEach(MaskCombineMode.addButtons, id: \.self) { mode in
                     addMenu(mode)
                 }
             }
             row(id: nil, title: local.shape.componentName, mode: nil, invert: local.invert)
-            ForEach(local.components) { component in
-                row(id: component.id, title: component.displayName, mode: component.mode, invert: component.invert,
-                    showsChannel: component.showsChannel)
+            ForEach(Array(local.components.enumerated()), id: \.element.id) { offset, component in
+                row(id: component.id, title: title(of: component), mode: component.mode, invert: component.invert,
+                    linked: component.linkedMaskID != nil, showsChannel: component.showsChannel)
+                    .modifier(MaskComponentReorder(model: model, index: index, id: component.id, offset: offset,
+                                                   count: local.components.count))
             }
         }
     }
@@ -141,6 +147,8 @@ struct MaskComponentList: View {
                 Button("Click to Select") { model.addMaskComponent(.clickToSelect(prompted), mode: mode) }
                 Button("Select Objects (Box)") { model.addMaskComponent(.objects(prompted), mode: mode) }
             }
+            Divider()
+            linkMenu(mode)
         } label: {
             Image(systemName: mode == .add ? "plus.circle" : mode == .subtract ? "minus.circle" : "circle.circle")
         }
@@ -152,7 +160,29 @@ struct MaskComponentList: View {
         .accessibilityLabel("\(mode.displayName) a component")
     }
 
-    private func row(id: UUID?, title: String, mode: MaskCombineMode?, invert: Bool,
+    /// Use Mask: another mask of this edit, as it is now (MaskLinks.swift).
+    /// Masks that would nest links, loop back or overflow are disabled.
+    private func linkMenu(_ mode: MaskCombineMode) -> some View {
+        let p = model.parameters
+        return Menu("Use Mask") {
+            ForEach(Array(p.locals.enumerated()), id: \.element.id) { offset, other in
+                if offset != index {
+                    Button(other.name) { model.addLinkedMaskComponent(other.id, mode: mode) }
+                        .disabled(!p.canLink(mask: other.id, intoLocal: index))
+                }
+            }
+        }
+        .disabled(p.locals.count < 2)
+        .help("Combine another mask of this photo, as it is now; editing that mask changes this one too")
+    }
+
+    /// A linked component shows the mask it uses.
+    private func title(of component: MaskComponent) -> String {
+        guard let id = component.linkedMaskID else { return component.displayName }
+        return model.parameters.linkedMaskName(id)
+    }
+
+    private func row(id: UUID?, title: String, mode: MaskCombineMode?, invert: Bool, linked: Bool = false,
                      showsChannel: Bool = false) -> some View {
         let selected = model.selectedMaskComponentID == id
         return HStack(spacing: 6) {
@@ -169,6 +199,11 @@ struct MaskComponentList: View {
                 .accessibilityLabel("Combine mode, \(mode.displayName)")
             } else {
                 Text("Shape").font(.caption2).foregroundStyle(.secondary)
+            }
+            if linked {
+                Image(systemName: "link").font(.caption2).foregroundStyle(.secondary)
+                    .help("Uses another mask: editing that mask changes this one")
+                    .accessibilityLabel("Linked mask")
             }
             Text(title).font(.caption)
             Spacer()
@@ -252,7 +287,7 @@ struct MaskRangeComponentControls: View {
             }
         case .channel(let range):
             ChannelRangeControls(model: model, range: range, update: { update(.channel($0)) })
-        case .shape:
+        case .shape, .mask:
             EmptyView()
         }
     }

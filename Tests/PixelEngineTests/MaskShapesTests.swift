@@ -80,8 +80,32 @@ final class MaskShapesTests: XCTestCase {
         let lum = MaskComponentGPU(MaskComponent(mode: .add, source: .luminance(LuminanceRange(low: 0.2, high: 0.6, feather: 0.1))), slice: -1)
         XCTAssertEqual(lum.geometry0, SIMD4(0.2, 0.6, 0.1, 0.1))
         let ch = MaskComponentGPU(MaskComponent(mode: .add, source: .channel(ChannelRange(channel: .labB))), slice: -1)
-        XCTAssertEqual(ch.info.x, 7)
+        XCTAssertEqual(ch.info.x, 8, "7 is a linked mask's hue range")
+        XCTAssertEqual(ch.info.x, MaskComponentGPU.channelRangeType)
+        XCTAssertNotEqual(MaskComponentGPU.channelRangeType, MaskLinks.hueRangeType)
         XCTAssertEqual(ch.extra.x, 6)
+    }
+
+    func testChannelRangeAfterALinkedMaskPacksAndShowsItsOwnEntry() {
+        var target = LocalAdjustment(name: "Sky", shape: .whole)
+        target.hueRange = HueRange()
+        var user = LocalAdjustment(name: "User", shape: .whole)
+        user.components = [MaskComponent(mode: .add, source: .mask(id: target.id)),
+                           MaskComponent(mode: .sum, source: .channel(ChannelRange(channel: .green)))]
+        let plan = LocalsGPUPlan(locals: [target, user], slices: [:])
+        let start = Int(plan.locals[1].info2.x)
+        XCTAssertEqual(plan.locals[1].info2.y, 3, "the linked group (shape, hue range), then the channel range")
+        XCTAssertEqual(plan.components[start + 1].info.x, MaskLinks.hueRangeType)
+        XCTAssertEqual(plan.components[start + 2].info.x, MaskComponentGPU.channelRangeType)
+        XCTAssertEqual(plan.components[start + 2].info.w, MaskCombineMode.sum.gpuCode)
+        XCTAssertEqual(plan.componentOffsets[1], [0, 2])
+
+        var output = RenderOutput.file(.sRGB)
+        output.maskOverlay = 1
+        output.maskOverlayStyle.channelComponent = 1
+        XCTAssertEqual(plan.channelViewFlag(output), UInt32(start + 2 + 1), "Show Channel finds the channel range past the group")
+        output.maskOverlayStyle.channelComponent = 2
+        XCTAssertEqual(plan.channelViewFlag(output), 0)
     }
 
     // MARK: - CPU mirrors

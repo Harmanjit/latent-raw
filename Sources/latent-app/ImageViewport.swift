@@ -29,6 +29,8 @@ struct ImageViewport: View {
     /// fractions of it, the pane under it showing through the rest.
     var visibleFraction: CGRect? = nil
     @ObservedObject private var overlay = LoupeOverlaySettings.shared
+    /// Focus peaking, raw clipping, the clipping options and colour assessment.
+    @ObservedObject private var viewing = ViewingSettings.shared
 
     /// A Develop tool owns clicks and drags on the image, so there's no
     /// swipe to another image and no magnifier while one is armed.
@@ -39,11 +41,12 @@ struct ImageViewport: View {
     var body: some View {
         ZStack {
             if let visibleFraction {
-                prefs.surroundColor.mask(FractionMask(fraction: visibleFraction))
+                ColourAssessment.surroundColor(viewing, prefs).mask(FractionMask(fraction: visibleFraction))
             } else {
-                prefs.surroundColor
+                ColourAssessment.surroundColor(viewing, prefs)
             }
 
+            Group {
             if let device = model.device, let presenter = model.presenter,
                let preview = model.preview {
                 MetalImageView(preview: preview,
@@ -54,7 +57,7 @@ struct ImageViewport: View {
                                 device: device,
                                 onResize: { model.viewportDidResize(to: $0) },
                                 onHeadroomChange: { model.displayHeadroomDidChange(to: $0) },
-                                backgroundLevel: prefs.surroundLinear,
+                                backgroundLevel: ColourAssessment.surroundLinear(viewing, prefs),
                                 onZoom: { factor, point in
                                     model.zoom(by: factor, about: point)
                                 },
@@ -77,7 +80,12 @@ struct ImageViewport: View {
                                 onPointer: allowsTools ? { model.pointerMoved(to: $0) } : nil,
                                 mirrored: followsMirrorImageMode && mirrorImageMode.isOn,
                                 visibleFraction: visibleFraction,
-                                onToolScroll: allowsTools ? { model.maskToolScrolled(atScreen: $0, delta: $1, shift: $2) } : nil)
+                                overlays: viewing.overlays(developTools: allowsTools),
+                                onOptionClick: allowsTools && !toolArmed && !model.defringePickerActive
+                                    ? { model.pinColourSample(atScreen: $0) } : nil,
+                                onToolScroll: allowsTools && model.toneTool == .toneEqualizer
+                                    ? { model.toneEqualizerScrolled(by: $0, at: $1, gestureEnded: $2) } : nil,
+                                onMaskScroll: allowsTools ? { model.maskToolScrolled(atScreen: $0, delta: $1, shift: $2) } : nil)
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isImage)
                     .accessibilityLabel(model.imageTitle ?? "Image")
@@ -110,6 +118,9 @@ struct ImageViewport: View {
                 if allowsTools && model.showsMaskShapeOverlay {
                     MaskShapeOverlay(model: model)
                 }
+                if allowsTools {
+                    ColourSampleMarkers(model: model, samples: model.colourSamples)
+                }
                 if showsLoupeOverlay && overlay.isShown {
                     LoupeOverlayView(model: model)
                     LoupeOverlayControls()
@@ -124,6 +135,10 @@ struct ImageViewport: View {
                     }
                 }
             }
+            }
+            .modifier(ColourAssessmentInset(settings: viewing, imageRect: { inner in
+                ColourAssessment.imageRect(model: model, innerSize: inner)
+            }))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -146,6 +161,8 @@ struct FractionMask: View {
 struct ImageCaption: View {
     let record: ImageRecord?
     var title: String? = nil
+    /// Settings › Library's info line (ImageCaptionTemplate).
+    @AppStorage(ImageCaptionTemplate.templateKey) private var template = ImageCaptionTemplate.defaultTemplate
 
     var body: some View {
         HStack(spacing: 10) {
@@ -157,8 +174,13 @@ struct ImageCaption: View {
                     .textCase(.uppercase)
             }
             if let record {
-                Text(record.fileName).font(.caption).lineLimit(1).truncationMode(.middle)
-                Text(record.exposureLine).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if ImageCaptionTemplate.isStandard(template) {
+                    Text(record.fileName).font(.caption).lineLimit(1).truncationMode(.middle)
+                    Text(record.exposureLine).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                } else {
+                    Text(ImageCaptionTemplate.text(template, for: record))
+                        .font(.caption).lineLimit(1).truncationMode(.middle)
+                }
                 Spacer()
                 if record.flag > 0 { Text("✓").foregroundStyle(.green) }
                 if record.flag < 0 { Text("✗").foregroundStyle(.red) }
@@ -175,8 +197,15 @@ struct ImageCaption: View {
         .background(Color(nsColor: .windowBackgroundColor))
         // One line, not scraps of glyphs: "Candidate, DSC_0107.NEF, 1/250 s, picked, 3 stars".
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(SpokenText.caption(title: title, name: record?.fileName,
-                                               exposure: record?.exposureLine ?? "",
-                                               rating: record?.rating ?? 0, flag: record?.flag ?? 0))
+        .accessibilityLabel(spokenCaption)
+    }
+
+    private var spokenCaption: String {
+        guard let record, !ImageCaptionTemplate.isStandard(template) else {
+            return SpokenText.caption(title: title, name: record?.fileName, exposure: record?.exposureLine ?? "",
+                                      rating: record?.rating ?? 0, flag: record?.flag ?? 0)
+        }
+        return SpokenText.caption(title: title, name: ImageCaptionTemplate.text(template, for: record), exposure: "",
+                                  rating: record.rating, flag: record.flag)
     }
 }

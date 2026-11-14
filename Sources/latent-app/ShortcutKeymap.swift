@@ -82,6 +82,11 @@ final class Keymap: @unchecked Sendable {
         }
     }
 
+    /// Forgets the table worked out, for when the presets change.
+    func invalidate() {
+        lock.withLock { cachedEffective = nil }
+    }
+
     /// Replaces every override, dropping any that only restate a default,
     /// and saves them.
     func setOverrides(_ overrides: [String: ShortcutOverride]) {
@@ -102,7 +107,13 @@ final class Keymap: @unchecked Sendable {
     /// Every command the Keyboard tab lists, `Shortcuts.all`'s first and in
     /// its order. A command added to the table without an entry below
     /// still gets a row (titled by its case), so it can be rebound.
-    static let commands: [ShortcutCommandInfo] = {
+    /// Then one row per user preset (PresetShortcuts.swift).
+    static var commands: [ShortcutCommandInfo] {
+        staticCommands + PresetShortcuts.infos(overrides: Keymap.shared.overrides)
+    }
+
+    /// The fixed commands, without the presets.
+    static let staticCommands: [ShortcutCommandInfo] = {
         var known = Dictionary(catalog.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         var result: [ShortcutCommandInfo] = []
         for shortcut in Shortcuts.all {
@@ -131,7 +142,7 @@ final class Keymap: @unchecked Sendable {
     /// keep their default scope; a key given to a command with no default
     /// takes the command's own.
     static func effective(overrides: [String: ShortcutOverride]) -> [Shortcut] {
-        commands.compactMap { info in
+        (staticCommands + PresetShortcuts.infos(overrides: overrides)).compactMap { info in
             let fallback = Shortcuts.defaultShortcut(for: info.command)
             switch overrides[info.id] {
             case nil: return fallback
@@ -146,6 +157,12 @@ final class Keymap: @unchecked Sendable {
     /// than its default, or a default taken away.
     static func normalised(_ overrides: [String: ShortcutOverride]) -> [String: ShortcutOverride] {
         overrides.filter { id, override in
+            // A preset's keys are kept even while it is missing, so they
+            // come back if it does; it has no default to take away.
+            if PresetShortcuts.isPresetID(id) {
+                if case .keys = override { return true }
+                return false
+            }
             guard let info = info(id: id) else { return false }
             let fallback = Shortcuts.defaultShortcut(for: info.command)
             switch override {
@@ -376,6 +393,7 @@ extension Keymap {
             c("clearFilter", .clearFilter, "Clear Filters", rating),
             c("addToTargetCollection", .addToTargetCollection, "Add to Target Collection", rating),
             c("newCollection", .newCollection, "New Collection…", rating),
+            c("addKeywords", .addKeywords, "Add Keywords…", rating),
             c("undo", .undo, "Undo", editing),
             c("redo", .redo, "Redo", editing),
             c("beforeAfter", .beforeAfter, "Before / After", editing),
@@ -460,6 +478,24 @@ extension Keymap {
             c("copyAfterToBefore", .view(.copyAfterToBefore), "Copy After's Settings to Before", develop, in: .develop),
             c("copyBeforeToAfter", .view(.copyBeforeToAfter), "Copy Before's Settings to After", develop, in: .develop),
             c("swapBeforeAfter", .view(.swapBeforeAfter), "Swap Before and After Settings", develop, in: .develop),
+            c("pasteSettingsOverwrite", .history(.pasteOverwrite), "Paste Settings (Overwrite)", editing),
+            c("copySettingsSelective", .history(.copySelective), "Copy Settings…", editing),
+            c("pasteSettingsSelective", .history(.pasteSelective), "Paste Settings…", editing),
+            c("syncLastChange", .history(.syncLastChange), "Sync Last Change to Selection", editing),
+            c("resetEdits", .history(.resetEdits), "Reset Edits", editing),
+            c("loadSettingsFromFile", .history(.loadSettingsFromFile), "Load Settings from File…", editing),
+            c("newBlankCopy", .history(.newBlankCopy), "New Blank Copy", files),
+            c("straightenFineLeft", .viewing(.straighten(tenths: -1)), "Straighten −0.1°", develop, in: .develop),
+            c("straightenFineRight", .viewing(.straighten(tenths: 1)), "Straighten +0.1°", develop, in: .develop),
+            c("straightenLeft", .viewing(.straighten(tenths: -10)), "Straighten −1°", develop, in: .develop),
+            c("straightenRight", .viewing(.straighten(tenths: 10)), "Straighten +1°", develop, in: .develop),
+            c("focusExposure", .viewing(.focusExposure), "Focus Exposure", develop, in: .develop),
+            c("shortcutsOverlay", .viewing(.toggleShortcutsOverlay), "Show Shortcuts Overlay", views),
+            c("showWelcome", .viewing(.showWelcome), "Show Welcome", views),
+            c("focusPeaking", .viewing(.toggleFocusPeaking), "Focus Peaking", views),
+            c("rawClipping", .viewing(.toggleRawClipping), "Show Raw Clipping", editing, in: .develop),
+            c("colourAssessment", .viewing(.toggleColourAssessment), "Colour Assessment", views),
+            c("highQualityPreview", .viewing(.toggleHighQualityPreview), "High Quality Preview", views),
         ]
         return list
     }()

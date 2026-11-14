@@ -4,13 +4,17 @@ Select images in the Library and press ⇧⌘E (File > Export), or right-click t
 
 ## The sheet
 
-**Format.** JPEG, HEIC, PNG or TIFF on every Mac; AVIF and JPEG XL as well when the Mac's system can write them. A format this Mac can't write is listed greyed out as "(not on this Mac)", and its tooltip says why: macOS 27.2, for one, reads JPEG XL but has no encoder for it, so JPEG XL turns on by itself only on a macOS that has one, with a quality slider like JPEG's. Two more choices don't render an image file at all: **DNG** and **Original + XMP sidecar** (below). Quality for the lossy formats; **Compare…** beside it opens the quality comparison (below) for JPEG and HEIC.
+**Format.** JPEG, HEIC, PNG or TIFF on every Mac; AVIF and JPEG XL as well when the Mac's system can write them. A format this Mac can't write is listed greyed out as "(not on this Mac)", and its tooltip says why: macOS 27.2, for one, reads JPEG XL but has no encoder for it, so JPEG XL turns on by itself only on a macOS that has one, with a quality slider like JPEG's. **OpenEXR** is listed too when the Mac can write it (below). Two more choices don't render an image file at all: **DNG** and **Original + XMP sidecar** (below), and **PDF** puts each photo on a page (below). Quality for the lossy formats; **Compare…** beside it opens the quality comparison (below) for JPEG and HEIC.
 
 **Limit file size.** For the lossy formats: the quality is lowered, photo by photo, until the file is no bigger than the size given (in KB). A photo that doesn't fit even at the lowest quality is reported and not written; export it smaller.
 
-**TIFF.** 16 bits per channel (smooth gradients for further editing) or 8 (half the size), and compression None, LZW or ZIP. All three are lossless; ZIP is usually smallest, LZW is read by the most software.
+**TIFF.** 16 bits per channel (smooth gradients for further editing), 8 (half the size) or **32-bit float**, and compression None, LZW or ZIP. All three are lossless; ZIP is usually smallest, LZW is read by the most software. A 32-bit float TIFF holds the export in linear light (the profile's linear form, Linear sRGB for an sRGB export), for HDR and compositing tools; it is rendered at 16 bits and widened as it is written, so it holds the edit's range, not highlights above white. **Greyscale when monochrome** writes a black and white edit (with no colour grading or tint) as one grey channel, a third of the size, tagged Gray Gamma 2.2 (Linear Gray at 32-bit float); colour edits are written in colour as usual.
 
-**Colour space.** sRGB (safe for the web and anyone's screen), Display P3 (wider, for modern Apple screens), **Adobe RGB (1998)** (what print labs usually ask for), **ProPhoto RGB** (the widest, for 16-bit files going on to another editor), any RGB profile installed on the Mac (a printer or paper profile, listed from the ColorSync folders), or **Other…** to pick a profile file. Every file embeds its profile. Adobe RGB, ProPhoto and installed profiles are made by rendering the photo in Latent's wide working space at 16 bits and converting it with macOS's ColorSync, so nothing bands on the way; a printer or paper profile converts with perceptual intent. ProPhoto in an 8-bit file can band in smooth skies, and the sheet says so. A gain map is written only in sRGB or Display P3.
+**PNG and HEIC bit depth.** PNG can be 16 bits per channel as well as 8 (the default). HEIC can be **10 bits** for SDR as well as 8 (the default): smooth skies don't band on wide-gamut screens, and every Apple device reads it. A full HDR HEIC is always 10 bits.
+
+**OpenEXR.** Listed only when the Mac's system can write it. A scene-linear file at full size, cropped and upright, in half (16-bit, the default) or full (32-bit) float: white balance, exposure, noise reduction, lens corrections, healing and masks are baked in, and the look (tone curve, colour, presence, sharpening) is left out, as for a [DNG](#dng-export-render-to-dng). Highlights above white are kept. The pixels are in linear sRGB primaries, with colours outside sRGB kept as negative values, because macOS writes no other primaries into an EXR. Image sizing, sharpening, border, watermark and metadata don't apply.
+
+**Colour space.** sRGB (safe for the web and anyone's screen), Display P3 (wider, for modern Apple screens), **Adobe RGB (1998)** (what print labs usually ask for), **ProPhoto RGB** (the widest, for 16-bit files going on to another editor), any RGB profile installed on the Mac (a printer or paper profile, listed from the ColorSync folders), or **Other…** to pick a profile file. Every file embeds its profile. Adobe RGB, ProPhoto and installed profiles are made by rendering the photo in Latent's wide working space at 16 bits and converting it with macOS's ColorSync, so nothing bands on the way; a printer or paper profile converts with perceptual intent, Adobe RGB and ProPhoto with relative colorimetric. **Rendering intent**, shown for these converted spaces, chooses another: any intent Latent offers (Perceptual, Relative Colorimetric). ProPhoto in an 8-bit file can band in smooth skies, and the sheet says so. A gain map is written only in sRGB or Display P3.
 
 **HDR Output** (JPEG, HEIC and AVIF, off by default). Writes highlights above white for HDR screens, up to the photo's HDR Limit (two stops unless changed in Develop, see [HDR Limit](Develop#hdr-limit)), as the editor's HDR display shows them. It costs a second render of the image. PNG and TIFF are SDR only.
 
@@ -27,6 +31,8 @@ Select images in the Library and press ⇧⌘E (File > Export), or right-click t
 | Dimensions | fits inside a box whichever way the photo is turned: the larger number limits the long side |
 | Megapixels | the whole picture scaled to that many million pixels |
 | Percentage | the whole picture scaled by that share of its full size |
+
+Long and short edge, width & height and dimensions can be typed in **px**, **cm** or **in**: centimetres and inches are turned into pixels at the Resolution below (its number is used even while it isn't written), and changing the resolution then keeps the print size and changes the pixels, as in Lightroom.
 
 **Don't enlarge** (on by default) writes a photo that is already smaller than the size asked for at its own size. Off, it is enlarged. Either way the render bins the sensor data towards the target size, then sizes it exactly with a Lanczos 3 filter in linear light, so fine detail doesn't alias.
 
@@ -46,9 +52,17 @@ Select images in the Library and press ⇧⌘E (File > Export), or right-click t
 
 A keyword inside others (Places › France › Paris) is written as each of its levels. The title, caption, creator and copyright you gave the photo in the Library panel's **Title & Copyright** section replace the raw's own: they go in the IPTC fields (Object Name, Caption/Abstract, By-line, Copyright Notice), the TIFF fields (Image Description, Artist, Copyright) and XMP (`dc:title`, `dc:description`, `dc:creator`, `dc:rights`), so photo sites and other catalogs show them. Export Open Image and Edit in External Editor carry them too, unless their **Include camera metadata** switch is off.
 
+**Write keyword hierarchy** (off by default) also writes each keyword whole, such as Places|France|Paris, in `lr:hierarchicalSubject`, which Lightroom and other catalogs read as a hierarchy; the flat levels stay in the keywords. **Embed Latent edit** (off by default) writes the photo's Latent edit into the file's XMP as `latent:EditStack`, the element its sidecar keeps it in, so the edit can be recovered from the exported file. Both need metadata on (not None); the hierarchy goes with the keywords, so the copyright levels leave it out, while the edit, asked for by its own switch, is written at every level.
+
 Tags that only describe the raw's storage (orientation, sensor layout, autofocus points), makers' private data and Camera Raw's edit settings are never written. **Include location** (off by default, and in presets saved before it existed) also keeps the **GPS position**, place names, and the camera body's and lens's serial numbers, at All and All except camera info; see [Security and Privacy](Security-and-Privacy#location-in-exports).
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
+**Watermark.** Off by default. Switch it on to stamp **Text** or a **Graphic** into a corner of every exported file. Text: one line, where `{year}` becomes the capture year and `{name}` the original file name, in any letter case; the naming tokens below work too, filled in for each photo (`© {year} {creator|Ann Smith}`, `{lens} · {iso}`), and Insert lists them, in the system font or any font installed on the Mac; its size is a share of the picture's short edge (1–20%) and its colour is picked as sRGB and converted for the file's colour space. Graphic: a PNG logo (up to 4 MB; transparent parts stay transparent), sized by its longer side as a share of the picture's short edge (2–50%). The PNG is kept in the preset, so it still works after the original file moves. Either can be turned 90°, 180° or 270° (270° runs text up the side of the picture), and has an opacity. It is drawn into the file after the resize, never into the photo or its edit, so it looks the same at any export size. In a file with an HDR gain map it is not brightened on HDR screens. Presets remember the watermark even while the switch is off.
+
+**Border.** Off by default. Pads each file with a border on every side, a percentage of the picture's long edge or a number of pixels, in a colour you pick (sRGB, converted for the file's colour space). **Canvas** enlarges it further to a shape, 1:1, 4:5, 3:2, 16:9 or a custom ratio, growing the short sides so the photo is never cropped; turned to match the picture, or always portrait or landscape (a landscape photo on a 4:5 portrait canvas, say). **Position** places the photo in the room left over, centred by default. An **inner line** of a width, colour and gap from the picture can frame it. The border is drawn after the resize, so the picture keeps the size asked for and the file grows by the border, and before the watermark, which is placed on the whole canvas. A bordered file is SDR: HDR Output is left out.
+
 **Watermark.** Off by default. Switch it on to stamp **Text** or a **Graphic** into a corner of every exported file. Text: one line, where `{year}` becomes the capture year and `{name}` the original file name, in any letter case, in the system font or any font installed on the Mac; its size is a share of the picture's short edge (1–20%) and its colour is picked as sRGB and converted for the file's colour space. Graphic: a PNG logo (up to 4 MB; transparent parts stay transparent), sized by its longer side as a share of the picture's short edge (2–50%). The PNG is kept in the preset, so it still works after the original file moves. Either can be turned 90°, 180° or 270° (270° runs text up the side of the picture), and has an opacity. It is drawn into the file after the resize, never into the photo or its edit, so it looks the same at any export size. In a file with an HDR gain map it is not brightened on HDR screens. Presets remember the watermark even while the switch is off.
+<!-- /RECONCILE -->
 
 **Naming.** A template with tokens, expanded per image. Tokens can be typed in any letter case, or picked from Insert:
 
@@ -62,16 +76,27 @@ Tags that only describe the raw's storage (orientation, sensor layout, autofocus
 | `{camera}` | camera model, spaces removed |
 | `{rating}` | stars as a digit |
 | `{folder}` | the image's subfolder, or the catalog name |
+| `{lens}`, `{maker}`, `{model}` | the lens; the camera's maker and model (the camera name split at its first space) |
+| `{iso}`, `{shutter}`, `{aperture}`, `{focal}`, `{bias}` | 400, 1-250 (2.5s for long exposures), f2.8, 50mm, +0.7 |
+| `{width}`, `{height}` | the raw's size in pixels |
+| `{label}`, `{stars}` | the colour label's name; the rating as ★★★ |
+| `{title}`, `{caption}`, `{creator}`, `{copyright}`, `{headline}`, `{city}`, `{country}` | the descriptive fields |
+| `{keywords}` | the keywords' last levels, sorted, joined by `_` |
+| `{ext}` | the original's extension, NEF |
+| `{version}` | a virtual copy's number, 0 for the original |
+| `{original}` | the name the file had when first renamed by Latent (its preserved name), else its name |
+
+A token takes modifiers, written in this order: `{token/old/new}` replaces every `old` with `new` (`{title/ /_}`), `{token:upper}`, `{token:lower}` or `{token:title}` changes the letter case, `{token:1-8}` keeps characters 1 to 8, and `{token|text}` gives `text` when the token comes out empty (`{city|nowhere}`). They combine: `{title:upper/ /-|untitled}`. A date or time with its own format (`{date:yyyy/MM}`) keeps its colon for the format, as before. A modifier Latent doesn't know shows in red like an unknown token. The preview in the sheet leaves `{keywords}` empty; the exported names have them.
 
 Dates are written the same on every Mac, whatever its region or calendar. The whole name can be made lowercase or UPPERCASE, and the extension `.jpg` or `.JPG`. A token the template doesn't know, such as `{nmae}`, is shown in red and Export stays off until it is fixed.
 
-Every file name is planned before anything is written. A line shows the first file's name, and notes say how many images would share a name within the export (after the first, those always get a number: -1, -2…), how many names are already in the destination, and what happens to those: **Add a number**, **Replace**, or **Skip**. Each name is checked against the folder again just before its file is written, and once more as the finished file is moved into place: under Add a number or Skip, a file that took the name while the image rendered is never replaced; the image gets the next free number (and is rendered again) or is skipped.
+Every file name is planned before anything is written. A line shows the first file's name, and notes say how many images would share a name within the export (after the first, those always get a number: -1, -2…), how many names are already in the destination, and what happens to those: **Add a number**, **Replace**, **Skip**, or **Overwrite if edit changed**, which replaces a file only when the photo's edit (its sidecar) or the photo itself changed after the file was written, and skips it otherwise, so exporting a folder again redoes only what changed. Each name is checked against the folder again just before its file is written, and once more as the finished file is moved into place: under Add a number or Skip, a file that took the name while the image rendered is never replaced; the image gets the next free number (and is rendered again) or is skipped.
 
 **Destination.** **Export to** a **chosen folder** (remembered between exports, defaulting to the one in Settings), the **same folder as the original** (each file beside its photo), or **choose folder later**, which asks when the export starts: handy for presets and Export with Previous that shouldn't always land in one place. **Subfolder** puts the files in a folder of that name inside the destination (or inside each photo's folder). Optionally sort into subfolders by capture date.
 
 **After export.** **Show in Finder when done**, and **Open in** an application you choose (Choose App…), which opens the exported files in it, as Lightroom's Open in Other Application does.
 
-**Add to this catalog.** When an export writes into the open folder (or a subfolder it includes, as with Same folder as original), **Add to this catalog** indexes the new files as soon as the export finishes, rather than when the folder watcher next notices them, and selects them in the grid. **Stack** then puts each one in a stack with the photo it was exported from, just **above** or **below** it; the stack is left expanded so the new file shows. Files written elsewhere are left alone, and the status bar says how many. Not for Original + XMP sidecar, which is the same photo again. See [Stacks](Library#stacks).
+**Add to this catalog.** When an export writes into the open folder (or a subfolder it includes, as with Same folder as original), **Add to this catalog** indexes the new files as soon as the export finishes, rather than when the folder watcher next notices them, and selects them in the grid. **Stack** then puts each one in a stack with the photo it was exported from, just **above** or **below** it; the stack is left expanded so the new file shows. Files written elsewhere are left alone, and the status bar says how many. Not for Original + XMP sidecar, which is the same photo again. See [Stacks](Library#stacks). **Copy rating, label and keywords from the original** (on unless switched off) gives each added file the stars, colour label, keywords, title, caption and the other descriptive fields of the photo it came from, but not a reject flag.
 
 **Presets.** Save the current sheet under a name; four built-ins cover web at 2048 px, full-size JPEG, print TIFF in P3, and proofs by date. A preset keeps every setting above, including its location.
 
@@ -80,6 +105,16 @@ Every file name is planned before anything is written. A line shows the first fi
 **Estimated size.** For image formats, the sheet renders and encodes the first selected image at the current settings and scales that by each other image's pixel count. Crops and detail vary from photo to photo, so a batch total is approximate; for a single image it is the real file size. Changing only the quality or JPEG versus HEIC re-encodes without rendering again. With a size limit the estimate is at most the limit per file.
 
 **Compare qualities.** **Compare…** next to Quality (JPEG and HEIC) opens a window with the first image encoded at two to four qualities side by side at 100%. Drag any pane to pan them all. Each pane shows the size of the whole file at that quality, and **Use** sets the sheet's quality. JPEG panes look exactly as the file will; the edges of HEIC panes can differ slightly. The window closes with the sheet.
+
+<!-- RECONCILE: two branches edited this; merge into one text -->
+### Apply a preset at export
+
+**Apply preset**, under the watermark, applies a develop preset to the exported files only, as darktable's style on export: a black and white set or a web look from the same edits, without touching them. Choose **None** (the default) or any preset. **Append** applies it over each photo's edit, as Apply Preset does; **Replace** uses the preset alone, from no edit. **Amount** blends it as the Presets panel's Amount does, 0–200%. The preset is merged into a copy of each photo's edit just before the render, so the edit in the catalog and its sidecar never change. The choice is kept in export presets; a preset deleted since shows as **Missing** and nothing is applied. DNG exports don't use it.
+
+## PDF export
+
+**PDF** in the format menu writes one PDF per photo: the edited photo on a page of its own, drawn as Print and Contact Sheet draw theirs. **Page** is **Fit to image** (the photo's own size at the Resolution set for images, 300 ppi when none is) or **A4**, **US Letter** or **A3**, turned to match the photo, which is then rendered at no more pixels than the page holds at that resolution. A **margin** in millimetres goes round the photo, and an optional **caption** under it is made from the same tokens as the file name (`{name}`, `{date}`…). The colour is sRGB, or Display P3 when it was chosen for image files. PDFs aren't added to the catalog.
+<!-- /RECONCILE -->
 
 ## DNG export (Render to DNG)
 
@@ -109,13 +144,44 @@ Quitting during an export asks whether to finish the image being written and qui
 
 Model-generated masks and AI denoise are recomputed at export time, for the queue and for Export open image alike, so the file matches the screen.
 
+## From the command line
+
+`latent-cli`, built with the app's sources (`swift build`, then `.build/debug/latent-cli`), exports without opening the app:
+
+```
+latent-cli export ~/Photos/Brittany --out-dir ~/Desktop/Web --long-edge 2048 --quality 85
+latent-cli export a.NEF b.NEF --out-dir out --preset web.json --template "{date}-{name}" --dry-run
+```
+
+Each photo gets its saved edit: from the folder's catalog when it has one (opened as it is, not re-read), otherwise from its sidecar in `_latent/xmp/`, otherwise Latent's defaults. A folder gives the photos its catalog lists, leaving out the JPEG half of RAW+JPEG pairs; files name themselves. The render is the export queue's own, model masks and AI noise reduction included, so a file matches what the sheet writes with the same settings. When an edit uses AI noise reduction and its model isn't available, the photo is exported without it and a warning says so.
+
+The options:
+
+- `--out-dir <folder>` (required): where the files go; made if missing.
+- `--preset <file.json>`: start from an export preset in the app's JSON form (one preset, or `{"name": …, "preset": {…}}`). Flags given as well win over it. A preset that writes DNGs or originals is refused.
+- `--format jpeg|heic|tiff|png|avif|jxl`, `--quality 0-100`, `--long-edge <pixels>` (never enlarging), `--space srgb|p3|adobergb`.
+- `--template <naming>`: the sheet's naming tokens, such as `{name}`, `{seq}` and `{date}`.
+- `--on-conflict number|skip|replace`: what happens to a name already taken in the destination, as in the sheet.
+- `--no-metadata`: pixels only.
+- `--dry-run`: lists each photo, the file it would become, what would happen there and where its edit comes from, and writes nothing.
+
+It prints one line per photo and a summary, and exits with 1 if any photo failed.
+
+`latent-cli thumbs <folder>` builds or refreshes the folder's thumbnail cache, creating its catalog if it has none, so a large folder opens in the app with every thumbnail ready. `--include-subfolders` includes subfolders still awaiting a decision.
+
 ## Print
 
 **File > Print…** (⌘P) prints the selection in the Library and Survey, and the image shown in Loupe, Compare and Develop, with its current edit, saved or not.
 
 The print panel's **Photo Layout** section sets photos per page (1, 2, 4, 6, 9, 12, 20 or 30), Fit or Fill, whether to rotate photos to fill their cells, margins, spacing, captions (file name, and optionally date and camera) and colour. The panel's preview updates as you change them, drawn from thumbnails.
 
-Photos are rendered for the printer as an export is: model masks regenerated and AI noise reduction included, at the printer's resolution (150 to 360 dpi) in 16-bit Display P3. If Soft Proof is on in Develop with an ICC profile, Colour starts at that profile and photos are converted into it, so the print matches the proof. **Rendering intent** then sets how colours the profile can't reproduce are handled: **Perceptual** or **Relative Colorimetric** (with black point compensation), as described under [Soft proofing](Develop#soft-proofing). Each print starts from the intent Soft Proof is set to; changing it in the print panel applies to that print. The panel's summary lists the intent under Colour. With Colour set to Display P3, the printer's own colour matching does the conversion and the intent doesn't apply. A photo that can't be rendered (its file was moved or can't be read) prints as an empty cell, and Latent names it once the print is done; Rename, Move and Copy wait while a print or contact sheet renders. The layout settings are remembered, and the paper, orientation, scale and printer carry over to the next print.
+Photos are rendered for the printer as an export is: model masks regenerated and AI noise reduction included, at the printer's resolution (150 to 360 dpi) in 16-bit Display P3. If Soft Proof is on in Develop with an ICC profile, Colour starts at that profile and photos are converted into it, so the print matches the proof. **Rendering intent** then sets how colours the profile can't reproduce are handled: **Perceptual** or **Relative Colorimetric** (with black point compensation), as described under [Soft proofing](Develop#soft-proofing). Each print starts from the intent Soft Proof is set to; changing it in the print panel applies to that print. The panel's summary lists the intent under Colour. With Colour set to Display P3, the printer's own colour matching does the conversion and the intent doesn't apply. **Colour** can also be **Printer profile**: pick any installed profile, one added in Soft Proof, or **Add Profile…** for another file, and photos are converted into it whatever Soft Proof shows. The choice keeps its own access to the file, so it works after a relaunch. **Use soft-proof profile** stays the default. All four intents are offered: **Saturation** and **Absolute Colorimetric** join Perceptual and Relative Colorimetric.
+
+**Margins** are one slider while **Same on all sides** is ticked, as before; untick it for top, bottom, left and right fields of their own. **Units** shows them in points, millimetres or inches (Automatic follows the region, as before). Settings saved with a single margin open with it on all four sides. No margin goes inside the printer's own unprintable edge.
+
+**Preset** applies a develop preset to the print only, with Append or Replace and an Amount, exactly as [at export](#apply-a-preset-at-export). **Sharpening** adds output sharpening for **Matte** or **Glossy** paper (**Low**, **Standard** or **High**), worked out for the printer's resolution, as Export's Output Sharpening is. Neither changes the photo's edit, and the summary lists both.
+
+A photo that can't be rendered (its file was moved or can't be read) prints as an empty cell, and Latent names it once the print is done; Rename, Move and Copy wait while a print or contact sheet renders. The layout settings are remembered, and the paper, orientation, scale and printer carry over to the next print.
 
 ## Contact sheets
 

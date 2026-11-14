@@ -12,6 +12,8 @@ struct LocalDetailGPU: Equatable {
     var pointTarget2 = SIMD4<Float>(repeating: 0), pointTarget3 = SIMD4<Float>(repeating: 0)
     var pointShift0 = SIMD4<Float>(repeating: 0), pointShift1 = SIMD4<Float>(repeating: 0)
     var pointShift2 = SIMD4<Float>(repeating: 0), pointShift3 = SIMD4<Float>(repeating: 0)
+    // Smooth radius (render px) and amount, and the blend mode (MaskBlend.swift).
+    var extra = SIMD4<Float>(repeating: 0)
 }
 
 /// Texture, clarity, dehaze, sharpness, noise and defringe inside masks
@@ -26,9 +28,13 @@ struct LocalDetailGPU: Equatable {
 /// stage is still reading. Skipped outright unless a visible mask uses
 /// one of these sliders.
 enum LocalDetailStage {
+    /// Sensor pixels Smooth reaches at 1.
+    static let smoothReach: Float = 20
+
     /// One entry per mask that wants the stage, in the slot order
-    /// `LocalsGPUPlan` assigned.
-    static func params(for locals: [LocalAdjustment], shortSide: Float = 0) -> [LocalDetailGPU] {
+    /// `LocalsGPUPlan` assigned. `binSpan` is sensor pixels per render
+    /// pixel, so Smooth reaches the same part of the picture at any scale.
+    static func params(for locals: [LocalAdjustment], shortSide: Float = 0, binSpan: Float = 1) -> [LocalDetailGPU] {
         let plan = LocalsGPUPlan(locals: locals, slices: [:])
         return plan.detailSlots.sorted { $0.value < $1.value }.map { index, slot in
             let l = locals[index]
@@ -46,6 +52,8 @@ enum LocalDetailStage {
             gpu.pointTarget2 = targets[2]; gpu.pointTarget3 = targets[3]
             gpu.pointShift0 = shifts[0]; gpu.pointShift1 = shifts[1]
             gpu.pointShift2 = shifts[2]; gpu.pointShift3 = shifts[3]
+            let smooth = min(max(l.smooth, 0), 1)
+            gpu.extra = SIMD4(smooth * smoothReach / max(binSpan, 1e-3), smooth, Float(l.blendMode.gpuCode), 0)
             return gpu
         }
     }
@@ -197,7 +205,7 @@ extension RenderPipeline {
         let locals = Array(parameters.locals.prefix(LocalAdjustment.maximumCount))
         let summary = session.file.summary
         let shortSide = Float(min(summary.rawWidth, summary.rawHeight))
-        let params = LocalDetailStage.params(for: locals, shortSide: shortSide)
+        let params = LocalDetailStage.params(for: locals, shortSide: shortSide, binSpan: binSpan)
         let slots = LocalsGPUPlan(locals: locals, slices: [:]).detailSlots
         // A pattern of its own, so local grain doesn't line up with the global grain's.
         let seed = Grain.seed(cameraModel: summary.cameraModel, captureTime: summary.captureTime.timeIntervalSince1970,

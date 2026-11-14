@@ -31,6 +31,11 @@ public enum RenameTemplate {
         ("{rating}", "stars"), ("{folder}", "subfolder"),
     ]
 
+    /// The tokens that read one more value of the photo (lens, ISO, city,
+    /// keywords…), for the sheet's More menu. {title} is already above.
+    public static let moreTokens: [(token: String, meaning: String)] =
+        ExportNaming.fieldTokens.filter { $0.token != titleToken }
+
     /// Private-use characters standing in for the two tokens while the
     /// export's namer works: it leaves them alone, and nothing typed into a
     /// template contains them.
@@ -123,11 +128,13 @@ public struct RenamePlan: Sendable {
                             start: Int = 1, padding: Int = 3, catalogName: String = "",
                             letterCase: ExportNaming.LetterCase = .unchanged,
                             timeZone: TimeZone = .current,
+                            keywords: [Int64: [String]] = [:],
                             isTaken: (String) -> Bool) -> RenamePlan {
         let namer = ExportNaming.Namer(template: RenameTemplate.marked(template), timeZone: timeZone)
         var items: [Item] = records.enumerated().map { index, record in
-            let context = ExportNaming.Context(index: index, start: start, padding: padding,
+            var context = ExportNaming.Context(index: index, start: start, padding: padding,
                                                catalogName: catalogName, letterCase: letterCase)
+            if let id = record.id, let words = keywords[id] { context.keywords = words }
             switch RenameTemplate.fileName(namer: namer, customText: customText, record: record, context: context) {
             case .success(let name): return Item(record: record, newName: name, problem: nil)
             case .failure(let problem): return Item(record: record, newName: record.fileName, problem: problem.description)

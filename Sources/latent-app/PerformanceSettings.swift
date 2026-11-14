@@ -139,6 +139,7 @@ struct PerformanceSettingsTab: View {
                 Text("Thumbnails live in the folder's _latent/thumbnails, excluded from Time Machine. They are only a cache: anything removed here is made again from the photos.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            HighQualityPreviewSettingsSection()
         }
         .formStyle(.grouped)
         .task(id: library.folderURL) { await measure() }

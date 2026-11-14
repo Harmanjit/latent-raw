@@ -61,6 +61,12 @@ public struct LensBlur: Codable, Equatable, Sendable {
     /// "<id>@<version>", or `LensBlur.subjectDepthVersion` for the two
     /// planes made from the subject mask. Nil until the blur first runs.
     public var depthModel: String?
+    /// Gaussian or Motion (LensBlurTypes.swift); nil is Bokeh, the
+    /// depth-driven disc every edit before them has, and absent from the
+    /// JSON then.
+    public var blurType: BlurType?
+    /// Motion's direction in degrees, 0 (horizontal) … 180; nil is 0.
+    public var motionAngle: Float?
 
     public init(amount: Float = 0, bokeh: Bokeh = .circle, boost: Float = 0,
                 focusFar: Float = LensBlur.defaultFocusFar, focusNear: Float = 1, depthModel: String? = nil) {
@@ -98,7 +104,9 @@ public struct LensBlur: Codable, Equatable, Sendable {
 
     // MARK: - Decoding
 
-    private enum CodingKeys: String, CodingKey { case amount, bokeh, boost, focusFar, focusNear, depthModel }
+    private enum CodingKeys: String, CodingKey {
+        case amount, bokeh, boost, focusFar, focusNear, depthModel, blurType, motionAngle
+    }
 
     /// Lenient: a missing key keeps its default and an unknown bokeh name
     /// reads as a circle, so a sidecar from a later build still loads.
@@ -111,6 +119,9 @@ public struct LensBlur: Codable, Equatable, Sendable {
         focusFar = try c.decodeIfPresent(Float.self, forKey: .focusFar) ?? Self.defaultFocusFar
         focusNear = try c.decodeIfPresent(Float.self, forKey: .focusNear) ?? 1
         depthModel = try c.decodeIfPresent(String.self, forKey: .depthModel)
+        // An unknown type (a later build's) reads as Bokeh.
+        blurType = try c.decodeIfPresent(String.self, forKey: .blurType).flatMap(BlurType.init(rawValue:))
+        motionAngle = try c.decodeIfPresent(Float.self, forKey: .motionAngle)
     }
 
     /// Values from a file brought into range: a hand-edited amount of a
@@ -125,6 +136,7 @@ public struct LensBlur: Codable, Equatable, Sendable {
         s.focusFar = clamped(focusFar, 0, 1, Self.defaultFocusFar)
         s.focusNear = clamped(focusNear, 0, 1, 1)
         if s.focusFar > s.focusNear { swap(&s.focusFar, &s.focusNear) }
+        sanitizeBlurType(&s)
         return s
     }
 

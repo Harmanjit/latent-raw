@@ -45,7 +45,14 @@ extension EditorModel {
         output.touchUpOverlay = touchUpOverlayWanted
         output.sharpenMaskPreview = sharpenMaskPreview
         output.hueIsolation = hasImage ? hueIsolationBand : nil
+        output.gradingRangePreview = hasImage ? gradingRangePreview : nil
         output.depthVisualisation = lensBlurState.showDepth
+        // View › Show Raw Clipping, for Develop's own editor only. A JPEG
+        // or TIFF has no sensor clip level to compare with.
+        output.rawClipMask = hasImage && session?.isRenderedImage != true
+            && ViewingSettings.shared.rendersRawClipping(for: self)
+        output.toneEqualizerMaskView = hasImage && toneEqualizerState.showMask
+        output.toneEqualizerAnalysis = hasImage && toneEqualizerWantsMask
         return output
     }
 
@@ -143,6 +150,14 @@ extension EditorModel {
         case .waveform:
             waveform = scopeCalculator?.computeWaveform(from: analysisTexture, inputIsLinear: true)
         case .vectorscope:
+            vectorscope = scopeCalculator?.computeVectorscope(from: analysisTexture, inputIsLinear: true)
+        case .parade:
+            waveform = scopeCalculator?.computeWaveform(from: analysisTexture, inputIsLinear: true)
+        case .waveformVectorscope:
+            waveform = scopeCalculator?.computeWaveform(from: analysisTexture, inputIsLinear: true)
+            vectorscope = scopeCalculator?.computeVectorscope(from: analysisTexture, inputIsLinear: true)
+        case .histogramVectorscope:
+            histogram = histogramCalculator?.compute(from: analysisTexture, inputIsLinear: true)
             vectorscope = scopeCalculator?.computeVectorscope(from: analysisTexture, inputIsLinear: true)
         }
     }

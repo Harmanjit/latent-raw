@@ -46,10 +46,18 @@ using namespace metal;
 // pieces are independent of each other and a tile holds only the pieces
 // it shows, however far the stroke runs.
 // A circle has no list and takes the original path through every kernel.
+//
+// Fill (mode 3) and Blur (mode 4) have no source (HealModes.swift). Fill
+// mixes in one colour, `extra.rgb` in camera space. Blur gathers every
+// pixel of its grid, the patch's own included (`gatherAll`), so after the
+// same two healBlur passes the grid holds the area blurred by the patch's
+// blur radius, and healApply mixes that in. Both keep the feather and the
+// opacity of the other modes.
 
 struct HealPatchGPU {
     float4 geometry;   // target.xy, source.xy, normalized sensor
-    float4 params;     // radius (fraction of short side), feather, mode (0 heal, 1 clone), opacity
+    float4 params;     // radius (fraction of short side), feather, mode (0 heal, 1 clone, 3 fill, 4 blur), opacity
+    float4 extra;      // fill: the colour in camera space
 };
 
 // Where one patch lands on the texture being rendered (HealStage.swift).
@@ -66,6 +74,8 @@ struct HealGridGPU {
     int2 boxSize;        // texels
     int maskCount;       // a stroke piece: segments in its list; 0 for a circle
     int ownIndex;        // the piece's own segment in that list
+    int gatherAll;       // 1 for Blur: gather every pixel, the patch included
+    int padding;
 };
 
 // Distance from `q` to the segment a-b (seg.xy, seg.zw), texture pixels.
@@ -121,7 +131,7 @@ kernel void healGather(
             } else {
                 dist = length(q - g.target);
             }
-            float w = healFillWeight(dist, g.radius, g.feather);
+            float w = g.gatherAll != 0 ? 1.0 : healFillWeight(dist, g.radius, g.feather);
             if (w <= 0.0) continue;
             sumT += w * state.sample(s, q).rgb;
             sumS += w * state.sample(s, q + g.offset).rgb;
@@ -220,9 +230,19 @@ kernel void healApply(
         dist = length(d);
         src = healSensorToTexture(p.geometry.zw * sensorSize + d, tileOrigin, binSpan);
     }
+    // Fill and Blur read no source.
+    bool sourceless = p.params.z > 2.5;
+    if (sourceless) src = here;
     if (owned && dist < r && healInsideTexture(src, before)) {
         float4 v = before.sample(s, src);
-        if (p.params.z < 0.5) {
+        if (p.params.z > 3.5) {
+            // Blur: the gathered, blurred grid at this pixel.
+            float4 ft = healField(fieldT, here, g);
+            v.rgb = ft.rgb / max(ft.a, 1e-4);
+        } else if (sourceless) {
+            // Fill.
+            v.rgb = p.extra.rgb;
+        } else if (p.params.z < 0.5) {
             // Heal. A ratio in linear light, because texture is mostly
             // reflectance times illumination: pores copied from a lit
             // cheek into a shaded one keep the shaded contrast. Where

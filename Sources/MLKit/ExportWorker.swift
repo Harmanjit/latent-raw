@@ -270,6 +270,9 @@ public enum ExportWorker {
         metadata.descriptive = request.descriptive.limited(to: request.metadataLevel)
         metadata.rating = request.metadataLevel.includesKeywordsAndRating ? request.rating : 0
         metadata.includeLocation = request.includeLocation && request.metadataLevel.allowsLocation
+        // Off unless asked for in the sheet (ExportKeywords.swift).
+        metadata.writesKeywordHierarchy = request.settings.keywordHierarchy
+        if request.settings.embedsEdit { metadata.embeddedEditJSON = request.editStackJSON }
         if request.includeMetadata {
             // GPS, copyright, exposure details and the rest, read from the
             // raw in the decoder service. A file it can't read still gets
@@ -285,6 +288,7 @@ public enum ExportWorker {
         // when the raw has none) and its name.
         var settings = request.settings
         settings.enlarges = enlarges
+        settings.editIsMonochrome = ExportPlan.isMonochrome(parameters)
         settings.watermark = request.settings.watermark?.resolved(
             fileName: request.sourceURL.deletingPathExtension().lastPathComponent,
             captureDate: metadata.captureDate ?? Date())

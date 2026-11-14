@@ -137,6 +137,8 @@ enum Shortcuts {
         // makes a collection.
         Shortcut(.addToTargetCollection, "b"),
         Shortcut(.newCollection, "n", .command),
+        // Lightroom's key for the keywording field.
+        Shortcut(.addKeywords, "k", .command),
         // Editing
         Shortcut(.undo, "z", .command),
         Shortcut(.redo, "z", [.shift, .command]),
@@ -162,6 +164,14 @@ enum Shortcuts {
         Shortcut(.toggleBlackAndWhite, "v", in: .develop),
         Shortcut(.whiteBalanceSelector, "w"),
         Shortcut(.toggleClipping, "j"),
+        // darktable's keys for fine rotation: ⌥[ and ⌥] a tenth of a degree,
+        // with ⇧ a whole one (⇧[ types {, so the table keeps that key).
+        Shortcut(.viewing(.straighten(tenths: -1)), "[", .option, in: .develop),
+        Shortcut(.viewing(.straighten(tenths: 1)), "]", .option, in: .develop),
+        Shortcut(.viewing(.straighten(tenths: -10)), "{", [.option, .shift], in: .develop),
+        Shortcut(.viewing(.straighten(tenths: 10)), "}", [.option, .shift], in: .develop),
+        // ? (⇧/), as in most apps with a shortcuts sheet.
+        Shortcut(.viewing(.toggleShortcutsOverlay), "?", .shift),
         // Lightroom's key for Soft Proofing.
         Shortcut(.toggleSoftProof, "s", in: .develop),
         Shortcut(.toolSize(-1), "[", in: .develop),
@@ -341,6 +351,7 @@ extension Shortcuts {
             ShortcutPageRow([.back, .forward], "Back / forward through the folders opened, back to the images you had selected"),
             ShortcutPageRow(keys: .system("Settings"), "Settings"),
             ShortcutPageRow(keys: .system("Latent Help"), "Latent Help (these pages)"),
+            ShortcutPageRow([.viewing(.toggleShortcutsOverlay)], "Show or hide the keys of the current mode over the window (Esc closes it too)"),
         ]),
         ("Rating and metadata", [
             ShortcutPageRow([.rate(0), .rate(1), .rate(2), .rate(3), .rate(4), .rate(5)], "Stars"),
@@ -354,6 +365,7 @@ extension Shortcuts {
             ShortcutPageRow([.clearFilter], "Clear the filter bar"),
             ShortcutPageRow([.addToTargetCollection], "Add the selection to the target collection (the Quick Collection unless you chose another), or take it out when it is all there already"),
             ShortcutPageRow([.newCollection], "New collection (with the selected photos, if you like)"),
+            ShortcutPageRow([.addKeywords], "Add keywords: the keywording field, ready to type in, for the selected photos"),
         ]),
         ("Editing", [
             ShortcutPageRow([.undo, .redo], "Undo, redo (in Develop, the image's edit history; elsewhere, what you did in the Library, moves and renames included)"),
@@ -375,6 +387,9 @@ extension Shortcuts {
             ShortcutPageRow([.toggleBlackAndWhite], "Develop: switch the treatment between Color and Black & White"),
             ShortcutPageRow([.whiteBalanceSelector], "White Balance Selector: click something neutral in the photo"),
             ShortcutPageRow([.toggleClipping], "Show or hide clipping on the image: highlights red, crushed shadows blue"),
+            ShortcutPageRow([.viewing(.straighten(tenths: -1)), .viewing(.straighten(tenths: 1)),
+                             .viewing(.straighten(tenths: -10)), .viewing(.straighten(tenths: 10))],
+                            "Develop: straighten by a tenth of a degree, or a whole degree, either way (one undo step each)"),
             ShortcutPageRow([.toggleSoftProof], "Turn Soft Proofing on or off in Develop"),
             ShortcutPageRow([.toolSize(-1), .toolSize(1)], "Smaller, larger brush or spot (while the mask brush, spot removal or red-eye is on)"),
             ShortcutPageRow([.deleteHeal], "Delete the selected spot patch or red-eye spot"),

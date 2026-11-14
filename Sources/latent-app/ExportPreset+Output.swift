@@ -12,12 +12,15 @@ enum ExportFileKind: String, Codable, CaseIterable {
     case dng
     /// The original raw file, untouched, with an XMP sidecar beside it.
     case original
+    /// The rendered photo on a page of a PDF (ExportPDF.swift).
+    case pdf
 
     var title: String {
         switch self {
         case .image: "Image"
         case .dng: "DNG"
         case .original: "Original + XMP"
+        case .pdf: "PDF"
         }
     }
 }
@@ -104,6 +107,7 @@ extension ExportPreset {
         if sharpenEnabled { s.outputSharpening = OutputSharpening(medium: sharpenMedium, strength: sharpenStrength) }
         s.tiffBitDepth = tiffBitDepth
         s.tiffCompression = tiffCompression
+        applyFormatOptions(to: &s)
     }
 
     /// The colour space's name as the sheet and summaries show it.
@@ -115,6 +119,8 @@ extension ExportPreset {
     /// Image sizing when it differs from a plain long edge that never
     /// enlarges (which `maxLongEdge` already says); nil otherwise.
     var sizing: ExportSizing? {
+        // Centimetres and inches are typed through the sizing row and kept
+        // in pixels (ExportSizeUnit), so the sizing is built from pixels.
         guard resize, sizingMode != .longEdge || !dontEnlarge else { return nil }
         return ExportSizing(mode: sizingMode, longEdge: maxLongEdge, shortEdge: shortEdge, width: boxWidth,
                             height: boxHeight, megapixels: megapixels, percentage: percentage,

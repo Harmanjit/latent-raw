@@ -128,6 +128,23 @@ final class GoldenImageTests: XCTestCase {
         })
     }
 
+    /// LMMSE, the high-ISO demosaic. Like bilinear, only the
+    /// full-resolution window can show it.
+    func testLMMSEDemosaic() throws {
+        try check(Recipe(name: "demosaic-lmmse", overview: false, detail: Self.ballCentre) {
+            $0.demosaic = .lmmse
+        })
+    }
+
+    /// Highlight Reconstruction's Inpaint Opposed, over the whole frame
+    /// (the binned path) and the ball's bright studs at full resolution.
+    func testHighlightInpaint() throws {
+        try check(Recipe(name: "highlight-inpaint", detail: Self.ballCentre) {
+            $0.highlightMethod = .inpaintOpposed
+            $0.highlightThreshold = 0.8
+        })
+    }
+
     /// Crop, straighten, perspective, manual lens controls and a quarter
     /// turn: everything that moves pixels rather than recolouring them.
     func testGeometry() throws {
@@ -187,6 +204,15 @@ final class GoldenImageTests: XCTestCase {
         try check(Recipe(name: "dust", detail: Self.ballCentre) {
             $0.dust = Self.dustSpots
             $0.heals = [HealPatch(id: Self.uuid(9), target: [0.508, 0.556], source: [0.44, 0.50], radius: 0.012, mode: .heal)]
+        })
+    }
+
+    /// The tone equalizer: shadows lifted, highlights lowered, the mask
+    /// moved up half a stop. The detail window checks that the mask,
+    /// made once for the whole image, holds at full resolution.
+    func testToneEqualizer() throws {
+        try check(Recipe(name: "tone-equalizer", detail: Self.ballCentre) {
+            $0.toneEqualizer = ToneEqualizer(bands: [1.2, 1, 0.8, 0.5, 0.2, 0, -0.3, -0.6, -0.9], maskExposure: 0.5)
         })
     }
 

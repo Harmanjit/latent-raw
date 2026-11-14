@@ -27,22 +27,33 @@ struct FilterBar: View {
     private var bar: some View {
         HStack(spacing: 10) {
             ratingThreshold
+            RatingRangeButton(filter: $library.filter)
             flagToggles
-            LabelFilterMenu(selection: $library.filter.labels)
-            Toggle("Edited", isOn: $library.filter.editedOnly)
-                .toggleStyle(.button)
-                .accessibilityLabel("Edited only")
+            LabelFilterMenu(selection: $library.filter.labels, excluded: $library.filter.excludedLabels)
+            EditedFilterToggle(filter: $library.filter)
 
             attributeMenu("Camera", selection: $library.filter.camera, options: options.cameras)
             attributeMenu("Lens", selection: $library.filter.lens, options: options.lenses)
-            attributeMenu("Keyword", selection: $library.filter.keyword, options: options.keywords)
+            KeywordFilterMenu(filter: $library.filter, options: options.keywords)
             FinderTagFilterMenu(selection: $library.filter.finderTag, tags: options.finderTags)
+            KindFilterMenu(filter: $library.filter)
+            RangesFilterButton(library: library)
+            DateFilterButton(filter: $library.filter)
 
-            TextField("Search file names", text: $library.filter.text)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Search file names")
-                .help("Shows images whose file name, title or caption contains this")
-                .frame(width: 150)
+            SearchScopeMenu(scope: $library.filter.textScope)
+            if library.filter.textScope == .everything {
+                TextField("Search all fields", text: $library.filter.text)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Search all fields")
+                    .help("Every word must appear in the name, path, title, caption, creator, copyright, camera, lens or keywords; \"quote\" a phrase, -word leaves out")
+                    .frame(width: 150)
+            } else {
+                TextField("Search file names", text: $library.filter.text)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Search file names")
+                    .help("Shows images whose file name, title or caption contains this")
+                    .frame(width: 150)
+            }
 
             Spacer()
 
@@ -52,6 +63,7 @@ struct FilterBar: View {
                 Button("Clear") { library.filter = LibraryFilter() }
             }
             sortMenu
+            FilterPresetsMenu(library: library)
         }
         .controlSize(.small)
         .font(.caption)
@@ -65,15 +77,23 @@ struct FilterBar: View {
         HStack(spacing: 1) {
             ForEach(1...5, id: \.self) { star in
                 Button {
-                    library.filter.minRating = library.filter.minRating == star ? 0 : star
+                    if library.filter.ratingOperator == .atMost {
+                        // At most (the rating range popover) sets the top instead.
+                        library.filter.maxRating = library.filter.maxRating == star ? 5 : star
+                    } else {
+                        library.filter.minRating = library.filter.minRating == star ? 0 : star
+                    }
                 } label: {
-                    Text(star <= library.filter.minRating ? "★" : "☆")
-                        .foregroundStyle(star <= library.filter.minRating ? Color.yellow : Color.secondary)
+                    let shown = RatingRangeText.shownRating(library.filter)
+                    Text(star <= shown ? "★" : "☆")
+                        .foregroundStyle(star <= shown ? Color.yellow : Color.secondary)
                 }
                 .buttonStyle(.plain)
             }
-            if library.filter.minRating > 0 {
+            if library.filter.minRating > 0, library.filter.ratingOperator == .atLeast {
                 Text("+").foregroundStyle(.secondary)
+            } else if library.filter.ratingOperator != .atLeast, library.filter.ratingIsConstrained {
+                Text(RatingRangeText.operatorMark(library.filter)).foregroundStyle(.secondary)
             }
         }
         .help("Show images rated this many stars or more")

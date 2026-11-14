@@ -124,6 +124,9 @@ public struct RawSummary: Sendable {
     /// rather than a raw, decoded by ImageIO into a linear source (see
     /// `RawFile+RenderedImage.swift`). nil for every raw and DNG.
     public var renderedImage: RenderedImageInfo? = nil
+    /// The camera's own white balance presets from its maker notes
+    /// (`CameraWhiteBalancePreset`); empty when LibRaw has none.
+    public var cameraWhiteBalancePresets: [CameraWhiteBalancePreset] = []
 }
 
 /// What the file says about the lens, beyond its (often empty) name.
@@ -245,6 +248,9 @@ public final class RawFile {
     private let preview: Data?
     /// Diagnostic: the return code from LibRaw's thumbnail call.
     public let lastThumbnailError: Int32
+    /// A DNG's opcode-list corrections (DNGOpcodes.swift), read beside the
+    /// decode for a full open of a DNG that has any; nil otherwise.
+    public internal(set) var dngOpcodes: DNGOpcodeList?
 
     /// `metadataOnly` skips decoding the sensor data — EXIF, the colour
     /// matrix and the embedded preview are still available, at roughly a
@@ -267,6 +273,9 @@ public final class RawFile {
             try self.init(remoteFileDescriptor: fd, metadataOnly: metadataOnly)
         } else {
             try self.init(fileDescriptor: fd, metadataOnly: metadataOnly)
+        }
+        if !metadataOnly, DNGOpcodes.mayHaveOpcodes(path: path) {
+            dngOpcodes = DNGOpcodes.read(url: URL(fileURLWithPath: path))
         }
     }
 
@@ -467,7 +476,7 @@ public final class RawFile {
         // all a DNG can hold, has no room for those, so LibRaw's reading of
         // this file would match lens profiles on less than the source did.
         let recipeLens = mergeInfo?.lens
-        return RawSummary(
+        var summary = RawSummary(
             activeArea: SensorActiveArea(
                 left: Int(c.left_margin), top: Int(c.top_margin), width: Int(c.width), height: Int(c.height),
                 fullWidth: Int(c.raw_width), fullHeight: Int(c.raw_height)),
@@ -488,6 +497,8 @@ public final class RawFile {
                 maxApertureAtMinFocal: Double(c.lens_max_ap_min_focal),
                 maxApertureAtMaxFocal: Double(c.lens_max_ap_max_focal),
                 cropFactor: Double(c.crop_factor)))
+        summary.cameraWhiteBalancePresets = isLinear ? [] : CameraWhiteBalancePreset.read(h)
+        return summary
     }
 
     private static func readPreview(_ h: OpaquePointer) -> (Data?, Int32) {

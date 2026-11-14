@@ -37,10 +37,15 @@ struct ColourExtrasGPU {
         let mix = c.blackAndWhite.mix.count == 8 ? c.blackAndWhite.mix : BlackAndWhite.neutralMix
         bwMix0 = SIMD4(mix[0], mix[1], mix[2], mix[3])
         bwMix1 = SIMD4(mix[4], mix[5], mix[6], mix[7])
-        shadows = SIMD4(0, 0, g.shadowLuminance, 0)
-        highlights = SIMD4(0, 0, g.highlightLuminance, 0)
-        midtones = SIMD4(g.midtones.hue, g.midtones.saturation, g.midtones.luminance, 0)
-        global = SIMD4(g.global.hue, g.global.saturation, g.global.luminance, 0)
+        // The w components: per-range saturation, and the global hue
+        // shift in degrees; 0 (the shader skips them) in older edits.
+        shadows = SIMD4(0, 0, g.shadowLuminance, g.shadowSaturation)
+        highlights = SIMD4(0, 0, g.highlightLuminance, g.highlightSaturation)
+        midtones = SIMD4(g.midtones.hue, g.midtones.saturation, g.midtones.luminance, g.midtoneSaturation)
+        global = SIMD4(g.global.hue, g.global.saturation, g.global.luminance, g.hueShift)
+        // Gamut Compression and Highlight Purity, as float bits.
+        info.z = c.gamutCompression.bitPattern
+        info.w = c.purity.bitPattern
         let points = c.pointColours.prefix(PointColour.maximumCount)
         info.y = UInt32(points.count)
         for (i, pc) in points.enumerated() {
@@ -64,5 +69,20 @@ extension RenderPipeline {
     /// moved, so an uncalibrated edit uses the same numbers as before.
     static func calibrated(_ cameraToWorking: simd_float3x3, _ calibration: Calibration) -> simd_float3x3 {
         calibration.movesPrimaries ? calibration.matrix * cameraToWorking : cameraToWorking
+    }
+
+    /// The camera-to-working matrix with every colour control that is a
+    /// matrix folded in: Adaptation first (it is about the light), then
+    /// Calibration's primaries, then the Channel Mixer. With neither
+    /// Adaptation nor the mixer in use this is exactly the calibrated
+    /// matrix above, so existing edits use the same numbers as before.
+    static func calibrated(_ cameraToWorking: simd_float3x3, _ colour: ColourControls) -> simd_float3x3 {
+        let base = calibrated(cameraToWorking, colour.calibration)
+        guard colour.movesMatrix else { return base }
+        var m = cameraToWorking
+        if !colour.adaptation.isIdentity { m = colour.adaptation.matrix * m }
+        if colour.calibration.movesPrimaries { m = colour.calibration.matrix * m }
+        if !colour.channelMixer.isNeutral { m = colour.channelMixer.matrix * m }
+        return m
     }
 }

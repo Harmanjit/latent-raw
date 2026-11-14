@@ -31,6 +31,7 @@ _latent/
   catalog.sqlite     the database (a cache; rebuildable)
   xmp/               one sidecar per image (the source of truth)
   thumbnails/        512 px HEIC previews (excluded from Time Machine)
+  backups/           the last five copies of catalog.sqlite
   custom-order.json  your Custom sort arrangement, once you make one
   collections.json   a copy of your collections, once you make one
 ```
@@ -40,6 +41,8 @@ _latent/
 **Sidecars** are standard XMP. Rating, colour label, keywords, title, caption, creator and copyright are written in the fields Lightroom and others read (`xmp:Rating`, `xmp:Label`, `dc:subject`, `dc:title`, `dc:description`, `dc:creator`, `dc:rights`), keyword hierarchies included (`lr:hierarchicalSubject`). The edit, history and snapshots are under Latent's own namespace. A sidecar written by another application is read for whatever standard fields it has.
 
 **A damaged database** is not a lost catalog. If SQLite reports `catalog.sqlite` as damaged, Latent moves it aside as `catalog.damaged-<date>.sqlite` in the same `_latent/` folder, starts a new one that fills from the sidecars, and tells you. Ratings, keywords and edits come back, and collections come back from `collections.json`; the include-or-separate answers for subfolders were kept only in the database, so they are asked again.
+
+**Backups.** Latent copies a folder's `catalog.sqlite` into `_latent/backups/` once a day when the folder opens (once it holds photos), and always just before an update changes the catalog's format. It keeps five, `catalog-backup-1.sqlite` to `-5`, each new copy overwriting the oldest; nothing is deleted. The sidecars already hold every edit, rating and keyword, so a backup matters for what only the database keeps: collections, stacks, subfolder choices and the like. To go back to one, open the folder and choose **Settings › Folders › Restore Catalog Backup…**, which lists the backups by date. Latent saves the open edit, closes the catalog, keeps the current one as `catalog-replaced-<date>.sqlite` beside it, copies the backup in and opens the folder again; edits, ratings and keywords saved in sidecars after the backup are read back from the sidecars as it opens. Restoring waits until no export, move, copy, Photo Merge, print or contact sheet is running.
 
 **Network volumes** use SQLite's rollback journal instead of write-ahead logging, which is unreliable over SMB and NFS.
 
@@ -58,11 +61,13 @@ Thumbnails are made in the background as soon as a folder opens: from the camera
 
 Thumbnail progress reaches the status bar at most ten times a second, so a big folder filling in doesn't slow the window down.
 
+To have a large folder's thumbnails ready before you open it, run `latent-cli thumbs <folder>` in Terminal: it reads the folder as opening it would and makes every missing or out-of-date thumbnail, edited photos from their edits (see [From the command line](Export#from-the-command-line)).
+
 ## Supported files
 
-**Raw files:** NEF, NRW, ARW, SRF, SR2, CR2, CR3, CRW, DNG, RAF, ORF, RW2, PEF, SRW, 3FR, FFF, IIQ, MOS, MRW, X3F. Decoding is by LibRaw. Only Bayer-pattern sensors render; see [Limitations](Limitations).
+**Raw files:** NEF, NRW, ARW, SRF, SR2, CR2, CR3, CRW, DNG, RAF, ORF, RW2, PEF, SRW, 3FR, FFF, IIQ, MOS, MRW, X3F, and the rarer ARI, BAY, BMQ, CAP, CINE, CS1, DC2, DCR, ERF, GPR, IA, K25, KC2, KDC, MDC, MEF, PXN, QTK, RAW, RDC, RW1 and STI. Decoding is by LibRaw. Only Bayer-pattern sensors render; see [Limitations](Limitations).
 
-**Pictures:** JPEG, HEIC and HEIF, TIFF and PNG, and WebP and AVIF where this Mac's macOS can read them. They are catalogued, rated, keyworded, filtered and exported like raws, with their camera, lens, exposure and capture time read from their EXIF; a scan or screenshot with no capture time is dated by the file's modification date. Their thumbnails are made from the pictures themselves, turned upright by their orientation tag. They open in Develop too: see [Develop](Develop#jpeg-tiff-and-other-pictures).
+**Pictures:** JPEG, HEIC and HEIF, TIFF and PNG, and WebP, AVIF and JPEG XL where this Mac's macOS can read them. They are catalogued, rated, keyworded, filtered and exported like raws, with their camera, lens, exposure and capture time read from their EXIF; a scan or screenshot with no capture time is dated by the file's modification date. Their thumbnails are made from the pictures themselves, turned upright by their orientation tag. They open in Develop too: see [Develop](Develop#jpeg-tiff-and-other-pictures).
 
 ### RAW+JPEG pairs
 
@@ -94,9 +99,23 @@ Click to select, ⌘-click and ⇧-click for multiple, double-click or Return to
 
 **Thumbnail size.** The slider in the filter bar, or ⌘= and ⌘- while the grid shows (View > Larger Thumbnails, Smaller Thumbnails). The size is remembered.
 
-**Right-click** an image for Open in Loupe, Open in Develop, Compare Selected (with exactly two selected), Survey Selected (two to four), Rating, Flag, Label, Rotate Left and Right, Flip Horizontal and Vertical, Create Virtual Copy, Set Copy as Master, Remove Virtual Copy, Copy Settings, Paste Settings, Apply Preset, Export, Reveal in Finder, Rename… (Rename N Images… with several selected, which opens Rename with Template), Rename with Template…, Move to Folder and Copy to Folder, Duplicate, and Add to Quick Collection (B), Add to Collection and, while the grid shows a collection, Remove from it, acting on the selection. Right-click between images for Select All and Reveal Folder in Finder.
+**Right-click** an image for Open in Loupe, Open in Develop, Compare Selected (with exactly two selected), Survey Selected (two to four), Rating, Flag, Label, Rotate Left and Right, Flip Horizontal and Vertical, Create Virtual Copy, Set Copy as Master, Remove Virtual Copy, Copy Settings, Paste Settings, Paste Settings (Overwrite), Sync Last Change to Selection, Reset Edits, Apply Preset, Export, Reveal in Finder, Rename… (Rename N Images… with several selected, which opens Rename with Template), Rename with Template…, Move to Folder and Copy to Folder, Duplicate, and Add to Quick Collection (B), Add to Collection and, while the grid shows a collection, Remove from it, acting on the selection. Right-click between images for Select All and Reveal Folder in Finder.
 
 **Filter bar** above the grid: rating threshold (click a star for "this many or better"), flag states, colour label, edited-only, camera, lens, keyword, Finder tag, and a search that looks in file names, titles and captions, combined with AND. The Label menu takes any number of labels, plus No Label and Custom Label (a label another application named), and shows images with any one of them. A keyword also finds the photos tagged with keywords inside it (Places finds Places › France › Paris). While a collection is shown, the filter narrows its photos. The count shows how many pass. ⇧⌘L clears the filter. Arrow keys walk only the visible images.
+
+**More filters.** Beside the controls above, each leaving the filter as it was until you use it:
+
+- **Rating range.** The small arrow after the stars opens a popover with At least (the stars' own meaning), Exactly, At most and Between, and a star range with two ends. Exactly with no stars shows the unrated photos.
+- **Excluding labels.** Option-click a label in the Label menu to hide photos with it; it shows as "Not Red" in the menu and "−Red" on the button. A photo passes when it has one of the chosen labels (or none are chosen) and none of the excluded ones.
+- **Unedited.** Option-click Edited to show only photos without an edit; click it again to show everything. Edit › Select Unedited selects them.
+- **No Keywords.** In the keyword menu, and at the top of the Keyword List with how many photos have none.
+- **Kind.** Raw (camera raws and DNG, as the File type sort groups them), Not Raw, or RAW+JPEG Pair (the raws that have a JPEG companion, and the JPEGs when shown); and Masters, Virtual Copies, or masters that Have Virtual Copies.
+- **Ranges.** ISO, focal length, aperture and exposure time, each with a small histogram of the folder (or collection) and a two-thumb range under it. Drag a thumb to narrow the range; a photo that doesn't record the value is hidden while its range is set. ⇧⌘L clears these with everything else.
+- **Date.** From and To dates for the capture time, or Today, Last 7 Days, This Month and This Year. Photos without a capture date are hidden only while a range is set.
+- **Searching all fields.** The magnifying glass before the search box switches it from file name, title and caption (the default) to every searchable field: name, folder path, title, caption, creator, copyright, camera, lens and keywords. There every word must appear, "quoted words" match as one phrase, and -word leaves out photos containing it, so `nikon "blue hour" -raw` works as you'd expect.
+- **Filter presets.** The filter button at the right end of the bar saves the bar's settings under a name (Save Current Filter…), applies a saved preset with one click, and renames or removes them. Presets belong to the app, so every folder sees them; they are separate from Save Filter as Smart Collection.
+
+**Grid marks** (View › Grid Marks) choose how much each thumbnail shows: Always (every mark, as the grid has always looked), On Hover (marks only under the pointer), Minimal (the selection, flag and colour label only) and Extended (adds a line of exposure time, aperture and ISO along the bottom of the picture). A small tag in the badge row marks photos with keywords; point at it to read them. Pointing at the edited pencil lists what the edit changes, by group (Tone, Crop & Straighten and so on).
 
 **Sort** (the menu in the filter bar, or View › Sort) by capture time, file name, rating, modified date or Custom, or by Lightroom's other orders:
 
@@ -141,6 +160,16 @@ Press Return or click away to save a field. With several photos selected, each f
 
 They go into the sidecar as Dublin Core (`dc:title`, `dc:description`, `dc:creator` and `dc:rights`), where Lightroom, Bridge and Capture One look for them, and Latent reads them from sidecars those applications wrote. Exports carry them too (see [Export](Export)). The filter bar's search finds words in titles and captions.
 
+**More** opens the rest of the IPTC fields Lightroom's IPTC panel shows: **Headline**, **Sublocation**, **City**, **State/Province**, **Country**, **Country Code**, **Creator Job Title**, **Creator Email**, **Creator URL** and **Instructions** (which, like the caption, can run to several lines). They work exactly as the four above, Mixed included, and go into the sidecar under the names Lightroom and darktable use (`photoshop:Headline`, `Iptc4xmpCore:Location`, `photoshop:City`, `photoshop:State`, `photoshop:Country`, `Iptc4xmpCore:CountryCode`, `photoshop:AuthorsPosition`, `Iptc4xmpCore:CreatorContactInfo` and `photoshop:Instructions`). Exports carry them in IPTC and XMP; the place names only when the export's location switch is on, and at the Copyright and contact level only the creator's job title, email and web address.
+
+Each field has a small **chevron** listing the values other photos in the folder already have, most used first: choose one to set it on the selection. **Presets** saves the fields the selected photos share as a named **metadata preset** (kept in Latent's settings, not in the folder), and applies one to the selection in a single step of ⌘Z; a preset sets only the fields it holds and leaves the rest alone. **Delete Preset** removes one.
+
+### Ratings and keywords from other apps
+
+When a photo is catalogued for the first time and has no sidecar of Latent's, Latent looks beside it for one another application wrote: darktable's `DSC_0107.NEF.xmp` first, then Lightroom's and Capture One's `DSC_0107.xmp`. From it come the stars (a rating of −1 becomes the reject flag), the colour label (`xmp:Label`, or darktable's colour labels, of which the first is taken), the keywords (`dc:subject` and `lr:hierarchicalSubject`, so keywords inside keywords come across), and the title, caption, creator, copyright and the More fields. Latent only reads those files, never changes them; what it takes goes into its own sidecar in `_latent/xmp`. Turn it off under **Settings › Folders › Read ratings and keywords from other apps' sidecars**.
+
+For photos already in the catalog, **File › Import Ratings and Keywords from Other Apps' Sidecars…** does the same for the selected photos (or every photo shown, with none selected), but fills only what Latent has empty: a photo you have rated keeps its stars, one with keywords keeps them, and a field you typed is left as it is. It is one step of ⌘Z. Edits (darktable's history, Lightroom's develop settings) are never read.
+
 ## Watching folders
 
 **The open folder.** Photos copied into the open folder or into a subfolder it includes, deleted, or renamed in Finder appear and go from the grid by themselves, a second or so after the copying stops: a whole card copied in is one refresh, not hundreds. A renamed photo keeps its rating and edits, as when the folder is opened. Latent doesn't read the folder to notice; macOS tells it what changed, so a quiet folder costs nothing. Changes to Latent's own `_latent` folder, and to files Latent doesn't catalog (text files, say), are ignored. Turn it off under **Settings › Folders › Watch the open folder for changes**. On a network share, changes made from another computer may not be noticed.
@@ -161,11 +190,11 @@ Loupe and Develop show the grid's visible images along the bottom, in the grid's
 
 ## Metadata panel
 
-The left panel shows the selected image's name, rating, flag, colour label, keywords and Finder tags, its title, caption, creator and copyright, then its camera, lens, exposure, capture time, dimensions and file size, read from the catalog so changing selection costs nothing. Keywords show as chips; the **Add keywords** field adds to every selected photo, with suggestions from the keywords already in the folder, and a chip's × takes that keyword off them all. The **Keyword List** below lists every keyword in the folder with its count. See [Collections and Keywords](Collections-and-Keywords). Below: history and snapshots, and export.
+The left panel shows the selected image's name, rating, flag, colour label, keywords and Finder tags, its title, caption, creator and copyright, then its camera, lens, exposure, capture time, dimensions and file size, read from the catalog so changing selection costs nothing. Below those come the **exposure bias**, whether the **flash** fired, the **metering** and **white balance** modes, the **GPS** position and **altitude**, when the file recorded them; with several photos selected, these say **Various** where the photos differ. Right-click the GPS row for **Copy Coordinates** (decimal degrees, for a map or a spreadsheet; Latent opens no map and goes on no network). Folders catalogued before these rows existed fill them in a few hundred photos at a time as the folder is scanned. **Settings › Library › Metadata rows** chooses which rows to show. Keywords show as chips; the **Add keywords** field adds to every selected photo, with suggestions from the keywords already in the folder, and a chip's × takes that keyword off them all. The **Keyword List** below lists every keyword in the folder with its count. See [Collections and Keywords](Collections-and-Keywords). Below: history and snapshots, and export.
 
 ## Loupe, Compare and Survey
 
-**Loupe** (E, or Space from the grid) shows one image full size with a caption. Arrows step, Z toggles fit and 100%, rating keys act on the image shown. With View › Mirror Image Mode on it is drawn mirrored, and zooming, panning and the magnifier follow the mirrored picture. View › Loupe Overlay (⌥⌘O) lays a grid, guides or a layout image over it; see [Loupe overlay](Develop#loupe-overlay).
+**Loupe** (E, or Space from the grid) shows one image full size with a caption. **Settings › Library › Info line** changes what the caption says, with a template in the export naming language (see [Export](Export#the-sheet)) plus `{file}` (the file name) and `{exposure}` (shutter, aperture, ISO and focal length), and whether it sits above or below the image; the stars and flag stay at its right. The default template gives the caption as it always was. The same caption is used in Compare and Survey. Arrows step, Z toggles fit and 100%, rating keys act on the image shown. With View › Mirror Image Mode on it is drawn mirrored, and zooming, panning and the magnifier follow the mirrored picture. View › Loupe Overlay (⌥⌘O) lays a grid, guides or a layout image over it; see [Loupe overlay](Develop#loupe-overlay).
 
 **Compare** (C) pins a "Select" on the left and walks a "Candidate" on the right with the arrows. While **Sync** (in the Compare bar) is on, zoom and pan stay matched by position in each picture, so images with different crops, rotations or sizes show the same region, and a candidate stepped in while zoomed keeps the zoom. ⇧X promotes the candidate to Select; Swap exchanges them. Rating keys act on the candidate. Sync is on at each launch.
 
@@ -178,6 +207,7 @@ These work in Loupe and Develop; zooming and the magnifier work in Compare too.
 - **Trackpad.** At fit, a two-finger swipe left shows the next image and right the previous, one per swipe; momentum does nothing. There is no swipe navigation in Compare, or while a crop, spot or mask tool is on. Zoomed in, two-finger scrolling pans. Pinch, or scroll with ⌥ or ⌘, to zoom about the pointer. A two-finger double-tap toggles fit and 100% at the pointer, like a double-click.
 - **Magnifier.** On a fitted image, hold the mouse button, or start dragging, to get a round loupe showing one image pixel per point (100%, or 200% on a Retina screen). Move it around; let go to close it. It sharpens in a moment, from a small full-resolution render of the area under the pointer. Edits and before/after (`\`) show in it. It is off while a Develop tool is on.
 - **Square pixels.** Past 200% the pixels are drawn as crisp squares, so demosaic, sharpening and noise-reduction artefacts can be judged pixel by pixel.
+- **Focus peaking and colour assessment.** View › Focus Peaking marks the sharpest edges in colour, and View › Colour Assessment frames the picture in mid-grey with a white border, in Loupe, Compare and Survey as in Develop. See [The viewport](Develop#the-viewport).
 - **Arrow keys.** With **Settings › Library › Arrow keys pan a zoomed-in image** on (it is off by default), ← → ↑ ↓ move around an image zoomed past fit, an eighth of the view per press. At fit ← and → still step, and Previous and Next Image in the View menu always step.
 
 ## Full screen and a second display
@@ -188,9 +218,15 @@ These work in Loupe and Develop; zooming and the magnifier work in Compare too.
 
 ## Applying edits to many images
 
-With several images selected, ⇧⌘V pastes copied settings onto all of them, and the Apply Preset menu applies a preset to all. Which parts travel is set under Presets and Clipboard in Develop; by default the look travels and masks and crops do not.
+With several images selected, ⇧⌘V pastes copied settings onto all of them, and the Apply Preset menu applies a preset to all. Which parts travel is set under Presets and Clipboard in Develop; by default the look travels and masks and crops do not. **Paste Settings (Overwrite)**, **Copy Settings…**, **Paste Settings…** and **Load Settings from File…** work on the selection the same way; see [Presets and clipboard](Develop#presets-and-clipboard).
+
+**Photo › Reset Edits** (also on the grid's right-click menu) puts every selected photo back to the default edit, keeping its rating, flag, label, keywords, title, caption and the rest; in Loupe, Compare, Survey and Develop it resets the photo shown. It is one undo step, Undo Reset Edits (12 Images), and in Develop a step in the photo's history.
+
+**Edit › Sync Last Change to Selection** (also on the right-click menu) is darktable's "sync last edited module": it looks at the lead photo's last history step, finds which groups it changed (say Tone after you moved Exposure), and pastes just those groups, as the lead has them now, onto every other selected photo. The lead is never written, and the others keep everything else. It works in the Library and, with photos selected in the filmstrip, in Develop. It is one Library undo step, Undo Sync Last Change; in Develop, where ⌘Z steps the open photo's history, undo it from the Library.
 
 **Photo › Match Total Exposures** (⌥⇧⌘M, Lightroom's key) evens out the brightness of the selection: each photo's Exposure is set so that, counting how the camera exposed it (shutter speed, aperture and ISO) and its Exposure slider, it has the same total as the lead (the selected photo whose details the panel shows). A bracket shot at −2, 0 and +2 comes out at one brightness, and a photo shot a stop darker gets a stop more Exposure. Only Exposure changes, within its −5 to +5 range, and the lead keeps its edit. Photos without shutter speed, aperture and ISO (most JPEGs from apps, scans) are left alone and counted in the message. It works in the Library grid, is one undo step, and needs at least two photos selected.
+
+**Photo › Match Exposures by Histogram…** does the same from the pictures rather than the camera's settings, so it works without shutter speed, aperture and ISO and also evens out light that changed between shots. Each photo's edit is rendered small before Exposure, the brightness below which **Percentile** of its pixels fall is found (50%, the median, by default; higher matches the highlights, lower the shadows), and its Exposure is set to bring that brightness to the **Target**: the lead photo's, with its own Exposure, or a fixed level in stops from 18% grey. It reads every raw, so it runs in the background like Remove Dust, and writes all the photos together as one undo step; a photo edited meanwhile is left alone. With the lead as target the lead keeps its edit. It works in the Library grid and needs at least two photos selected.
 
 A pasted or preset **Touch-up** carries its sliders but not the faces they were found on, so after the paste Latent finds the faces in each of those photos itself: a "Finding faces" job runs in the background, with its progress and a Cancel face search button in the left panel, and writes the faces (and, with Remove blemishes on, the blemishes) back as one undo step, "Find Faces (12 Images)". A photo with no face is left alone and named in the panel's notes. In Loupe, Compare and Survey the job runs for the image shown; in Develop the open image finds its faces on the spot, and the job leaves that one to the editor rather than finding them twice. Opening another folder while the job runs ends it without writing anything, the same as Remove Dust below.
 
@@ -222,7 +258,9 @@ The **Activity** button in the status bar appears while anything runs in the bac
 
 A virtual copy is another version of a photo: its own edit, rating, flag, colour label, rotation, keywords, history and snapshots, sharing the one raw file. Use one to try a black-and-white version beside the colour one, or a square crop beside the full frame, and keep both. A copy takes no disk space beyond its sidecar and thumbnail.
 
-**Create Virtual Copy** (⌘', the Photo menu or the grid's right-click menu) makes one copy of each selected image; in Loupe and Develop, of the image shown, and the new copy opens in its place. The copy starts as the image looked: the same edit, rating, flag, label, rotation and keywords. Its history and snapshots start empty and are its own from then on. A copy of a copy is another copy of the same photo.
+**Create Virtual Copy** (⌘', the Photo menu or the grid's right-click menu) makes one copy of each selected image; in Loupe and Develop, of the image shown, and the new copy opens in its place. The copy starts as the image looked: the same edit, rating, flag, label, rotation and keywords. Its history and snapshots start empty and are its own from then on. A copy of a copy is another copy of the same photo. **Photo › New Blank Copy** makes one that starts from the default edit instead, keeping the rating, flag, label, rotation and keywords.
+
+**Versions** in Develop's right panel lists the photo's master and its copies, each with a small thumbnail; click one to open it. A copy can be given a name of its own there, such as "Moody B&W", shown in the row and its tooltip. The section also has **New Virtual Copy** and **New Blank Copy**.
 
 **In the grid** a copy sits right after its photo (the master) when sorted by capture time or file name, with a stacked-squares mark at the bottom-left of its picture. Its name is the master's with the copy's number, "DSC_0107 (Copy 2).NEF", and the left panel says "Virtual copy of DSC_0107.NEF". The filter's file-name search finds copies by that name, so typing "Copy" shows them all.
 
@@ -291,6 +329,8 @@ Progress shows in the status bar with a stop button. Stopping, or quitting, fini
 | `{time}` | the capture time, 143005 |
 | `{title}` | the photo's title |
 | `{camera}`, `{rating}`, `{folder}` | the camera model, the stars, the subfolder |
+
+The **More** menu adds the rest of the export's tokens, such as `{lens}`, `{iso}`, `{city}` and `{keywords}`, and every token takes the export's modifiers (`{title|untitled}`, `{title:upper}`, `{name:1-8}`, `{name/_/-}`); see [Export](Export#the-sheet).
 
 Anything else in the template is used as typed, and the extension is always kept. The template, custom text and start number are remembered, and the template language is the same as the export's file naming.
 

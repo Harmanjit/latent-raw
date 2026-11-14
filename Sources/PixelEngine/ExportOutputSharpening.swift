@@ -1,5 +1,7 @@
 import Foundation
 import Metal
+import CoreGraphics
+import ColorKit
 
 /// Output sharpening, as Lightroom's export offers it: a final sharpen
 /// made for where the file is going, applied after the resize so it
@@ -163,5 +165,23 @@ extension Exporter {
         cmdBuffer.commit()
         cmdBuffer.waitUntilCompleted()
         guard cmdBuffer.status != .error else { throw ExportError.readbackFailed }
+    }
+}
+
+extension Exporter {
+    /// `cgImage(from:…)` with output sharpening after the resize, as an
+    /// exported file has it: what a print uses for Matte or Glossy paper.
+    /// Nil `sharpening` is exactly `cgImage(from:…)`.
+    public func cgImage(from texture: MTLTexture, colorSpace: ColorKit.OutputSpace, rotation: ImageRotation = .none,
+                        crop: CropParameters = .none, bitsPerComponent: Int = 8, maxLongEdge: Int? = nil,
+                        sharpening: OutputSharpening?, ppi: Double?) throws -> CGImage {
+        guard let sharpening else {
+            return try cgImage(from: texture, colorSpace: colorSpace, rotation: rotation, crop: crop,
+                               bitsPerComponent: bitsPerComponent, maxLongEdge: maxLongEdge)
+        }
+        let packed = try packedTexture(from: texture, rotation: rotation, crop: crop, bitsPerComponent: bitsPerComponent,
+                                       maxLongEdge: maxLongEdge,
+                                       finish: PackFinish(sharpening: sharpening, ppi: ppi))
+        return try cgImage(packed: packed, colorSpace: colorSpace, bitsPerComponent: bitsPerComponent, watermark: nil)
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import PixelEngine
+import ColorKit
 import Catalog
 import MLKit
 
@@ -12,7 +13,7 @@ struct ExportFormatPicker: View {
 
     var body: some View {
         Picker("Format", selection: selection) {
-            ForEach(ExportSettings.Format.available, id: \.self) { format in
+            ForEach(ExportSettings.Format.menu, id: \.self) { format in
                 Text(format.displayName).tag("image." + format.rawValue)
             }
             // Formats this Mac can't encode, shown greyed out so their
@@ -24,10 +25,12 @@ struct ExportFormatPicker: View {
             Divider()
             Text("DNG").tag(ExportFileKind.dng.rawValue)
             Text("Original + XMP sidecar").tag(ExportFileKind.original.rawValue)
+            Text("PDF").tag(ExportFileKind.pdf.rawValue)
         }
-        .help("JPEG, HEIC, PNG and TIFF everywhere; AVIF and JPEG XL when this Mac can write them"
+        .help("JPEG, HEIC, PNG and TIFF everywhere; AVIF, JPEG XL and OpenEXR when this Mac can write them"
               + unavailableNote + ". DNG keeps raw editing room, with the edit baked in. Original copies the raw "
-              + "file itself, with an XMP sidecar holding its rating, keywords and edit.")
+              + "file itself, with an XMP sidecar holding its rating, keywords and edit. PDF puts each photo on a page "
+              + "of its own.")
         .accessibilityLabel("Format")
     }
 
@@ -86,6 +89,9 @@ struct ExportKindNote: View {
         case .original:
             "The raw file itself, unchanged, with an .xmp sidecar beside it holding the rating, label, "
                 + "keywords and Latent's edit. Other apps read the rating, label and keywords."
+        case .pdf:
+            "One PDF per photo: the edited photo on a page of its own, with the page size, margin and caption "
+                + "set below. Colour is sRGB, or Display P3 when it was chosen for image files."
         }
     }
 }
@@ -108,14 +114,46 @@ struct ExportFileOptionsSection: View {
                 Spacer()
             }
         }
+        if preset.format == .png {
+            Picker("Bit depth", selection: $preset.formats.pngBitDepth) {
+                Text("16 bits per channel").tag(16)
+                Text("8 bits per channel").tag(8)
+            }
+            .frame(width: 240)
+            .help("16 bits keeps smooth gradients for further editing; 8 bits makes a file half the size.")
+        }
+        if preset.format == .heic, !preset.settings.writesFullHDR {
+            Picker("Bit depth", selection: $preset.formats.heicBitDepth) {
+                Text("8 bits per channel").tag(8)
+                Text("10 bits per channel").tag(10)
+            }
+            .frame(width: 240)
+            .help("10 bits keeps smooth skies and gradients from banding on wide-gamut screens; every Apple "
+                  + "device reads it. 8 bits is the most widely read.")
+        }
+        if preset.format == .exr {
+            Picker("Precision", selection: $preset.formats.exr.half) {
+                Text("Half float (16-bit)").tag(true)
+                Text("Full float (32-bit)").tag(false)
+            }
+            .frame(width: 240)
+            .help("Half float is what compositing apps expect and half the size; full float keeps every bit.")
+            Text("A scene-linear OpenEXR at full size, cropped and upright, in linear sRGB primaries (colours "
+                 + "outside sRGB are kept as negative values): white balance, exposure, noise reduction, lens "
+                 + "corrections, healing and masks are baked in, and the look (tone curve, colour, presence) is "
+                 + "left out, as for a DNG. Image sizing, sharpening, border, watermark and metadata aren't used.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
         if preset.format == .tiff {
             HStack {
                 Picker("Bit depth", selection: $preset.tiffBitDepth) {
                     Text("16 bits per channel").tag(16)
                     Text("8 bits per channel").tag(8)
+                    Text("32-bit float (linear)").tag(32)
                 }
                 .frame(width: 240)
-                .help("16 bits keeps smooth gradients for further editing; 8 bits makes a file half the size.")
+                .help("16 bits keeps smooth gradients for further editing; 8 bits makes a file half the size. "
+                      + "32-bit float writes linear light, for HDR and compositing tools.")
                 Picker("Compression", selection: $preset.tiffCompression) {
                     ForEach(TIFFCompression.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
@@ -123,6 +161,10 @@ struct ExportFileOptionsSection: View {
                 .help("All three are lossless. ZIP is usually smallest, LZW is read by the most software, "
                       + "None is quickest to open.")
             }
+            Toggle("Greyscale when monochrome", isOn: $preset.formats.greyscaleWhenMonochrome)
+                .help("A black and white edit (with no colour grading or tint) is written as one grey channel, "
+                      + "a third of the size, tagged Gray Gamma 2.2 (Linear Gray for 32-bit float). Colour edits "
+                      + "are written in colour as usual.")
         }
     }
 }
@@ -158,6 +200,16 @@ struct ExportColorSpacePicker: View {
             Label("ProPhoto RGB in 8 bits can band in smooth skies; use a 16-bit TIFF.",
                   systemImage: "exclamationmark.triangle.fill")
                 .font(.caption).foregroundStyle(.orange)
+        }
+        if preset.settings.colorProfile?.needsConversion == true {
+            Picker("Rendering intent", selection: $preset.formats.renderingIntent) {
+                Text("Default (\(ExportColorProfile.defaultIntent(for: preset.profile?.kind ?? .icc).displayName))")
+                    .tag(RenderingIntent?.none)
+                ForEach(RenderingIntent.allCases) { Text($0.displayName).tag(Optional($0)) }
+            }
+            .frame(width: 330)
+            .help("How colours outside the profile's gamut are brought in. Default is perceptual for a printer or "
+                  + "paper profile and relative colorimetric for Adobe RGB and ProPhoto RGB, as before.")
         }
         if preset.hdrGainMap, preset.format.supportsGainMap, preset.settings.colorProfile?.needsConversion == true {
             Text("No HDR gain map in this colour space: the map describes sRGB or Display P3.")
@@ -226,6 +278,14 @@ struct ExportSizingSection: View {
                           + "fits inside it whichever way the photo is turned. Megapixels and Percentage scale the "
                           + "whole picture.")
                     values
+                    if preset.sizingMode.usesLengths {
+                        Picker("Unit", selection: $preset.formats.sizeUnit) {
+                            ForEach(ExportSizeUnit.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }
+                        .labelsHidden().frame(width: 64)
+                        .accessibilityLabel("Size unit")
+                        .help("Centimetres and inches are turned into pixels at the Resolution below.")
+                    }
                     Spacer()
                 }
                 Toggle("Don't enlarge", isOn: $preset.dontEnlarge)
@@ -248,14 +308,29 @@ struct ExportSizingSection: View {
                     .accessibilityLabel("\(n) pixels per inch")
             }
         }
+        .onChange(of: preset.ppi) { old, new in keepPrintSize(from: old, to: new) }
+    }
+
+    /// With sizes typed in cm or inches, a new resolution keeps the print
+    /// size and changes the pixels, as Lightroom does.
+    private func keepPrintSize(from old: Int, to new: Int) {
+        guard preset.formats.sizeUnit != .pixels, old > 0, new > 0, old != new else { return }
+        let scale = Double(min(max(new, 1), 9999)) / Double(min(max(old, 1), 9999))
+        func scaled(_ n: Int) -> Int { max(1, Int((Double(n) * scale).rounded())) }
+        preset.maxLongEdge = scaled(preset.maxLongEdge)
+        preset.shortEdge = scaled(preset.shortEdge)
+        preset.boxWidth = scaled(preset.boxWidth)
+        preset.boxHeight = scaled(preset.boxHeight)
     }
 
     @ViewBuilder private var values: some View {
         switch preset.sizingMode {
         case .longEdge:
             number($preset.maxLongEdge, "px", label: "Long edge in pixels")
-            ForEach([1024, 2048, 4096], id: \.self) { n in
-                Button("\(n)") { preset.maxLongEdge = n }.controlSize(.small).accessibilityLabel("\(n) pixels")
+            if preset.formats.sizeUnit == .pixels {
+                ForEach([1024, 2048, 4096], id: \.self) { n in
+                    Button("\(n)") { preset.maxLongEdge = n }.controlSize(.small).accessibilityLabel("\(n) pixels")
+                }
             }
         case .shortEdge:
             number($preset.shortEdge, "px", label: "Short edge in pixels")
@@ -273,10 +348,28 @@ struct ExportSizingSection: View {
         }
     }
 
-    private func number(_ value: Binding<Int>, _ unit: String, label: String) -> some View {
-        HStack(spacing: 4) {
-            TextField("px", value: value, format: .number).frame(width: 64).accessibilityLabel(label)
-            Text(unit).foregroundStyle(.secondary).accessibilityHidden(true)
+    @ViewBuilder private func number(_ value: Binding<Int>, _ unit: String, label: String) -> some View {
+        let sizeUnit = preset.formats.sizeUnit
+        if sizeUnit == .pixels {
+            HStack(spacing: 4) {
+                TextField("px", value: value, format: .number).frame(width: 64).accessibilityLabel(label)
+                Text(unit).foregroundStyle(.secondary).accessibilityHidden(true)
+            }
+        } else {
+            // Shown and typed in cm or inches, kept in pixels.
+            let ppi = preset.ppi
+            let physical = Binding<Double> {
+                (sizeUnit.value(pixels: value.wrappedValue, ppi: ppi) * 100).rounded() / 100
+            } set: { typed in
+                value.wrappedValue = sizeUnit.pixels(value: typed, ppi: ppi)
+            }
+            HStack(spacing: 4) {
+                TextField(sizeUnit.title, value: physical, format: .number.precision(.fractionLength(0...2)))
+                    .frame(width: 64)
+                    .accessibilityLabel(label.replacingOccurrences(of: "pixels", with: sizeUnit == .inches ? "inches" : "centimetres"))
+                    .help("\(value.wrappedValue) pixels at \(ppi) ppi.")
+                Text(unit == "px" ? "" : unit).foregroundStyle(.secondary).accessibilityHidden(true)
+            }
         }
     }
 }
@@ -325,6 +418,16 @@ struct ExportMetadataSection: View {
             .padding(.leading, 20)
             .accessibilityHint(ExportPreset.locationHelp)
             .help(ExportPreset.locationHelp)
+        Toggle("Write keyword hierarchy", isOn: $preset.formats.keywordHierarchy)
+            .disabled(!preset.includeMetadata || !preset.metadataLevel.includesKeywordsAndRating)
+            .padding(.leading, 20)
+            .help("Also writes each keyword whole (Places|France|Paris) in lr:hierarchicalSubject, which "
+                  + "Lightroom and other catalogs read back as a hierarchy. The flat keywords are written as before.")
+        Toggle("Embed Latent edit", isOn: $preset.formats.embedEdit)
+            .disabled(!preset.includeMetadata)
+            .padding(.leading, 20)
+            .help("Writes this photo's Latent edit into the file's XMP, as its sidecar holds it, so the edit can "
+                  + "be recovered from the exported file later.")
     }
 
     private var level: Binding<ExportMetadataLevel?> {

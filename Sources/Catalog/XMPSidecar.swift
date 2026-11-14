@@ -45,6 +45,10 @@ public enum XMPSidecar {
         public var caption: String? = nil
         public var creator: String? = nil
         public var copyright: String? = nil
+        /// The More descriptive fields (`DescriptiveField.more`), absent
+        /// ones left out; written under the photoshop and Iptc4xmpCore names
+        /// only when there is one, so other sidecars stay byte for byte.
+        public var more: [DescriptiveField: String] = [:]
 
         public init(rating: Int = 0, label: String? = nil, flag: Int = 0, rotation: Int = 0,
                     keywords: [String] = [],
@@ -96,7 +100,8 @@ public enum XMPSidecar {
         let keywordItems = subjects.map { "      <rdf:li>\(escape($0))</rdf:li>" }.joined(separator: "\n")
         let hierarchyItems = f.keywords.map { "      <rdf:li>\(escape($0))</rdf:li>" }.joined(separator: "\n")
         let hierarchyBlock = hierarchical ? "   <lr:hierarchicalSubject><rdf:Bag>\n\(hierarchyItems)\n   </rdf:Bag></lr:hierarchicalSubject>\n" : ""
-        let lightroomNamespace = hierarchical ? "\n    xmlns:lr=\"http://ns.adobe.com/lightroom/1.0/\"" : ""
+        let lightroomNamespace = (hierarchical ? "\n    xmlns:lr=\"http://ns.adobe.com/lightroom/1.0/\"" : "")
+            + moreNamespaces(f)
         let labelAttr = f.label.map { " xmp:Label=\"\(escape($0))\"" } ?? ""
         let preservedAttr = f.preservedFileName.map {
             " xmpMM:PreservedFileName=\"\(escape($0))\""
@@ -119,7 +124,7 @@ public enum XMPSidecar {
             latent:Rotation="\(f.rotation)">
            <dc:subject><rdf:Bag>
         \(keywordItems)
-           </rdf:Bag></dc:subject>\(descriptiveElements(f))
+           </rdf:Bag></dc:subject>\(descriptiveElements(f))\(moreElements(f))
         \(hierarchyBlock)   <latent:EditStack>\(cdata(f.editStackJSON))</latent:EditStack>
         \(f.snapshotsJSON.isEmpty ? "" : "   <latent:Snapshots>\(cdata(f.snapshotsJSON))</latent:Snapshots>")
         \(f.historyJSON.isEmpty ? "" : "   <latent:History>\(cdata(f.historyJSON))</latent:History>")
@@ -151,6 +156,56 @@ public enum XMPSidecar {
             lines.append("   <dc:creator><rdf:Seq>\(items)</rdf:Seq></dc:creator>")
         }
         if let line = alternative("rights", f.copyright) { lines.append(line) }
+        return lines.isEmpty ? "" : "\n" + lines.joined(separator: "\n")
+    }
+
+    static let photoshopNamespace = "http://ns.adobe.com/photoshop/1.0/"
+    static let iptcCoreNamespace = "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"
+
+    /// Where each More field lives in XMP: its prefix and property name.
+    /// The creator's email and web address sit inside
+    /// Iptc4xmpCore:CreatorContactInfo, as CiEmailWork and CiUrlWork.
+    static func xmpName(_ field: DescriptiveField) -> (prefix: String, name: String)? {
+        switch field {
+        case .headline: ("photoshop", "Headline")
+        case .sublocation: ("Iptc4xmpCore", "Location")
+        case .city: ("photoshop", "City")
+        case .state: ("photoshop", "State")
+        case .country: ("photoshop", "Country")
+        case .countryCode: ("Iptc4xmpCore", "CountryCode")
+        case .creatorJobTitle: ("photoshop", "AuthorsPosition")
+        case .creatorEmail: ("Iptc4xmpCore", "CiEmailWork")
+        case .creatorURL: ("Iptc4xmpCore", "CiUrlWork")
+        case .instructions: ("photoshop", "Instructions")
+        case .title, .caption, .creator, .copyright: nil
+        }
+    }
+
+    /// The namespace declarations the More fields need, none without them.
+    static func moreNamespaces(_ f: Fields) -> String {
+        let used = Set(f.more.filter { !$0.value.isEmpty }.keys.compactMap { xmpName($0)?.prefix })
+        var out = ""
+        if used.contains("photoshop") { out += "\n    xmlns:photoshop=\"\(photoshopNamespace)\"" }
+        if used.contains("Iptc4xmpCore") { out += "\n    xmlns:Iptc4xmpCore=\"\(iptcCoreNamespace)\"" }
+        return out
+    }
+
+    /// The More fields, one element each after the Dublin Core ones, in
+    /// `DescriptiveField.more` order; nothing when none is set.
+    static func moreElements(_ f: Fields) -> String {
+        var lines: [String] = []
+        var contact: [String] = []
+        for field in DescriptiveField.more {
+            guard let value = f.more[field], !value.isEmpty, let (prefix, name) = xmpName(field) else { continue }
+            if field == .creatorEmail || field == .creatorURL {
+                contact.append("<\(prefix):\(name)>\(escape(value))</\(prefix):\(name)>")
+            } else {
+                lines.append("   <\(prefix):\(name)>\(escape(value))</\(prefix):\(name)>")
+            }
+        }
+        if !contact.isEmpty {
+            lines.append("   <Iptc4xmpCore:CreatorContactInfo rdf:parseType=\"Resource\">\(contact.joined())</Iptc4xmpCore:CreatorContactInfo>")
+        }
         return lines.isEmpty ? "" : "\n" + lines.joined(separator: "\n")
     }
 
@@ -197,6 +252,13 @@ public enum XMPSidecar {
     /// parser read its target whole. Non-blocking, so a FIFO dropped in
     /// under a sidecar's name is refused rather than waited on.
     public static func read(from url: URL) throws -> Fields {
+        try parse(loadDocument(from: url))
+    }
+
+    /// The parsed XML of the file at `url`, opened as `read(from:)` opens it.
+    /// For readers of other applications' sidecars (ForeignSidecar), which
+    /// need a few properties Latent's own don't carry.
+    static func loadDocument(from url: URL) throws -> XMLDocument {
         let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         guard fd >= 0 else {
             let code = errno
@@ -213,8 +275,7 @@ public enum XMPSidecar {
         // Bounded even if the file grows after the check.
         let data = try handle.read(upToCount: maximumSidecarBytes + 1) ?? Data()
         if data.count > maximumSidecarBytes { throw SidecarError.tooLarge(data.count) }
-        let document = try XMLDocument(data: data, options: parseOptions)
-        return try parse(document)
+        return try XMLDocument(data: data, options: parseOptions)
     }
 
     public static func read(xml: String) throws -> Fields {
@@ -235,7 +296,7 @@ public enum XMPSidecar {
         }
     }
 
-    private static func parse(_ document: XMLDocument) throws -> Fields {
+    static func parse(_ document: XMLDocument) throws -> Fields {
         // Foundation's XPath is namespace-aware and won't resolve a prefix
         // like `rdf:` on its own, so elements are matched by local name.
         // That's also more forgiving of foreign sidecars that declare the
@@ -302,7 +363,34 @@ public enum XMPSidecar {
             .compactMap { DescriptiveField.normalized($0.stringValue) }
         fields.creator = creators.isEmpty
             ? DescriptiveField.normalized(childText("creator")) : creators.joined(separator: "; ")
+        fields.more = moreFields(in: description)
         return fields
+    }
+
+    /// The More fields of a Description, as attributes or elements, whatever
+    /// their prefix; the contact details inside CreatorContactInfo either way.
+    static func moreFields(in description: XMLElement) -> [DescriptiveField: String] {
+        var out: [DescriptiveField: String] = [:]
+        let contact = (try? description.nodes(forXPath: "*[local-name()='CreatorContactInfo']"))?.first as? XMLElement
+        for field in DescriptiveField.more {
+            guard let (_, local) = xmpName(field) else { continue }
+            let holder = field == .creatorEmail || field == .creatorURL ? contact : description
+            guard let holder else { continue }
+            let text = holder.attributes?.first { $0.localName == local }?.stringValue
+                ?? simpleText(in: holder, local)
+            if let value = DescriptiveField.normalized(text, multiline: field.isMultiline) { out[field] = value }
+        }
+        return out
+    }
+
+    /// A simple property's text: the element's own, or its language
+    /// alternative's default entry when a writer used one.
+    private static func simpleText(in element: XMLElement, _ local: String) -> String? {
+        guard let child = (try? element.nodes(forXPath: "*[local-name()='\(local)']"))?.first as? XMLElement
+        else { return nil }
+        let items = ((try? child.nodes(forXPath: ".//*[local-name()='li']")) ?? []).compactMap { $0 as? XMLElement }
+        let chosen = items.first { $0.attribute(forName: "xml:lang")?.stringValue == "x-default" } ?? items.first
+        return chosen?.stringValue ?? child.stringValue
     }
 
     /// A language alternative's text: the default language's entry, else

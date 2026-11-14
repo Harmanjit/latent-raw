@@ -32,7 +32,8 @@ struct HealOverlay: View {
                     let r = CGFloat(patch.radius) * short * model.viewport.zoom / scale
                     let t = point(patch.target, scale: scale)
                     let s = point(patch.source, scale: scale)
-                    if patch.mode == .remove {
+                    // Remove, Fill and Blur have no source to draw.
+                    if !patch.mode.usesSource {
                         drawRemoval(patch, radius: r, selected: selected, scale: scale, in: &context)
                         continue
                     }

@@ -15,6 +15,9 @@ struct PrintLayoutSettings: Codable, Equatable, Sendable {
         /// Converted into the printer or paper profile chosen for Soft
         /// Proof, so the print matches the proof.
         case proofProfile
+        /// Converted into a profile chosen for printing itself
+        /// (`printProfileBookmark`), whatever Soft Proof shows.
+        case icc
 
         var id: String { rawValue }
     }
@@ -34,6 +37,22 @@ struct PrintLayoutSettings: Codable, Equatable, Sendable {
     /// printing into it. Each print starts from Soft Proof's intent, so the
     /// print matches what was proofed (`PrintPresenter`).
     var intent: RenderingIntent = .perceptual
+
+    // Added later (PrintLayoutSettings+Extras.swift). Each is absent in an
+    // older store and defaults to what a print did before it existed.
+
+    /// The profile `.icc` prints into: a security-scoped bookmark of its
+    /// own, so it opens again after a relaunch, and its name for the menu.
+    var printProfileBookmark: Data?
+    var printProfileName: String?
+    /// A develop preset applied to the print only.
+    var presetStyle: PresetStyle?
+    /// Output sharpening for Matte or Glossy paper; nil for none.
+    var sharpening: OutputSharpening?
+    /// Each side's margin, when they differ; nil uses `margin` on all four.
+    var customMargins: LayoutInsets?
+    /// The unit margins are shown in; nil follows the locale (mm or in).
+    var marginUnit: PrintMarginUnit?
 
     static let marginRange = 0.0...72.0
     static let spacingRange = 0.0...36.0
@@ -55,6 +74,12 @@ struct PrintLayoutSettings: Codable, Equatable, Sendable {
         autoRotate = (try? c.decode(Bool.self, forKey: .autoRotate)) ?? defaults.autoRotate
         color = (try? c.decode(ColorChoice.self, forKey: .color)) ?? defaults.color
         intent = (try? c.decode(RenderingIntent.self, forKey: .intent)) ?? defaults.intent
+        printProfileBookmark = (try? c.decodeIfPresent(Data.self, forKey: .printProfileBookmark)) ?? nil
+        printProfileName = (try? c.decodeIfPresent(String.self, forKey: .printProfileName)) ?? nil
+        presetStyle = (try? c.decodeIfPresent(PresetStyle.self, forKey: .presetStyle)) ?? nil
+        sharpening = (try? c.decodeIfPresent(OutputSharpening.self, forKey: .sharpening)) ?? nil
+        customMargins = (try? c.decodeIfPresent(LayoutInsets.self, forKey: .customMargins)) ?? nil
+        marginUnit = (try? c.decodeIfPresent(PrintMarginUnit.self, forKey: .marginUnit)) ?? nil
         self = validated
     }
 
@@ -63,6 +88,13 @@ struct PrintLayoutSettings: Codable, Equatable, Sendable {
         if !PageLayout.imagesPerPageChoices.contains(copy.imagesPerPage) { copy.imagesPerPage = 1 }
         copy.margin = min(max(copy.margin, Self.marginRange.lowerBound), Self.marginRange.upperBound)
         copy.spacing = min(max(copy.spacing, Self.spacingRange.lowerBound), Self.spacingRange.upperBound)
+        if let custom = copy.customMargins {
+            let clamp = { (v: Double) in min(max(v.isFinite ? v : 0, Self.marginRange.lowerBound), Self.marginRange.upperBound) }
+            copy.customMargins = LayoutInsets(top: clamp(custom.top), left: clamp(custom.left),
+                                              bottom: clamp(custom.bottom), right: clamp(custom.right))
+        }
+        // Screen sharpening is for files; a print is matte or glossy.
+        if copy.sharpening?.medium == .screen { copy.sharpening = nil }
         return copy
     }
 
@@ -74,6 +106,7 @@ struct PrintLayoutSettings: Codable, Equatable, Sendable {
     /// the proof profile when that is the choice and one is set, else none
     /// (Display P3).
     func profile(proof: SheetProfile?) -> SheetProfile? {
+        if color == .icc { return printProfile() }
         guard color == .proofProfile, var profile = proof else { return nil }
         profile.intent = intent
         return profile
@@ -163,8 +196,9 @@ struct PrintPaper: Sendable, Equatable {
         let settings = settings.validated
         let page = pageSize
         let hardware = unprintableInsets
-        let margins = LayoutInsets(top: max(settings.margin, hardware.top), left: max(settings.margin, hardware.left),
-                                   bottom: max(settings.margin, hardware.bottom), right: max(settings.margin, hardware.right))
+        let wanted = settings.margins
+        let margins = LayoutInsets(top: max(wanted.top, hardware.top), left: max(wanted.left, hardware.left),
+                                   bottom: max(wanted.bottom, hardware.bottom), right: max(wanted.right, hardware.right))
         var layout = PageLayout(pageSize: page, margins: margins, spacing: settings.spacing,
                                 captionHeight: settings.caption.height(fontSize: PrintLayoutSettings.captionFontSize),
                                 scaling: settings.scaling, autoRotate: settings.autoRotate, centersPartialPages: true)

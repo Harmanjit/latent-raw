@@ -44,6 +44,8 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
     /// photosites for a Bayer raw (`width x height`), Float16 channel
     /// values for a linear source (`width x height x 4`).
     public var planeSampleCount: Int
+    /// The camera's white balance presets; absent when it has none.
+    public var cameraWhiteBalancePresets: [CameraWhiteBalancePreset]?
 
     public init(summary s: RawSummary, cameraToXYZ: [Float]?, thumbnailError: Int32, isMetadataOnly: Bool,
                 planeSampleCount: Int) {
@@ -69,6 +71,7 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
         self.thumbnailError = thumbnailError
         self.isMetadataOnly = isMetadataOnly
         self.planeSampleCount = planeSampleCount
+        cameraWhiteBalancePresets = s.cameraWhiteBalancePresets.isEmpty ? nil : s.cameraWhiteBalancePresets
     }
 
     /// The largest side the shim can report: its size fields are uint16.
@@ -101,7 +104,7 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
     }
 
     public var summary: RawSummary {
-        RawSummary(
+        var summary = RawSummary(
             activeArea: SensorActiveArea(left: leftMargin, top: topMargin, width: width, height: height,
                                          fullWidth: rawWidth, fullHeight: rawHeight),
             cfaPattern: CFAPattern(rawValue: cfaCode),
@@ -126,6 +129,9 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
                                minFocal: minFocal, maxFocal: maxFocal,
                                maxApertureAtMinFocal: maxApertureAtMinFocal,
                                maxApertureAtMaxFocal: maxApertureAtMaxFocal, cropFactor: cropFactor))
+        // Checked like everything else the service sends.
+        summary.cameraWhiteBalancePresets = CameraWhiteBalancePreset.sanitized(cameraWhiteBalancePresets ?? [])
+        return summary
     }
 }
 

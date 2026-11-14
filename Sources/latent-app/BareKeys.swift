@@ -112,6 +112,9 @@ enum KeyCommand: Equatable, Sendable {
     /// Photo › Match Total Exposures: the selection's Exposure sliders set
     /// to the lead photo's total exposure (MatchTotalExposures.swift).
     case matchTotalExposures
+    /// Photo › Match Exposures by Histogram…: the same, from each photo's
+    /// pixels rather than its Exif (MatchByHistogram.swift). No shortcut.
+    case matchExposuresByHistogram
     case addMask(NewMask), toggleMaskOverlay
     /// Develop › Masks › Show Mask Channel: the selected range component's
     /// input as a grey (EditorModel+MaskShapes.swift). No default key.
@@ -133,6 +136,10 @@ enum KeyCommand: Equatable, Sendable {
     /// File › Rebuild Thumbnails: the selection's thumbnails made again, at
     /// Settings › Performance's quality (`Library+ThumbnailCache.swift`).
     case rebuildThumbnails
+    /// File › Import Ratings and Keywords from Other Apps' Sidecars…: the
+    /// selection (or every photo) fills what it has empty from darktable's
+    /// or Lightroom's sidecars beside it (ForeignXMPImport.swift).
+    case importForeignSidecars
     /// Photo › Create Virtual Copy, Set Copy as Master, Remove Virtual Copy,
     /// and File › Duplicate (a true copy of the file beside it).
     case createVirtualCopy, setCopyAsMaster, removeVirtualCopy, duplicatePhoto
@@ -144,6 +151,8 @@ enum KeyCommand: Equatable, Sendable {
     /// target collection, and taking photos out of the collection shown.
     case newCollection, newSmartCollection, newCollectionSet, saveFilterAsSmartCollection
     case addToTargetCollection, removeFromCollection
+    /// Photo › Add Keywords…: the keywording field, focused (KeywordSuggestions.swift).
+    case addKeywords
     /// Crop guides, straighten, flips, Upright, and the camera's orientation.
     case geometry(GeometryCommand)
     /// Photo › Flip for the selection, View › Sort and Mirror Image Mode.
@@ -158,6 +167,18 @@ enum KeyCommand: Equatable, Sendable {
     /// View › Loupe Overlay, and Develop's Before/After and Reference views
     /// (DevelopViews.swift).
     case view(ViewCommand)
+    /// Develop › Apply Preset, and a key given to a preset in Settings ›
+    /// Keyboard (PresetShortcuts.swift): the named preset on the selection
+    /// in the Library, on the open photo in Develop.
+    case applyPreset(String)
+    /// Batch edits and versions: Reset Edits, Sync Last Change, Paste
+    /// Overwrite, the selective sheet, Load Settings from File, New Blank
+    /// Copy (LibraryBatchEdits.swift).
+    case history(HistoryCommand)
+    /// The viewing aids: focus peaking, raw clipping, colour assessment,
+    /// the high-quality preview, fine straightening, Focus Exposure, the
+    /// shortcuts overlay and the welcome sheet (ViewingCommands.swift).
+    case viewing(ViewingCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).

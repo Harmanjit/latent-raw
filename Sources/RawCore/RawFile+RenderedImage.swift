@@ -7,7 +7,7 @@ import os
 import Accelerate
 
 /// What Latent knows about an ordinary picture it opened: a JPEG, HEIC,
-/// TIFF, PNG, WebP or AVIF rather than a raw. Such a file was already
+/// TIFF, PNG, WebP, AVIF or JPEG XL rather than a raw. Such a file was already
 /// developed by a camera, phone, scanner or another editor, so it arrives
 /// display-referred: its values are what a screen shows, not what the
 /// sensor measured.
@@ -61,17 +61,25 @@ public enum RenderedImageFormat {
         "png": "PNG",
         "webp": "WebP",
         "avif": "AVIF",
+        // JPEG XL opens only where ImageIO decodes it (macOS 14 and later
+        // on Apple silicon); elsewhere `extensions` leaves it out.
+        "jxl": "JPEG XL",
     ]
 
     /// The extensions this Mac can open as rendered images: those above
     /// whose type ImageIO lists as readable.
-    public static let extensions: Set<String> = {
-        let readable = Set((CGImageSourceCopyTypeIdentifiers() as? [String]) ?? [])
-        return Set(formatNames.keys.filter { ext in
+    public static let extensions: Set<String> =
+        extensions(readableTypes: Set((CGImageSourceCopyTypeIdentifiers() as? [String]) ?? []))
+
+    /// The extensions of `formatNames` whose type is among `readableTypes`
+    /// (uniform type identifiers), so a format this Mac's ImageIO can't
+    /// read is never offered. Separate so tests can try a Mac without one.
+    public static func extensions(readableTypes: Set<String>) -> Set<String> {
+        Set(formatNames.keys.filter { ext in
             guard let type = UTType(filenameExtension: ext) else { return false }
-            return readable.contains(type.identifier)
+            return readableTypes.contains(type.identifier)
         })
-    }()
+    }
 
     /// The extensions a camera writes beside its raw in RAW+JPEG (or
     /// RAW+HEIF) mode. The library treats such a file as the raw's

@@ -128,7 +128,7 @@ extension EditorModel {
     /// source is its target, so turning it into Heal or Clone places a
     /// source beside it, as a new patch would get.
     func sourceForModeChange(of patch: HealPatch, to mode: HealPatch.Mode) -> SIMD2<Float> {
-        if mode == .remove { return patch.target }
+        if !mode.usesSource { return patch.target }
         guard patch.source == patch.target else { return patch.source }
         let offset = HealPatch.automaticStrokeOffset(patch.pathPoints(), radius: patch.radius, sensorSize: sensorSize)
         return simd_clamp(patch.target + offset, SIMD2(-1, -1), SIMD2(2, 2))

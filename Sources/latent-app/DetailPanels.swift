@@ -123,6 +123,8 @@ struct DetailPanel: View {
             Text("Judge both at 100% zoom; the fit-to-window preview is scaled to match but hides fine grain.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+
+            HotPixelsSection(model: model)
         }
         .disabled(!model.hasImage)
     }
@@ -149,6 +151,7 @@ struct LensCorrectionsPanel: View {
                     .help("Lines up red and blue with green using the profile's measurements")
                 Toggle("Vignetting", isOn: $model.parameters.lensVignetting)
                     .help("Brightens the corners the lens darkened, from the profile")
+                EmbeddedDNGCorrectionsToggle(model: model)
             }
             Toggle("Remove chromatic aberration (automatic)", isOn: Binding(
                 get: { model.parameters.autoCA != nil },
@@ -160,6 +163,7 @@ struct LensCorrectionsPanel: View {
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            ManualTCASliders(model: model)
 
             DetailSubheading(title: "Manual")
             DetailSliderRow(title: "Distortion", value: $model.parameters.manualDistortion, range: -0.1...0.1,

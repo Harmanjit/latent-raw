@@ -25,6 +25,8 @@ There are three kinds:
 
 **Taking photos out.** While the grid shows a collection, choose **Photo › Remove from Collection**, or right-click and choose **Remove from** and the collection's name. Right-clicking a collection in the sidebar offers **Remove Selected Photos** too. Taking a photo out of a collection never touches the file, its edits or its other collections.
 
+**Recent collections.** The **Recent** list at the top of the Collections section shows the last eight collections you opened in this folder, newest first, whether from the sidebar, the menu bar or a right-click. Click one to show it again; click the small triangle to fold the list away. A deleted collection drops out of it. It is only a list to click: **Back** and **Forward** still move between folders as before.
+
 **Renaming, moving and deleting.** Right-click a collection for **Rename…**, **Move to** (another set, or the top level) and **Delete Collection**. Deleting a set deletes the collections inside it. Photos are never deleted with a collection.
 
 Every one of these can be undone with ⌘Z (outside Develop), and redone with ⇧⌘Z.
@@ -35,14 +37,35 @@ A smart collection has a name and a list of rules. Choose whether a photo must m
 
 | Field | Comparisons |
 |---|---|
-| Rating, ISO, Focal length, Aperture | is at least, is at most, is, is not |
+<!-- RECONCILE: two branches edited this; merge into one text -->
+| Rating, ISO, Focal length, Aperture | is at least, is at most, is, is not, is between |
+| Exposure time | the same, in seconds: type `1/250`, `0.5` or `2` |
+| Flag | is or is not picked, unflagged or rejected |
+| Edited, In a stack, Virtual copy | is yes or no |
+| Keyword | is, is not (a keyword counts the keywords inside it), contains, doesn't contain, is not empty (has any keyword), is empty (has none) |
+| Camera, Lens, File name, Finder tag, Title, Caption, Creator, Copyright | contains, doesn't contain, is, is not, starts with, ends with |
+| Folder | starts with, is, is not, contains, doesn't contain, ends with (the folder inside the open one, such as `2026/Lisbon`) |
+| File type | is, is not (NEF, DNG and so on), is raw, is not raw (camera raws and DNGs are raw; JPEG, HEIF, TIFF and the like are not) |
+
+| Rating, ISO, Focal length, Aperture, Exposure bias | is at least, is at most, is, is not |
 | Flag | is or is not picked, unflagged or rejected |
 | Edited | is yes or no |
+| Flash fired, Has GPS position | is yes or no (a file that doesn't say counts as no) |
 | Keyword | is, is not (a keyword counts the keywords inside it), contains, doesn't contain |
 | Camera, Lens, File name, Finder tag | contains, doesn't contain, is, is not, starts with, ends with |
 | File type | is, is not (NEF, DNG and so on) |
+<!-- /RECONCILE -->
 | Colour label | is, is not (labels read from sidecars written by other applications) |
-| Capture date | is in the last so many days, is, is before, is after |
+| Capture date, Edit date | is in the last so many days, is, is before, is after, is between (both days included) |
+| Aspect ratio | is or is not landscape, portrait or square (within 1%), or at least, at most or between a width over height such as `1.5` or `3:2`; the camera's orientation and your quarter turns count, the crop doesn't |
+| Kind | is or is not a master, a virtual copy, or a photo that has virtual copies |
+| Edit changes | is or is not a part of the edit (Tone, Crop & Straighten, Local Adjustments and so on) that the photo's edit changes from Latent's defaults |
+
+**Is between** takes two values, and either can be the lower. **Edit date** is when the photo's edit was last saved; a photo with no edit has none.
+
+**Picking a value.** For text fields (camera, lens, keyword, file type, Finder tag, title, caption, creator, copyright, folder) the small arrow beside the value lists the values the photos in this folder have, so you can pick one rather than type it.
+
+**Joining rules one by one.** From the second rule on, a menu at the start of each rule says how it joins the rules above it: **and**, **or**, or **except** (and not). They are read from the top down: "rating is at least 4, *or* keyword is Family, *except* flag is rejected" is (4 stars or Family) without the rejects. A rule you leave alone follows **Match all** (and) or **Match any** (or), so smart collections made before these menus existed match exactly what they always did.
 
 Text comparisons ignore upper and lower case and accents. A photo with no value for a field (no capture time, say) doesn't match that rule, except under "is not" and "doesn't contain".
 
@@ -63,7 +86,10 @@ Keywords are words you attach to photos to find them later: who is in them, wher
 The left panel shows the selected photos' keywords as small chips, under the rating and flag. With several photos selected, a chip with an asterisk (\*) is on only some of them.
 
 - **Add**: type in the **Add keywords** field and press Return. Separate several keywords with commas. With several photos selected, the keywords go on every one of them, and each keeps the keywords it already had.
-- **Suggestions**: as you type, keywords already used in the folder that start with or contain what you typed appear below the field. Click one to use it.
+- **Suggestions**: as you type, keywords already used in the folder, or kept in the [keyword dictionary](#the-keyword-dictionary), that start with or contain what you typed appear below the field. Click one to use it.
+- **Recent** and **Often used with**: under the field, two rows of chips offer the last twelve keywords you added, and the eight keywords most often found on the same photos as the selection's own. Click a chip to add it to the selected photos.
+- **Photo › Add Keywords…** (⌘K, as in Lightroom) puts the cursor in the field, ready to type, wherever you are. You can give it other keys in Settings › Keyboard.
+- **Drag photos onto a keyword**: drag thumbnails from the grid onto a keyword in the Keyword List to give them that keyword, as one step ⌘Z undoes.
 - **Remove**: click the × on a chip to take that keyword off every selected photo.
 - Click a chip's name to show every photo in the folder with that keyword.
 
@@ -90,7 +116,21 @@ Open **Keyword List** in the left panel to see every keyword in the folder, arra
 - **Find keyword** at the top narrows the list to keywords whose name contains what you type, keeping the levels above them.
 - **Right-click** a keyword for **Rename…** and **Delete Keyword**. Renaming changes the keyword on every photo in the folder that has it; type a path such as `Places > France > Paris` to move it into another keyword, and everything inside it moves too. Deleting takes the keyword, and the keywords inside it, off every photo. Both can be undone with ⌘Z.
 
-The list shows the keywords photos carry: a keyword taken off its last photo leaves the list.
+- **Drag a keyword onto another** to move it inside, with everything inside it, on every photo in the folder; drop it on the Find keyword field at the top to move it to the top level. It is the same as renaming it to the new path, and ⌘Z undoes it.
+
+The list shows the keywords photos carry: a keyword taken off its last photo leaves the list, unless you show the dictionary's keywords.
+
+### The keyword dictionary
+
+Latent remembers every keyword it sees in any folder, and every keyword you add, in one keyword dictionary for the whole app (there is no master catalog: each folder still keeps its own photos' keywords). Its keywords are suggested as you type in every folder.
+
+The **…** button beside Find keyword holds its commands:
+
+- **Show Dictionary Keywords** adds the dictionary's keywords that no photo in this folder carries to the Keyword List, with a count of 0, so you can tick them onto photos or drop photos on them.
+- **New Keyword…** adds a keyword to the dictionary without putting it on any photo; type a path such as `Places > France > Lyon` to put it inside another.
+- **Import Keyword List…** and **Export Keyword List…** read and write the dictionary as a plain text file: one keyword per line, its levels separated by `|` (`Places|France|Paris`; `>` is read too). Blank lines and lines starting with `#` are skipped.
+
+**Delete Keyword** takes a keyword out of the dictionary as well as off the folder's photos; it comes back if another folder that uses it is opened. The dictionary is kept in `keyword-dictionary.json` in Latent's Application Support folder.
 
 ### Filtering
 

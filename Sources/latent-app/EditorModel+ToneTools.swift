@@ -11,6 +11,12 @@ enum ToneTool: Equatable {
     case curve
     /// The HSL panel's targeted tool, for one of its three sliders.
     case colour(HSLComponent)
+    /// The Exposure eyedropper: click or drag over an area to set Exposure
+    /// from it (ExposurePicker.swift).
+    case exposure
+    /// The tone equalizer's on-image tool: scroll, or drag up or down, on
+    /// a tone to raise or lower its band (EditorModel+ToneEqualizer.swift).
+    case toneEqualizer
 
     /// What the hint over the image says while it's armed.
     var hint: String {
@@ -19,6 +25,8 @@ enum ToneTool: Equatable {
         case .whiteBalance: return "Click something that should be neutral grey or white. Esc cancels."
         case .curve: return "Drag up or down on a tone to lighten or darken it. Esc leaves the tool."
         case .colour(let c): return "Drag up or down on a colour to change its \(c.title.lowercased()). Esc leaves the tool."
+        case .exposure: return "Click, or drag a rectangle, over an area to bring it to the target grey. Esc cancels."
+        case .toneEqualizer: return "Scroll, or drag up or down, on a tone to raise or lower its band. Esc leaves the tool."
         }
     }
 }
@@ -52,6 +60,8 @@ struct ToneToolDrag {
         case point(index: Int, start: Float)
         /// The HSL bands under a hue, each from its starting value.
         case bands(HSLComponent, weights: [Float], start: [Float])
+        /// One tone equalizer band, from its starting gain in EV.
+        case toneEqualizerBand(Int, start: Float)
     }
     var origin: CGPoint
     var target: Target
@@ -61,6 +71,13 @@ struct ToneToolDrag {
 @MainActor
 final class PixelProbe: ObservableObject {
     @Published var readout: PixelReadout?
+    /// The square around the pointer, when the picker's sample size is
+    /// larger than a point (Scope settings); nil otherwise.
+    @Published var area: PixelAreaStatistics?
+    /// The last reading over the picture, kept after the pointer leaves
+    /// so the picker's Copy Value has something to copy.
+    var lastReadout: PixelReadout?
+    var lastArea: PixelAreaStatistics?
     /// The texture pixel last read, by layer generation, and its colour:
     /// pointer moves within one pixel don't read the GPU again.
     var last: (generation: UInt64, x: Int, y: Int, colour: SIMD3<Float>)?
@@ -113,9 +130,14 @@ extension EditorModel {
     /// The pointer moved over the image (nil: it left).
     func pointerMoved(to screen: CGPoint?) {
         if pointerOverImage != (screen != nil) { pointerOverImage = screen != nil }
-        let readout = screen.flatMap { displayedPixel(atScreen: $0) }.map { PixelReadout(linearDisplayP3: $0) }
+        let readout = screen.flatMap { point in
+            displayedPixel(atScreen: point).map {
+                PixelReadout(linearDisplayP3: $0, toneEqualizerMaskEV: toneEqualizerMaskEV(atScreen: point))
+            }
+        }
         if pixelProbe.readout != readout { pixelProbe.readout = readout }
         updateMaskRangeProbe(atScreen: screen)
+        updateAreaReadout(atScreen: screen)
     }
 
     // MARK: - Clipping overlay
@@ -208,6 +230,8 @@ extension EditorModel {
             return
         case .whiteBalance:
             pickWhiteBalance(at: screen)
+        case .exposure:
+            exposurePickDrag = (screen, screen)
         case .curve:
             guard let tone = toneBeforeCurve(atScreen: screen) else { return }
             if curveEditorMode == .parametric {
@@ -225,10 +249,13 @@ extension EditorModel {
             let weights = HSLAdjustments.bandWeights(hue: hue)
             toneToolDrag = ToneToolDrag(origin: screen,
                                         target: .bands(component, weights: weights, start: hslValues(component)))
+        case .toneEqualizer:
+            toneEqualizerDragBegan(at: screen)
         }
     }
 
     func toneToolMoved(to screen: CGPoint) {
+        if toneTool == .exposure { exposurePickDrag?.end = screen; return }
         guard let drag = toneToolDrag else { return }
         // Up is more, as in Lightroom.
         let amount = Float((drag.origin.y - screen.y) / Self.targetedDragSpan) * 2
@@ -246,11 +273,17 @@ extension EditorModel {
             var values = start
             for i in values.indices { values[i] = min(max(start[i] + weights[i] * amount, -1), 1) }
             setHSLValues(values, component)
+        case .toneEqualizerBand(let band, let start):
+            // A drag of `targetedDragSpan` points moves the band 3 EV.
+            setToneEqualizerBand(band, to: start + amount * 1.5)
         }
     }
 
     func toneToolEnded() {
+        // One undo step per tone equalizer drag.
+        if case .toneEqualizerBand = toneToolDrag?.target { flushPendingSave() }
         toneToolDrag = nil
+        if toneTool == .exposure { exposurePickEnded() }
     }
 
     /// The tone the master curve took as input at a screen point: the

@@ -161,6 +161,8 @@ struct PreferencesView: View {
             libraryTab.tabItem { Label("Library", systemImage: "photo.on.rectangle") }
             FolderSettingsTab().tabItem { Label("Folders", systemImage: "folder.badge.gearshape") }
             aiTab.tabItem { Label("AI", systemImage: "cpu") }
+            ViewingSettingsTab().tabItem { Label("Viewing", systemImage: "eye") }
+            ScopeSettingsTab().tabItem { Label("Scopes", systemImage: "waveform.path.ecg") }
             PerformanceSettingsTab().tabItem { Label("Performance", systemImage: "gauge.with.dots.needle.67percent") }
             SlideshowSettingsTab().tabItem { Label("Slideshow", systemImage: "play.rectangle") }
             ExternalEditorSettingsTab().tabItem { Label("External Editor", systemImage: "arrow.up.forward.app") }
@@ -229,6 +231,7 @@ struct PreferencesView: View {
                 .accessibilityLabel("Show JPEGs of RAW+JPEG pairs as separate photos")
             Text("Off, a JPEG (or HEIF) saved beside a raw of the same name is hidden and travels with the raw when it is moved, copied or renamed. On, it is a photo of its own in the grid.")
                 .font(.caption).foregroundStyle(.secondary)
+            LibraryInfoSettings()
         }
         .formStyle(.grouped)
     }

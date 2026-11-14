@@ -83,6 +83,7 @@ public struct EditHistory: Equatable, Sendable, Codable {
         if a.modules.tone != b.modules.tone { names.append("Tone") }
         if a.modules.highlights != b.modules.highlights { names.append("Highlight Recovery") }
         names += toneRangeChanges(from: a.modules.toneranges ?? .neutral, to: b.modules.toneranges ?? .neutral)
+        if a.modules.toneEqualizer != b.modules.toneEqualizer { names.append("Tone Equalizer") }
         if a.modules.curve != b.modules.curve { names.append("Curve") }
         if a.modules.hsl != b.modules.hsl { names.append("HSL") }
         if a.modules.splittoning != b.modules.splittoning { names.append("Split Toning") }
@@ -90,6 +91,7 @@ public struct EditHistory: Equatable, Sendable, Codable {
         if a.modules.sharpen != b.modules.sharpen { names.append("Sharpening") }
         if a.modules.denoise != b.modules.denoise { names.append("Noise Reduction") }
         if a.modules.demosaic != b.modules.demosaic { names.append("Demosaic") }
+        if a.modules.hotpixels != b.modules.hotpixels { names.append("Hot Pixels") }
         if a.modules.lens != b.modules.lens { names.append("Lens") }
         if a.modules.locals != b.modules.locals { names.append("Local Adjustments") }
         if a.modules.heal != b.modules.heal { names.append("Spot Removal") }
@@ -100,6 +102,26 @@ public struct EditHistory: Equatable, Sendable, Codable {
         if a.modules.lensblur != b.modules.lensblur { names.append("Lens Blur") }
         if a.modules.hdr != b.modules.hdr { names.append("HDR Limit") }
         return names.isEmpty ? "Edit" : names.joined(separator: ", ")
+    }
+
+    /// The edit groups (as copy, paste and presets know them) whose values
+    /// differ between `a` and `b`: what Sync Last Change to Selection pastes
+    /// for the step from `a` to `b`, darktable's "selective paste of the
+    /// last edited module". Measured on each group as the clipboard would
+    /// hold it (`restricted(to:)`), so it agrees exactly with what a paste
+    /// of those groups carries: a touch-up's faces (never pasted) don't
+    /// count, and neither does a change of process version. `describeChange`
+    /// names the same step for the History list, by module.
+    public static func changedGroups(from a: EditStack, to b: EditStack) -> Set<EditGroup> {
+        guard a != b else { return [] }
+        return Set(EditGroup.allCases.filter { a.restricted(to: [$0]) != b.restricted(to: [$0]) })
+    }
+
+    /// The groups the step into the current state changed, or none when the
+    /// cursor is at the first step.
+    public var lastChangedGroups: Set<EditGroup> {
+        guard cursor > 0 else { return [] }
+        return Self.changedGroups(from: steps[cursor - 1].stack, to: steps[cursor].stack)
     }
 
     /// Each of the four sliders by its own name, in panel order.

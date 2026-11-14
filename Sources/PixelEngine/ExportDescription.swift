@@ -12,6 +12,9 @@ public struct ExportDescription: Sendable, Equatable {
     public var caption: String?
     public var creator: String?
     public var copyright: String?
+    /// Headline, location, the creator's contact details and instructions
+    /// (ExportDescription+More.swift); all empty unless set.
+    public var more = More()
 
     public init(title: String? = nil, caption: String? = nil, creator: String? = nil, copyright: String? = nil) {
         self.title = Self.clean(title)
@@ -20,7 +23,7 @@ public struct ExportDescription: Sendable, Equatable {
         self.copyright = Self.clean(copyright)
     }
 
-    public var isEmpty: Bool { title == nil && caption == nil && creator == nil && copyright == nil }
+    public var isEmpty: Bool { title == nil && caption == nil && creator == nil && copyright == nil && more.isEmpty }
 
     /// "Ann Smith; Bo Lee": one name each in By-line and dc:creator.
     var creators: [String] {
@@ -46,6 +49,7 @@ public struct ExportDescription: Sendable, Equatable {
             iptc[kCGImagePropertyIPTCCopyrightNotice as String] = copyright
             tiff[kCGImagePropertyTIFFCopyright as String] = copyright
         }
+        more.apply(iptc: &iptc)
     }
 
     /// The same values in XMP, which ImageIO lets win over the
@@ -75,6 +79,7 @@ public struct ExportDescription: Sendable, Equatable {
         if let copyright {
             CGImageMetadataSetValueMatchingImageProperty(xmp, iptc, kCGImagePropertyIPTCCopyrightNotice, copyright as CFString)
         }
+        more.apply(xmp: xmp)
     }
 }
 
@@ -85,7 +90,8 @@ extension ExportDescription {
     public func limited(to level: ExportMetadataLevel) -> ExportDescription {
         switch level {
         case .all, .allExceptCameraInfo: self
-        case .copyrightAndContact: ExportDescription(creator: creator, copyright: copyright)
+        case .copyrightAndContact:
+            ExportDescription(creator: creator, copyright: copyright).with(more: more.contactOnly)
         case .copyrightOnly: ExportDescription(copyright: copyright)
         }
     }

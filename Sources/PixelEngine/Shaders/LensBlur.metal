@@ -28,6 +28,14 @@ using namespace metal;
 //
 // lensBlurDepthView is the viewport's Show Depth pass.
 //
+// Blur types (LensBlurTypes.swift): `kind` 0 is the bokeh disc above;
+// 1, Gaussian, weights the same disc of taps by a Gaussian of half the
+// neighbour's radius, so there is no bright-edged disc, only softness; 2,
+// Motion, gathers along `motionDirection` instead of over a disc, each
+// neighbour on the line reaching as far as its own blur. `wholeFrame`
+// (no depth map yet, Gaussian and Motion only) blurs every pixel fully
+// and never reads the depth texture, which is then a stand-in.
+//
 // Helpers are prefixed (lensBlur…): make_app.sh compiles each .metal file
 // on its own while the runtime fallback concatenates them all, so names
 // shared with another file fail one way or the other.
@@ -47,7 +55,10 @@ struct LensBlurParamsGPU {
     float headroom;
     uint shape;            // 0 circle, 1 bubble, 2 five blades
     uint tapCount;
+    uint kind;             // 0 bokeh, 1 gaussian, 2 motion
+    uint wholeFrame;       // 1 without a depth map: blur everything, read no depth
     float padding;
+    float2 motionDirection; // motion's unit direction, render grid
 };
 
 constant float lensBlurPi = 3.14159265;
@@ -72,6 +83,7 @@ inline float lensBlurDepthAt(texture2d<float, access::sample> depth, float2 uv) 
 // 0 inside the focus range, rising to 1 at fullBlurDepth beyond it. The
 // Swift twin is LensBlur.blurFraction(atDepth:).
 inline float lensBlurFraction(float d, constant LensBlurParamsGPU &p) {
+    if (p.wholeFrame != 0) return 1.0;
     float distance = max(max(p.focusFar - d, d - p.focusNear), 0.0);
     return min(distance / p.fullBlurDepth, 1.0);
 }
@@ -122,7 +134,7 @@ kernel void lensBlurPrepare(
         }
     }
     float3 colour = sum / max(n, 1.0);
-    float d = lensBlurDepthAt(depth, lensBlurSensorUV((float2(gid) + 0.5) * p.factor, p));
+    float d = p.wholeFrame != 0 ? 0.0 : lensBlurDepthAt(depth, lensBlurSensorUV((float2(gid) + 0.5) * p.factor, p));
     reduced.write(float4(colour, lensBlurFraction(d, p) * p.maxRadius), gid);
 }
 
@@ -139,15 +151,37 @@ kernel void lensBlurGather(
     float2 size = float2(reduced.get_width(), reduced.get_height());
     float2 centre = float2(gid) + 0.5;
     float centreRadius = reduced.sample(s, centre / size).a;
-    float centreDepth = lensBlurDepthAt(depth, lensBlurSensorUV(centre * p.factor, p));
+    bool useDepth = p.wholeFrame == 0;
+    float centreDepth = useDepth ? lensBlurDepthAt(depth, lensBlurSensorUV(centre * p.factor, p)) : 0.0;
 
     float3 sum = float3(0.0);
     float weights = 0.0, nearer = 0.0;
+    if (p.kind == 2) {
+        // Motion: taps along the streak, one shrunk pixel apart.
+        float halfCount = float(p.tapCount / 2);
+        for (uint i = 0; i < p.tapCount; i++) {
+            float t = (float(i) - halfCount) / max(halfCount, 1.0);
+            float2 offset = p.motionDirection * (t * p.maxRadius);
+            float2 q = centre + offset;
+            float4 tap = reduced.sample(s, q / size);
+            float sampleDepth = useDepth ? lensBlurDepthAt(depth, lensBlurSensorUV(q * p.factor, p)) : 0.0;
+            float radius = tap.a;
+            if (useDepth && sampleDepth < centreDepth - 0.02) radius = min(radius, centreRadius);
+            float cover = saturate(radius - abs(t) * p.maxRadius + 1.0);
+            if (cover <= 0.0) continue;
+            float weight = cover / max(radius, 0.5);
+            sum += tap.rgb * weight;
+            weights += weight;
+            if (useDepth && sampleDepth > centreDepth + 0.02 && radius >= 0.5) nearer += weight;
+        }
+        gathered.write(float4(sum / max(weights, 1e-6), nearer / max(weights, 1e-6)), gid);
+        return;
+    }
     for (uint i = 0; i < p.tapCount; i++) {
         float2 offset = taps[i] * p.maxRadius;
         float2 q = centre + offset;
         float4 tap = reduced.sample(s, q / size);
-        float sampleDepth = lensBlurDepthAt(depth, lensBlurSensorUV(q * p.factor, p));
+        float sampleDepth = useDepth ? lensBlurDepthAt(depth, lensBlurSensorUV(q * p.factor, p)) : 0.0;
         float radius = tap.a;
         // Behind this pixel: it spreads over it no further than this
         // pixel's own blur, so a sharp subject keeps its outline.
@@ -160,6 +194,11 @@ kernel void lensBlurGather(
         // Bubble: the disc's rim carries more light than its middle.
         if (p.shape == 1 && radius > 2.0) {
             weight *= 0.4 + 1.2 * smoothstep(0.55, 1.0, distance / radius);
+        }
+        // Gaussian: sigma half the neighbour's radius, no hard rim.
+        if (p.kind == 1) {
+            float u = distance / r;
+            weight *= exp(-2.0 * u * u);
         }
         sum += tap.rgb * weight;
         weights += weight;
@@ -183,7 +222,7 @@ kernel void lensBlurComposite(
     constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);
     float4 src = input.read(gid);
     float2 centre = float2(gid) + 0.5;
-    float d = lensBlurDepthAt(depth, lensBlurSensorUV(centre, p));
+    float d = p.wholeFrame != 0 ? 0.0 : lensBlurDepthAt(depth, lensBlurSensorUV(centre, p));
     // The pixel's own blur in shrunk pixels: one shrunk pixel or more
     // takes the blurred copy whole, less mixes it with the sharp picture.
     float own = lensBlurFraction(d, p) * p.maxRadius;

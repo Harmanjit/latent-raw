@@ -21,6 +21,41 @@ extension Exporter {
         }
     }
 
+    /// The pixels as the file stores them, when that isn't the rendered
+    /// RGB: one grey channel for a monochrome edit (Gray Gamma 2.2, or
+    /// Linear Gray when floating point), or linear floating point for a
+    /// 32-bit TIFF and for OpenEXR. Core Graphics converts the rendered
+    /// pixels, so a converted colour space's profile is honoured. Anything
+    /// else, and any image Core Graphics can't convert, is returned as it is.
+    static func finalPixels(_ image: CGImage, settings: ExportSettings) -> CGImage {
+        let grey = settings.writesGreyscale
+        let floatBits: Int? = settings.writesFloatTIFF ? 32
+            : settings.format == .exr ? (settings.exr.half ? 16 : 32) : nil
+        guard grey || floatBits != nil, let source = image.colorSpace else { return image }
+        let space: CGColorSpace?
+        if grey {
+            space = CGColorSpace(name: floatBits == nil ? CGColorSpace.genericGrayGamma2_2 : CGColorSpace.linearGray)
+        } else if settings.format == .exr {
+            // Extended, so colours outside sRGB keep their negative values.
+            // ImageIO writes an EXR in linear sRGB primaries whatever the
+            // image's space (measured), so the conversion is made here.
+            space = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)
+        } else {
+            space = CGColorSpaceCreateLinearized(source)
+        }
+        guard let space else { return image }
+        let bits = floatBits ?? (image.bitsPerComponent == 16 ? 16 : 8)
+        var info = grey ? CGImageAlphaInfo.none.rawValue : CGImageAlphaInfo.noneSkipLast.rawValue
+        if floatBits != nil { info |= CGBitmapInfo.floatComponents.rawValue }
+        if bits == 16 { info |= CGBitmapInfo.byteOrder16Little.rawValue }
+        if bits == 32 { info |= CGBitmapInfo.byteOrder32Little.rawValue }
+        guard let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: bits,
+                                      bytesPerRow: 0, space: space, bitmapInfo: info) else { return image }
+        context.interpolationQuality = .none
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage() ?? image
+    }
+
     /// The lowest JPEG quality tried when fitting a size limit. Below this
     /// a photo falls apart into blocks; failing says so instead.
     public static let minimumLimitedQuality: Float = 0.05
@@ -78,5 +113,15 @@ public enum ExportSizeLimitError: Error, CustomStringConvertible, Equatable {
             return "even at the lowest quality the file is \(format(smallest)), over the \(format(limit)) limit; "
                 + "export it smaller"
         }
+    }
+}
+
+extension ExportPlan {
+    /// Whether an edit renders in grey only: Black & White on, with no
+    /// colour grading or split toning and no shadow tint to colour it.
+    /// Greyscale when monochrome writes such an export as one grey channel.
+    public static func isMonochrome(_ parameters: EditParameters) -> Bool {
+        let c = parameters.colour
+        return c.blackAndWhite.enabled && c.grading.isNeutral && c.calibration.shadowTint == 0
     }
 }

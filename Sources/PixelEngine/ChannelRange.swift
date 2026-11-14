@@ -230,7 +230,7 @@ extension MaskComponent {
     public var showsChannel: Bool {
         switch source {
         case .luminance, .colour, .channel: return true
-        case .shape: return false
+        case .shape, .mask: return false
         }
     }
 }
@@ -240,7 +240,9 @@ extension LocalsGPUPlan {
     /// component Show Channel displays, 0 when it is off.
     func channelViewFlag(_ output: RenderOutput) -> UInt32 {
         guard let i = output.maskOverlay, let k = output.maskOverlayStyle.channelComponent,
-              i >= 0, i < locals.count, k >= 0, k < Int(locals[i].info2.y) else { return 0 }
-        return UInt32(Int(locals[i].info2.x) + k + 1)
+              i >= 0, i < locals.count, i < componentOffsets.count,
+              k >= 0, k < componentOffsets[i].count,
+              let offset = componentOffsets[i][k], offset < Int(locals[i].info2.y) else { return 0 }
+        return UInt32(Int(locals[i].info2.x) + offset + 1)
     }
 }

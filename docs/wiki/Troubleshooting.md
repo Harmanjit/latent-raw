@@ -20,6 +20,9 @@ Mount the disk or connect to the share, then click the folder again. Latent does
 **A folder "is on a read-only disk".**
 The catalog lives inside the folder, so Latent can't open a folder it can't write to. Copy the files to a writable folder first, or unlock the card.
 
+**Collections or stacks went missing, or a catalog looks wrong.**
+Open the folder and choose **Settings › Folders › Restore Catalog Backup…** to go back to one of the last five daily backups (see [The catalog](Library#the-catalog)). The catalog it replaces is kept as `catalog-replaced-<date>.sqlite` in `_latent/`.
+
 **A folder's catalog "was damaged and has been rebuilt".**
 SQLite couldn't read `catalog.sqlite`. Latent kept the damaged file as `catalog.damaged-<date>.sqlite` in the folder's `_latent/` directory and rebuilt the catalog from the sidecars, so ratings, keywords and edits are back. Answer the subfolder question again. The damaged file can be deleted once you are satisfied.
 

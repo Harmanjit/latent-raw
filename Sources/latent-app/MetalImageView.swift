@@ -75,10 +75,23 @@ struct MetalImageView: NSViewRepresentable {
     /// Only this part of the view shows, as fractions of it (a
     /// Before/After split); nil, all of it.
     var visibleFraction: CGRect? = nil
-    /// A mouse-wheel notch while a tool is armed: the point (device
+    /// Focus peaking, raw clipping and the clipping overlay's options
+    /// (ViewingSettings). Display only; the default draws nothing new.
+    var overlays: PresentOverlays = .none
+    /// An Option-click with no tool armed (pins a colour sample in
+    /// Develop); nil, Option-click does what a click does.
+    var onOptionClick: ((CGPoint) -> Void)? = nil
+    /// An on-image tool that scrolling adjusts (the tone equalizer's):
+    /// while set, scrolling over the image goes to it, with the amount
+    /// (`ViewerInteraction.toolScrollAmount`, 0 for an event worth
+    /// nothing), the point and whether the gesture ended, instead of
+    /// panning, zooming or stepping. nil normally.
+    var onToolScroll: ((Float, CGPoint, Bool) -> Void)? = nil
+    /// A mouse-wheel notch while a mask tool is armed: the point (device
     /// pixels), the delta and whether ⇧ was held. True when the tool took
     /// it (a mask shape's feather); false lets the wheel pan as usual.
-    var onToolScroll: ((CGPoint, CGFloat, Bool) -> Bool)? = nil
+    /// `onToolScroll` (the tone equalizer), when set, comes first.
+    var onMaskScroll: ((CGPoint, CGFloat, Bool) -> Bool)? = nil
 
     func makeNSView(context: Context) -> MetalLayerView {
         let view = MetalLayerView()
@@ -105,7 +118,10 @@ struct MetalImageView: NSViewRepresentable {
         view.onPointer = onPointer
         view.mirrored = mirrored
         view.visibleFraction = visibleFraction
+        view.overlays = overlays
+        view.onOptionClick = onOptionClick
         view.onToolScroll = onToolScroll
+        view.onMaskScroll = onMaskScroll
         view.display(preview: preview, tile: tile, transform: transform, frame: frame,
                      magnifierTile: magnifierTile)
     }
@@ -126,6 +142,7 @@ private struct PresentedFrame: Equatable {
     var magnifier: ViewerInteraction.Magnifier?
     var magnifierTile: UInt64?
     var clipping: ClippingIndicators = []
+    var overlays: PresentOverlays = .none
 }
 
 final class MetalLayerView: NSView {
@@ -144,6 +161,9 @@ final class MetalLayerView: NSView {
     }
     var clipping: ClippingIndicators = [] {
         didSet { if clipping != oldValue { setNeedsRedraw() } }
+    }
+    var overlays: PresentOverlays = .none {
+        didSet { if overlays != oldValue { setNeedsRedraw() } }
     }
     /// See `MetalImageView.onPointer`. Setting it adds or removes the
     /// tracking area that reports pointer moves.
@@ -199,13 +219,18 @@ final class MetalLayerView: NSView {
     var onDoubleClick: ((CGPoint) -> Void)?
     var atFit = true
     var onStep: ((Int) -> Void)?
+    var onToolScroll: ((Float, CGPoint, Bool) -> Void)?
     var allowsMagnifier = true
     var onMagnifier: ((ViewerInteraction.Magnifier?) -> Void)?
     var toolActive = false
     var onToolBegan: ((CGPoint, Bool) -> Void)?
     var onToolMoved: ((CGPoint) -> Void)?
     var onToolEnded: (() -> Void)?
-    var onToolScroll: ((CGPoint, CGFloat, Bool) -> Bool)?
+    var onMaskScroll: ((CGPoint, CGFloat, Bool) -> Bool)?
+    var onOptionClick: ((CGPoint) -> Void)?
+    /// Where an Option-press began, in view points, until it moves away
+    /// (a drag) or ends (a click).
+    private var optionPressLocation: CGPoint?
 
     /// Top-left origin, like the Metal drawable. Without this AppKit puts
     /// (0,0) at the bottom-left and every y coordinate would need
@@ -413,7 +438,7 @@ final class MetalLayerView: NSView {
                                     drawableSize: metalLayer.drawableSize,
                                     displayHeadroom: headroom,
                                     magnifier: magnifier, magnifierTile: magnifierTile?.generation,
-                                    clipping: clipping)
+                                    clipping: clipping, overlays: overlays)
         guard wanted != presented, let drawable = metalLayer.nextDrawable() else { return }
         presented = wanted
         presenter.present(base: preview, tile: currentTile,
@@ -423,7 +448,7 @@ final class MetalLayerView: NSView {
                           magnifier: magnifier.map {
                               PresentMagnifier(loupe: $0, ringWidth: magnifierRingWidth, tile: magnifierTile)
                           },
-                          clipping: clipping)
+                          clipping: clipping, overlays: overlays)
         #if DEBUG
         SnapshotHarness.noteDrawable(drawable.texture, presentedBy: self)
         #endif
@@ -466,10 +491,11 @@ final class MetalLayerView: NSView {
         guard magnifier == nil else { return }
         let flags = event.modifierFlags
         // A mouse wheel (not a trackpad, which keeps panning) over an armed
-        // mask shape changes its feather. ⇧ turns the wheel sideways.
-        if toolActive, !event.hasPreciseScrollingDeltas, let onToolScroll {
+        // mask shape changes its feather. ⇧ turns the wheel sideways. The
+        // tone equalizer's scroll, while it is armed, comes first.
+        if onToolScroll == nil, toolActive, !event.hasPreciseScrollingDeltas, let onMaskScroll {
             let delta = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.scrollingDeltaX
-            if delta != 0, onToolScroll(screenPoint(for: event), delta, flags.contains(.shift)) { return }
+            if delta != 0, onMaskScroll(screenPoint(for: event), delta, flags.contains(.shift)) { return }
         }
         let scroll = ViewerInteraction.WheelEvent(
             precise: event.hasPreciseScrollingDeltas,
@@ -478,6 +504,11 @@ final class MetalLayerView: NSView {
             phase: Self.phase(event.phase), momentumPhase: Self.phase(event.momentumPhase),
             zoomModifier: flags.contains(.option) || flags.contains(.command),
             atFit: atFit, canNavigate: onStep != nil && !toolActive)
+        if let onToolScroll, !scroll.zoomModifier {
+            onToolScroll(ViewerInteraction.toolScrollAmount(scroll) ?? 0, screenPoint(for: event),
+                         scroll.phase == .ended)
+            return
+        }
         switch wheel.interpret(scroll) {
         case .navigate(let offset):
             onStep?(offset)
@@ -536,6 +567,8 @@ final class MetalLayerView: NSView {
             return
         }
         cancelPress()
+        optionPressLocation = onOptionClick != nil && event.clickCount == 1 && event.modifierFlags.contains(.option)
+            ? convert(event.locationInWindow, from: nil) : nil
         if event.clickCount == 2 {
             onDoubleClick?(screenPoint(for: event))
             return
@@ -555,6 +588,10 @@ final class MetalLayerView: NSView {
             onToolMoved?(screenPoint(for: event))
             return
         }
+        if let start = optionPressLocation {
+            let now = convert(event.locationInWindow, from: nil)
+            if hypot(now.x - start.x, now.y - start.y) > 3 { optionPressLocation = nil }
+        }
         if var current = press {
             let location = convert(event.locationInWindow, from: nil)
             let state = current.moved(to: location, time: event.timestamp)
@@ -572,6 +609,10 @@ final class MetalLayerView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         if toolActive { onToolEnded?() }
+        if !toolActive, optionPressLocation != nil, magnifier == nil {
+            onOptionClick?(screenPoint(for: event))
+        }
+        optionPressLocation = nil
         cancelPress()
     }
 

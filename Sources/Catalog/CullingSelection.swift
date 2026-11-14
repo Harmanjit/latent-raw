@@ -18,11 +18,15 @@ public enum CullingSelection: Hashable, Sendable {
     /// Takes the unflagged photos out of the selection, keeping the picked
     /// and the rejected.
     case deselectUnflagged
+    /// Select Unedited: the photos without a stored edit.
+    case unedited
 
     /// The ids selected after the command, from `visible` (the grid's list)
     /// and the ids selected now. Photos the filter hides are never selected,
     /// and a selected one hidden since is dropped, as everywhere in the grid.
-    public func selection(in visible: [ImageRecord], current: Set<Int64>) -> Set<Int64> {
+    /// `edited` is the ids with a stored edit (`Library.editedImageIDs`),
+    /// which only Select Unedited reads.
+    public func selection(in visible: [ImageRecord], current: Set<Int64>, edited: Set<Int64> = []) -> Set<Int64> {
         func ids(_ include: (ImageRecord) -> Bool) -> Set<Int64> {
             Set(visible.lazy.filter(include).compactMap(\.id))
         }
@@ -40,6 +44,8 @@ public enum CullingSelection: Hashable, Sendable {
             return ids { ColorLabel(xmpLabel: $0.label) == label && (label != nil || Self.hasNoLabel($0)) }
         case .deselectUnflagged:
             return ids { ($0.id.map(current.contains) ?? false) && $0.flag != ImageFlag.none.rawValue }
+        case .unedited:
+            return ids { !($0.id.map(edited.contains) ?? false) }
         }
     }
 
@@ -87,7 +93,8 @@ extension Library {
     /// Replaces the grid selection by one of the Select commands. The lead
     /// stays where it is if it's still selected.
     public func applySelection(_ command: CullingSelection) {
-        setSelection(command.selection(in: visibleImages, current: selectedImageIDs), primary: selectedImageID)
+        setSelection(command.selection(in: visibleImages, current: selectedImageIDs, edited: editedImageIDs),
+                     primary: selectedImageID)
     }
 
     /// Refine Photos over the visible photos, in one undoable step. Returns

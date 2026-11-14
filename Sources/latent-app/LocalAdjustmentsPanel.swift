@@ -133,6 +133,8 @@ struct LocalAdjustmentsPanel: View {
                     Button("Duplicate and Invert") { model.duplicateLocal(at: index, invert: true) }
                     Button(local.hidden ? "Show" : "Hide") { model.toggleHidden(at: index) }
                     Divider()
+                    MaskRowReorder.menuItems(model: model, index: index)
+                    Divider()
                     Button("Delete", role: .destructive) {
                         model.selectedLocalIndex = index
                         model.removeSelectedLocal()
@@ -144,6 +146,7 @@ struct LocalAdjustmentsPanel: View {
                 .accessibilityAction { model.selectedLocalIndex = index }
                 .accessibilityAction(named: local.hidden ? "Show" : "Hide") { model.toggleHidden(at: index) }
                 .accessibilityAction(named: "Duplicate") { model.duplicateLocal(at: index) }
+                .modifier(MaskRowReorder(model: model, index: index, id: local.id))
             }
         }
     }
@@ -163,11 +166,14 @@ struct LocalAdjustmentsPanel: View {
     private func selectedControls(_ i: Int) -> some View {
         let binding = $model.parameters.locals[i]
         VStack(alignment: .leading, spacing: 10) {
-            TextField("Name", text: binding.name)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-                .help("Rename this mask")
-                .accessibilityLabel("Mask name")
+            HStack(spacing: 6) {
+                TextField("Name", text: binding.name)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .help("Rename this mask")
+                    .accessibilityLabel("Mask name")
+                MaskBlendPicker(mode: binding.blendMode)
+            }
 
             MaskComponentList(model: model, index: i)
 
@@ -318,6 +324,35 @@ struct LocalAdjustmentsPanel: View {
             slider("Edge", refineBinding(i, element: element.id, edge: true), -1...1, "%+.2f", 0)
                 .help("Grows (right) or shrinks (left) the model's mask")
         }
+        edgeRefineRow(i)
+    }
+
+    /// Edge refine for a brush or model mask (MaskRefine.swift).
+    @ViewBuilder
+    private func edgeRefineRow(_ i: Int) -> some View {
+        if let element = model.activeMaskElement, element.shape.isModelGenerated || isBrush(element.shape) {
+            slider("Edge refine", edgeRefineBinding(i, element: element.id), 0...1, "%.2f", 0)
+                .help("Snaps the mask's edge to edges in the photo, such as a skyline or hair")
+        }
+    }
+
+    private func isBrush(_ shape: MaskShape) -> Bool {
+        if case .brush = shape { return true }
+        return false
+    }
+
+    private func edgeRefineBinding(_ i: Int, element id: UUID) -> Binding<Float> {
+        Binding(get: {
+            let local = model.parameters.locals[i]
+            if id == local.id { return local.edgeRefine }
+            return local.components.first { $0.id == id }?.edgeRefine ?? 0
+        }, set: { value in
+            if id == model.parameters.locals[i].id {
+                model.parameters.locals[i].edgeRefine = value
+            } else if let c = model.parameters.locals[i].components.firstIndex(where: { $0.id == id }) {
+                model.parameters.locals[i].components[c].edgeRefine = value > 0 ? value : nil
+            }
+        })
     }
 
     private func refineBinding(_ i: Int, element id: UUID, edge: Bool) -> Binding<Float> {

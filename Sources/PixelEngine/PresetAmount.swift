@@ -8,8 +8,8 @@ import ColorKit
 /// preset's (and past it above 100%): exposure, contrast, the tone ranges,
 /// presence, vibrance and saturation, HSL, the curves' points, split
 /// toning's and colour grading's strengths, Calibration, sharpening and
-/// noise reduction, the effects' amounts, white balance and a creative
-/// profile's Amount. Everything else a preset carries (a switch, a choice,
+/// noise reduction, the effects' amounts, the tone equalizer's bands, white
+/// balance and a creative profile's Amount. Everything else a preset carries (a switch, a choice,
 /// a hue, a mask, a crop) is taken from the preset whole whenever the
 /// Amount is above 0%, since half a Black & White switch or half a hue
 /// means nothing.
@@ -62,6 +62,7 @@ extension EditParameters {
         }
         // Tone.
         out.exposureEV = mix(base.exposureEV, exposureEV, -5...5)
+        out.blackOffset = mix(base.blackOffset, blackOffset, EditParameters.blackOffsetRange)
         out.contrast = mix(base.contrast, contrast, 0.5...3)
         out.toneRanges = ToneRanges(highlights: mix(base.toneRanges.highlights, toneRanges.highlights, u),
                                     shadows: mix(base.toneRanges.shadows, toneRanges.shadows, u),
@@ -107,6 +108,31 @@ extension EditParameters {
         out.colour.calibration.greenSaturation = mix(c0.greenSaturation, c1.greenSaturation, u)
         out.colour.calibration.blueHue = mix(c0.blueHue, c1.blueHue, u)
         out.colour.calibration.blueSaturation = mix(c0.blueSaturation, c1.blueSaturation, u)
+        // Calibration's additions: the Channel Mixer's rows (from the
+        // identity when the photo has none), Gamut Compression and Highlight
+        // Purity; Adaptation's fine-tuning when both use the same light.
+        let m0 = base.colour.channelMixer, m1 = colour.channelMixer
+        if m0 != m1 {
+            let r = ChannelMixer.sourceRange
+            out.colour.channelMixer.red = mix(m0.red, m1.red, r)
+            out.colour.channelMixer.green = mix(m0.green, m1.green, r)
+            out.colour.channelMixer.blue = mix(m0.blue, m1.blue, r)
+        }
+        out.colour.gamutCompression = mix(base.colour.gamutCompression, colour.gamutCompression, 0...1)
+        out.colour.purity = mix(base.colour.purity, colour.purity, 0...1)
+        let a0 = base.colour.adaptation, a1 = colour.adaptation
+        if a0.illuminant == a1.illuminant, a0.method == a1.method {
+            out.colour.adaptation.hue = mix(a0.hue, a1.hue, -180...180)
+            out.colour.adaptation.chroma = mix(a0.chroma, a1.chroma, u)
+        }
+        // Colour Grading's per-range saturation and hue shift.
+        out.colour.grading.shadowSaturation = mix(base.colour.grading.shadowSaturation,
+                                                  colour.grading.shadowSaturation, u)
+        out.colour.grading.midtoneSaturation = mix(base.colour.grading.midtoneSaturation,
+                                                   colour.grading.midtoneSaturation, u)
+        out.colour.grading.highlightSaturation = mix(base.colour.grading.highlightSaturation,
+                                                     colour.grading.highlightSaturation, u)
+        out.colour.grading.hueShift = mix(base.colour.grading.hueShift, colour.grading.hueShift, -180...180)
         // Detail.
         out.sharpenAmount = mix(base.sharpenAmount, sharpenAmount, 0...2)
         out.denoiseLuminance = mix(base.denoiseLuminance, denoiseLuminance, 0...1)
@@ -114,6 +140,10 @@ extension EditParameters {
         // Effects.
         out.grain.amount = mix(base.grain.amount, grain.amount, 0...1)
         out.postCropVignette.amount = mix(base.postCropVignette.amount, postCropVignette.amount, u)
+        // The tone equalizer's bands (its mask settings are taken whole).
+        if base.toneEqualizer.bands != toneEqualizer.bands {
+            out.toneEqualizer.bands = mix(base.toneEqualizer.bands, toneEqualizer.bands, ToneEqualizer.gainRange)
+        }
         // A creative profile's Amount, when the preset keeps the profile.
         if let p = profile, p.id == base.profile?.id {
             let a0 = base.profile?.amount ?? 1, a1 = p.amount ?? 1
@@ -128,7 +158,8 @@ extension EditStack {
     /// The groups whose values `EditParameters.blended` mixes. Masks,
     /// crops, retouching and lens switches are taken whole.
     public static let blendableGroups: Set<EditGroup> = [.whiteBalance, .tone, .presence, .toneCurve, .colour,
-                                                         .splitToning, .calibration, .detail, .effects, .profile]
+                                                         .splitToning, .calibration, .detail, .effects, .profile,
+                                                         .toneEqualizer]
 
     /// This stack with `preset`'s `groups` applied at `amount`. At 100% it
     /// is exactly `merged(with:groups:)`; otherwise the blendable groups

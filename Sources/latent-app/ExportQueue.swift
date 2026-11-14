@@ -77,6 +77,16 @@ struct ExportPreset: Codable, Equatable {
     /// (ExportToCatalog.swift). Off in older presets.
     var addToCatalog = false
     var stackWithOriginal: ExportStackPlacement = .off
+    /// Add to This Catalog also gives each export its original's rating,
+    /// label, keywords and descriptive fields (ExportToCatalog.swift). On
+    /// unless switched off.
+    var copyMetadataToCatalog = true
+    /// A develop preset applied to the files only (ExportPreset+Style.swift);
+    /// nil, the default and in older presets, applies none.
+    var presetStyle: PresetStyle?
+    /// Borders, PDF and OpenEXR, bit depths, the rendering intent, sizes
+    /// in cm or inches and the metadata extras (ExportPreset+Formats.swift).
+    var formats = ExportFormatOptions()
 
     var settings: ExportSettings {
         var s = ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap,
@@ -135,7 +145,8 @@ struct ExportPreset: Codable, Equatable {
         sharpenStrength = (try? c.decodeIfPresent(OutputSharpening.Strength.self, forKey: .sharpenStrength)) ?? .standard
         sizeLimitEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .sizeLimitEnabled)) ?? false
         sizeLimitKB = max((try? c.decodeIfPresent(Int.self, forKey: .sizeLimitKB)) ?? 500, 1)
-        tiffBitDepth = (try? c.decodeIfPresent(Int.self, forKey: .tiffBitDepth)) == 8 ? 8 : 16
+        let tiffBits = (try? c.decodeIfPresent(Int.self, forKey: .tiffBitDepth)) ?? 16
+        tiffBitDepth = tiffBits == 8 || tiffBits == 32 ? tiffBits : 16
         tiffCompression = (try? c.decodeIfPresent(TIFFCompression.self, forKey: .tiffCompression)) ?? .none
         location = (try? c.decodeIfPresent(ExportLocation.self, forKey: .location)) ?? .chosenFolder
         subfolder = (try? c.decodeIfPresent(String.self, forKey: .subfolder)) ?? ""
@@ -144,16 +155,19 @@ struct ExportPreset: Codable, Equatable {
         openInAppPath = (try? c.decodeIfPresent(String.self, forKey: .openInAppPath)) ?? nil
         addToCatalog = (try? c.decodeIfPresent(Bool.self, forKey: .addToCatalog)) ?? false
         stackWithOriginal = (try? c.decodeIfPresent(ExportStackPlacement.self, forKey: .stackWithOriginal)) ?? .off
+        copyMetadataToCatalog = (try? c.decodeIfPresent(Bool.self, forKey: .copyMetadataToCatalog)) ?? true
+        presetStyle = (try? c.decodeIfPresent(PresetStyle.self, forKey: .presetStyle)) ?? nil
+        formats = (try? c.decodeIfPresent(ExportFormatOptions.self, forKey: .formats)) ?? ExportFormatOptions()
     }
 
     var fileExtension: String {
-        let ext = fileKind == .dng ? "dng" : settings.format.fileExtension
+        let ext = fileKind == .dng ? "dng" : fileKind == .pdf ? "pdf" : settings.format.fileExtension
         return uppercaseExtension ? ext.uppercased() : ext
     }
 
     /// What the batch planner needs; the sheet's preview and the queue use
     /// the same, so the names shown are the names written.
-    func planOptions(catalogName: String) -> ExportBatchPlanner.Options {
+    func planOptions(catalogName: String, keywords: [Int64: Set<String>] = [:]) -> ExportBatchPlanner.Options {
         var options = ExportBatchPlanner.Options(template: template, start: sequenceStart, step: sequenceStep,
                                                  padding: sequencePadding, letterCase: letterCase,
                                                  fileExtension: fileExtension, collision: collision,
@@ -161,6 +175,9 @@ struct ExportPreset: Codable, Equatable {
         options.originalFolders = location == .sameAsOriginal
         options.subfolder = subfolder
         options.keepsOriginalExtension = fileKind == .original
+        if template.range(of: "{keywords", options: .caseInsensitive) != nil {
+            options.keywordsByImage = keywords.mapValues { Array($0) }
+        }
         return options
     }
 
@@ -325,7 +342,7 @@ final class ExportQueue: ObservableObject {
             // Every name settled before the first file is written, so two
             // images whose template gives the same name never overwrite each
             // other, whatever the collision policy.
-            let options = preset.planOptions(catalogName: catalogName)
+            let options = preset.planOptions(catalogName: catalogName, keywords: library.keywordsByImage)
             let makesDestination = preset.location != .sameAsOriginal
             var plan = await Task.detached(priority: .userInitiated) {
                 // A multi-batch preset's own subfolder of the destination.
@@ -405,6 +422,7 @@ final class ExportQueue: ObservableObject {
                                             captureTime: record.captureTime ?? 0,
                                             sidecar: sidecar)
                     job.dngContent = preset.dngContent
+                    job.pdf = preset.pdfJob(for: record, index: index, catalogName: catalogName)
                     outcome = await Task.detached(priority: .userInitiated) {
                         do { return .success(try await job.run(gpu: gpu)) }
                         catch { return .failure(error) }
@@ -612,10 +630,13 @@ struct ExportSheet: View {
                 groupLabel("Image Sizing")
                 ExportSizingSection(preset: $preset)
                 ExportSharpeningSection(preset: $preset)
+                ExportBorderSection(preset: $preset)
                 ExportWatermarkSection(preset: $preset)
+                ExportPresetStyleSection(preset: $preset)
                 ExportMetadataSection(preset: $preset)
             } else {
                 if preset.fileKind == .dng { ExportDNGSection(preset: $preset) }
+                if preset.fileKind == .pdf { ExportPDFSection(preset: $preset) }
                 ExportKindNote(kind: preset.fileKind, dngContent: preset.dngContent)
             }
 
@@ -888,6 +909,10 @@ struct ExportSheet: View {
                 case .skip where plan.count(.skip) > 0:
                     let n = plan.count(.skip)
                     note("\(images(n)) will be skipped: \(n == 1 ? "its file is" : "their files are") already there.")
+                case .replaceIfChanged where plan.existingCount > 0:
+                    let replaced = plan.count(.replace), skipped = plan.count(.skip)
+                    note("\(replaced) existing file\(replaced == 1 ? "" : "s") will be replaced (edited since) and "
+                         + "\(skipped) skipped (unchanged).")
                 default:
                     EmptyView()
                 }

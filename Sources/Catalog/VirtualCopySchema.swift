@@ -50,4 +50,16 @@ enum VirtualCopySchema {
             END
             """)
     }
+
+    /// Names for versions (the Versions panel in Develop), one per row that
+    /// has one, deleted with the row. Added by migration
+    /// `history_v1_version_names`; no row before it has a name.
+    static func registerVersionNames(in migrator: inout DatabaseMigrator) {
+        migrator.registerMigration("history_v1_version_names") { db in
+            try db.create(table: "version_names") { t in
+                t.column("image_id", .integer).primaryKey().references("images", onDelete: .cascade)
+                t.column("name", .text).notNull()
+            }
+        }
+    }
 }

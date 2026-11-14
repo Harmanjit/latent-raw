@@ -125,6 +125,7 @@ extension LibraryFilter {
         if lens != nil, old.lens != new.lens { return true }
         if !text.trimmingCharacters(in: .whitespaces).isEmpty, old.relPath != new.relPath { return true }
         if finderTag != nil, old.finderTags != new.finderTags { return true }
+        if hasAddedCriteria || textScope == .everything, addedCriteriaDependOnChange(from: old, to: new) { return true }
         return false
     }
 }

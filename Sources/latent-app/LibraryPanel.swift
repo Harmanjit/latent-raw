@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Catalog
 import PixelEngine
 
@@ -19,6 +20,8 @@ struct LibraryPanel: View {
     @AppStorage(OpenImageExportOptions.includeMetadataKey) private var openImageIncludesMetadata = true
     @AppStorage(OpenImageExportOptions.includeLocationKey) private var openImageIncludesLocation = false
     @AppStorage(OpenImageExportOptions.includeWatermarkKey) private var openImageIncludesWatermark = false
+    /// Settings › Library's rows to leave out of the Metadata section.
+    @AppStorage(MetadataRow.hiddenKey) private var hiddenMetadataRows = ""
     let onOpenFolder: () -> Void
     let onRate: (Int) -> Void
     let onFlag: (ImageFlag) -> Void
@@ -31,6 +34,9 @@ struct LibraryPanel: View {
     var exportsOpenImage = true
     /// A colour label chosen in the panel (nil removes it).
     var onLabel: (ColorLabel?) -> Void = { _ in }
+    /// Overwrite (Option) and Apply as New Virtual Copy (PresetApplyMode.swift).
+    var onApplyPresetMode: (Preset, PresetApplyMode) -> Void = { _, _ in }
+    @ObservedObject private var presetCatalog = PresetCatalog.shared
 
     /// The selected photo's merge recipe, when it is one Photo Merge made;
     /// read from the catalog when the selection settles.
@@ -421,8 +427,9 @@ struct LibraryPanel: View {
             // Presets and pasted settings apply to the whole selection.
             HStack {
                 Menu("Apply preset") {
-                    ForEach(presets) { preset in
-                        Button(preset.name) { onApplyPreset(preset) }
+                    PresetMenuItems(presets: presets, favourites: presets.filter { presetCatalog.favourites.contains($0.name) },
+                                    virtualCopies: true) { preset, mode in
+                        if mode == .append { onApplyPreset(preset) } else { onApplyPresetMode(preset, mode) }
                     }
                 }
                 .menuStyle(.borderlessButton).fixedSize()
@@ -447,8 +454,9 @@ struct LibraryPanel: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
+            let hidden = MetadataRow.hidden(from: hiddenMetadataRows)
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 4) {
-                ForEach(image.metadataRows, id: \.label) { row in
+                ForEach(image.metadataRows.filter { !hidden.contains($0.label) }, id: \.label) { row in
                     GridRow {
                         Text(row.label)
                             .foregroundStyle(.secondary)
@@ -456,6 +464,31 @@ struct LibraryPanel: View {
                         Text(row.value)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                // The EXIF extras, for the whole selection when the shown
+                // photo is part of it: "Various" where the photos differ.
+                let selection = library.batchTargets(onlyPrimary: false)
+                let extras = ImageRecord.extraMetadataRows(for: selection.contains(image) ? selection : [image])
+                ForEach(extras.filter { !hidden.contains($0.label) }, id: \.label) { row in
+                    GridRow {
+                        Text(row.label)
+                            .foregroundStyle(.secondary)
+                            .gridColumnAlignment(.trailing)
+                        Text(row.value)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .contextMenu {
+                                if row.label == "GPS", row.value != MetadataRow.various,
+                                   let lat = image.gpsLatitude, let lon = image.gpsLongitude {
+                                    Button("Copy Coordinates") {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(
+                                            MetadataFormat.coordinatesForCopying(latitude: lat, longitude: lon),
+                                            forType: .string)
+                                    }
+                                }
+                            }
                     }
                 }
             }

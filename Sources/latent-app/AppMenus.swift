@@ -96,6 +96,8 @@ struct CommandState: Equatable {
     var stacking = StackCommandState()
     /// The loupe overlay, and Develop's Before/After and Reference views.
     var views = ViewCommandState()
+    /// Focus peaking, raw clipping and the other viewing aids (ViewingCommands.swift).
+    var viewing = ViewingCommandState()
 
     /// Whether the arrow keys pan the image rather than step through images
     /// (Loupe and Develop only; Compare keeps them for the candidate).
@@ -182,6 +184,7 @@ struct CommandState: Equatable {
             && !(redoChangesFiles && (exportQueueRunning || outputJobRunning))
         case .copySettings: hasImage || hasSelection
         case .matchTotalExposures: mode == .library && selectionCount >= 2
+        case .matchExposuresByHistogram: mode == .library && selectionCount >= 2 && editorReady
         case .pasteSettings: hasImage || selectionCount > 0
         case .pasteFromPrevious: hasPreviousPhoto && (hasImage || selectionCount > 0)
         case .clearFilter: filterActive
@@ -211,6 +214,7 @@ struct CommandState: Equatable {
         case .back: canGoBack
         case .refreshFolder: hasFolder
         case .rebuildThumbnails: hasFolder && (hasSelection || selectionCount > 0) && mode != .survey
+        case .importForeignSidecars: hasFolder && mode == .library && hasVisibleImages && !fileOperationRunning
         case .forward: canGoForward
         // The grid goes to Loupe first, which needs a selection.
         case .fullScreenImage: fullScreenImage || hasSelection || (mode == .develop && hasImage)
@@ -220,6 +224,7 @@ struct CommandState: Equatable {
         case .saveFilterAsSmartCollection: hasCatalog && filterActive
         case .addToTargetCollection: hasCatalog && (hasSelection || selectionCount > 0)
         case .removeFromCollection: showsRegularCollection && (hasSelection || selectionCount > 0)
+        case .addKeywords: hasCatalog && (hasSelection || selectionCount > 0) && !fullScreenImage
         case .geometry(let geometry): isEnabled(geometry)
         case .libraryView(let command): isEnabled(command)
         // Culling (CullingCommands.swift). The Select commands and Refine
@@ -229,6 +234,9 @@ struct CommandState: Equatable {
         case .select, .refinePhotos: mode == .library && hasVisibleImages
         case .stack(let stack): isEnabled(stack)
         case .view(let command): isEnabled(command)
+        case .applyPreset: hasImage || selectionCount > 0
+        case .history(let command): isEnabled(command)
+        case .viewing(let command): isEnabled(command)
         }
     }
 
@@ -347,12 +355,14 @@ struct LatentCommands: Commands {
             item("Open File…", .openFile)
             item("Refresh Folder", .refreshFolder)
             item("Rebuild Thumbnails", .rebuildThumbnails)
+            item("Import Ratings and Keywords from Other Apps’ Sidecars…", .importForeignSidecars)
             Divider()
             item(state.exportTitle, .export)
             item("Export with Previous", .exportWithPrevious)
             item("Export Open Image…", .exportOpenImage)
             item("Edit in \(externalEditors.chosen?.name ?? "External Editor")…", .editExternally)
             item("Reveal in Finder", .revealInFinder)
+            item(HistoryCommand.loadSettingsFromFile.title, .history(.loadSettingsFromFile))
             Divider()
             item("Contact Sheet…", .contactSheet)
             item("Print…", .print)
@@ -377,6 +387,10 @@ struct LatentCommands: Commands {
             Divider()
             item("Copy Settings", .copySettings)
             item("Paste Settings", .pasteSettings)
+            item(HistoryCommand.pasteOverwrite.title, .history(.pasteOverwrite))
+            item(HistoryCommand.copySelective.title, .history(.copySelective))
+            item(HistoryCommand.pasteSelective.title, .history(.pasteSelective))
+            item(HistoryCommand.syncLastChange.title, .history(.syncLastChange))
             CullingSelectMenu { AnyView(item($0, $1)) }
             item("Paste Settings From Previous", .pasteFromPrevious)
         }
@@ -409,6 +423,7 @@ struct LatentCommands: Commands {
             ViewModesMenus(state: state.views, item: { AnyView(item($0, $1)) },
                            toggle: { AnyView(toolToggle($0, $1, isOn: $2)) })
             item(state.clippingTitle, .toggleClipping)
+            ViewingMenuItems(state: state.viewing, toggle: { AnyView(toolToggle($0, $1, isOn: $2)) })
             toolToggle("Soft Proofing", .toggleSoftProof, isOn: state.softProofing)
             item("Make Select", .makeSelect)
             item("Swap Select and Candidate", .swapCompare)
@@ -417,6 +432,7 @@ struct LatentCommands: Commands {
             item("Clear Filters", .clearFilter)
             LibraryViewMenuItems(state: state, item: { AnyView(item($0, $1)) },
                                  toggle: { AnyView(toolToggle($0, $1, isOn: $2)) })
+            GridMarksMenu()
             Divider()
         }
 
@@ -445,6 +461,8 @@ struct LatentCommands: Commands {
             item("Create Virtual Copy", .createVirtualCopy)
             item("Set Copy as Master", .setCopyAsMaster)
             item("Remove Virtual Copy", .removeVirtualCopy)
+            item(HistoryCommand.newBlankCopy.title, .history(.newBlankCopy))
+            item(HistoryCommand.resetEdits.title, .history(.resetEdits))
             Divider()
             StackingMenu { AnyView(item($0, $1)) }
             Divider()
@@ -458,10 +476,13 @@ struct LatentCommands: Commands {
             item("Verify Files…", .verifyFiles)
             item("Find Duplicates…", .findDuplicates)
             item("Match Total Exposures", .matchTotalExposures)
+            item("Match Exposures by Histogram…", .matchExposuresByHistogram)
             item("Flat-Field Correction…", .flatFieldCorrection)
             Divider()
             item(state.targetCollectionTitle, .addToTargetCollection)
             item("Remove from Collection", .removeFromCollection)
+            Divider()
+            item("Add Keywords…", .addKeywords)
         }
 
         CommandMenu("Develop") {
@@ -470,6 +491,7 @@ struct LatentCommands: Commands {
             // No key and no window state needed: it only copies files into
             // Latent's profile folder (EditorModel+Profiles.swift).
             Button("Import Camera Profile…") { CameraProfileImport.run() }
+            ApplyPresetMenu(catalog: PresetCatalog.shared) { AnyView(item($0, $1)) }
             Divider()
             toolToggle("Crop & Straighten", .crop, isOn: state.cropToolActive)
             TransformMenu { AnyView(item($0, $1)) }
@@ -493,6 +515,13 @@ struct LatentCommands: Commands {
             item("Larger Brush", .toolSize(1))
             item("Delete Spot", .deleteHeal)
             item("Leave Tool", .disarmTools)
+            Divider()
+            StraightenMenuItems { AnyView(item($0, $1)) }
+        }
+
+        CommandGroup(after: .help) {
+            ViewingHelpMenuItems(state: state.viewing, item: { AnyView(item($0, $1)) },
+                                 toggle: { AnyView(toolToggle($0, $1, isOn: $2)) })
         }
     }
 

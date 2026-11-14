@@ -17,10 +17,27 @@ struct WhiteBalancePresetRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Picker("White balance", selection: Binding(
-                get: { model.whiteBalancePreset?.rawValue ?? "custom" },
-                set: { raw in WhiteBalancePreset(rawValue: raw).map(model.applyWhiteBalancePreset) })) {
+                get: { model.whiteBalancePreset?.rawValue ?? model.cameraWhiteBalanceTag ?? "custom" },
+                set: { raw in
+                    if raw.hasPrefix(EditorModel.cameraWhiteBalanceTagPrefix) {
+                        model.applyCameraWhiteBalance(tag: raw)
+                    } else {
+                        WhiteBalancePreset(rawValue: raw).map(model.applyWhiteBalancePreset)
+                    }
+                })) {
                 ForEach(WhiteBalancePreset.allCases) { Text($0.title).tag($0.rawValue) }
-                if model.whiteBalancePreset == nil {
+                // The camera's own presets, when its file records them
+                // (RawReconstructionViews.swift).
+                let cameraChoices = model.cameraWhiteBalanceChoices
+                if !cameraChoices.isEmpty {
+                    Divider()
+                    Section("Camera presets") {
+                        ForEach(cameraChoices) { choice in
+                            Text(choice.title).tag(EditorModel.cameraWhiteBalanceTagPrefix + choice.id)
+                        }
+                    }
+                }
+                if model.whiteBalancePreset == nil && model.cameraWhiteBalanceTag == nil {
                     Divider()
                     Text("Custom").tag("custom")
                 }
@@ -342,6 +359,8 @@ private struct Triangle: Shape {
 /// clipping switches (J turns both on or off).
 struct PixelReadoutBar: View {
     @ObservedObject var model: EditorModel
+    /// The clipping warning's options (ViewingSettingsViews.swift).
+    @State private var showsClippingOptions = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -349,8 +368,19 @@ struct PixelReadoutBar: View {
                        help: "Show crushed shadows in blue (J shows both)")
             PixelReadoutText(probe: model.pixelProbe)
             Spacer(minLength: 0)
+            PixelReadoutMenu(probe: model.pixelProbe)
             clipToggle(.highlights, title: "Highlights", systemImage: "triangle.tophalf.filled",
                        help: "Show clipped highlights in red (J shows both)")
+            Button { showsClippingOptions.toggle() } label: {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.mini)
+            .accessibilityLabel("Clipping warning options")
+            .help("How the clipping warning marks the image: mode, thresholds and colours")
+            .popover(isPresented: $showsClippingOptions, arrowEdge: .bottom) {
+                ClippingOptionsPopover(settings: ViewingSettings.shared)
+            }
         }
         .disabled(!model.hasImage)
     }
@@ -374,16 +404,22 @@ struct PixelReadoutBar: View {
 /// redraw the panel around it.
 struct PixelReadoutText: View {
     @ObservedObject var probe: PixelProbe
+    @ObservedObject private var settings = ScopeSettings.shared
 
     var body: some View {
         Group {
-            if let r = probe.readout {
+            if settings.sampleSize != .point || settings.readoutSpace != .standard {
+                // The picker's other sizes and spaces (PixelReadoutMenu).
+                PixelReadoutLines(readout: probe.readout, area: probe.area, settings: settings)
+            } else if let r = probe.readout {
                 let p = r.percent, lab = r.lab
                 // Above SDR white (an HDR view), how far, as Lightroom's
                 // HDR readout does; RGB itself stays on the 0–100 scale.
                 let hdr = r.stopsAboveSDRWhite.map { String(format: "   +%.1f stops", $0) } ?? ""
+                // While the tone equalizer is in use, its mask under the pointer.
+                let mask = r.toneEqualizerText.isEmpty ? "" : "   " + r.toneEqualizerText
                 Text(String(format: "R %.0f  G %.0f  B %.0f %%   L %.0f  a %.0f  b %.0f",
-                            p.x, p.y, p.z, lab.x, lab.y, lab.z) + hdr)
+                            p.x, p.y, p.z, lab.x, lab.y, lab.z) + hdr + mask)
             } else {
                 Text("Point at the photo for its colour")
             }

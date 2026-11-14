@@ -14,6 +14,7 @@ struct ThumbnailGridView: NSViewRepresentable {
     @ObservedObject var library: Library
     @ObservedObject private var prefs = AppPreferences.shared
     @ObservedObject private var mirrorImageMode = MirrorImageMode.shared
+    @ObservedObject private var gridMarks = GridMarksSettings.shared
     /// Double-click, or Return: open this image in the editor.
     let onOpen: (ImageRecord) -> Void
     /// What the right-click menu does.
@@ -58,6 +59,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         context.coordinator.actions = actions
         context.coordinator.sync(with: library, side: prefs.thumbnailSize)
         context.coordinator.setMirrored(mirrorImageMode.isOn)
+        context.coordinator.setMarksMode(gridMarks.mode)
         if let collection = scrollView.documentView as? NSCollectionView {
             let colour = prefs.surroundNSColor
             if collection.backgroundColors.first != colour { collection.backgroundColors = [colour] }
@@ -142,6 +144,15 @@ struct ThumbnailGridView: NSViewRepresentable {
 
         // MARK: Cells
 
+        /// View › Grid Marks: how much of each cell's marks show.
+        private(set) var marksMode = GridMarksSettings.shared.mode
+
+        func setMarksMode(_ mode: GridMarksMode) {
+            guard mode != marksMode else { return }
+            marksMode = mode
+            forEachVisibleCell { $0.setMarksMode(mode) }
+        }
+
         private func forEachVisibleCell(_ body: (ThumbnailItem) -> Void) {
             guard let collectionView else { return }
             for case let cell as ThumbnailItem in collectionView.visibleItems() { body(cell) }
@@ -199,6 +210,7 @@ struct ThumbnailGridView: NSViewRepresentable {
             let record = images[indexPath.item]
             cell.configure(record: record, isEdited: record.id.map(library.editedImageIDs.contains) ?? false,
                            library: library, layout: layout, pixelSize: layout.pixelSize(backingScale: backingScale))
+            cell.setMarksMode(marksMode)
             cell.onRate = { [weak self, weak cell] star in
                 guard let self, let cell else { return }
                 self.rate(cell, clickedStar: star)
@@ -471,6 +483,23 @@ final class ThumbnailItem: NSCollectionViewItem {
 
     override func loadView() {
         view = ThumbnailCellView(frame: NSRect(origin: .zero, size: ThumbnailGridLayout(side: 160).itemSize))
+        cellView.editedTip.loadToolTip = { [weak self] done in self?.loadEditedToolTip(done) }
+    }
+
+    func setMarksMode(_ mode: GridMarksMode) {
+        cellView.marksMode = mode
+    }
+
+    /// The edited pencil's tooltip: the groups this photo's edit changes,
+    /// read from the catalog as the pointer arrives.
+    private func loadEditedToolTip(_ done: @escaping @MainActor (String?) -> Void) {
+        guard isEdited, let id = record?.id, let catalog = library?.catalog else { return done(nil) }
+        Task { @MainActor [weak self] in
+            let json = try? await catalog.storedEdit(forImageID: id)?.json
+            // The cell moved on to another photo meanwhile.
+            guard let self, self.record?.id == id else { return }
+            done(json.map { EditedGroupsSummary.toolTip(EditedGroupsSummary.changedGroups(json: $0)) })
+        }
     }
 
     func configure(record: ImageRecord, isEdited: Bool, library: Library, layout: ThumbnailGridLayout, pixelSize: Int) {
@@ -495,12 +524,15 @@ final class ThumbnailItem: NSCollectionViewItem {
     func update(record: ImageRecord, isEdited: Bool) {
         // Before the guard: Verify Files changes this without changing the record.
         cellView.setDamaged(record.id.map { library?.damagedImageIDs.contains($0) ?? false } ?? false)
+        // Keywords change without the record changing, as damage does.
+        cellView.setKeywords(record.id.flatMap { library?.keywordsByImage[$0] } ?? [])
         guard record != self.record || isEdited != self.isEdited else { return }
         self.record = record
         self.isEdited = isEdited
         cellView.setMarks(name: record.fileName, rating: record.rating, flag: record.flag, isEdited: isEdited)
         cellView.setTags(stored: record.finderTags)
         cellView.setLabel(record.label)
+        cellView.setInfo(record)
         cellView.setVirtualCopy(record.isVirtualCopy)
         cellView.setStack(record.id.flatMap { library?.stackMemberships[$0] })
         loadIfNeeded()
@@ -624,6 +656,15 @@ final class ThumbnailCellView: NSView {
     private let copyBadge = VirtualCopyBadgeView()
     private let damagedBadge = DamagedFileBadgeView()
     private let stackBadge = StackBadgeView()
+    /// The keyword tag, the edited pencil's tooltip patch and Extended's
+    /// shooting-data line (GridCellMarks.swift).
+    private let keywordBadge = KeywordBadgeView()
+    let editedTip = EditedBadgeTipView()
+    private let infoField = NSTextField(labelWithString: "")
+    /// View › Grid Marks.
+    var marksMode = GridMarksMode.always {
+        didSet { if marksMode != oldValue { applyMarksVisibility() } }
+    }
     private var stackMembership: StackMembership?
     private var storedTags: String?
     private var hoverArea: NSTrackingArea?
@@ -679,6 +720,20 @@ final class ThumbnailCellView: NSView {
         addSubview(copyBadge)
         addSubview(damagedBadge)
         addSubview(stackBadge)
+        infoField.font = .monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+        infoField.textColor = .white
+        infoField.alignment = .center
+        infoField.drawsBackground = true
+        infoField.backgroundColor = NSColor.black.withAlphaComponent(0.55)
+        infoField.maximumNumberOfLines = 1
+        infoField.lineBreakMode = .byTruncatingTail
+        infoField.setAccessibilityElement(false)
+        infoField.isHidden = true
+        keywordBadge.isHidden = true
+        editedTip.isHidden = true
+        addSubview(keywordBadge)
+        addSubview(editedTip)
+        addSubview(infoField)
 
         // VoiceOver reads the cell as one image (name, flag, stars, edited)
         // rather than scraps of it.
@@ -729,7 +784,10 @@ final class ThumbnailCellView: NSView {
     /// The pointer is over the cell: the stars show their empty places.
     var isHovered: Bool {
         get { starsView.isCellHovered }
-        set { starsView.isCellHovered = newValue }
+        set {
+            starsView.isCellHovered = newValue
+            if marksMode == .onHover { applyMarksVisibility() }
+        }
     }
 
     override func updateTrackingAreas() {
@@ -784,6 +842,54 @@ final class ThumbnailCellView: NSView {
 
     override func isAccessibilitySelected() -> Bool { selectionStyle == .selected }
 
+    /// The photo's keywords (stored paths); the tag shows only for some.
+    func setKeywords(_ keywords: Set<String>) {
+        guard keywordBadge.setKeywords(keywords) else { return }
+        keywordBadge.isHidden = keywordBadge.keywords.isEmpty || !marksMode.visibility(hovered: isHovered).keywordBadge
+        needsLayout = true
+    }
+
+    /// Extended's line: exposure time, aperture and ISO, as far as known.
+    func setInfo(_ record: ImageRecord) {
+        let text = Self.infoText(record)
+        guard text != infoField.stringValue else { return }
+        infoField.stringValue = text
+        infoField.isHidden = text.isEmpty || !marksMode.visibility(hovered: isHovered).infoLine
+    }
+
+    /// "1/250 s  f/2.8  ISO 400".
+    static func infoText(_ record: ImageRecord) -> String {
+        var parts: [String] = []
+        if let shutter = record.shutter, shutter > 0 { parts.append(FilterRangeField.shutter.format(shutter)) }
+        if let aperture = record.aperture, aperture > 0 { parts.append(FilterRangeField.aperture.format(aperture)) }
+        if let iso = record.iso, iso > 0 { parts.append("ISO \(iso)") }
+        return parts.joined(separator: "  ")
+    }
+
+    /// Shows and hides the marks for View › Grid Marks (and, On Hover,
+    /// the pointer). Always shows every mark, as the grid always has.
+    private func applyMarksVisibility() {
+        let shown = marksMode.visibility(hovered: isHovered)
+        nameField.isHidden = !shown.name
+        starsView.isHidden = !shown.stars
+        badgeField.isHidden = !shown.flagBadge
+        var badges: [String] = []
+        if isEdited, shown.editedBadge { badges.append("✎") }
+        if flag > 0 { badges.append("✓") }
+        if flag < 0 { badges.append("✗") }
+        let text = badges.joined(separator: "  ")
+        if badgeField.stringValue != text { badgeField.stringValue = text }
+        editedTip.isHidden = !(isEdited && shown.editedBadge && shown.flagBadge)
+        // Views whose isHidden their own setters manage fade instead.
+        labelDotView.alphaValue = shown.labelDot ? 1 : 0
+        tagDotsView.alphaValue = shown.tagDots ? 1 : 0
+        copyBadge.alphaValue = shown.pictureBadges ? 1 : 0
+        stackBadge.alphaValue = shown.pictureBadges ? 1 : 0
+        keywordBadge.isHidden = keywordBadge.keywords.isEmpty || !shown.keywordBadge
+        infoField.isHidden = infoField.stringValue.isEmpty || !shown.infoLine
+        needsLayout = true
+    }
+
     /// "DSC_0107.NEF, picked, 3 stars, edited" (SpokenText.image, which the
     /// filmstrip reads too).
     static func accessibilityText(name: String, rating: Int, flag: Int, isEdited: Bool) -> String {
@@ -808,6 +914,8 @@ final class ThumbnailCellView: NSView {
         badgeField.stringValue = badges.joined(separator: "  ")
         starsView.rating = min(max(rating, 0), ThumbnailGridLayout.starCount)
         badgeField.textColor = flag < 0 ? .systemRed : flag > 0 ? .systemGreen : .tertiaryLabelColor
+        // A mode that leaves out the pencil redoes the text without it.
+        if marksMode != .always { applyMarksVisibility() } else { editedTip.isHidden = !isEdited }
     }
 
     /// Core Animation copies a CGImage's pixels for the render server and
@@ -835,7 +943,11 @@ final class ThumbnailCellView: NSView {
         let tagCount = tagDotsView.tags.count
         nameField.frame = info.nameFrame(tagCount: tagCount)
         tagDotsView.frame = info.tagDotsFrame(tagCount: tagCount)
-        badgeField.frame = info.flagBadgeFrame(hasLabel: labelDotView.label != nil)
+        let hasKeywords = !keywordBadge.isHidden
+        badgeField.frame = info.flagBadgeFrame(hasLabel: labelDotView.label != nil, hasKeywords: hasKeywords)
+        keywordBadge.frame = info.keywordBadgeFrame(hasLabel: labelDotView.label != nil)
+        editedTip.frame = info.editedBadgeFrame
+        infoField.frame = ThumbnailGridLayout.infoLineFrame(inImageFrame: imageLayer.frame)
         labelDotView.frame = info.labelDotFrame
         starsView.frame = info.starsFrame
         copyBadge.frame = VirtualCopyBadgeView.frame(inImageFrame: imageLayer.frame)

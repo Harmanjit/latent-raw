@@ -12,6 +12,9 @@ public struct ReconcileReport: Sendable, CustomStringConvertible {
     public var removed = 0
     public var unchanged = 0
     public var sidecarsRead = 0
+    /// New photos that took their rating, label and keywords from another
+    /// application's sidecar beside them (ForeignSidecar).
+    public var foreignSidecarsRead = 0
     /// Unchanged files whose Finder tags changed since the last pass.
     public var tagsChanged = 0
     /// Subfolders with no decision yet (mode `ask`), relative paths.
@@ -38,7 +41,7 @@ public struct ReconcileReport: Sendable, CustomStringConvertible {
 extension Catalog {
     /// File extensions Latent indexes: every raw format, and the ordinary
     /// picture formats this Mac's ImageIO decodes (JPEG, HEIC, TIFF, PNG,
-    /// and WebP and AVIF where available; `RenderedImageFormat`).
+    /// and WebP, AVIF and JPEG XL where available; `RenderedImageFormat`).
     public static let indexedExtensions: Set<String> = rawExtensions.union(RenderedImageFormat.extensions)
 
     /// The raw formats, which LibRaw reads.
@@ -49,6 +52,11 @@ extension Catalog {
         "dng",                              // Adobe / phones / Leica
         "raf", "orf", "rw2", "pef", "srw",  // Fuji, Olympus, Panasonic, Pentax, Samsung
         "3fr", "fff", "iiq", "mos", "mrw", "x3f",
+        // Rarer and older formats LibRaw also reads: ARRI, Casio, Phase One
+        // and Leaf, Kodak, Epson, Mamiya, GoPro, Logitech, Apple QuickTake,
+        // Sinar, Minolta, Leica and Panasonic, and others.
+        "ari", "bay", "bmq", "cap", "cine", "cs1", "dc2", "dcr", "erf", "gpr", "ia",
+        "k25", "kc2", "kdc", "mdc", "mef", "pxn", "qtk", "raw", "rdc", "rw1", "sti",
     ]
 
     /// A file as seen on disk during the scan.
@@ -271,10 +279,7 @@ extension Catalog {
                 fresh.userRotation = previous.userRotation
                 fresh.preservedName = previous.preservedName
                 fresh.mergeJSON = previous.mergeJSON
-                fresh.title = previous.title
-                fresh.caption = previous.caption
-                fresh.creator = previous.creator
-                fresh.copyright = previous.copyright
+                fresh.copyDescriptive(from: previous)
                 fresh.sidecarMtime = previous.sidecarMtime
                 fresh.thumbKey = nil   // pixels changed; thumbnail is stale
                 updates.append(fresh)
@@ -361,6 +366,11 @@ extension Catalog {
         //    row first, for this pass to fill.
         _ = restoreVirtualCopiesFromSidecars(report: &report)
         report.sidecarsRead = try syncSidecars(report: &report, leaving: moved.sidecarsMissing)
+        // 10. Photos that arrived with another application's sidecar and
+        //     none of Latent's (ForeignSidecar), and EXIF extras for rows
+        //     made before they were read (ExifExtras), a batch per pass.
+        report.foreignSidecarsRead = importForeignSidecars(forNewImageIDs: addedIDs, report: &report)
+        _ = try? backfillExifExtras()
 
         report.duration = Date().timeIntervalSince(start)
         return report
@@ -467,7 +477,7 @@ extension Catalog {
         // Until then such a file is catalogued as a plain DNG.
         let camera = [s.cameraMake, s.cameraModel]
             .filter { !$0.isEmpty }.joined(separator: " ")
-        return ImageRecord(
+        var record = ImageRecord(
             id: nil, relPath: file.relPath, preservedName: nil,
             size: file.size, mtime: file.mtime, xxhash: hash,
             captureTime: s.captureTime.timeIntervalSince1970 > 0
@@ -482,6 +492,8 @@ extension Catalog {
             width: s.width, height: s.height, orientation: s.orientation,
             rating: 0, label: nil, flag: 0, sidecarMtime: nil, thumbKey: nil,
             finderTags: file.finderTags)
+        record.apply(ExifExtras.read(from: url))
+        return record
     }
 
 
@@ -682,6 +694,7 @@ extension Catalog {
                 row.caption = fields?.caption
                 row.creator = fields?.creator
                 row.copyright = fields?.copyright
+                for field in DescriptiveField.more { field.set(fields?.more[field], on: &row) }
                 row.sidecarMtime = mtime
                 try row.update(db)
 

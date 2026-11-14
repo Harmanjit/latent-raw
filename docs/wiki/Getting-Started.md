@@ -17,7 +17,7 @@ The window has four parts:
 - The **grid** (or the picture, in the other views) in the middle.
 - The **status bar** along the bottom, with the switch between the five views and messages about what Latent is doing.
 
-The first time, no folder is open and the left panel says so. After that, Latent opens the last folder you used each time it starts.
+The very first time, a welcome sheet offers **Open Folder…** and links to this page and [Keyboard Shortcuts](Keyboard-Shortcuts); **Help › Show Welcome** brings it back, and **Help › Show Shortcuts Overlay** (?) lists the keys of whichever view you are in. The first time, no folder is open and the left panel says so. After that, Latent opens the last folder you used each time it starts.
 
 ## Choose a folder: that is your catalog
 

@@ -11,6 +11,7 @@ struct ColourSections: View {
     @State private var pointColourExpanded = false
     @State private var gradingExpanded = false
     @State private var calibrationExpanded = false
+    @State private var channelMixerExpanded = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $blackAndWhiteExpanded) {
@@ -35,22 +36,34 @@ struct ColourSections: View {
         }
 
         DisclosureGroup(isExpanded: $gradingExpanded) {
-            ColourGradingPanel(parameters: $model.parameters)
+            ColourGradingPanel(parameters: $model.parameters, onRangePreview: { model.gradingRangePreview = $0 })
                 .disabled(!model.hasImage)
                 .padding(.top, 8)
         } label: {
-            ColourSectionLabel(title: "Colour Grading")
+            HStack { ColourSectionLabel(title: "Colour Grading"); PanelPresetsMenu(model: model, groups: [.splitToning], panel: "Colour Grading") }
         }
 
         DisclosureGroup(isExpanded: $calibrationExpanded) {
             VStack(alignment: .leading, spacing: 10) {
                 ProcessVersionMenu(model: model)
                 CalibrationPanel(calibration: $model.parameters.colour.calibration)
+                CalibrationExtrasPanel(colour: $model.parameters.colour)
             }
             .disabled(!model.hasImage)
             .padding(.top, 8)
         } label: {
-            ColourSectionLabel(title: "Calibration")
+            HStack { ColourSectionLabel(title: "Calibration"); PanelPresetsMenu(model: model, groups: [.calibration], panel: "Calibration") }
+        }
+
+        DisclosureGroup(isExpanded: $channelMixerExpanded) {
+            ChannelMixerPanel(mixer: $model.parameters.colour.channelMixer)
+                .disabled(!model.hasImage)
+                .padding(.top, 8)
+        } label: {
+            HStack {
+                ColourSectionLabel(title: "Channel Mixer")
+                if !model.parameters.colour.channelMixer.isNeutral { badge("MIX") }
+            }
         }
     }
 
@@ -63,7 +76,7 @@ struct ColourSections: View {
             .padding(.vertical, 1)
             .background(Color.accentColor.opacity(0.85), in: RoundedRectangle(cornerRadius: 3))
             .foregroundStyle(.white)
-            .accessibilityLabel(text == "ON" ? "picker on" : "black and white")
+            .accessibilityLabel(text == "ON" ? "picker on" : text == "MIX" ? "channel mixer in use" : "black and white")
     }
 }
 
@@ -90,6 +103,9 @@ struct ColourSliderRow: View {
     var format = SliderValueFormat(decimals: 0, signed: true, scale: 100)
     var defaultValue: Float = 0
     var help: String
+    /// Told when the knob is pressed and released, with whether Option was
+    /// held (`ResettableSlider.onPress`); nil for most rows.
+    var onPress: ((_ pressed: Bool, _ option: Bool) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -98,7 +114,7 @@ struct ColourSliderRow: View {
                 Spacer()
                 SliderValueField(value: $value, in: range, format: format, label: title)
             }
-            ResettableSlider(value: $value, in: range, label: title, format: format) { value = defaultValue }
+            ResettableSlider(value: $value, in: range, label: title, format: format, onPress: onPress) { value = defaultValue }
                 .help(help + " Double-click to reset.")
         }
     }
@@ -259,6 +275,10 @@ struct PointColourPanel: View {
 /// unchanged.
 struct ColourGradingPanel: View {
     @Binding var parameters: EditParameters
+    /// Told the range (0 shadows, 1 midtones, 2 highlights) to preview
+    /// while a luminance slider is Option-dragged, nil on release
+    /// (`EditorModel.gradingRangePreview`).
+    var onRangePreview: ((Int?) -> Void)? = nil
     @State private var view: GradingView = .threeWay
 
     enum GradingView: String, CaseIterable, Identifiable {
@@ -300,12 +320,18 @@ struct ColourGradingPanel: View {
                 .frame(maxWidth: .infinity)
             }
 
+            GradingRangeGraph(balance: parameters.splitToning.balance, blending: parameters.colour.grading.blending)
+                .frame(height: 40)
+
             ColourSliderRow(title: "Blending", value: blending, range: 0...1,
                             format: SliderValueFormat(decimals: 0, scale: 100),
                             defaultValue: ColourGrading.defaultBlending,
                             help: "How far shadows, midtones and highlights reach into each other.")
             ColourSliderRow(title: "Balance", value: $parameters.splitToning.balance,
                             help: "Moves the line between shadows and highlights: below zero more of the picture counts as shadow.")
+            ColourSliderRow(title: "Hue Shift", value: $parameters.colour.grading.hueShift, range: -180...180,
+                            format: SliderValueFormat(decimals: 0, signed: true, unit: "°"),
+                            help: "Turns every colour round the colour circle after the wheels' tints; greys stay grey.")
             HStack {
                 Spacer()
                 Button("Reset") {
@@ -359,10 +385,43 @@ struct ColourGradingPanel: View {
             Text(range.rawValue).font(.caption2).foregroundStyle(.secondary).accessibilityHidden(true)
             ColourWheel(wheel: w, title: range.rawValue).frame(width: 96, height: 96)
             ResettableSlider(value: w.luminance, in: -1...1, label: "\(range.rawValue) luminance",
-                             format: SliderValueFormat(decimals: 0, signed: true, scale: 100)) { w.wrappedValue.luminance = 0 }
+                             format: SliderValueFormat(decimals: 0, signed: true, scale: 100),
+                             onPress: preview(range)) { w.wrappedValue.luminance = 0 }
                 .frame(width: 110)
-                .help("\(range.rawValue) luminance: darker or lighter. Double-click to reset.")
+                .help("\(range.rawValue) luminance: darker or lighter. Double-click to reset. Option-drag shows where this range acts.")
+            if let s = rangeSaturation(range) {
+                ResettableSlider(value: s, in: -1...1, label: "\(range.rawValue) saturation",
+                                 format: SliderValueFormat(decimals: 0, signed: true, scale: 100)) { s.wrappedValue = 0 }
+                    .frame(width: 110)
+                    .controlSize(.mini)
+                    .help("\(range.rawValue) saturation: less or more colourful. Double-click to reset.")
+            }
         }
+    }
+
+    /// The per-range saturation; nil for Global, which has Saturation on
+    /// its wheel and Hue Shift below.
+    private func rangeSaturation(_ range: GradingRange) -> Binding<Float>? {
+        switch range {
+        case .shadows: return $parameters.colour.grading.shadowSaturation
+        case .midtones: return $parameters.colour.grading.midtoneSaturation
+        case .highlights: return $parameters.colour.grading.highlightSaturation
+        case .global: return nil
+        }
+    }
+
+    /// The Option-drag preview for a range's luminance slider; nil for
+    /// Global, which covers every tone.
+    private func preview(_ range: GradingRange) -> ((Bool, Bool) -> Void)? {
+        guard let onRangePreview else { return nil }
+        let index: Int
+        switch range {
+        case .shadows: index = 0
+        case .midtones: index = 1
+        case .highlights: index = 2
+        case .global: return nil
+        }
+        return { pressed, option in onRangePreview(pressed && option ? index : nil) }
     }
 
     private func singleWheel(_ range: GradingRange) -> some View {
@@ -378,7 +437,12 @@ struct ColourGradingPanel: View {
                             format: SliderValueFormat(decimals: 0, scale: 100),
                             help: "How strong the tint is.")
             ColourSliderRow(title: "Luminance", value: w.luminance,
-                            help: "Darkens or lightens this range.")
+                            help: "Darkens or lightens this range." + (preview(range) == nil ? "" : " Option-drag shows where it acts."),
+                            onPress: preview(range))
+            if let s = rangeSaturation(range) {
+                ColourSliderRow(title: "Range Saturation", value: s,
+                                help: "Makes this range less or more colourful, by the same weights as its wheel.")
+            }
         }
     }
 }
@@ -518,5 +582,189 @@ struct CalibrationPanel: View {
             ColourSliderRow(title: "\(name) Saturation", value: saturation,
                             help: "Makes the \(name.lowercased()) primary, and the colours built from it, duller or richer.")
         }
+    }
+}
+
+// MARK: - Colour Grading range graph
+
+/// How much of each range every tone gets, from black (left) to white
+/// (right): shadows, midtones and highlights as `applyColourGrading`
+/// weighs them, so Balance and Blending can be seen working.
+struct GradingRangeGraph: View {
+    let balance: Float
+    let blending: Float
+
+    private static let colours: [Color] = [Color(red: 0.35, green: 0.55, blue: 1), Color(white: 0.7),
+                                           Color(red: 1, green: 0.7, blue: 0.3)]
+    private static let names = ["shadows", "midtones", "highlights"]
+
+    var body: some View {
+        Canvas { context, size in
+            let steps = 64
+            context.stroke(Path(CGRect(origin: .zero, size: size)), with: .color(.secondary.opacity(0.3)), lineWidth: 0.5)
+            for range in 0..<3 {
+                var path = Path()
+                for i in 0...steps {
+                    let l = Float(i) / Float(steps)
+                    let w = ColourGradingRanges.weights(luminance: l, balance: balance, blending: blending)[range]
+                    let point = CGPoint(x: CGFloat(l) * size.width, y: (1 - CGFloat(w)) * (size.height - 2) + 1)
+                    if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                }
+                context.stroke(path, with: .color(Self.colours[range]), lineWidth: 1.5)
+            }
+        }
+        .help("How far each range reaches, from black (left) to white (right): shadows blue, midtones grey, highlights orange. Balance and Blending move them.")
+        .accessibilityElement()
+        .accessibilityLabel("Colour grading ranges")
+        .accessibilityValue(summary)
+    }
+
+    /// Where shadows hand over to highlights, for VoiceOver.
+    private var summary: String {
+        let crossing = (0...100).first { i in
+            let w = ColourGradingRanges.weights(luminance: Float(i) / 100, balance: balance, blending: blending)
+            return w.z >= w.x
+        } ?? 50
+        return "shadows hand over to highlights at \(crossing) percent brightness"
+    }
+}
+
+// MARK: - Calibration extras
+
+/// Beside Lightroom's Calibration sliders: Gamut Compression, Highlight
+/// Purity and the Adaptation disclosure. Each is off until moved.
+struct CalibrationExtrasPanel: View {
+    @Binding var colour: ColourControls
+    @State private var adaptationExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ColourSliderRow(title: "Gamut Compression", value: $colour.gamutCompression, range: ColourControls.amountRange,
+                            format: SliderValueFormat(decimals: 0, scale: 100),
+                            help: "Eases colours beyond (or nearly beyond) what the working space can hold back inside it, softly, so saturated lights and flowers keep their detail.")
+            ColourSliderRow(title: "Highlight Purity", value: $colour.purity, range: ColourControls.amountRange,
+                            format: SliderValueFormat(decimals: 0, scale: 100),
+                            help: "Gives back the colour the tone curve bleaches out of the brightest tones, such as a sunset or a lit sign.")
+            DisclosureGroup(isExpanded: $adaptationExpanded) {
+                AdaptationPanel(adaptation: $colour.adaptation).padding(.top, 6)
+            } label: {
+                HStack {
+                    Text("Adaptation").font(.caption).fontWeight(.semibold).foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .accessibilityAddTraits(.isHeader)
+                    if !colour.adaptation.isNeutral {
+                        Text(colour.adaptation.illuminant.rawValue).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// darktable's chromatic adaptation: the light the scene was lit by,
+/// carried to D65 by the chosen transform.
+struct AdaptationPanel: View {
+    @Binding var adaptation: ChromaticAdaptation
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("Method", selection: $adaptation.method) {
+                ForEach(ChromaticAdaptation.Method.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .help("How the eye's adaptation is modelled: CAT16 (darktable's default), Bradford (ICC's) or plain XYZ scaling")
+            Picker("Illuminant", selection: Binding(get: { adaptation.illuminant }, set: { picked in
+                var a = adaptation
+                if picked == .custom {
+                    // Start the custom light where the chosen one was.
+                    let xy = a.sourceXY
+                    a.x = xy.x; a.y = xy.y; a.hue = 0; a.chroma = 0
+                }
+                a.illuminant = picked
+                adaptation = a
+            })) {
+                ForEach(ChromaticAdaptation.Illuminant.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .help("The light the scene was lit by. D65 changes nothing; any other is carried to D65's white.")
+            if adaptation.illuminant == .custom {
+                ColourSliderRow(title: "x", value: $adaptation.x, range: 0.2...0.6,
+                                format: SliderValueFormat(decimals: 4), defaultValue: ChromaticAdaptation.d65xy.x,
+                                help: "The light's CIE x chromaticity.")
+                ColourSliderRow(title: "y", value: $adaptation.y, range: 0.2...0.5,
+                                format: SliderValueFormat(decimals: 4), defaultValue: ChromaticAdaptation.d65xy.y,
+                                help: "The light's CIE y chromaticity.")
+            }
+            ColourSliderRow(title: "Hue", value: $adaptation.hue, range: -180...180,
+                            format: SliderValueFormat(decimals: 0, signed: true, unit: "°"),
+                            help: "Turns the chosen light round D65's white.")
+            ColourSliderRow(title: "Chroma", value: $adaptation.chroma,
+                            help: "Moves the chosen light nearer to D65's white (left) or further from it (right).")
+            HStack {
+                Spacer()
+                Button("Reset") { adaptation = .neutral }
+                    .controlSize(.mini)
+                    .disabled(adaptation.isNeutral)
+                    .help("Back to D65: no adaptation")
+            }
+        }
+    }
+}
+
+// MARK: - Channel Mixer
+
+/// darktable's channel mixer: each output channel as a mix of the red,
+/// green and blue sources, after the camera matrix.
+struct ChannelMixerPanel: View {
+    @Binding var mixer: ChannelMixer
+    @State private var output = 0
+
+    private static let names = ["Red", "Green", "Blue"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("Output", selection: $output) {
+                ForEach(0..<3, id: \.self) { Text(Self.names[$0]).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .accessibilityLabel("Output channel")
+
+            ForEach(0..<3, id: \.self) { source in
+                ColourSliderRow(title: "\(Self.names[source]) Source", value: binding(source),
+                                range: ChannelMixer.sourceRange,
+                                format: SliderValueFormat(decimals: 0, signed: true, unit: "%", scale: 100),
+                                defaultValue: source == output ? 1 : 0,
+                                help: "How much of the \(Self.names[source].lowercased()) source goes into the \(Self.names[output].lowercased()) output.")
+            }
+            Toggle("Normalise", isOn: $mixer.normalise)
+                .controlSize(.small)
+                .help("Scales each output's sources so they add up to 100%, so greys stay grey")
+            HStack {
+                Button("Monochrome") { mixer = .monochrome }
+                    .controlSize(.mini)
+                    .help("Every output the same mix, Rec.2020 luminance: black and white before the colour controls")
+                Spacer()
+                Button("Reset") { mixer = .identity }
+                    .controlSize(.mini)
+                    .disabled(mixer.isNeutral)
+                    .help("Each output its own source only")
+            }
+        }
+    }
+
+    private func binding(_ source: Int) -> Binding<Float> {
+        Binding(get: {
+            let row = mixer[output]
+            return row.count == 3 ? row[source] : 0
+        }, set: { v in
+            var row = mixer[output]
+            guard row.count == 3 else { return }
+            row[source] = v
+            mixer[output] = row
+        })
     }
 }

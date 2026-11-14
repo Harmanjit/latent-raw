@@ -43,6 +43,19 @@ enum PrintPresenter {
                         renderers.made(renderer)
                         return renderer
                     },
+                    // The same, with the print's own preset and output
+                    // sharpening when the panel sets them.
+                    makeOptionsRenderer: { options in
+                        let renderer = SheetRenderer(gpu: gpu, colorSpace: .displayP3, bitsPerComponent: 16,
+                                                     aiDenoiseFrom: 0, profile: options.profile,
+                                                     cacheBudget: PrintRenderPolicy.cacheBudget) { request in
+                            request.presetStyle = options.presetStyle
+                            request.outputSharpening = options.sharpening
+                            request.outputPPI = options.sharpening == nil ? nil : options.ppi
+                        }
+                        renderers.made(renderer)
+                        return renderer
+                    },
                     // Previews of what has no thumbnail render small and in
                     // sRGB; they are never printed.
                     previewRenderer: SheetRenderer(gpu: gpu, colorSpace: .sRGB, bitsPerComponent: 8,
@@ -101,7 +114,8 @@ final class PrintSession: NSObject {
     /// proof profile or none); `previewRenderer` renders small previews of
     /// what has no thumbnail.
     init(items: [SheetItem], thumbnails: @escaping SheetThumbnailSource,
-         makeRenderer: @escaping @Sendable (SheetProfile?) -> SheetRenderer, previewRenderer: SheetRenderer?,
+         makeRenderer: @escaping @Sendable (SheetProfile?) -> SheetRenderer,
+         makeOptionsRenderer: (@Sendable (PrintRenderOptions) -> SheetRenderer)? = nil, previewRenderer: SheetRenderer?,
          proofProfile: SheetProfile?, intent: RenderingIntent? = nil, store: PrintLayoutStore = PrintLayoutStore(),
          printInfo shared: NSPrintInfo = .shared, jobs: OutputJobs = .shared) {
         // A copy of the shared print info, so Page Setup's paper, scale and
@@ -119,7 +133,8 @@ final class PrintSession: NSObject {
         var settings = store.settings
         if let intent { settings.intent = intent }
         job = PrintJob(items: items, settings: settings, paper: PrintPaper(printInfo: info),
-                       proofProfile: proofProfile, makeRenderer: makeRenderer,
+                       proofProfile: proofProfile,
+                       makeOptionsRenderer: makeOptionsRenderer ?? { makeRenderer($0.profile) },
                        makePreview: { job in
                            SheetPreviewImages(renderer: previewRenderer, thumbnail: thumbnails,
                                               onReady: { [weak job] in job?.previewDidChange() })
@@ -287,23 +302,27 @@ final class PrintAccessoryController: NSViewController, NSPrintPanelAccessorizin
     }
 
     static func summary(_ settings: PrintLayoutSettings, proofProfileName: String?) -> [(name: String, value: String)] {
-        [
+        let m = settings.margins
+        let margins = settings.marginsLocked ? settings.marginText(settings.margin)
+            : [m.top, m.left, m.bottom, m.right].map(settings.marginText).joined(separator: ", ")
+        return [
             ("Photos per Page", "\(settings.imagesPerPage)"),
             ("Scaling", settings.scaling == .fit ? "Fit" : "Fill"),
-            ("Margins", PrintLength.text(points: settings.margin)),
+            ("Margins", margins),
             ("Spacing", PrintLength.text(points: settings.spacing)),
             ("Captions", settings.caption.title),
             ("Auto-Rotate", settings.autoRotate ? "On" : "Off"),
-            ("Colour", colorTitle(settings.color == .proofProfile && proofProfileName != nil ? .proofProfile : .displayP3,
-                                  proofProfileName: proofProfileName)),
-        ] + (settings.color == .proofProfile && proofProfileName != nil
+            ("Colour", settings.colourDescription(proofProfileName: proofProfileName)),
+        ] + (settings.usesIntent(proofProfileName: proofProfileName)
              ? [("Rendering Intent", settings.intent.displayName)] : [])
+          + PrintExtrasSection.summary(settings)
     }
 
     static func colorTitle(_ choice: PrintLayoutSettings.ColorChoice, proofProfileName: String?) -> String {
         switch choice {
         case .displayP3: "Display P3 (wide gamut)"
         case .proofProfile: proofProfileName.map { "Soft proof profile: \($0)" } ?? "Display P3 (wide gamut)"
+        case .icc: "Printer profile"
         }
     }
 }
@@ -325,9 +344,15 @@ struct PrintAccessoryView: View {
             .fixedSize()
             .accessibilityHint("Fit shows each whole photo; Fill covers its cell and crops the overflow")
             Toggle("Rotate photos to fill the cells", isOn: $model.settings.autoRotate)
-            LabeledContent("Margins") {
-                lengthSlider($model.settings.margin, range: PrintLayoutSettings.marginRange, label: "Margins")
+            if model.settings.marginsLocked {
+                LabeledContent("Margins") {
+                    lengthSlider($model.settings.margin, range: PrintLayoutSettings.marginRange, label: "Margins",
+                                 text: model.settings.marginText)
+                }
+            } else {
+                PrintMarginFields(settings: $model.settings)
             }
+            PrintMarginOptions(settings: $model.settings)
             LabeledContent("Spacing") {
                 lengthSlider($model.settings.spacing, range: PrintLayoutSettings.spacingRange, label: "Spacing")
             }
@@ -336,26 +361,31 @@ struct PrintAccessoryView: View {
             }
             .fixedSize()
             Picker("Colour", selection: Binding(
-                // Without a proof profile the choice can only be Display P3;
+                // Without a proof profile that choice reads as Display P3;
                 // the remembered choice comes back when one is set again.
-                get: { model.proofProfileName == nil ? .displayP3 : model.settings.color },
+                get: { model.proofProfileName == nil && model.settings.color == .proofProfile ? .displayP3
+                       : model.settings.color },
                 set: { model.settings.color = $0 })) {
                 Text(PrintAccessoryController.colorTitle(.displayP3, proofProfileName: nil)).tag(PrintLayoutSettings.ColorChoice.displayP3)
                 if let name = model.proofProfileName {
                     Text(PrintAccessoryController.colorTitle(.proofProfile, proofProfileName: name))
                         .tag(PrintLayoutSettings.ColorChoice.proofProfile)
                 }
+                Text(PrintAccessoryController.colorTitle(.icc, proofProfileName: nil)).tag(PrintLayoutSettings.ColorChoice.icc)
             }
             .fixedSize()
-            .disabled(model.proofProfileName == nil)
             .accessibilityHint("Photos are rendered in this colour space before the printer's colour matching")
+            if model.settings.color == .icc {
+                PrintProfilePicker(settings: $model.settings)
+            }
             Picker("Rendering intent", selection: $model.settings.intent) {
                 ForEach(RenderingIntent.allCases) { Text($0.displayName).tag($0) }
             }
             .fixedSize()
-            .disabled(model.proofProfileName == nil || model.settings.color != .proofProfile)
+            .disabled(!model.settings.usesIntent(proofProfileName: model.proofProfileName))
             .help(model.settings.intent.help)
             .accessibilityHint("How colours the printer profile can't reproduce are brought into its gamut")
+            PrintExtrasSection(settings: $model.settings)
         }
         .formStyle(.columns)
         .padding(.vertical, 16)
@@ -363,14 +393,15 @@ struct PrintAccessoryView: View {
         .frame(width: 460)
     }
 
-    private func lengthSlider(_ value: Binding<Double>, range: ClosedRange<Double>, label: String) -> some View {
+    private func lengthSlider(_ value: Binding<Double>, range: ClosedRange<Double>, label: String,
+                              text: @escaping (Double) -> String = { PrintLength.text(points: $0) }) -> some View {
         HStack {
             Slider(value: Binding(get: { value.wrappedValue }, set: { value.wrappedValue = ($0 / 3).rounded() * 3 }),
                    in: range)
                 .frame(width: 180)
                 .accessibilityLabel(label)
-                .accessibilityValue(PrintLength.text(points: value.wrappedValue))
-            Text(PrintLength.text(points: value.wrappedValue))
+                .accessibilityValue(text(value.wrappedValue))
+            Text(text(value.wrappedValue))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .frame(width: 64, alignment: .leading)

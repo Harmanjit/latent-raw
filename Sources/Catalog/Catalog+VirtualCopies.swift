@@ -27,6 +27,9 @@ public struct VirtualCopyArchive: Sendable, Equatable {
     public var edit: StoredEdit?
     public var snapshots: [Snapshot]
     public var history: [HistoryStep]
+    /// The name the user gave this version in the Versions panel, if any
+    /// (`version_names`, migration `history_v1_version_names`).
+    public var versionName: String? = nil
 }
 
 /// A virtual copy could not be made or changed.
@@ -74,7 +77,8 @@ extension Catalog {
         let data = try Self.ownData(of: id, in: db)
         return VirtualCopyArchive(id: id, masterID: masterID, key: key, rating: row.rating, label: row.label,
                                   flag: row.flag, userRotation: row.userRotation, keywords: data.keywords,
-                                  edit: data.edit, snapshots: data.snapshots, history: data.history)
+                                  edit: data.edit, snapshots: data.snapshots, history: data.history,
+                                  versionName: try versionName(of: id, in: db))
     }
 
     /// What a row holds outside the `images` table.
@@ -135,7 +139,11 @@ extension Catalog {
     /// empty history and no snapshots of its own. It takes the next number
     /// among its master's copies, and the image's thumbnail, which already
     /// shows that edit.
-    public func createVirtualCopy(of id: Int64) throws -> VirtualCopyArchive {
+    ///
+    /// `blank` (Versions › New Blank Copy) starts it from the default edit
+    /// instead, with no thumbnail until the thumbnail pass makes one; its
+    /// rating, label, flag, rotation and keywords still come from the image.
+    public func createVirtualCopy(of id: Int64, blank: Bool = false) throws -> VirtualCopyArchive {
         let archive: VirtualCopyArchive = try dbQueue.write { db in
             guard let source = try ImageRecord.fetchOne(db, key: id) else { throw VirtualCopyError.noSuchImage }
             let masterID = try Int64.fetchOne(db, sql: "SELECT master_id FROM images WHERE id = ?", arguments: [id]) ?? id
@@ -148,9 +156,13 @@ extension Catalog {
             let data = try Self.ownData(of: id, in: db)
             return try VirtualCopyArchive(id: 0, masterID: masterID, key: VirtualCopy.Key(number: number, token: token),
                                       rating: source.rating, label: source.label, flag: source.flag,
-                                      userRotation: source.userRotation, keywords: data.keywords, edit: data.edit,
-                                      snapshots: [], history: [])
-                .inserting(from: master, thumbKey: source.thumbKey, in: db)
+                                      userRotation: source.userRotation, keywords: data.keywords,
+                                      edit: blank ? nil : data.edit, snapshots: [], history: [])
+                .inserting(from: master, thumbKey: blank ? nil : source.thumbKey, in: db)
+        }
+        if blank {
+            try writeSidecar(forImageID: archive.id)
+            return archive
         }
         // The source's thumbnail already shows this edit; the key recorded
         // with it is the one this edit calls for, so no pass remakes it.
@@ -256,6 +268,39 @@ extension Catalog {
         return masterID
     }
 
+    // MARK: Version names
+
+    /// The names given to versions in the Versions panel, by image id, for
+    /// those of `ids` that have one.
+    public func versionNames(forImageIDs ids: [Int64]) throws -> [Int64: String] {
+        guard !ids.isEmpty else { return [:] }
+        let marks = ids.map { _ in "?" }.joined(separator: ",")
+        return try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: "SELECT image_id, name FROM version_names WHERE image_id IN (\(marks))",
+                                        arguments: StatementArguments(ids))
+            return Dictionary(rows.map { ($0["image_id"] as Int64, $0["name"] as String) },
+                              uniquingKeysWith: { first, _ in first })
+        }
+    }
+
+    /// Names a version, or takes its name away (nil or blank). Kept in the
+    /// catalog only; Set Copy as Master leaves each row its own name.
+    public func setVersionName(_ name: String?, forImageID id: Int64) throws {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        try dbQueue.write { db in
+            if trimmed.isEmpty {
+                try db.execute(sql: "DELETE FROM version_names WHERE image_id = ?", arguments: [id])
+            } else {
+                try db.execute(sql: "INSERT OR REPLACE INTO version_names (image_id, name) VALUES (?, ?)",
+                               arguments: [id, trimmed])
+            }
+        }
+    }
+
+    fileprivate static func versionName(of id: Int64, in db: Database) throws -> String? {
+        try String.fetchOne(db, sql: "SELECT name FROM version_names WHERE image_id = ?", arguments: [id])
+    }
+
     // MARK: Rebuilding from sidecars
 
     /// Makes a row for every copy sidecar whose copy the database doesn't
@@ -325,6 +370,10 @@ extension VirtualCopyArchive {
         try db.execute(sql: "UPDATE images SET master_id = ? WHERE id = ?", arguments: [master.id, newID])
         try Catalog.replaceOwnData(of: newID, keywords: keywords, edit: edit, snapshots: snapshots,
                                    history: history, in: db)
+        if let versionName {
+            try db.execute(sql: "INSERT OR REPLACE INTO version_names (image_id, name) VALUES (?, ?)",
+                           arguments: [newID, versionName])
+        }
         var result = self
         result.id = newID
         return result

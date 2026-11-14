@@ -48,6 +48,8 @@ extension HealPatch.Mode {
         case .heal: "Heal"
         case .clone: "Clone"
         case .remove: "Remove"
+        case .fill: "Fill"
+        case .blur: "Blur"
         }
     }
 }

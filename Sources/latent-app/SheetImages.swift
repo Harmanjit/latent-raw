@@ -143,16 +143,20 @@ final class SheetRenderer: @unchecked Sendable {
     /// intent (as the soft proof shows it) and tagged with it. AI denoise, which takes
     /// seconds per photo, runs for renders at least `aiDenoiseFrom` pixels
     /// on the long edge (0 always, `Int.max` never): a small cell can't show it.
+    /// `adjust` may add to each request (a print's preset and sharpening).
     convenience init(gpu: GPUContext, colorSpace: ColorKit.OutputSpace, bitsPerComponent: Int, aiDenoiseFrom: Int,
-                     profile: SheetProfile?, cacheBudget: Int) {
+                     profile: SheetProfile?, cacheBudget: Int,
+                     adjust: (@Sendable (inout ExportWorker.ImageRequest) -> Void)? = nil) {
         // The closure is made before the renderer, so the log it writes
         // to is shared rather than captured.
         let substitutions = MaskSubstitutionLog()
         self.init(cache: SheetImageCache(byteBudget: cacheBudget), render: { item, longEdge in
-            let request = ExportWorker.ImageRequest(sourceURL: item.sourceURL, editStackJSON: item.editStackJSON,
+            var adjusted = ExportWorker.ImageRequest(sourceURL: item.sourceURL, editStackJSON: item.editStackJSON,
                                                     userRotation: item.userRotation, colorSpace: colorSpace,
                                                     maxLongEdge: longEdge, bitsPerComponent: bitsPerComponent,
                                                     runsAIDenoise: longEdge >= aiDenoiseFrom)
+            adjust?(&adjusted)
+            let request = adjusted
             let outcome = Self.wait { () -> Result<RenderedImage, any Error> in
                 do { return .success(try await ExportWorker.renderImage(request, gpu: gpu)) } catch { return .failure(error) }
             }

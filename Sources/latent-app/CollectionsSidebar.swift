@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import Catalog
+import PixelEngine
 
 /// The Collections section of the sidebar: the open folder's collections,
 /// smart collections and sets. Clicking one shows its photos in the grid
@@ -16,6 +17,8 @@ struct CollectionsSection: View {
     /// Sets the user has folded.
     @State private var folded: Set<Int64> = []
     @State private var dropTarget: Int64?
+    @ObservedObject private var recents = RecentCollectionsStore.shared
+    @AppStorage("latent.recentCollectionsExpanded") private var recentExpanded = true
 
     init(library: Library) {
         self.library = library
@@ -31,6 +34,7 @@ struct CollectionsSection: View {
                 } else if collections.state.collections.isEmpty {
                     note("Gather photos from anywhere in this folder: select them and choose New Collection, or press B to add them to the Quick Collection.")
                 } else {
+                    recentSection
                     let rows = flatRows(parent: nil, depth: 0)
                     ScrollView(.vertical) {
                         VStack(alignment: .leading, spacing: 0) {
@@ -46,6 +50,54 @@ struct CollectionsSection: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
+        // Every collection opened, from here, the menu bar or the grid, is
+        // remembered for this folder's Recent list.
+        .onChange(of: collections.activeID) { _, id in
+            if let id, let folder = library.folderURL { recents.record(id, folder: folder) }
+        }
+    }
+
+    /// The collections opened most recently in this folder, newest first.
+    /// Back and Forward are untouched: this is only a list to click.
+    @ViewBuilder private var recentSection: some View {
+        let ids = library.folderURL.map { RecentCollections.existing(recents.list(for: $0), in: collections.state) } ?? []
+        if !ids.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    recentExpanded.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: recentExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                        Text("Recent").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .padding(.leading, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Recent collections")
+                .accessibilityValue(recentExpanded ? "Expanded" : "Collapsed")
+                if recentExpanded {
+                    ForEach(ids, id: \.self) { id in
+                        if let c = collections.state.collection(id) {
+                            let active = collections.activeID == id
+                            Button {
+                                collections.show(active ? nil : id)
+                            } label: {
+                                rowLabel(icon: Self.icon(c.kind), name: collections.state.path(of: id),
+                                         count: collections.counts[id] ?? 0, active: active, depth: 0)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Opened recently in this folder. Click to show it again.")
+                            .accessibilityLabel("Recent \(Self.kindName(c.kind).lowercased()) \(c.name)")
+                            .accessibilityValue("\(collections.counts[id] ?? 0) photos")
+                            .accessibilityAddTraits(active ? .isSelected : [])
+                        }
+                    }
+                }
+            }
+            .padding(.bottom, 2)
+        }
     }
 
     private var header: some View {
@@ -278,6 +330,33 @@ private final class URLCollector {
     }
 }
 
+/// The collections opened recently, per folder path, in the preferences.
+@MainActor
+final class RecentCollectionsStore: ObservableObject {
+    static let shared = RecentCollectionsStore()
+    private static let key = "latent.recentCollections"
+
+    /// Folder path → collection ids, newest first.
+    @Published private(set) var byFolder: [String: [Int64]]
+
+    private init() {
+        let stored = UserDefaults.standard.dictionary(forKey: Self.key) as? [String: [Int]] ?? [:]
+        byFolder = stored.mapValues { $0.map(Int64.init) }
+    }
+
+    func list(for folder: URL) -> [Int64] {
+        byFolder[folder.standardizedFileURL.path] ?? []
+    }
+
+    func record(_ id: Int64, folder: URL) {
+        let path = folder.standardizedFileURL.path
+        let next = RecentCollections.recording(id, in: byFolder[path] ?? [])
+        guard next != byFolder[path] else { return }
+        byFolder[path] = next
+        UserDefaults.standard.set(byFolder.mapValues { $0.map(Int.init) }, forKey: Self.key)
+    }
+}
+
 // MARK: - Sheets
 
 /// Which collection sheet is up. One main window, so one presenter; the
@@ -426,6 +505,8 @@ struct CollectionNameSheet: View {
 /// how many photos match as you go.
 struct SmartCollectionEditor: View {
     let library: Library
+    /// Observed so the count follows edit details read in the background.
+    @ObservedObject private var collections: LibraryCollections
     let editing: CatalogCollection?
     @State private var name: String
     @State private var parent: Int64?
@@ -434,6 +515,7 @@ struct SmartCollectionEditor: View {
 
     init(library: Library, editing: CatalogCollection?, parent: Int64?, rules: SmartCollectionRules) {
         self.library = library
+        self.collections = library.collections
         self.editing = editing
         _name = State(initialValue: editing?.name ?? "")
         _parent = State(initialValue: parent)
@@ -474,7 +556,9 @@ struct SmartCollectionEditor: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(rules.criteria.indices, id: \.self) { index in
                     SmartCriterionRow(criterion: $rules.criteria[index], keywords: library.availableKeywords,
-                                      canRemove: rules.criteria.count > 1) {
+                                      canRemove: rules.criteria.count > 1,
+                                      join: index == 0 ? nil : joinBinding(index),
+                                      existingValues: { collections.existingValues(for: $0) }) {
                         rules.criteria.remove(at: index)
                     } onAdd: {
                         rules.criteria.insert(SmartCriterion(field: .rating), at: index + 1)
@@ -495,17 +579,25 @@ struct SmartCollectionEditor: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 560)
+        .frame(minWidth: 720)
+    }
+
+    /// A line's join popup: its own join, else the one Match implies.
+    /// Choosing the implied one leaves the line following Match.
+    private func joinBinding(_ index: Int) -> Binding<SmartCriterion.Join> {
+        Binding(get: {
+            guard rules.criteria.indices.contains(index) else { return .and }
+            return rules.effectiveJoin(of: rules.criteria[index])
+        }, set: { join in
+            guard rules.criteria.indices.contains(index) else { return }
+            let implied: SmartCriterion.Join = rules.match == .all ? .and : .or
+            rules.criteria[index].join = rules.criteria[index].join == nil && join == implied ? nil : join
+        })
     }
 
     private var matchCount: String {
-        let edited = library.editedImageIDs
-        let index = library.keywordsByImage
-        let now = Date()
-        let n = library.images.filter { record in
-            rules.matches(record, isEdited: record.id.map(edited.contains) ?? false,
-                          keywords: record.id.flatMap { index[$0] } ?? [], now: now)
-        }.count
+        let context = collections.matchContexts(for: rules)
+        let n = library.images.filter { rules.matches($0, context: context($0)) }.count
         return n == 1 ? "1 photo in this folder matches." : "\(n) photos in this folder match."
     }
 
@@ -523,19 +615,37 @@ struct SmartCollectionEditor: View {
     }
 }
 
-/// One rule: field, comparison, value, and the − and + buttons.
+/// One rule: how it joins the rules above (from the second), field,
+/// comparison, value, and the − and + buttons.
 private struct SmartCriterionRow: View {
     @Binding var criterion: SmartCriterion
     let keywords: [String]
     let canRemove: Bool
+    /// The join popup's value; nil on the first line, which has none.
+    let join: Binding<SmartCriterion.Join>?
+    /// The folder's values for a text field, for the value menu.
+    let existingValues: (SmartCriterion.Field) -> [String]
     let onRemove: () -> Void
     let onAdd: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
+            if let join {
+                Picker("Join", selection: join) {
+                    ForEach(SmartCriterion.Join.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .frame(width: 80)
+                .help("How this rule joins the rules above it, read from the top down: and, or, or except (and not)")
+                .accessibilityLabel("Join")
+            } else {
+                Color.clear.frame(width: 80, height: 1)
+            }
             Picker("Field", selection: Binding(get: { criterion.field }, set: { field in
                 guard field != criterion.field else { return }
+                let join = criterion.join
                 criterion = SmartCriterion(field: field)
+                criterion.join = join
             })) {
                 ForEach(SmartCriterion.Field.allCases, id: \.self) { Text($0.title).tag($0) }
             }
@@ -545,9 +655,23 @@ private struct SmartCriterionRow: View {
             Picker("Comparison", selection: Binding(get: { criterion.op }, set: { op in
                 let wasDays = criterion.op.takesDays
                 criterion.op = op
-                // The date field's value changes meaning with its comparison.
-                if criterion.field == .captureDate, wasDays != op.takesDays {
+                // The date fields' value changes meaning with the comparison.
+                if criterion.field.valueKind == .date, wasDays != op.takesDays {
                     criterion.value = op.takesDays ? "30" : SmartCriterion.dayString(Date())
+                }
+                // A range needs its end; anything else carries none.
+                if op.takesSecondValue {
+                    if criterion.value2 == nil { criterion.value2 = criterion.value }
+                } else {
+                    criterion.value2 = nil
+                }
+                // Aspect ratio names a shape under is / is not, a number otherwise.
+                if criterion.field == .aspectRatio {
+                    let named = SmartCriterion.Shape(rawValue: criterion.value) != nil
+                    if (op == .is || op == .isNot) != named {
+                        criterion.value = op == .is || op == .isNot ? SmartCriterion.Shape.landscape.rawValue : "1.5"
+                        if op.takesSecondValue { criterion.value2 = "1.5" }
+                    }
                 }
             })) {
                 ForEach(criterion.field.operators, id: \.self) { Text($0.title).tag($0) }
@@ -556,7 +680,7 @@ private struct SmartCriterionRow: View {
             .frame(width: 130)
             .accessibilityLabel("Comparison")
             valueEditor
-                .frame(width: 170, alignment: .leading)
+                .frame(width: 230, alignment: .leading)
             Button(action: onRemove) { Image(systemName: "minus") }
                 .disabled(!canRemove)
                 .help("Remove this rule")
@@ -568,62 +692,155 @@ private struct SmartCriterionRow: View {
         .controlSize(.small)
     }
 
+    private var secondValue: Binding<String> {
+        Binding(get: { criterion.value2 ?? "" }, set: { criterion.value2 = $0 })
+    }
+
     @ViewBuilder private var valueEditor: some View {
-        switch criterion.field.valueKind {
-        case .flag:
-            Picker("Flag", selection: $criterion.value) {
-                Text("Picked").tag("1")
-                Text("Unflagged").tag("0")
-                Text("Rejected").tag("-1")
-            }
-            .labelsHidden()
-            .accessibilityLabel("Flag")
-        case .yesNo:
-            Picker("Edited", selection: $criterion.value) {
-                Text("Yes").tag("true")
-                Text("No").tag("false")
-            }
-            .labelsHidden()
-            .accessibilityLabel("Edited")
-        case .number:
-            HStack(spacing: 4) {
-                TextField("Value", text: $criterion.value)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 70)
-                    .accessibilityLabel("\(criterion.field.title) value")
-                if criterion.field == .rating { Text("stars").foregroundStyle(.secondary) }
-                if criterion.field == .focalLength { Text("mm").foregroundStyle(.secondary) }
-            }
-        case .date:
-            HStack(spacing: 4) {
-                if criterion.op.takesDays {
-                    TextField("Days", text: $criterion.value)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 50)
-                        .accessibilityLabel("Number of days")
-                    Text("days").foregroundStyle(.secondary)
-                } else {
-                    DatePicker("Date", selection: Binding(
-                        get: { SmartCriterion.parseDay(criterion.value) ?? Date() },
-                        set: { criterion.value = SmartCriterion.dayString($0) }), displayedComponents: .date)
-                        .labelsHidden()
-                        .accessibilityLabel("Date")
-                }
-            }
-        case .days, .text:
-            if criterion.field == .keyword, !keywords.isEmpty, criterion.op == .is || criterion.op == .isNot {
-                Picker("Keyword", selection: $criterion.value) {
-                    if !keywords.contains(criterion.value) { Text("Choose…").tag(criterion.value) }
-                    ForEach(keywords, id: \.self) { Text(KeywordPath.display($0)).tag($0) }
+        if !criterion.op.takesValue {
+            Color.clear.frame(height: 1)
+        } else {
+            switch criterion.field.valueKind {
+            case .flag:
+                Picker("Flag", selection: $criterion.value) {
+                    Text("Picked").tag("1")
+                    Text("Unflagged").tag("0")
+                    Text("Rejected").tag("-1")
                 }
                 .labelsHidden()
-                .accessibilityLabel("Keyword")
-            } else {
-                TextField(criterion.field == .fileType ? "e.g. NEF" : "Text", text: $criterion.value)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("\(criterion.field.title) text")
+                .accessibilityLabel("Flag")
+            case .yesNo:
+                Picker(criterion.field.title, selection: $criterion.value) {
+                    Text("Yes").tag("true")
+                    Text("No").tag("false")
+                }
+                .labelsHidden()
+                .accessibilityLabel(criterion.field.title)
+            case .number:
+                HStack(spacing: 4) {
+                    numberField($criterion.value)
+                    if criterion.op.takesSecondValue {
+                        Text("and").foregroundStyle(.secondary)
+                        numberField(secondValue)
+                    }
+                    if criterion.field == .rating { Text("stars").foregroundStyle(.secondary) }
+                    if criterion.field == .focalLength { Text("mm").foregroundStyle(.secondary) }
+                    if criterion.field == .exposureTime { Text("s").foregroundStyle(.secondary) }
+                }
+            case .shape:
+                if criterion.op == .is || criterion.op == .isNot {
+                    Picker("Shape", selection: $criterion.value) {
+                        if SmartCriterion.Shape(rawValue: criterion.value) == nil { Text("Choose…").tag(criterion.value) }
+                        ForEach(SmartCriterion.Shape.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
+                    }
+                    .labelsHidden()
+                    .accessibilityLabel("Shape")
+                } else {
+                    HStack(spacing: 4) {
+                        numberField($criterion.value)
+                        if criterion.op.takesSecondValue {
+                            Text("and").foregroundStyle(.secondary)
+                            numberField(secondValue)
+                        }
+                        Text("width ÷ height").foregroundStyle(.secondary)
+                    }
+                    .help("A number such as 1.5, or a ratio such as 3:2")
+                }
+            case .kind:
+                Picker("Kind", selection: $criterion.value) {
+                    ForEach(SmartCriterion.Kind.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
+                }
+                .labelsHidden()
+                .accessibilityLabel("Kind")
+            case .module:
+                Picker("Edit group", selection: $criterion.value) {
+                    if EditGroup(rawValue: criterion.value) == nil { Text("Choose…").tag(criterion.value) }
+                    ForEach(EditGroup.allCases) { Text(Self.shortName($0)).tag($0.rawValue) }
+                }
+                .labelsHidden()
+                .help("Photos whose edit changes this part from its default")
+                .accessibilityLabel("Edit group")
+            case .date:
+                HStack(spacing: 4) {
+                    if criterion.op.takesDays {
+                        TextField("Days", text: $criterion.value)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 50)
+                            .accessibilityLabel("Number of days")
+                        Text("days").foregroundStyle(.secondary)
+                    } else {
+                        dayPicker($criterion.value, label: criterion.op.takesSecondValue ? "From date" : "Date")
+                        if criterion.op.takesSecondValue {
+                            Text("and").foregroundStyle(.secondary)
+                            dayPicker(secondValue, label: "To date")
+                        }
+                    }
+                }
+            case .days, .text:
+                if criterion.field == .keyword, !keywords.isEmpty, criterion.op == .is || criterion.op == .isNot {
+                    Picker("Keyword", selection: $criterion.value) {
+                        if !keywords.contains(criterion.value) { Text("Choose…").tag(criterion.value) }
+                        ForEach(keywords, id: \.self) { Text(KeywordPath.display($0)).tag($0) }
+                    }
+                    .labelsHidden()
+                    .accessibilityLabel("Keyword")
+                } else {
+                    HStack(spacing: 2) {
+                        TextField(criterion.field == .fileType ? "e.g. NEF" : "Text", text: $criterion.value)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityLabel("\(criterion.field.title) text")
+                        if criterion.field.offersExistingValues {
+                            existingValuesMenu
+                        }
+                    }
+                }
             }
         }
+    }
+
+    /// The values the field takes in this folder, to pick one.
+    private var existingValuesMenu: some View {
+        let values = existingValues(criterion.field)
+        return Menu {
+            if values.isEmpty {
+                Text("None in this folder")
+            }
+            ForEach(values.prefix(200), id: \.self) { value in
+                Button(criterion.field == .keyword ? KeywordPath.display(value)
+                       : criterion.field == .folder && value.isEmpty ? "(top level)" : value) {
+                    criterion.value = value
+                }
+            }
+        } label: {
+            Image(systemName: "chevron.down")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Choose a value the photos in this folder have")
+        .accessibilityLabel("\(criterion.field.title) values in this folder")
+    }
+
+    private func numberField(_ value: Binding<String>) -> some View {
+        TextField("Value", text: value)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 60)
+            .accessibilityLabel("\(criterion.field.title) value")
+    }
+
+    private func dayPicker(_ value: Binding<String>, label: String) -> some View {
+        DatePicker(label, selection: Binding(
+            get: { SmartCriterion.parseDay(value.wrappedValue) ?? Date() },
+            set: { value.wrappedValue = SmartCriterion.dayString($0) }), displayedComponents: .date)
+            .labelsHidden()
+            .accessibilityLabel(label)
+    }
+
+    /// "Tone" for "Tone (exposure, contrast, …)".
+    static func shortName(_ group: EditGroup) -> String {
+        let name = group.displayName
+        guard let open = name.range(of: " (") else { return name }
+        return String(name[..<open.lowerBound])
     }
 }
 
@@ -693,5 +910,22 @@ enum CollectionCommands {
                 collections.remove(selected, from: active.id)
             })
         }
+    }
+}
+
+// MARK: - Edit changes
+
+/// What the "Edit changes" smart collection field reads: the edit groups a
+/// stored edit changes from Latent's own defaults. Run off the main
+/// thread by `LibraryCollections`, which the catalog module can't do
+/// itself (it doesn't link PixelEngine).
+enum SmartCollectionEditGroups {
+    private static let neutral = EditStack(parameters: EditParameters())
+
+    static let reader: @Sendable (String) -> Set<String> = { json in
+        guard let stack = try? EditStack.decode(json: json) else { return [] }
+        return Set(EditGroup.allCases.filter { group in
+            stack.restricted(to: [group]).modules != neutral.restricted(to: [group]).modules
+        }.map(\.rawValue))
     }
 }

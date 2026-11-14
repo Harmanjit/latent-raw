@@ -28,6 +28,12 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
         case heal, clone
         /// Content-aware fill (RemoveFill.swift); `source` is unused.
         case remove
+        /// Paints `fillColour`, brightened by `fillBrightness` stops, with
+        /// the patch's feather and opacity (HealModes.swift); no source.
+        case fill
+        /// Blurs what is under the patch by `blurRadius` (HealModes.swift);
+        /// no source.
+        case blur
     }
 
     public var id: UUID
@@ -51,6 +57,15 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
     /// beneath by this much. Nil means fully (1), and is absent from the
     /// JSON then, so every patch made before Opacity encodes as before.
     public var opacity: Float?
+    /// Fill's colour, linear Rec.2020 scene values; nil is a mid grey
+    /// (`HealPatch.defaultFillColour`). Absent from the JSON for every
+    /// other mode, so their patches encode as before.
+    public var fillColour: SIMD3<Float>?
+    /// Fill's brightness offset in stops, −4…+4; nil is 0.
+    public var fillBrightness: Float?
+    /// Blur's radius, a fraction of the sensor's short side like `radius`;
+    /// nil is `HealPatch.defaultBlurRadius`.
+    public var blurRadius: Float?
 
     public init(id: UUID = UUID(), target: SIMD2<Float>, source: SIMD2<Float>,
                 radius: Float, feather: Float = 0.35, mode: Mode = .heal,
@@ -110,6 +125,7 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
         p.radius = min(max(radius, 0), 0.5)
         p.feather = min(max(feather, 0), 1)
         p.opacity = opacity.map { $0.isFinite ? min(max($0, 0), 1) : 1 }
+        sanitizeModeFields(&p)
         if var offsets = stroke {
             if offsets.count > Self.maximumStrokePoints {
                 let last = offsets.count - 1, kept = Self.maximumStrokePoints
@@ -168,6 +184,8 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
         case .clone: return r + 2
         case .heal: return max(r + 2, CGFloat(HealFieldLayout(radius: Float(r)).reach))
         case .remove: return r + removeContextMarginPixels(sensorSize: s)
+        case .fill: return r + 2
+        case .blur: return r + CGFloat(blurFieldLayout(sensorSize: s).reach)
         }
     }
 
@@ -224,8 +242,8 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
                 }
             }
             for read in reads {
-                if p.mode == .heal { needed.append(clampedToSensor(read.target, s)) }
-                needed.append(clampedToSensor(read.source, s))
+                if p.mode == .heal || p.mode == .blur { needed.append(clampedToSensor(read.target, s)) }
+                if p.mode.usesSource { needed.append(clampedToSensor(read.source, s)) }
             }
         }
         return needed.dropFirst().reduce(region) { $0.union($1) }
@@ -268,11 +286,14 @@ public struct HealPatch: Equatable, Sendable, Codable, Identifiable {
 /// Mirror of `HealPatchGPU` in Heal.metal.
 struct HealPatchGPU {
     var geometry: SIMD4<Float>   // target.xy, source.xy (normalized sensor)
-    var params: SIMD4<Float>     // radius (fraction of short side), feather, mode (0 heal, 1 clone), opacity
+    var params: SIMD4<Float>     // radius (fraction of short side), feather, mode (0 heal, 1 clone, 3 fill, 4 blur), opacity
+    /// Fill's colour in camera space, set by HealStage (it needs the
+    /// camera matrix); unused by the other modes.
+    var extra: SIMD4<Float> = .zero
 
     init(_ p: HealPatch) {
         geometry = SIMD4(p.target.x, p.target.y, p.source.x, p.source.y)
-        params = SIMD4(p.radius, p.feather, p.mode == .clone ? 1 : p.mode == .remove ? 2 : 0, p.effectiveOpacity)
+        params = SIMD4(p.radius, p.feather, p.mode.gpuIndex, p.effectiveOpacity)
     }
 }
 

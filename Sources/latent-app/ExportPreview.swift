@@ -48,6 +48,10 @@ final class ExportPreviewRenderer {
         var sizing: ExportSizing?
         var sharpening: OutputSharpening?
         var ppi: Double?
+        /// Borders, bit depths, greyscale and the rest: each changes the
+        /// pixels or how they are encoded (ExportPreset+Formats.swift).
+        var formats: ExportFormatOptions
+        var tiffBitDepth: Int
 
         init(record: ImageRecord, preset: ExportPreset) {
             imageID = record.id; relPath = record.relPath
@@ -61,6 +65,8 @@ final class ExportPreviewRenderer {
             sizing = preset.sizing
             sharpening = settings.outputSharpening
             ppi = settings.outputSharpening == nil ? nil : settings.ppi
+            formats = preset.formats
+            tiffBitDepth = preset.tiffBitDepth
         }
     }
 

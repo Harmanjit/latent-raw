@@ -61,11 +61,17 @@ public enum DemosaicMethod: String, Sendable, CaseIterable {
     /// Ratio Corrected Demosaicing, ported from RawTherapee. Finds the
     /// local direction of detail and interpolates along it.
     case rcd
+    /// Linear minimum mean square-error estimation (Shaders/LMMSE.metal):
+    /// weighs a horizontal and a vertical estimate by how far each stands
+    /// above its own noise, so high-ISO files get smooth answers instead
+    /// of the mazes a gradient-led method can make of noise.
+    case lmmse
 
     public var displayName: String {
         switch self {
         case .bilinear: return "Bilinear (fast)"
         case .rcd:      return "RCD (quality)"
+        case .lmmse:    return "LMMSE (better for high ISO)"
         }
     }
 }
@@ -79,6 +85,9 @@ public struct EditParameters: Sendable, Equatable {
     public var whiteBalance: ColorKit.WhiteBalance
     /// Exposure adjustment in stops. 0 is as-shot.
     public var exposureEV: Float
+    /// Black Offset: subtracted in linear light right after exposure,
+    /// −0.05…0.05 (`clampedBlackOffset`). 0 leaves the render as it was.
+    public var blackOffset: Float = 0
     /// Tone curve contrast.
     public var contrast: Float
     /// Scene-linear value mapped to 0.5 output.
@@ -185,6 +194,24 @@ public struct EditParameters: Sendable, Equatable {
     /// Flat-field correction from a reference raw (FlatField.swift); nil
     /// for none, which every edit older than it has.
     public var flatField: FlatFieldCorrection? = nil
+    /// The tone equalizer (ToneEqualizer.swift, ToneEqualizerStage.swift);
+    /// neutral, and skipped, unless a band is moved.
+    public var toneEqualizer: ToneEqualizer = .neutral
+    /// How Highlight Reconstruction rebuilds clipped channels
+    /// (HighlightInpaint.swift). `.blend` for every edit older than it.
+    public var highlightMethod: HighlightReconstructionMethod = .blend
+    /// Whether a DNG's own corrections (its OpcodeList GainMap,
+    /// FixVignetteRadial and WarpRectilinear; DNGOpcodeCorrections.swift)
+    /// are applied. Off unless switched on, so no existing edit changes.
+    public var embeddedDNGCorrections: Bool = false
+    /// Hot pixel removal on the sensor plane (HotPixels.swift); nil for
+    /// off, which every edit older than it has.
+    public var hotPixels: HotPixelRemoval? = nil
+    /// Manual lateral chromatic aberration (ManualTCA.swift), in percent
+    /// of radius, −0.5…+0.5 each: how much larger the red and blue images
+    /// are made, on top of the profile's or the measured correction.
+    public var manualTCARed: Float = 0
+    public var manualTCABlue: Float = 0
     /// The rendering generation the edit was made with (`ProcessVersion`);
     /// a stage whose behaviour changed between versions branches on it.
     public var processVersion: String = EditStack.processVersion
@@ -284,6 +311,7 @@ public struct EditParameters: Sendable, Equatable {
     public static func == (a: EditParameters, b: EditParameters) -> Bool {
         a.whiteBalance == b.whiteBalance
             && a.exposureEV == b.exposureEV && a.contrast == b.contrast
+            && a.blackOffset == b.blackOffset
             && a.greyPoint == b.greyPoint
             && a.highlightRecovery == b.highlightRecovery
             && a.highlightThreshold == b.highlightThreshold
@@ -316,6 +344,10 @@ public struct EditParameters: Sendable, Equatable {
             && a.reflections == b.reflections
             && a.hdrLimitStops == b.hdrLimitStops
             && a.flatField == b.flatField
+            && a.toneEqualizer == b.toneEqualizer
+            && a.highlightMethod == b.highlightMethod && a.embeddedDNGCorrections == b.embeddedDNGCorrections
+            && a.hotPixels == b.hotPixels
+            && a.manualTCARed == b.manualTCARed && a.manualTCABlue == b.manualTCABlue
     }
 }
 
@@ -384,6 +416,22 @@ public struct RenderOutput: Sendable, Equatable {
     /// magenta) whose colours stay while the rest of the picture goes grey
     /// (RenderPipeline+HueIsolation.swift). Viewport only; nil normally.
     public var hueIsolation: Int? = nil
+    /// View › Show Raw Clipping: also write a mask of the pixels where a
+    /// sensor channel reached its clip level before highlight
+    /// reconstruction (RenderPipeline+RawClipping.swift), read back with
+    /// `ImageSession.rawClipMask(preview:)`. Viewport only; off normally.
+    public var rawClipMask = false
+    /// Option-drag on a Colour Grading luminance slider: that range's
+    /// weight (0 shadows, 1 midtones, 2 highlights) shown in grey in place
+    /// of the picture (RenderPipeline+GradingRange.swift). Viewport only;
+    /// nil normally.
+    public var gradingRangePreview: Int? = nil
+    /// Show Mask: the tone equalizer's mask in grey in place of the
+    /// picture (ToneEqualizerStage.swift). Viewport only.
+    public var toneEqualizerMaskView = false
+    /// Work out the tone equalizer's mask even while every band is at 0,
+    /// for its panel's histogram and the readout. Changes no pixel.
+    public var toneEqualizerAnalysis = false
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -419,6 +467,9 @@ public struct RenderOutput: Sendable, Equatable {
             && a.sharpenMaskPreview == b.sharpenMaskPreview
             && a.depthVisualisation == b.depthVisualisation
             && a.hueIsolation == b.hueIsolation
+            && a.gradingRangePreview == b.gradingRangePreview
+            && a.toneEqualizerMaskView == b.toneEqualizerMaskView
+            && a.toneEqualizerAnalysis == b.toneEqualizerAnalysis
     }
 }
 
@@ -540,12 +591,13 @@ public final class RenderPipeline {
                          output: .sceneLinear, cameraRGBOnly: true, info: nil)
     }
 
-    private func renderStages(_ session: ImageSession,
-                              scale: RenderScale,
-                              parameters: EditParameters,
-                              output: RenderOutput,
-                              cameraRGBOnly: Bool,
-                              info: UnsafeMutablePointer<RenderInfo>?) throws -> MTLTexture {
+    func renderStages(_ session: ImageSession,
+                      scale: RenderScale,
+                      parameters: EditParameters,
+                      output: RenderOutput,
+                      cameraRGBOnly: Bool,
+                      stopAfterLens: Bool = false,
+                      info: UnsafeMutablePointer<RenderInfo>?) throws -> MTLTexture {
         let summary = session.file.summary
         // The Bayer order, or nil for a linear source; any other layout
         // can't be rendered.
@@ -589,6 +641,16 @@ public final class RenderPipeline {
             widened = true
         }
 
+        // The tone equalizer's whole-image mask, made first in a render of
+        // its own when this render covers only part of the image and the
+        // session has none for these settings (ToneEqualizerStage.swift).
+        let toneEqualizer = ToneEqualizerStage.Request(parameters: parameters, output: output,
+                                                       cameraRGBOnly: cameraRGBOnly || stopAfterLens)
+        if let toneEqualizer, case .fullResolution(_, let size) = plan, size.width < rawW || size.height < rawH {
+            try prepareToneEqualizerMask(session: session, parameters: parameters, request: toneEqualizer,
+                                         cameraToWorking: cameraToWorking, multipliers: multipliers)
+        }
+
         // Every stage of this render is encoded into ONE command buffer and
         // submitted once. The GPU runs the stages back to back and the CPU
         // waits a single time at the end. Submitting each stage separately
@@ -601,9 +663,17 @@ public final class RenderPipeline {
         // demosaiced result for exactly these inputs, skip straight to the
         // colour stage. Exposure and tone edits hit this every time; white
         // balance and zoom changes miss.
-        let stageKey = Self.stageKey(plan: sourcePlan, source: summary.sourceKind, multipliers: multipliers,
+        // Hot pixels are replaced on the sensor plane itself, so the
+        // demosaic's key carries the setting (HotPixels.swift).
+        let hotPixels = HotPixelStage.activeRemoval(session: session, parameters: parameters)
+        var stageKey = Self.stageKey(plan: sourcePlan, source: summary.sourceKind, multipliers: multipliers,
                                      demosaic: parameters.demosaic)
+        stageKey.hotPixels = hotPixels
         let cached = session.cachedCameraRGB(for: stageKey)
+        var sensor: MTLBuffer?
+        if cached == nil, hotPixels != nil {
+            sensor = try HotPixelStage.sensorBuffer(session: session, removal: hotPixels, gpu: gpu)
+        }
 
         // THE CAMERA-RGB SEAM. Whatever the source, what comes out of this
         // switch is the same thing: an rgba16Float texture of linear camera
@@ -624,7 +694,7 @@ public final class RenderPipeline {
                 cameraRGB = try cached ?? renderFullResolution(
                     session: session, cmdBuffer: cmdBuffer, order: bayerOrder,
                     multipliers: multipliers, method: parameters.demosaic,
-                    origin: origin, size: size)
+                    origin: origin, size: size, sensor: sensor)
             } else {
                 cameraRGB = try cached ?? renderLinearUpload(
                     session: session, cmdBuffer: cmdBuffer, multipliers: multipliers,
@@ -643,7 +713,7 @@ public final class RenderPipeline {
             if let bayerOrder {
                 cameraRGB = try cached ?? renderBinned(
                     session: session, cmdBuffer: cmdBuffer, order: bayerOrder,
-                    binQuads: quads, multipliers: multipliers)
+                    binQuads: quads, multipliers: multipliers, sensor: sensor)
             } else {
                 cameraRGB = try cached ?? renderLinearBinned(
                     session: session, cmdBuffer: cmdBuffer, binQuads: quads, multipliers: multipliers)
@@ -747,6 +817,15 @@ public final class RenderPipeline {
         }
         renderInfo = renderInfo.markingHealCached(cachedHealed != nil)
 
+        // Stage 6a: Highlight Reconstruction by Inpaint Opposed, while the
+        // clip levels still hold: before the flat field and the lens
+        // stage's vignetting scale pixels (HighlightInpaint.swift).
+        if HighlightInpaintStage.isActive(parameters, session: session) {
+            colourInput = try HighlightInpaintStage.encode(input: colourInput, session: session, multipliers: multipliers,
+                                                           parameters: parameters, preview: displayRole != .display,
+                                                           gpu: gpu, commandBuffer: cmdBuffer)
+        }
+
         // Stage 6b: flat-field correction, on the sensor grid before the
         // lens stage moves pixels (FlatField.swift). Only once this Mac
         // holds the reference's gain map: whoever opens or exports the
@@ -759,6 +838,14 @@ public final class RenderPipeline {
                                                     sensorRect: sourceInfo.sensorRect, binSpan: binSpan,
                                                     session: session, preview: displayRole != .display,
                                                     gpu: gpu, commandBuffer: cmdBuffer)
+        } else if let embedded = session.embeddedGainMapTexture(for: parameters) {
+            // A DNG's own GainMap, while its corrections are switched on
+            // and no reference flat field replaces it (DNGOpcodeCorrections.swift).
+            colourInput = try FlatFieldStage.encode(input: colourInput, gain: embedded, amount: 1,
+                                                    sensorSize: SIMD2(Float(rawW), Float(rawH)),
+                                                    sensorRect: sourceInfo.sensorRect, binSpan: binSpan,
+                                                    session: session, preview: displayRole != .display,
+                                                    gpu: gpu, commandBuffer: cmdBuffer)
         }
 
         // Stage 7: lens corrections, still in camera space.
@@ -766,6 +853,36 @@ public final class RenderPipeline {
             colourInput = try applyLensCorrection(session: session, cmdBuffer: cmdBuffer,
                                                   input: colourInput, parameters: parameters,
                                                   source: sourceInfo, output: renderInfo, binSpan: binSpan)
+        }
+
+        // Display pass: the raw clipping mask, from what the colour stage
+        // is about to read, so it lines up with the render.
+        if output.rawClipMask {
+            try encodeRawClipMask(session: session, cmdBuffer: cmdBuffer, input: colourInput,
+                                  multipliers: multipliers, preview: displayRole != .display)
+        }
+
+        // A whole-image source for the tone equalizer's mask render.
+        if stopAfterLens {
+            cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
+            info?.pointee = renderInfo
+            return colourInput
+        }
+
+        // Stage 7b: the tone equalizer, a colour-neutral gain in scene-linear
+        // camera space (ToneEqualizerStage.swift). Its mask view, if asked
+        // for, replaces the picture at the end.
+        var toneEqualizerMaskView: MTLTexture?
+        if let toneEqualizer {
+            let applied = try applyToneEqualizer(session: session, cmdBuffer: cmdBuffer, input: colourInput,
+                                                 request: toneEqualizer, parameters: parameters,
+                                                 cameraToWorking: cameraToWorking, multipliers: multipliers,
+                                                 profile: profile, renderInfo: renderInfo, binSpan: binSpan,
+                                                 preview: displayRole != .display)
+            colourInput = applied.image
+            toneEqualizerMaskView = applied.maskView
         }
 
         // Stages 8 to 15, in one kernel (Shaders/ColorPipeline.metal).
@@ -795,8 +912,11 @@ public final class RenderPipeline {
         // adjustments, over the session's depth map (LensBlurStage.swift).
         // Skipped outright while the amount is 0 or there is no depth
         // map yet (a thumbnail, the CLI), so it costs nothing then.
-        if parameters.lensBlur.isActive, output.toneMapped, let depth = session.depthTexture() {
-            final = try LensBlurStage.encode(input: final, depth: depth, blur: parameters.lensBlur,
+        // Gaussian and Motion blur the whole frame until a depth map exists.
+        let lensBlurDepth = parameters.lensBlur.isActive && output.toneMapped ? session.depthTexture() : nil
+        if parameters.lensBlur.isActive, output.toneMapped,
+           lensBlurDepth != nil || parameters.lensBlur.blursWithoutDepth {
+            final = try LensBlurStage.encode(input: final, depth: lensBlurDepth, blur: parameters.lensBlur,
                                              geometry: lensBlurGeometry(session: session, output: output,
                                                                         renderInfo: renderInfo, binSpan: binSpan),
                                              session: session, preview: displayRole != .display,
@@ -866,6 +986,13 @@ public final class RenderPipeline {
                                           outputRole: displayRole == .display ? .hueIsolated : .hueIsolatedPreview)
         }
 
+        // Display pass: Colour Grading's Option-drag range preview.
+        if let range = output.gradingRangePreview {
+            final = try applyGradingRangePreview(session: session, cmdBuffer: cmdBuffer, input: final, range: range,
+                                                 parameters: parameters, headroom: output.headroom,
+                                                 outputRole: displayRole == .display ? .gradingRange : .gradingRangePreview)
+        }
+
         // Display pass: Show Depth, for the viewport only, last so it
         // replaces the picture whatever ran before it.
         if output.depthVisualisation, let depth = session.depthTexture() {
@@ -876,9 +1003,17 @@ public final class RenderPipeline {
                                                       gpu: gpu, commandBuffer: cmdBuffer)
         }
 
+        // Display pass: the tone equalizer's Show Mask, last, like Show Depth.
+        if let toneEqualizerMaskView {
+            final = try ToneEqualizerStage.encodeMaskView(mask: toneEqualizerMaskView, like: final, output: output,
+                                                          session: session, preview: displayRole != .display,
+                                                          gpu: gpu, commandBuffer: cmdBuffer)
+        }
+
         cmdBuffer.commit()
         cmdBuffer.waitUntilCompleted()
         if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
+        if toneEqualizer != nil { session.toneEqualizerStore.renderDidComplete() }
 
         info?.pointee = renderInfo
         return final
@@ -903,7 +1038,7 @@ public final class RenderPipeline {
 
     static func wantsLensCorrection(session: ImageSession, parameters p: EditParameters) -> Bool {
         if p.manualDistortion != 0 || p.manualVignetting != 0 || !p.perspective.isIdentity { return true }
-        if p.autoCA != nil { return true }
+        if p.autoCA != nil || ManualTCA.isActive(p) { return true }
         guard let c = session.lensCorrection(for: p) else { return false }
         return (p.lensDistortion && c.distortion != nil)
             || (p.lensTCA && c.tca != nil)
@@ -954,6 +1089,8 @@ public final class RenderPipeline {
             // A measured correction replaces the profile's: it was fitted
             // to this photo, uncorrected.
             if let auto = p.autoCA { tca = auto.tcaModel }
+            // The manual sliders go on top of whichever is in use.
+            tca = ManualTCA.adding(red: p.manualTCARed, blue: p.manualTCABlue, to: tca)
             vignetting = p.lensVignetting ? c?.vignetting : nil
             manualVignetting = p.manualVignetting
             manualVignettingPower = ManualVignettingShape.exponent(midpoint: p.manualVignettingMidpoint)
@@ -1512,12 +1649,13 @@ public final class RenderPipeline {
         encoder.setTexture(input, index: 0)
         encoder.setTexture(outputTexture, index: 1)
 
-        var camToWorking = Self.calibrated(cameraToWorking, parameters.colour.calibration)
+        var camToWorking = Self.calibrated(cameraToWorking, parameters.colour)
         var workingToOut = ColorKit.workingToOutput(output.space)
-        var exposureScale = powf(2.0, parameters.exposureEV)
+        // The scale, then Black Offset subtracted after it.
+        var exposureScale = SIMD2<Float>(powf(2.0, parameters.exposureEV), parameters.blackOffset)
         var contrast = parameters.contrast
         if let profile {
-            exposureScale = powf(2.0, parameters.exposureEV + profile.exposureOffset)
+            exposureScale.x = powf(2.0, parameters.exposureEV + profile.exposureOffset)
             contrast *= profile.contrastScale
         }
         var greyPoint = parameters.greyPoint
@@ -1530,11 +1668,12 @@ public final class RenderPipeline {
         // is 1 and this is the multipliers themselves.
         var clipLevel = session.highlightClipLevel(multipliers: multipliers)
         var highlightThreshold = parameters.highlightThreshold
-        var highlightStrength = parameters.highlightRecovery
+        // Off while Inpaint Opposed has already rebuilt the highlights (stage 6a).
+        var highlightStrength = HighlightInpaintStage.blendStrength(parameters, session: session)
 
         encoder.setBytes(&camToWorking, length: MemoryLayout<simd_float3x3>.size, index: 0)
         encoder.setBytes(&workingToOut, length: MemoryLayout<simd_float3x3>.size, index: 1)
-        encoder.setBytes(&exposureScale, length: 4, index: 2)
+        encoder.setBytes(&exposureScale, length: MemoryLayout<SIMD2<Float>>.size, index: 2)
         encoder.setBytes(&contrast, length: 4, index: 3)
         encoder.setBytes(&greyPoint, length: 4, index: 4)
         encoder.setBytes(&clipLevel, length: MemoryLayout<SIMD3<Float>>.size, index: 5)
@@ -1614,10 +1753,11 @@ public final class RenderPipeline {
                                        multipliers: SIMD4<Float>,
                                        method: DemosaicMethod,
                                        origin: (x: Int, y: Int),
-                                       size: (width: Int, height: Int)) throws -> MTLTexture {
+                                       size: (width: Int, height: Int),
+                                       sensor: MTLBuffer? = nil) throws -> MTLTexture {
         let cfaTex = try prepareCFA(session: session, cmdBuffer: cmdBuffer,
                                     multipliers: multipliers, order: order,
-                                    origin: origin, size: size)
+                                    origin: origin, size: size, sensor: sensor)
         switch method {
         case .bilinear:
             return try demosaicBilinear(session: session, cmdBuffer: cmdBuffer,
@@ -1625,6 +1765,9 @@ public final class RenderPipeline {
         case .rcd:
             return try demosaicRCD(session: session, cmdBuffer: cmdBuffer,
                                    cfa: cfaTex, order: order)
+        case .lmmse:
+            return try demosaicLMMSE(session: session, cmdBuffer: cmdBuffer,
+                                     cfa: cfaTex, order: order)
         }
     }
 
@@ -1639,7 +1782,8 @@ public final class RenderPipeline {
                              multipliers: SIMD4<Float>,
                              order: UInt8,
                              origin: (x: Int, y: Int),
-                             size: (width: Int, height: Int)) throws -> MTLTexture {
+                             size: (width: Int, height: Int),
+                             sensor: MTLBuffer? = nil) throws -> MTLTexture {
         let summary = session.file.summary
         let w = size.width, h = size.height
         let cfaTex = try session.texture(width: w, height: h, pixelFormat: .r32Float, role: .cfa)
@@ -1648,7 +1792,7 @@ public final class RenderPipeline {
             throw RenderError.commandBufferFailed
         }
         encoder.setComputePipelineState(gpu.whiteBalanceBlackLevelPSO)
-        encoder.setBuffer(session.sensorBuffer, offset: 0, index: 0)
+        encoder.setBuffer(sensor ?? session.sensorBuffer, offset: 0, index: 0)
         // The sensor buffer's row stride is always the full raw width,
         // even when only a sub-rectangle is being rendered.
         var rawWidth = UInt32(summary.rawWidth)
@@ -1775,7 +1919,7 @@ public final class RenderPipeline {
     /// sensor data, not the arithmetic.
     private func renderBinned(session: ImageSession, cmdBuffer: MTLCommandBuffer,
                                order: UInt8, binQuads: Int,
-                               multipliers: SIMD4<Float>) throws -> MTLTexture {
+                               multipliers: SIMD4<Float>, sensor: MTLBuffer? = nil) throws -> MTLTexture {
         let summary = session.file.summary
         let rawW = summary.rawWidth, rawH = summary.rawHeight
         let span = binQuads * 2
@@ -1789,7 +1933,7 @@ public final class RenderPipeline {
         }
 
         encoder.setComputePipelineState(gpu.demosaicBinnedPSO)
-        encoder.setBuffer(session.sensorBuffer, offset: 0, index: 0)
+        encoder.setBuffer(sensor ?? session.sensorBuffer, offset: 0, index: 0)
         var rawWidth = UInt32(rawW)
         var rawHeight = UInt32(rawH)
         var black = summary.blackLevel

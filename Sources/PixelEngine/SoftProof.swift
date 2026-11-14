@@ -266,7 +266,8 @@ public final class SoftProofLUT: @unchecked Sendable {
             if options.intent == .relativeColorimetric {
                 device = uncompensated ? try into(.relativeColorimetric, compensate: false) : relative
             } else {
-                device = try into(.perceptual, compensate: false)
+                // Perceptual, or Saturation or Absolute Colorimetric.
+                device = try into(ICCTransform.Intent(options.intent), compensate: false)
             }
             let proofed: [Float]
             if options.simulatePaperAndInk {

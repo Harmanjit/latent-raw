@@ -54,6 +54,8 @@ struct ContentView: View {
     @ObservedObject private var navigator = FolderNavigator.shared
     @ObservedObject private var fullScreen = FullScreenImageMode.shared
     @ObservedObject private var mirrorImageMode = MirrorImageMode.shared
+    /// Focus peaking, colour assessment, the shortcuts overlay and the welcome sheet.
+    @ObservedObject private var viewing = ViewingSettings.shared
     @ObservedObject private var secondDisplay = SecondaryDisplay.shared
     /// Develop's Before/After and Reference views (DevelopViews.swift).
     @ObservedObject private var developViews = DevelopViewState.shared
@@ -109,6 +111,8 @@ struct ContentView: View {
     @State private var renaming: ImageRecord?
     /// The photos Rename with Template is naming, while its sheet is up.
     @State private var templateRenaming: TemplateRenameRequest?
+    /// Copy Settings…, Paste Settings… and Load Settings from File…'s checklist.
+    @State private var selectiveSettings: SelectiveSettingsRequest?
     /// What Undo and Redo would do outside Develop (see LibraryUndo.swift).
     @StateObject private var libraryUndo = LibraryUndoObserver()
     /// Survey's panes (N), each with its own view-only model.
@@ -157,14 +161,11 @@ struct ContentView: View {
                     }
                     .onDisappear { model.flushPendingSave() }
                 case .loupe:
-                    VStack(spacing: 0) {
+                    CaptionedPane(showsCaption: !fullScreen.isActive,
+                                  caption: ImageCaption(record: library.selectedImage)) {
                         ImageViewport(model: model, allowsTools: false, onStep: { _ = perform(.step($0)) },
                                       followsMirrorImageMode: true,
                                       showsLoupeOverlay: true)
-                        if !fullScreen.isActive {
-                            Divider()
-                            ImageCaption(record: library.selectedImage)
-                        }
                     }
                 case .compare:
                     compareArea
@@ -198,6 +199,7 @@ struct ContentView: View {
                                    .frame(height: FilmstripView.height)
                            })
         .background(navigationShortcuts)
+        .overlay { ShortcutsOverlay(mode: mode) }
         .focusedSceneValue(\.commandContext, CommandContext(state: commandState) { command in
             // A sheet over the window has the keyboard; menus wait, as keys do.
             guard NSApp.mainWindow?.attachedSheet == nil else { return }
@@ -274,6 +276,7 @@ struct ContentView: View {
                            canApply: !exportQueue.isGPUBusy)
                 .motionFollowsAccessibility()
         }
+        .histogramMatchSheet(queue: selectionJobs, model: model, library: library, canMatch: !exportQueue.isGPUBusy)
         .sheet(item: $templateRenaming) { request in
             TemplateRenameSheet(request: request,
                                 plan: { library.renamePlan(for: request.records, template: $0, customText: $1, start: $2) },
@@ -284,6 +287,27 @@ struct ContentView: View {
                                     }
                                 })
             .motionFollowsAccessibility()
+        }
+        .sheet(item: $selectiveSettings) { request in
+            SelectiveSettingsSheet(request: request)
+                .motionFollowsAccessibility()
+        }
+        .sheet(isPresented: $viewing.welcomeShown, onDismiss: { viewing.dismissWelcome() }) {
+            WelcomeSheet(onOpenFolder: {
+                viewing.dismissWelcome()
+                // Once the sheet has gone, so the panel isn't run over it.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    showOpenFolderPanel()
+                }
+            }, onOpenHelp: { page in
+                HelpWindow.show(page: page)
+            }, onClose: { viewing.dismissWelcome() })
+            .motionFollowsAccessibility()
+        }
+        .onAppear {
+            viewing.setPrimaryEditor(model)
+            viewing.showWelcomeIfFirstRun()
         }
         .sheet(item: $renaming) { record in
             RenameSheet(record: record) { name in
@@ -299,9 +323,13 @@ struct ContentView: View {
         .onAppear {
             LensfunDatabase.warmUp()
             wireEditSaving()
+            // "Edit changes" smart collections (CollectionsSidebar.swift).
+            library.collections.editGroupsReader = SmartCollectionEditGroups.reader
             wireFileOperations()
             // The open folder's watch and the watched-folder import.
             FolderWatching.shared.start(library: library)
+            // Settings › Folders › Restore Catalog Backup… (CatalogRestore).
+            CatalogRestore.shared.attach(model: model, library: library, exportQueue: exportQueue)
             // Quitting flushes and waits for these (AppDelegate).
             AppDelegate.register(model: model, library: library, exportQueue: exportQueue)
             if let gpu = model.gpu {
@@ -361,7 +389,8 @@ struct ContentView: View {
                      onApplyPreset: { applyPresetToSelection($0) },
                      onPaste: { pasteSettings() },
                      exportsOpenImage: mode != .survey,
-                     onLabel: { chooseLabel($0) })
+                     onLabel: { chooseLabel($0) },
+                     onApplyPresetMode: applyPreset)
     }
 
     // MARK: - Library wiring
@@ -602,7 +631,7 @@ struct ContentView: View {
             rate: rate, flag: flag, rotate: { rotate(by: $0) },
             copySettings: copySettings, pasteSettings: pasteSettings,
             canPasteSettings: { EditorModel.clipboardStack() != nil },
-            presets: { model.presets }, applyPreset: applyPresetToSelection,
+            presets: { model.presets }, applyPreset: applyPresetToSelection, applyPresetMode: applyPreset,
             export: { showingExportSheet = true },
             // Not while a merge or dust job holds the GPU slot either: the
             // queue would refuse to start.
@@ -776,21 +805,17 @@ struct ContentView: View {
     private var compareArea: some View {
         VStack(spacing: 0) {
             HStack(spacing: 1) {
-                VStack(spacing: 0) {
+                CaptionedPane(caption: ImageCaption(record: compareRecord, title: "Select")) {
                     if let compareModel {
                         ImageViewport(model: compareModel, mirror: model, allowsTools: false)
                     } else {
                         prefs.surroundColor
                     }
-                    Divider()
-                    ImageCaption(record: compareRecord, title: "Select")
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Select pane")
-                VStack(spacing: 0) {
+                CaptionedPane(caption: ImageCaption(record: library.selectedImage, title: "Candidate")) {
                     ImageViewport(model: model, mirror: compareModel, allowsTools: false)
-                    Divider()
-                    ImageCaption(record: library.selectedImage, title: "Candidate")
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Candidate pane")
@@ -1252,8 +1277,11 @@ struct ContentView: View {
             guard model.healToolActive else { return false }
             model.deleteSelectedHeal()
         case .disarmTools:
-            // Esc leaves the tool first, then the full-screen image.
-            if fullScreen.isActive, !model.imageToolActive, !model.cropToolActive {
+            // Esc closes the shortcuts overlay first, then leaves the tool,
+            // then the full-screen image.
+            if viewing.shortcutsOverlayShown {
+                viewing.shortcutsOverlayShown = false
+            } else if fullScreen.isActive, !model.imageToolActive, !model.cropToolActive {
                 fullScreen.leave()
             } else {
                 model.disarmTools()
@@ -1294,6 +1322,8 @@ struct ContentView: View {
             FileIntegrityModel.shared.showDuplicates(library: library)
         case .matchTotalExposures:
             MatchTotalExposures.run(library: library) { reportOutcome($0) }
+        case .matchExposuresByHistogram:
+            HistogramMatchPresenter.shared.present(library: library)
         case .flatFieldCorrection:
             // The selection in the grid, where the reference is picked
             // among it; the photo shown in the other views.
@@ -1324,6 +1354,9 @@ struct ContentView: View {
             pasteSettings()
         case .pasteFromPrevious:
             pasteFromPrevious()
+        case .applyPreset(let name):
+            if let preset = model.presets.first(where: { $0.name == name }) { applyPresetToSelection(preset) }
+            else { model.status = "There is no preset called “\(name)” any more" }
         case .rotate(let quarterTurns):
             rotate(by: quarterTurns)
         case .geometry(.resetOrientation):
@@ -1391,6 +1424,8 @@ struct ContentView: View {
             library.refreshFromDisk()
         case .rebuildThumbnails:
             library.rebuildThumbnails(for: library.batchTargets(onlyPrimary: mode != .library))
+        case .importForeignSidecars:
+            ForeignSidecarImportCommand.run(library: library)
         case .createVirtualCopy, .setCopyAsMaster, .removeVirtualCopy, .duplicatePhoto:
             VirtualCopyCommands(library: library, model: model, inGrid: mode == .library, open: { load($0) }).perform(command)
         case .back:
@@ -1415,10 +1450,26 @@ struct ContentView: View {
         case .newCollection, .newSmartCollection, .newCollectionSet, .saveFilterAsSmartCollection,
              .addToTargetCollection, .removeFromCollection:
             CollectionCommands.perform(command, library: library, onlyPrimary: mode != .library)
+        case .addKeywords:
+            KeywordEntryFocus.shared.requestFocus()
         case .view(let command):
             developViews.perform(command, load: { load($0) })
+        case .history(let command):
+            historyCommands.perform(command)
+        case .viewing(let command):
+            ViewingCommands.perform(command, editor: model, expandTone: { toneExpanded = true })
         }
         return true
+    }
+
+    /// Reset Edits, Sync Last Change, Paste Overwrite, the selective sheet,
+    /// Load Settings from File and New Blank Copy (LibraryBatchEdits.swift).
+    private var historyCommands: HistoryCommands {
+        HistoryCommands(library: library, model: model, mode: mode,
+                        apply: { applyToSelectionOrEditor($0, groups: $1, what: $3, undoName: $4, overwrite: $2) },
+                        report: { reportOutcome($0) },
+                        present: { selectiveSettings = $0 },
+                        open: { load($0) })
     }
 
     /// The second display's Loupe shows the selection. Loupe, Compare and
@@ -1501,6 +1552,7 @@ struct ContentView: View {
         state.sortKey = library.sort.key
         state.mirrorImageMode = mirrorImageMode.isOn
         state.views = developViews.commandState(main: model)
+        state.viewing = ViewingCommandState(viewing)
         return state
     }
 
@@ -1598,24 +1650,29 @@ struct ContentView: View {
     }
 
     /// `amount` is a preset's Amount (`PresetAmount`); 1 applies `stack` as it is.
+    /// `overwrite` (Paste Settings (Overwrite), Reset Edits) starts each
+    /// photo from its defaults, so groups not applied are reset.
     private func applyToSelectionOrEditor(_ stack: EditStack, groups: Set<EditGroup>, what: String, undoName: String,
-                                          amount: Float = PresetAmount.full) {
+                                          amount: Float = PresetAmount.full, overwrite: Bool = false) {
         let target = SettingsTarget.choose(mode: mode, editorHasImage: model.hasImage)
         // Each open model blends from its own photo's values.
         func forModel(_ m: EditorModel) -> EditStack {
             amount == PresetAmount.full ? stack : m.stack(applying: stack, groups: groups, amount: amount)
         }
+        func put(on m: EditorModel) {
+            if overwrite { m.applyOverwrite(stack, groups: groups) } else { m.apply(forModel(m), groups: groups) }
+        }
         // Compare's Select pane may show the candidate's own photo. It never
         // saves, so it takes the new look directly rather than going stale.
         if target != .selection, mode == .compare, let select = compareRecord?.id, select == library.selectedImageID {
-            if let m = compareModel { m.apply(forModel(m), groups: groups) }
+            if let m = compareModel { put(on: m) }
         }
         // So may a Survey pane, the focused one.
         if target != .selection, mode == .survey, let m = survey.model(for: library.selectedImageID) {
-            m.apply(forModel(m), groups: groups)
+            put(on: m)
         }
         if target == .editor {
-            model.apply(forModel(model), groups: groups)
+            put(on: model)
             return
         }
         // Through perform, so quitting waits for the edits being rewritten.
@@ -1629,7 +1686,8 @@ struct ContentView: View {
                 ) { existing in
                     // An unreadable existing edit throws here and the image
                     // is skipped, never replaced by the pasted modules alone.
-                    let current = try existing.map { try EditStack.decode(json: $0) } ?? EditStack()
+                    let stored = try existing.map { try EditStack.decode(json: $0) } ?? EditStack()
+                    let current = overwrite ? EditStack() : stored
                     let merged = current.applying(stack, groups: groups, amount: amount)
                     return merged == EditStack() ? nil : try merged.encodeJSON()
                 }
@@ -1651,7 +1709,7 @@ struct ContentView: View {
             if let selected = library.selectedImage,
                Self.editorHolds(selected, catalogImageID: model.catalogImageID, imageTitle: model.imageTitle),
                target == .primary || library.selectedImageIDs.contains(selected.id ?? -1) {
-                model.apply(forModel(model), groups: groups)
+                put(on: model)
                 handledByEditor = selected.id
             }
             // A pasted touch-up wants faces the stored edits don't have:
@@ -1754,6 +1812,13 @@ struct ContentView: View {
         }
     }
 
+    /// A preset with a mode: Append as `applyPresetToSelection`, Overwrite
+    /// or as a new virtual copy through `PresetApplier`.
+    private func applyPreset(_ preset: Preset, _ applyMode: PresetApplyMode) {
+        PresetApplier(library: library, model: model, mode: mode, open: { load($0) },
+                      append: { applyPresetToSelection($0) }).apply(preset, mode: applyMode)
+    }
+
     private func applyPresetToSelection(_ preset: Preset) {
         let amount = PresetAmountSession.amount
         let editorBase = SettingsTarget.choose(mode: mode, editorHasImage: model.hasImage) == .editor
@@ -1795,6 +1860,7 @@ struct ContentView: View {
         ScrollView {
             ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 20) {
+                NavigatorSection(model: model)
                 ScopePanel(model: model)
 
                 if let title = model.imageTitle {
@@ -1815,7 +1881,7 @@ struct ContentView: View {
                 DisclosureGroup(isExpanded: $toneExpanded) {
                     toneSection.padding(.top, 8)
                 } label: {
-                    disclosureLabel("Tone")
+                    HStack { disclosureLabel("Tone"); PanelPresetsMenu(model: model, groups: [.tone], panel: "Tone") }
                 }
 
                 DisclosureGroup(isExpanded: $presenceExpanded) {
@@ -1868,6 +1934,7 @@ struct ContentView: View {
                 if !model.isRenderedImage {
                     DisclosureGroup {
                         VStack(alignment: .leading, spacing: 10) {
+                            HighlightMethodPicker(model: model)
                             sliderRow(title: "Recovery",
                                        value: $model.parameters.highlightRecovery,
                                        range: 0...1, format: "%.2f", defaultValue: 1.0)
@@ -1882,10 +1949,22 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
-                    PresetsPanel(model: model, onApply: { applyPresetToSelection($0) })
+                    PresetsPanel(model: model, onApply: { applyPresetToSelection($0) }, onApplyMode: applyPreset)
                         .padding(.top, 8)
                 } label: {
                     disclosureLabel("Presets & Clipboard")
+                }
+
+                DisclosureGroup {
+                    VersionsPanel(library: library, onOpen: { record in
+                        model.flushPendingSave()
+                        if let id = record.id { library.setSelection([id], primary: id) }
+                        load(record)
+                    }, onNewCopy: { _ = perform(.createVirtualCopy) },
+                       onNewBlankCopy: { _ = perform(.history(.newBlankCopy)) })
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Versions")
                 }
 
                 DisclosureGroup {
@@ -1911,7 +1990,11 @@ struct ContentView: View {
                     ToneCurveControls(model: model)
                         .padding(.top, 8)
                 } label: {
-                    disclosureLabel("Tone Curve")
+                    HStack { disclosureLabel("Tone Curve"); PanelPresetsMenu(model: model, groups: [.toneCurve], panel: "Tone Curve") }
+                }
+
+                ToneEqualizerDisclosure(model: model) {
+                    disclosureLabel("Tone Equalizer")
                 }
 
                 DisclosureGroup {
@@ -1922,7 +2005,7 @@ struct ContentView: View {
                     }
                     .padding(.top, 8)
                 } label: {
-                    disclosureLabel("HSL / Colour")
+                    HStack { disclosureLabel("HSL / Colour"); PanelPresetsMenu(model: model, groups: [.colour], panel: "HSL / Colour") }
                 }
 
                 // Black & White, Point Colour, Colour Grading (which took
@@ -1933,21 +2016,21 @@ struct ContentView: View {
                     LensCorrectionsPanel(model: model)
                         .padding(.top, 8)
                 } label: {
-                    disclosureLabel("Lens Corrections")
+                    HStack { disclosureLabel("Lens Corrections"); PanelPresetsMenu(model: model, groups: [.lens], panel: "Lens Corrections") }
                 }
 
                 DisclosureGroup {
                     DetailPanel(model: model)
                         .padding(.top, 8)
                 } label: {
-                    disclosureLabel("Detail")
+                    HStack { disclosureLabel("Detail"); PanelPresetsMenu(model: model, groups: [.detail], panel: "Detail") }
                 }
 
                 DisclosureGroup {
                     EffectsPanel(model: model)
                         .padding(.top, 8)
                 } label: {
-                    disclosureLabel("Effects")
+                    HStack { disclosureLabel("Effects"); PanelPresetsMenu(model: model, groups: [.effects], panel: "Effects") }
                 }
 
                 DisclosureGroup {
@@ -2062,6 +2145,7 @@ struct ContentView: View {
                     sliderRow(title: "Exposure",
                                value: $model.parameters.exposureEV,
                                range: -5...5, format: "%+.2f EV")
+                    ExposureToolsRow(model: model)
                     sliderRow(title: "Contrast",
                                value: $model.parameters.contrast,
                                range: 0.5...3.0, format: "%.2f", defaultValue: 1.5)
@@ -2196,6 +2280,7 @@ struct ContentView: View {
 
             HealShapePicker(model: model)
             if model.activeHealMode == .remove { RemoveOptions(model: model) }
+            HealFillBlurOptions(model: model)
 
             sliderRow(title: "Size",
                       value: Binding(get: { model.activeHealRadiusPixels },
@@ -2366,6 +2451,7 @@ struct ContentView: View {
                     .accessibilityLabel("Zoom to fit")
                 Button("100%") { viewedModel.zoomToActualSize(); mirrorModel?.zoomToActualSize() }
                     .accessibilityLabel("Actual size")
+                ZoomLevelMenu(model: viewedModel, mirror: mirrorModel)
             }
             .controlSize(.small)
             .disabled(!viewedModel.hasImage || !mode.showsImage)

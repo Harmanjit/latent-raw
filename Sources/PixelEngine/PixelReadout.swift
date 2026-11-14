@@ -14,9 +14,20 @@ import ColorKit
 public struct PixelReadout: Equatable, Sendable {
     /// Linear Display P3, as sampled (may pass 1 with HDR headroom).
     public var linear: SIMD3<Float>
+    /// The tone equalizer's mask under the pointer, in EV with its
+    /// compensation applied (the value its bands are read at), while the
+    /// equalizer is in use; nil otherwise.
+    public var toneEqualizerMaskEV: Float?
 
-    public init(linearDisplayP3: SIMD3<Float>) {
+    public init(linearDisplayP3: SIMD3<Float>, toneEqualizerMaskEV: Float? = nil) {
         linear = linearDisplayP3
+        self.toneEqualizerMaskEV = toneEqualizerMaskEV
+    }
+
+    /// The readout's tone equalizer part: "Mask −4.3 EV", or "" without one.
+    public var toneEqualizerText: String {
+        guard let m = toneEqualizerMaskEV, m.isFinite else { return "" }
+        return String(format: "Mask %+.1f EV", m).replacingOccurrences(of: "-", with: "\u{2212}")
     }
 
     /// How far the brightest channel is above SDR white, in stops, when
@@ -120,4 +131,140 @@ public struct ClippingIndicators: OptionSet, Hashable, Sendable {
     /// ceiling in magenta (Present.metal's `hdrRangeIndicator`). Not one of
     /// J's two.
     public static let hdrRanges = ClippingIndicators(rawValue: 1 << 2)
+}
+
+// MARK: - Readout spaces and area statistics
+
+/// How the colour picker writes a colour out. `standard` is the readout
+/// Latent has always shown (RGB in percent and Lab together); the others
+/// are one space each, as darktable's colour picker offers them.
+public enum PixelReadoutSpace: String, CaseIterable, Identifiable, Sendable {
+    case standard, rgbPercent, rgb255, hsl, lch, lab
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .standard:   return "RGB % and Lab"
+        case .rgbPercent: return "RGB %"
+        case .rgb255:     return "RGB 0–255"
+        case .hsl:        return "HSL"
+        case .lch:        return "LCh"
+        case .lab:        return "Lab (D50)"
+        }
+    }
+    /// The three component names, in order.
+    public var componentNames: (String, String, String) {
+        switch self {
+        case .standard, .rgbPercent, .rgb255: return ("R", "G", "B")
+        case .hsl: return ("H", "S", "L")
+        case .lch: return ("L", "C", "h")
+        case .lab: return ("L", "a", "b")
+        }
+    }
+}
+
+extension PixelReadout {
+    /// 0…255 per channel, encoded with the sRGB curve, as an 8-bit file
+    /// would hold it.
+    public var rgb255: SIMD3<Float> { percent / 100 * 255 }
+
+    /// Hue in degrees, saturation and lightness in percent, from the
+    /// encoded RGB (the usual HSL of a colour picker).
+    public var hsl: SIMD3<Float> {
+        let c = percent / 100
+        let mx = max(c.x, max(c.y, c.z)), mn = min(c.x, min(c.y, c.z))
+        let l = (mx + mn) / 2
+        let d = mx - mn
+        let s: Float = d < 1e-6 ? 0 : d / (1 - abs(2 * l - 1))
+        return SIMD3(Self.hsv(c).x, min(max(s, 0), 1) * 100, l * 100)
+    }
+
+    /// L*, chroma and hue angle in degrees (0…360), from `lab`.
+    public var lch: SIMD3<Float> {
+        let l = lab
+        let chroma = (l.y * l.y + l.z * l.z).squareRoot()
+        var hue = atan2(l.z, l.y) * 180 / .pi
+        if hue < 0 { hue += 360 }
+        return SIMD3(l.x, chroma, chroma < 1e-4 ? 0 : hue)
+    }
+
+    /// The three numbers `space` shows. `standard` gives the RGB percent.
+    public func components(in space: PixelReadoutSpace) -> SIMD3<Float> {
+        switch space {
+        case .standard, .rgbPercent: return percent
+        case .rgb255: return rgb255
+        case .hsl: return hsl
+        case .lch: return lch
+        case .lab: return lab
+        }
+    }
+
+    /// The readout as one line of text in `space`: "R 50  G 40  B 30 %".
+    /// `standard` is exactly the line the Develop panel has always shown.
+    public func text(in space: PixelReadoutSpace) -> String {
+        if space == .standard {
+            let p = percent, l = lab
+            return String(format: "R %.0f  G %.0f  B %.0f %%   L %.0f  a %.0f  b %.0f",
+                          p.x, p.y, p.z, l.x, l.y, l.z)
+        }
+        return Self.text(components(in: space), space: space)
+    }
+
+    /// Three numbers of `space` as text, with their names and unit.
+    public static func text(_ c: SIMD3<Float>, space: PixelReadoutSpace) -> String {
+        let (a, b, d) = space.componentNames
+        switch space {
+        case .standard, .rgbPercent:
+            return String(format: "%@ %.0f  %@ %.0f  %@ %.0f %%", a, c.x, b, c.y, d, c.z)
+        case .rgb255:
+            return String(format: "%@ %.0f  %@ %.0f  %@ %.0f", a, c.x, b, c.y, d, c.z)
+        case .hsl:
+            return String(format: "%@ %.0f°  %@ %.0f  %@ %.0f %%", a, c.x, b, c.y, d, c.z)
+        case .lch:
+            return String(format: "%@ %.0f  %@ %.0f  %@ %.0f°", a, c.x, b, c.y, d, c.z)
+        case .lab:
+            return String(format: "%@ %.0f  %@ %.0f  %@ %.0f", a, c.x, b, c.y, d, c.z)
+        }
+    }
+}
+
+/// How much of the picture the colour picker averages: one pixel, or a
+/// square so many image pixels across.
+public enum PixelSampleSize: Int, CaseIterable, Identifiable, Sendable {
+    case point = 1, five = 5, fifteen = 15, thirtyOne = 31
+    public var id: Int { rawValue }
+    public var title: String { self == .point ? "Point" : "\(rawValue) px" }
+    /// Pixels either side of the centre, in image pixels.
+    public var radius: Int { rawValue / 2 }
+}
+
+/// The colours of a sampled square: their mean, and per component of a
+/// readout space their least and greatest, as darktable's area picker
+/// reports them.
+public struct PixelAreaStatistics: Equatable, Sendable {
+    /// Linear Display P3, one per pixel read. Never empty.
+    public let pixels: [SIMD3<Float>]
+
+    /// Nil when `pixels` is empty.
+    public init?(pixels: [SIMD3<Float>]) {
+        guard !pixels.isEmpty else { return nil }
+        self.pixels = pixels
+    }
+
+    /// The mean colour, averaged in linear light.
+    public var mean: PixelReadout {
+        let sum = pixels.reduce(SIMD3<Float>(repeating: 0), +)
+        return PixelReadout(linearDisplayP3: sum / Float(pixels.count))
+    }
+
+    /// Least and greatest of each component in `space` (hue taken as it
+    /// comes, without wrapping round 0°).
+    public func range(in space: PixelReadoutSpace) -> (min: SIMD3<Float>, max: SIMD3<Float>) {
+        var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var hi = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        for p in pixels {
+            let c = PixelReadout(linearDisplayP3: p).components(in: space)
+            lo = simd_min(lo, c); hi = simd_max(hi, c)
+        }
+        return (lo, hi)
+    }
 }

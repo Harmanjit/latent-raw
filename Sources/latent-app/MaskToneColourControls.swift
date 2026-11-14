@@ -135,3 +135,22 @@ struct MaskToneColourControls: View {
         return count - 1
     }
 }
+
+/// Blend: how the mask's result joins the photo under it (MaskBlend.swift).
+/// Normal is every mask as before; Colour Only keeps the photo's
+/// lightness, Lightness Only its colour.
+struct MaskBlendPicker: View {
+    @Binding var mode: LocalBlendMode
+
+    var body: some View {
+        Picker("Blend", selection: $mode) {
+            ForEach(LocalBlendMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .controlSize(.small)
+        .fixedSize()
+        .help("Blend: Normal, or keep only this mask's change of colour, or only its change of lightness")
+        .accessibilityLabel("Blend mode, \(mode.displayName)")
+    }
+}

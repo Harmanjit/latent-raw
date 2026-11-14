@@ -50,6 +50,23 @@ extension Library {
         }
     }
 
+    /// Adds keywords to the photos with these ids, whatever is selected: a
+    /// drop of photos on the Keyword List. One undo step.
+    public func addKeywords(_ keywords: [String], toImageIDs ids: Set<Int64>) async throws {
+        let paths = keywords.compactMap(KeywordPath.normalized)
+        guard !paths.isEmpty, !ids.isEmpty else { return }
+        try await changeKeywords(images.filter { $0.id.map(ids.contains) ?? false }, action: "Add Keyword") {
+            $0 + paths
+        }
+    }
+
+    /// The keywords most often found on the same photos as `keywords`, most
+    /// first (ties by name), leaving out `keywords` themselves: the
+    /// keywording field's "Often used with" chips.
+    public func keywordsOftenUsed(with keywords: Set<String>, limit: Int = 8) -> [String] {
+        KeywordPath.cooccurring(with: keywords, in: keywordIndex, limit: limit)
+    }
+
     /// Takes keywords off every photo keywording acts on.
     public func removeKeywords(_ keywords: [String], onlyPrimary: Bool = false) async throws {
         let paths = Set(keywords.compactMap(KeywordPath.normalized))
@@ -126,5 +143,21 @@ extension Library {
                 after.record(id, result.after)
             }
         }
+    }
+}
+
+extension KeywordPath {
+    /// Keywords counted by how many photos of `index` carry them together
+    /// with any of `keywords`, most first, ties by name, without `keywords`.
+    public static func cooccurring(with keywords: Set<String>, in index: [Int64: Set<String>],
+                                   limit: Int = 8) -> [String] {
+        guard !keywords.isEmpty, limit > 0 else { return [] }
+        var counts: [String: Int] = [:]
+        for paths in index.values where !paths.isDisjoint(with: keywords) {
+            for path in paths where !keywords.contains(path) { counts[path, default: 0] += 1 }
+        }
+        return counts.sorted { a, b in
+            a.value != b.value ? a.value > b.value : a.key.localizedStandardCompare(b.key) == .orderedAscending
+        }.prefix(limit).map(\.key)
     }
 }

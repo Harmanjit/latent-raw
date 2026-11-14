@@ -99,6 +99,8 @@ public final class GPUContext: @unchecked Sendable {
     enum LazyKernel: String, CaseIterable, Sendable {
         case linearUpload
         case linearBinned
+        // Hot pixel removal on the sensor plane (HotPixels.metal, HotPixels.swift).
+        case hotPixelsRemove
         // Photo Merge's HDR merge (MergeHDR.metal, HDRMergeKernels.swift).
         case mergeHDRBinnedAnalysis
         case mergeHDRRawPrepare
@@ -145,8 +147,16 @@ public final class GPUContext: @unchecked Sendable {
         case exportOutputSharpen
         // The Colour Mixer's Option-drag hue isolation (Present.metal).
         case hueIsolate
+        // Colour Grading's Option-drag range preview (Present.metal).
+        case gradingRangeView
         // Flat-field correction (FlatField.metal, FlatField.swift).
         case flatFieldApply
+        // The tone equalizer (ToneEqualizer.metal, ToneEqualizerStage.swift).
+        case toneEqPrepare, toneEqCoefficients, toneEqGridMask, toneEqApply, toneEqMaskView
+        // Highlight Reconstruction › Inpaint Opposed (HighlightInpaint.metal, HighlightInpaint.swift).
+        case highlightInpaintOpposed
+        // The LMMSE demosaic (LMMSE.metal, RenderPipeline+LMMSE.swift).
+        case lmmseDifferences, lmmseSmooth, lmmseGreen, lmmseRedBlueAtOpposite, lmmseRedBlueAtGreen
     }
 
     /// Built pipelines, by kernel. A Mutex because renders run on several
@@ -304,8 +314,9 @@ public final class GPUContext: @unchecked Sendable {
         let kernelNames = ["WhiteBalance", "Demosaic", "DemosaicBinned",
                             "ColorPipeline", "Present", "Histogram", "Scopes", "Detail", "LensCorrect", "Export", "RCD", "Heal", "LocalContrast", "AIDenoise", "RedEye", "Slideshow",
                             "LinearSource", "MergeHDR", "MergeWarp", "MergeDeghost", "MergePanoPrep", "MergePanoBlend",
-                            "Dust", "TouchUp", "DetailEffects", "LocalDetail", "Remove", "LensBlur",
-                            "ExportSharpen", "FlatField", "Reflections"]
+                            "Dust", "TouchUp", "DetailEffects", "LocalDetail", "Remove", "LensBlur", "HotPixels",
+                            "ExportSharpen", "FlatField", "Reflections", "ToneEqualizer",
+                            "HighlightInpaint", "LMMSE"]
         let kernelURLs = try kernelNames.map { name -> URL in
             guard let url = resourceURL(name, "metal") else {
                 throw GPUContextError.shaderLibraryNotFound

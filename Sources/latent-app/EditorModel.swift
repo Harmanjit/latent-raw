@@ -227,6 +227,15 @@ final class EditorModel: ObservableObject {
     @Published var hueIsolationBand: Int? = nil {
         didSet { if hueIsolationBand != oldValue { rerender() } }
     }
+    /// Option-drag on a Colour Grading luminance slider: the range (0
+    /// shadows, 1 midtones, 2 highlights) whose weight the viewport shows
+    /// in grey. Display only.
+    @Published var gradingRangePreview: Int? = nil {
+        didSet { if gradingRangePreview != oldValue { rerender() } }
+    }
+    /// Where a press with the Exposure eyedropper began and where the
+    /// pointer is now, in screen points (ExposurePicker.swift).
+    var exposurePickDrag: (start: CGPoint, end: CGPoint)?
     /// The defringe eyedropper is armed: the next click on the image picks
     /// a fringe colour (EditorModel+DetailTools.swift).
     @Published var defringePickerActive = false
@@ -416,6 +425,10 @@ final class EditorModel: ObservableObject {
     /// The colour under the pointer, in its own object so moving the
     /// pointer redraws the readout and not the whole window.
     let pixelProbe = PixelProbe()
+    /// Colour samples pinned with Option-click, per session.
+    let colourSamples = ColourSamples()
+    /// The tone equalizer's panel and display state (EditorModel+ToneEqualizer.swift).
+    let toneEqualizerState = ToneEqualizerState()
 
     // MARK: - Local adjustments
 
