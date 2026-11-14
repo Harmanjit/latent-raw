@@ -106,11 +106,22 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Export with Previous** (⌥⇧⌘E), **several presets in one run**, and new destinations: beside the original, or chosen when the export starts. See [Export with Previous](Export#export-with-previous).
 - **Soft proofing** with Perceptual and Relative Colorimetric intents, **Simulate Paper & Ink**, a monitor gamut warning and **proof copies**. See [Soft proofing](Develop#soft-proofing).
 - **Rendering intent when printing**, taken from the soft proof. See [Print](Export#print).
+- **Saturation and Absolute Colorimetric** intents in soft proofing and printing, beside Perceptual and Relative Colorimetric. See [Soft proofing](Develop#soft-proofing).
+- **Apply a preset at export**, appended or replacing the edit at 0–200%, without changing the photos. See [Apply a preset at export](Export#apply-a-preset-at-export).
+- **A print-only preset and print sharpening** for matte or glossy paper. See [Print](Export#print).
+- **A printer profile of its own for printing**, chosen in the print panel, whatever Soft Proof shows. See [Print](Export#print).
+- **Separate print margins** for each side, in points, millimetres or inches. See [Print](Export#print).
 - **More soft-proof controls**: **S** turns proofing on and off, profiles from anywhere (your own ~/Library/ColorSync/Profiles included) stay in the menu, the Mac's installed printer profiles are listed, the target is remembered, **Black Point Compensation** can be turned off, the two gamut warnings take colours you choose, and Before compares the proof with the unproofed edit. See [Soft proofing](Develop#soft-proofing).
 
 ## Presets and keyboard
 
 - **Preset Amount** applies a preset at 0–200% strength, and re-blends the last one live. See [Presets and clipboard](Develop#presets-and-clipboard).
+- **Import, export, rename, duplicate and update presets** from the Presets panel's ⋯ menu. See [Managing presets](Develop#managing-presets).
+- **Preset folders and favourites**: "Film|Portra" files a preset in a Film submenu, and starred presets sit at the top of every Apply Preset menu. See [Managing presets](Develop#managing-presets).
+- **Manage Presets**, a searchable list with descriptions and the groups each preset holds. See [Managing presets](Develop#managing-presets).
+- **Keyboard shortcuts for presets** in Settings › Keyboard, and **Develop › Apply Preset**. See [Managing presets](Develop#managing-presets).
+- **Panel presets** in the headers of the main Develop panels, with Save Panel as Preset…. See [Managing presets](Develop#managing-presets).
+- **Apply (Overwrite)** with ⌥, and **Apply as New Virtual Copy**. See [Managing presets](Develop#managing-presets).
 - **Previous** (⌥⌘V) pastes the settings of the photo selected before this one. See [Presets and clipboard](Develop#presets-and-clipboard).
 - **Process versions**: each edit records which rendering it was made with, shown in Calibration, ready for an Update Process Version dialog when the rendering next changes. See [Process versions](Develop#process-versions).
 - **Customisable shortcuts**: Settings › Keyboard lists every command, searchable and grouped, with click-to-record keys, a warning (and an offer to reassign) when keys are taken, reset one or all, and keymap import and export as JSON. Menu commands without a key can be given one. See [Customising the keys](Keyboard-Shortcuts#customising-the-keys).
