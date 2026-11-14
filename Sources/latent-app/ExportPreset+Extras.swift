@@ -16,7 +16,7 @@ extension ExportPreset {
         var request = ExportWorker.Request(
             sourceURL: root.appendingPathComponent(record.fileRelPath),
             destinationURL: destination,
-            editStackJSON: editStackJSON, userRotation: record.userRotation,
+            editStackJSON: styledEditStackJSON(editStackJSON), userRotation: record.userRotation,
             settings: settings, colorSpace: colorSpace,
             maxLongEdge: resize ? maxLongEdge : nil,
             keywords: includeMetadata ? keywords : [],
