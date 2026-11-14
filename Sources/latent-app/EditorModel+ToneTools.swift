@@ -11,6 +11,9 @@ enum ToneTool: Equatable {
     case curve
     /// The HSL panel's targeted tool, for one of its three sliders.
     case colour(HSLComponent)
+    /// The Exposure eyedropper: click or drag over an area to set Exposure
+    /// from it (ExposurePicker.swift).
+    case exposure
 
     /// What the hint over the image says while it's armed.
     var hint: String {
@@ -19,6 +22,7 @@ enum ToneTool: Equatable {
         case .whiteBalance: return "Click something that should be neutral grey or white. Esc cancels."
         case .curve: return "Drag up or down on a tone to lighten or darken it. Esc leaves the tool."
         case .colour(let c): return "Drag up or down on a colour to change its \(c.title.lowercased()). Esc leaves the tool."
+        case .exposure: return "Click, or drag a rectangle, over an area to bring it to the target grey. Esc cancels."
         }
     }
 }
@@ -207,6 +211,8 @@ extension EditorModel {
             return
         case .whiteBalance:
             pickWhiteBalance(at: screen)
+        case .exposure:
+            exposurePickDrag = (screen, screen)
         case .curve:
             guard let tone = toneBeforeCurve(atScreen: screen) else { return }
             if curveEditorMode == .parametric {
@@ -228,6 +234,7 @@ extension EditorModel {
     }
 
     func toneToolMoved(to screen: CGPoint) {
+        if toneTool == .exposure { exposurePickDrag?.end = screen; return }
         guard let drag = toneToolDrag else { return }
         // Up is more, as in Lightroom.
         let amount = Float((drag.origin.y - screen.y) / Self.targetedDragSpan) * 2
@@ -250,6 +257,7 @@ extension EditorModel {
 
     func toneToolEnded() {
         toneToolDrag = nil
+        if toneTool == .exposure { exposurePickEnded() }
     }
 
     /// The tone the master curve took as input at a screen point: the

@@ -44,6 +44,7 @@ extension EditorModel {
         output.touchUpOverlay = touchUpOverlayWanted
         output.sharpenMaskPreview = sharpenMaskPreview
         output.hueIsolation = hasImage ? hueIsolationBand : nil
+        output.gradingRangePreview = hasImage ? gradingRangePreview : nil
         output.depthVisualisation = lensBlurState.showDepth
         return output
     }

@@ -2060,6 +2060,7 @@ struct ContentView: View {
                     sliderRow(title: "Exposure",
                                value: $model.parameters.exposureEV,
                                range: -5...5, format: "%+.2f EV")
+                    ExposureToolsRow(model: model)
                     sliderRow(title: "Contrast",
                                value: $model.parameters.contrast,
                                range: 0.5...3.0, format: "%.2f", defaultValue: 1.5)
