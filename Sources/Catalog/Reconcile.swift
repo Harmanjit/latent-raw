@@ -38,7 +38,7 @@ public struct ReconcileReport: Sendable, CustomStringConvertible {
 extension Catalog {
     /// File extensions Latent indexes: every raw format, and the ordinary
     /// picture formats this Mac's ImageIO decodes (JPEG, HEIC, TIFF, PNG,
-    /// and WebP and AVIF where available; `RenderedImageFormat`).
+    /// and WebP, AVIF and JPEG XL where available; `RenderedImageFormat`).
     public static let indexedExtensions: Set<String> = rawExtensions.union(RenderedImageFormat.extensions)
 
     /// The raw formats, which LibRaw reads.
@@ -49,6 +49,11 @@ extension Catalog {
         "dng",                              // Adobe / phones / Leica
         "raf", "orf", "rw2", "pef", "srw",  // Fuji, Olympus, Panasonic, Pentax, Samsung
         "3fr", "fff", "iiq", "mos", "mrw", "x3f",
+        // Rarer and older formats LibRaw also reads: ARRI, Casio, Phase One
+        // and Leaf, Kodak, Epson, Mamiya, GoPro, Logitech, Apple QuickTake,
+        // Sinar, Minolta, Leica and Panasonic, and others.
+        "ari", "bay", "bmq", "cap", "cine", "cs1", "dc2", "dcr", "erf", "gpr", "ia",
+        "k25", "kc2", "kdc", "mdc", "mef", "pxn", "qtk", "raw", "rdc", "rw1", "sti",
     ]
 
     /// A file as seen on disk during the scan.
