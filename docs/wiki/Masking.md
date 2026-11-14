@@ -29,6 +29,21 @@ A mask can be built from several parts. Under **Components**, the first row is t
 
 Any shape, a colour range, a luminance range or a model mask can be a component, up to six per mask. Click a component's row to point the tools at it (a brush component is painted, a radial component is placed), change its mode from the menu at the start of the row, tick **Invert** to flip just that part, or remove it with ✕. **Invert mask** under the sliders flips the whole combination.
 
+The mode menu at the start of a component's row has two more modes, as in darktable:
+
+- **Sum** adds the two values, up to full strength, so where two soft edges overlap they build up rather than the stronger winning.
+- **Exclusion** keeps what is in one or the other but not both: two overlapping radials leave their overlap untouched.
+
+### Reordering
+
+Order matters: masks apply one after another, and each component joins what is built above it. Drag a mask in the list onto another to put it there, or drag a component onto another component (the first shape always stays first). Right-click either for **Move Up** and **Move Down**, which VoiceOver offers as actions too. Each move is one step for ⌘Z.
+
+### Using another mask
+
+**Use Mask** at the bottom of the **+**, **−** and **◎** menus adds a component that is another mask of the same photo, as it is now: its shape, its components, its Invert and its ranges. The row shows a link icon and that mask's name. Edit the mask it uses and every mask using it changes too, so one carefully painted sky can be added to one mask, subtracted from another and intersected with a third.
+
+Links are one level deep. A mask can't use itself, a mask that uses another, or a mask whose parts would take it past six; and a mask that another one uses can't use others. The menu greys those out. If the mask a link uses is deleted, the link stays in the list as **Missing Mask** and does nothing.
+
 ## Feather and Edge for model masks
 
 When a subject, class or selection mask (or component) is selected, two sliders refine the model's edge:
@@ -37,6 +52,10 @@ When a subject, class or selection mask (or component) is selected, two sliders 
 - **Feather** softens the edge by up to the same distance.
 
 Both work on the mask itself, before the adjustments, and are stored with the edit, so a regenerated mask gets the same treatment.
+
+### Edge refine
+
+Brush masks and model masks (and brush or model components) also have **Edge refine**. It runs a guided filter over the mask that pulls its edge onto edges in the photo, so a loosely painted sky or a model's soft outline follows the skyline or the hair. Higher reaches further, up to about 2% of the frame's short side, and follows fainter edges. It compares against the same quarter-size picture of the raw that [Auto Mask](#auto-mask) uses, so moving a slider never changes it and the export matches the screen. Gradients and radials have no pixels to refine and don't show it.
 
 ## Colour Range
 
@@ -51,7 +70,7 @@ Each mask has an **Amount** (how strongly all its sliders apply, from 0 to full)
 - **Light**: Exposure, Contrast, Highlights, Shadows, Whites and Blacks. The last four are the global sliders of the same name, working inside the mask.
 - **Colour**: Temperature (cooler or warmer), Tint (greener or more magenta), Hue (turns every colour round the colour wheel, ±180°) and Saturation.
 - **Effects**: Texture, Clarity and Dehaze, as the Presence sliders, inside the mask.
-- **Detail**: Sharpness (sharpens fine detail; below zero, softens), Noise (smooths luminance grain in flat areas and leaves edges alone) and Defringe (removes purple and green fringes on edges).
+- **Detail**: Sharpness (sharpens fine detail; below zero, softens), Noise (smooths luminance grain in flat areas and leaves edges alone), Defringe (removes purple and green fringes on edges) and Smooth (an edge-preserving blur of up to about 20 pixels of the raw, for skin or sky, that leaves edges sharp).
 
 Effects and Detail open once used. They need a look at each pixel's neighbourhood, so they run in a stage of their own after the global Presence; a photo whose masks don't use them never runs it.
 
@@ -62,6 +81,16 @@ Below the sliders, three more groups open once used:
 - **Grain**: Grain, Size and Roughness, as the Effects grain but only inside the mask, on top of any global grain. Its pattern is fixed to the photo, so the export matches the screen.
 
 These three run in the same stage as Effects and Detail, after the global edit, so a mask's curve bends the picture as it finally looks.
+
+### Blend
+
+The **Blend** menu beside the mask's name sets how its result joins the photo:
+
+- **Normal**: the result as the sliders make it, as every mask did before.
+- **Colour Only**: only the mask's change of colour. The photo keeps its lightness, so a warm-up, a hue turn or a curve on one channel never brightens or darkens.
+- **Lightness Only**: only the mask's change of lightness. The photo keeps its colour, so an exposure, contrast or curve move never shifts the saturation.
+
+Lightness here is luminance in linear light, so the recombination keeps hue and saturation exactly. It applies to everything the mask does, the Detail and Effects sliders, curve, Point Colour and grain included.
 
 ## Auto Mask
 
