@@ -459,6 +459,13 @@ extension Keymap {
             c("copyAfterToBefore", .view(.copyAfterToBefore), "Copy After's Settings to Before", develop, in: .develop),
             c("copyBeforeToAfter", .view(.copyBeforeToAfter), "Copy Before's Settings to After", develop, in: .develop),
             c("swapBeforeAfter", .view(.swapBeforeAfter), "Swap Before and After Settings", develop, in: .develop),
+            c("pasteSettingsOverwrite", .history(.pasteOverwrite), "Paste Settings (Overwrite)", editing),
+            c("copySettingsSelective", .history(.copySelective), "Copy Settings…", editing),
+            c("pasteSettingsSelective", .history(.pasteSelective), "Paste Settings…", editing),
+            c("syncLastChange", .history(.syncLastChange), "Sync Last Change to Selection", editing),
+            c("resetEdits", .history(.resetEdits), "Reset Edits", editing),
+            c("loadSettingsFromFile", .history(.loadSettingsFromFile), "Load Settings from File…", editing),
+            c("newBlankCopy", .history(.newBlankCopy), "New Blank Copy", files),
         ]
         return list
     }()

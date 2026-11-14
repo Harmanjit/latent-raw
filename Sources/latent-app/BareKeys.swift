@@ -155,6 +155,10 @@ enum KeyCommand: Equatable, Sendable {
     /// View › Loupe Overlay, and Develop's Before/After and Reference views
     /// (DevelopViews.swift).
     case view(ViewCommand)
+    /// Batch edits and versions: Reset Edits, Sync Last Change, Paste
+    /// Overwrite, the selective sheet, Load Settings from File, New Blank
+    /// Copy (LibraryBatchEdits.swift).
+    case history(HistoryCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).
