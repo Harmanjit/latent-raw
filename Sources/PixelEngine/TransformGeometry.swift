@@ -150,8 +150,9 @@ extension MaskShape {
         switch self {
         case .linear(let start, let end):
             return .linear(start: m(start), end: m(end))
-        case .radial(let centre, let radii, let feather):
-            return .radial(centre: m(centre), radii: radii, feather: feather)
+        case .radial(let centre, let radii, let feather, let angle):
+            // A mirror turns a rotated ellipse the other way.
+            return .radial(centre: m(centre), radii: radii, feather: feather, angle: angle.map { $0 == 0 ? 0 : -$0 })
         case .brush(let strokes):
             return .brush(strokes: strokes.map { stroke in
                 var s = stroke

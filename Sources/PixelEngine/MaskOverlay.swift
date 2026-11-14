@@ -35,6 +35,11 @@ public struct MaskOverlayStyle: Equatable, Sendable {
     public var colour: SIMD3<Float>
     /// 0…1: how far the colour covers the picture where the mask is full.
     public var opacity: Float
+    /// Show Channel: the index, among the overlaid mask's components, of
+    /// a range component whose input (luminance, channel, closeness to
+    /// the picked colours) is drawn as a grey in place of the overlay.
+    /// nil, the overlay is drawn as `mode` says.
+    public var channelComponent: Int? = nil
 
     public init(mode: MaskOverlayMode = .colour, colour: SIMD3<Float> = SIMD3(0.8, 0.05, 0.05), opacity: Float = 0.5) {
         self.mode = mode; self.colour = colour; self.opacity = opacity

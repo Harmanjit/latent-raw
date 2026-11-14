@@ -110,7 +110,11 @@ public enum MaskShape: Equatable, Sendable, Codable {
     case linear(start: SIMD2<Float>, end: SIMD2<Float>)
     /// Full effect inside the ellipse, fading out over `feather` (0...1 of
     /// the radius). Radii are fractions of the sensor's short side.
-    case radial(centre: SIMD2<Float>, radii: SIMD2<Float>, feather: Float)
+    /// `angle` turns the ellipse, in degrees clockwise on the sensor (y
+    /// down); nil is 0, and is what an edit made before rotation stores,
+    /// so such an edit reads and writes exactly as it did
+    /// (MaskShapeGeometry.swift has the helpers).
+    case radial(centre: SIMD2<Float>, radii: SIMD2<Float>, feather: Float, angle: Float? = nil)
     /// Painted.
     case brush(strokes: [BrushStroke])
     /// Everywhere — meaningful with a luminance or hue range.
@@ -239,6 +243,11 @@ public struct LuminanceRange: Equatable, Sendable, Codable {
     public var low: Float
     public var high: Float
     public var feather: Float
+    /// Separate fades below `low` and above `high` (the four-handle range
+    /// control). nil is `feather`, as every range made before them was, so
+    /// they are written only when set (ChannelRange.swift has the helpers).
+    public var featherLow: Float?
+    public var featherHigh: Float?
     public init(low: Float = 0, high: Float = 1, feather: Float = 0.1) {
         self.low = low; self.high = high; self.feather = feather
     }
@@ -269,28 +278,31 @@ struct LocalAdjustGPU {
     var hueRange = SIMD4<Float>(repeating: 0)   // centre, width, minSat, enabled
     var info = SIMD4<Int32>(repeating: 0)       // type, brushSlice, invert, 0
     var adjust2 = SIMD4<Float>(repeating: 0)    // tint, highlights, shadows, whites
-    var adjust3 = SIMD4<Float>(1, 0, 1, 0)      // amount, blacks, (unused), hue (degrees)
+    var adjust3 = SIMD4<Float>(1, 0, 1, 0)      // amount, blacks, luminance range high feather, hue (degrees)
     var info2 = SIMD4<Int32>(0, 0, -1, 0)       // componentStart, componentCount, detailSlot, invertMask
 
     init(_ local: LocalAdjustment, brushSlice: Int32) {
         geometry0 = MaskComponentGPU.geometry0(local.shape)
         geometry1 = MaskComponentGPU.geometry1(local.shape)
         adjust = SIMD4(local.exposureEV, local.contrast, local.saturation, local.warmth)
-        if let l = local.luminanceRange { lumRange = SIMD4(l.low, l.high, l.feather, 1) }
+        if let l = local.luminanceRange { lumRange = SIMD4(l.low, l.high, l.lowFeather, 1) }
         if let h = local.hueRange { hueRange = SIMD4(h.centre, h.width, h.minimumSaturation, 1) }
         info = SIMD4(local.shape.typeCode, brushSlice, local.invert ? 1 : 0, 0)
         adjust2 = SIMD4(local.tint, local.highlights, local.shadows, local.whites)
         // A hidden mask applies nothing; its shape still shows as an overlay.
-        adjust3 = SIMD4(local.hidden ? 0 : min(max(local.amount, 0), 1), local.blacks, 0, local.hue)
+        // The range's fade above High rides in the spare slot; it equals
+        // the fade below Low unless the two were set apart.
+        adjust3 = SIMD4(local.hidden ? 0 : min(max(local.amount, 0), 1), local.blacks,
+                        local.luminanceRange?.highFeather ?? 0, local.hue)
         info2 = SIMD4(0, 0, -1, local.invertMask ? 1 : 0)
     }
 }
 
 /// Mirrors `MaskComponentGPU` in ColorPipeline.metal: four 16-byte fields.
 struct MaskComponentGPU {
-    var geometry0 = SIMD4<Float>(repeating: 0)  // shape geometry | lum: low, high, feather | colour: h,s,h,s
-    var geometry1 = SIMD4<Float>(repeating: 0)  // radial feather | colour: h,s,h,s
-    var extra = SIMD4<Float>(repeating: 0)      // colour: h, s, radius, sample count
+    var geometry0 = SIMD4<Float>(repeating: 0)  // shape geometry | lum, channel: low, high, low feather, high feather | colour: h,s,h,s
+    var geometry1 = SIMD4<Float>(repeating: 0)  // radial feather, angle (radians) | colour: h,s,h,s
+    var extra = SIMD4<Float>(repeating: 0)      // colour: h, s, radius, sample count | channel: channel id
     var info = SIMD4<Int32>(repeating: 0)       // type, slice, invert, mode (0 add, 1 subtract, 2 intersect)
 
     /// Every mask's components, flattened, fit one `setBytes` (4 KB).
@@ -308,7 +320,7 @@ struct MaskComponentGPU {
             geometry1 = Self.geometry1(shape)
         case .luminance(let l):
             type = 5
-            geometry0 = SIMD4(l.low, l.high, l.feather, 0)
+            geometry0 = SIMD4(l.low, l.high, l.lowFeather, l.highFeather)
         case .colour(let r):
             type = 6
             var hs = [Float](repeating: 0, count: 10)
@@ -318,6 +330,10 @@ struct MaskComponentGPU {
             geometry0 = SIMD4(hs[0], hs[1], hs[2], hs[3])
             geometry1 = SIMD4(hs[4], hs[5], hs[6], hs[7])
             extra = SIMD4(hs[8], hs[9], r.radius, Float(min(r.samples.count, ColourRange.maximumSamples)))
+        case .channel(let r):
+            type = 7
+            geometry0 = SIMD4(r.low, r.high, r.lowFeather, r.highFeather)
+            extra = SIMD4(Float(r.channel.gpuID), 0, 0, 0)
         }
         let mode: Int32
         switch component.mode {
@@ -331,13 +347,17 @@ struct MaskComponentGPU {
     static func geometry0(_ shape: MaskShape) -> SIMD4<Float> {
         switch shape {
         case .linear(let s, let e): return SIMD4(s.x, s.y, e.x, e.y)
-        case .radial(let c, let r, _): return SIMD4(c.x, c.y, r.x, r.y)
+        case .radial(let c, let r, _, _): return SIMD4(c.x, c.y, r.x, r.y)
         default: return SIMD4(repeating: 0)
         }
     }
 
     static func geometry1(_ shape: MaskShape) -> SIMD4<Float> {
-        if case .radial(_, _, let feather) = shape { return SIMD4(feather, 0, 0, 0) }
+        // The angle is 0 for an edit made before rotation, which the shader
+        // skips, so such an ellipse renders exactly as it did.
+        if case .radial(_, _, let feather, let angle) = shape {
+            return SIMD4(feather, (angle ?? 0) * .pi / 180, 0, 0)
+        }
         return SIMD4(repeating: 0)
     }
 }

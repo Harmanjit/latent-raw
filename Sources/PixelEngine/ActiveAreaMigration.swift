@@ -126,8 +126,8 @@ struct ReadoutToActiveArea {
         switch shape {
         case .linear(let start, let end):
             return .linear(start: point(start), end: point(end))
-        case .radial(let centre, let radii, let feather):
-            return .radial(centre: point(centre), radii: radii * shortSide, feather: feather)
+        case .radial(let centre, let radii, let feather, let angle):
+            return .radial(centre: point(centre), radii: radii * shortSide, feather: feather, angle: angle)
         case .brush(let strokes):
             return .brush(strokes: strokes.map { stroke in
                 var stroke = stroke

@@ -173,7 +173,8 @@ extension RenderPipeline {
         let style = output.maskOverlayStyle
         let write: UInt32 = plan.detailSlots.isEmpty ? 0 : 1
         var overlay = MaskOverlayParamsGPU(style: SIMD4<Float>(style.colour, min(max(style.opacity, 0), 1)),
-                                           flags: SIMD4<UInt32>(UInt32(style.mode.rawValue), write, 0, 0))
+                                           flags: SIMD4<UInt32>(UInt32(style.mode.rawValue), write,
+                                                                plan.channelViewFlag(output), 0))
         encoder.setBytes(&overlay, length: MemoryLayout<MaskOverlayParamsGPU>.stride, index: 28)
 
         let size = write == 0 ? (1, 1) : (width, height)

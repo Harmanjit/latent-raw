@@ -252,7 +252,7 @@ final class ActiveAreaMigrationTests: XCTestCase {
         guard case .linear(let start, let end) = locals[0].shape else { return XCTFail() }
         same(start * size, activePixel([0.1, 0.2], canon), "gradient start")
         same(end * size, activePixel([0.9, 0.8], canon), "gradient end")
-        guard case .radial(let centre, let radii, _) = locals[1].shape else { return XCTFail() }
+        guard case .radial(let centre, let radii, _, _) = locals[1].shape else { return XCTFail() }
         same(centre * size, activePixel([0.5, 0.5], canon), "radial centre")
         XCTAssertEqual(radii.x * shortNew, 0.2 * shortOld, accuracy: 0.01)
         guard case .brush(let strokes) = locals[2].shape else { return XCTFail() }

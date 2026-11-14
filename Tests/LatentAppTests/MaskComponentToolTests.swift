@@ -57,12 +57,12 @@ final class MaskComponentToolTests: XCTestCase {
         model.maskToolBegan(at: CGPoint(x: 600, y: 400))
         model.maskToolMoved(to: CGPoint(x: 700, y: 400))
         model.maskToolEnded()
-        guard case .radial(let centre, let radii, _) = model.parameters.locals[0].shape else { return XCTFail() }
+        guard case .radial(let centre, let radii, _, _) = model.parameters.locals[0].shape else { return XCTFail() }
         model.maskTool = .radial
         model.maskToolBegan(at: CGPoint(x: 610, y: 400))
         model.maskToolMoved(to: CGPoint(x: 510, y: 300))
         model.maskToolEnded()
-        guard case .radial(let moved, let sameRadii, _) = model.parameters.locals[0].shape else { return XCTFail() }
+        guard case .radial(let moved, let sameRadii, _, _) = model.parameters.locals[0].shape else { return XCTFail() }
         XCTAssertEqual(sameRadii, radii, "moving keeps the size")
         XCTAssertLessThan(moved.x, centre.x)
         XCTAssertLessThan(moved.y, centre.y)

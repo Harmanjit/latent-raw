@@ -405,7 +405,7 @@ struct LocalAdjust {
     float4 hueRange;   // centre, width, minSat, enabled
     int4   info;       // type (1 linear, 2 radial, 3 brush, 4 whole), brushSlice, invert
     float4 adjust2;    // tint, highlights, shadows, whites
-    float4 adjust3;    // amount, blacks, unused, hue (degrees)
+    float4 adjust3;    // amount, blacks, luminance range high feather, hue (degrees)
     int4   info2;      // componentStart, componentCount, detailSlot (-1 none), invertMask
 };
 
@@ -414,15 +414,15 @@ struct LocalAdjust {
 // run out of argument slots (MaskOverlayParamsGPU in LocalDetailStage.swift).
 struct MaskOverlayParams {
     float4 style;      // colour (linear), opacity
-    uint4  flags;      // MaskOverlayMode, writeLocalMasks, unused, unused
+    uint4  flags;      // MaskOverlayMode, writeLocalMasks, channel view (1 + component index, 0 off), unused
 };
 
 // One component of a mask after its first shape (MaskComponents.swift).
 struct MaskComponentGPU {
-    float4 geometry0;  // shape geometry | luminance: low, high, feather | colour: h,s,h,s
-    float4 geometry1;  // radial feather | colour: h,s,h,s
-    float4 extra;      // colour: h, s, radius, sample count
-    int4   info;       // type (1-4 shapes, 5 luminance, 6 colour), slice, invert, mode
+    float4 geometry0;  // shape geometry | luminance, channel: low, high, low feather, high feather | colour: h,s,h,s
+    float4 geometry1;  // radial feather, angle (radians) | colour: h,s,h,s
+    float4 extra;      // colour: h, s, radius, sample count | channel: channel id (ChannelRange.swift)
+    int4   info;       // type (1-4 shapes, 5 luminance, 6 colour, 7 channel), slice, invert, mode
 };
 
 constant int kMaxLocals = 8;
@@ -445,7 +445,14 @@ inline float shapeMask(int type, int slice, float4 g0, float4 g1, float2 pNorm, 
             float shortSide = min(sensorSize.x, sensorSize.y);
             float2 c = g0.xy * sensorSize;
             float2 r = max(g0.zw * shortSide, float2(1.0));
-            float2 q = (pNorm * sensorSize - c) / r;
+            float2 d = pNorm * sensorSize - c;
+            // A turned ellipse: the offset into the ellipse's own axes.
+            // Angle 0 (every ellipse before rotation) skips this.
+            if (g1.y != 0.0) {
+                float cs = cos(g1.y), sn = sin(g1.y);
+                d = float2(d.x * cs + d.y * sn, -d.x * sn + d.y * cs);
+            }
+            float2 q = d / r;
             float e = length(q);
             float inner = 1.0 - clamp(g1.x, 0.0, 0.999);
             return 1.0 - smoothstep(inner, 1.0, e);
@@ -460,11 +467,39 @@ inline float shapeMask(int type, int slice, float4 g0, float4 g1, float2 pNorm, 
     }
 }
 
-inline float luminanceRangeWeight(float low, float high, float feather, float displayLuma) {
-    float f = max(feather, 1e-3);
-    float inLow  = smoothstep(low - f, low + f * 0.001, displayLuma);   // ramps up at low
-    float inHigh = 1.0 - smoothstep(high - f * 0.001, high + f, displayLuma);
+// A band with its own fade below `low` and above `high` (equal for every
+// range made before they could differ, which is then the old formula).
+// The CPU mirror is MaskRangeMath.weight in ChannelRange.swift.
+inline float luminanceRangeWeight(float low, float high, float featherLow, float featherHigh, float displayLuma) {
+    float fl = max(featherLow, 1e-3), fh = max(featherHigh, 1e-3);
+    float inLow  = smoothstep(low - fl, low + fl * 0.001, displayLuma);   // ramps up at low
+    float inHigh = 1.0 - smoothstep(high - fh * 0.001, high + fh, displayLuma);
     return inLow * inHigh;
+}
+
+// One channel of the pixel as a Channel Range component sees it, 0…1
+// (MaskChannel.value in ChannelRange.swift): 0-2 red, green, blue and 3
+// saturation of the perceptual (gamma 2.2) colour; 4 Lab lightness, 5 a,
+// 6 b and 7 chroma, from the display-referred working colour (Rec.2020,
+// D65), with a and b centred on 0.5 and ±100 at the ends.
+inline float labF(float t) {
+    return t > 0.008856452 ? pow(t, 1.0 / 3.0) : t * 7.787037 + 0.137931;
+}
+inline float maskChannelValue(int channel, float3 perceptual) {
+    if (channel <= 2) return perceptual[max(channel, 0)];
+    if (channel == 3) return rgbToHSV(perceptual).y;
+    float3 lin = pow(max(perceptual, 0.0), 2.2);
+    float x = dot(lin, float3(0.6369580, 0.1446169, 0.1688810)) / 0.95047;
+    float y = dot(lin, float3(0.2627002, 0.6779981, 0.0593017));
+    float z = dot(lin, float3(0.0, 0.0280727, 1.0609851)) / 1.08883;
+    float fx = labF(x), fy = labF(y), fz = labF(z);
+    float L = 116.0 * fy - 16.0, a = 500.0 * (fx - fy), b = 200.0 * (fy - fz);
+    switch (channel) {
+        case 4: return clamp(L / 100.0, 0.0, 1.0);
+        case 5: return clamp(a / 200.0 + 0.5, 0.0, 1.0);
+        case 6: return clamp(b / 200.0 + 0.5, 0.0, 1.0);
+        default: return clamp(sqrt(a * a + b * b) / 100.0, 0.0, 1.0);
+    }
 }
 
 inline float localMask(constant LocalAdjust &l, float2 pNorm, float2 sensorSize,
@@ -475,7 +510,7 @@ inline float localMask(constant LocalAdjust &l, float2 pNorm, float2 sensorSize,
     if (l.info.z != 0) m = 1.0 - m;
 
     if (l.lumRange.w != 0.0) {
-        m *= luminanceRangeWeight(l.lumRange.x, l.lumRange.y, l.lumRange.z, displayLuma);
+        m *= luminanceRangeWeight(l.lumRange.x, l.lumRange.y, l.lumRange.z, l.adjust3.z, displayLuma);
     }
     if (l.hueRange.w != 0.0) {
         float3 hsv = rgbToHSV(perceptual);
@@ -507,6 +542,31 @@ inline float colourRangeWeight(constant MaskComponentGPU &c, float3 perceptual) 
     return 1.0 - smoothstep(r * 0.5, r, d);
 }
 
+// What a range component reads, as a grey for Show Channel: the luminance
+// for a Luminance Range, the channel for a Channel Range, and for a
+// Colour Range how near each pixel is to the nearest sample on the colour
+// wheel, without the cut-off Refine puts on it.
+inline float maskChannelView(constant MaskComponentGPU &c, float displayLuma, float3 perceptual) {
+    if (c.info.x == 5) return displayLuma;
+    if (c.info.x == 7) return maskChannelValue(int(c.extra.x), perceptual);
+    if (c.info.x == 6) {
+        float3 hsv = rgbToHSV(perceptual);
+        float a = hsv.x * (M_PI_F / 180.0);
+        float2 p = hsv.y * float2(cos(a), sin(a));
+        float hs[10] = { c.geometry0.x, c.geometry0.y, c.geometry0.z, c.geometry0.w,
+                         c.geometry1.x, c.geometry1.y, c.geometry1.z, c.geometry1.w,
+                         c.extra.x, c.extra.y };
+        int count = min(int(c.extra.w), 5);
+        float d = 1.0;
+        for (int k = 0; k < count; k++) {
+            float sa = hs[2 * k] * (M_PI_F / 180.0);
+            d = min(d, length(p - hs[2 * k + 1] * float2(cos(sa), sin(sa))));
+        }
+        return 1.0 - clamp(d, 0.0, 1.0);
+    }
+    return 0.0;
+}
+
 // The mask with its components: the first shape, then each component
 // added, subtracted or intersected in order, then the whole inverted if
 // asked, then the original luminance and hue ranges. With no components
@@ -524,9 +584,12 @@ inline float combinedLocalMask(constant LocalAdjust &l, constant MaskComponentGP
         constant MaskComponentGPU &c = components[l.info2.x + k];
         float v;
         if (c.info.x == 5) {
-            v = luminanceRangeWeight(c.geometry0.x, c.geometry0.y, c.geometry0.z, displayLuma);
+            v = luminanceRangeWeight(c.geometry0.x, c.geometry0.y, c.geometry0.z, c.geometry0.w, displayLuma);
         } else if (c.info.x == 6) {
             v = colourRangeWeight(c, perceptual);
+        } else if (c.info.x == 7) {
+            v = luminanceRangeWeight(c.geometry0.x, c.geometry0.y, c.geometry0.z, c.geometry0.w,
+                                     maskChannelValue(int(c.extra.x), perceptual));
         } else {
             v = shapeMask(c.info.x, c.info.y, c.geometry0, c.geometry1, pNorm, sensorSize, brushes);
         }
@@ -538,7 +601,7 @@ inline float combinedLocalMask(constant LocalAdjust &l, constant MaskComponentGP
     }
     if (l.info2.w != 0) m = 1.0 - clamp(m, 0.0, 1.0);
     if (l.lumRange.w != 0.0) {
-        m *= luminanceRangeWeight(l.lumRange.x, l.lumRange.y, l.lumRange.z, displayLuma);
+        m *= luminanceRangeWeight(l.lumRange.x, l.lumRange.y, l.lumRange.z, l.adjust3.z, displayLuma);
     }
     if (l.hueRange.w != 0.0) {
         float3 hsv = rgbToHSV(perceptual);
@@ -762,6 +825,7 @@ kernel void colorAndTone(
     // any local changes it, so brightening the shadows can't push a pixel
     // out of its own mask mid-computation.
     float overlay = 0.0;
+    float channelView = -1.0;   // Show Channel's grey, when asked for
     float detailMasks[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
     if (localCount > 0) {
         float2 pNorm = (tileOrigin + (float2(gid) + 0.5) * binSpan) / sensorSize;
@@ -771,7 +835,12 @@ kernel void colorAndTone(
         for (int i = 0; i < localCount && i < kMaxLocals; i++) {
             float m = combinedLocalMask(locals[i], maskComponents, pNorm, sensorSize, brushMasks,
                                         displayLuma, perceptual);
-            if (i == maskOverlayIndex) overlay = m;
+            if (i == maskOverlayIndex) {
+                overlay = m;
+                if (maskOverlay.flags.z != 0) {
+                    channelView = maskChannelView(maskComponents[maskOverlay.flags.z - 1], displayLuma, perceptual);
+                }
+            }
             // Mask Amount scales the whole effect; a hidden mask has none.
             if (locals[i].adjust3.x != 1.0) m *= max(locals[i].adjust3.x, 0.0);
             working = applyLocal(working, locals[i], m, greyPoint);
@@ -864,7 +933,11 @@ kernel void colorAndTone(
     float3 outputLinear = workingToOutput * display;
     // Mask overlay for editing: the selected local's mask, by default as
     // a red tint (MaskOverlayStyle in MaskOverlay.swift has the others).
-    if (maskOverlayIndex >= 0) {
+    if (maskOverlayIndex >= 0 && channelView >= 0.0) {
+        // Show Channel: the selected range's input as a grey, in place of
+        // the picture (the encoded value is the perceptual one).
+        outputLinear = float3(pow(clamp(channelView, 0.0, 1.0), 2.2) * (encodeOutput != 0 ? 1.0 : 0.6));
+    } else if (maskOverlayIndex >= 0) {
         float3 tint = maskOverlay.style.rgb * (encodeOutput != 0 ? 1.0 : 0.6);
         float white = encodeOutput != 0 ? 1.0 : 0.6;
         switch (maskOverlay.flags.x) {

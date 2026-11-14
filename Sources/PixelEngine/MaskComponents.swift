@@ -35,6 +35,9 @@ public enum MaskComponentSource: Equatable, Sendable, Codable {
     case shape(MaskShape)
     case luminance(LuminanceRange)
     case colour(ColourRange)
+    /// One channel of the picture, such as Red or Lab Chroma, between a
+    /// low and a high value (ChannelRange.swift).
+    case channel(ChannelRange)
 }
 
 /// One part of a local adjustment's mask after its first shape
@@ -72,6 +75,7 @@ public struct MaskComponent: Equatable, Sendable, Codable, Identifiable {
         case .shape(let shape): return shape.componentName
         case .luminance: return "Luminance Range"
         case .colour: return "Colour Range"
+        case .channel(let r): return "Channel Range (\(r.channel.displayName))"
         }
     }
 }
@@ -99,7 +103,7 @@ extension MaskShape {
         case .brush(let strokes): return strokes.allSatisfy { $0.erase || $0.points.isEmpty }
         case .prompted(let points, _): return points.isEmpty
         case .linear(let s, let e): return simd_distance(s, e) < 1e-4
-        case .radial(_, let r, _): return max(r.x, r.y) < 0.002
+        case .radial(_, let r, _, _): return max(r.x, r.y) < 0.002
         case .whole, .ai: return false
         }
     }
@@ -250,7 +254,7 @@ extension LocalAdjustment {
             switch c.source {
             case .shape(let s): return s.isEmpty || c.mode != .add
             case .colour(let r): return r.samples.isEmpty || c.mode != .add
-            case .luminance: return c.mode != .add
+            case .luminance, .channel: return c.mode != .add
             }
         }
     }
