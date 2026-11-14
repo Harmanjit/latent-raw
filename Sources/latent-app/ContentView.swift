@@ -157,14 +157,11 @@ struct ContentView: View {
                     }
                     .onDisappear { model.flushPendingSave() }
                 case .loupe:
-                    VStack(spacing: 0) {
+                    CaptionedPane(showsCaption: !fullScreen.isActive,
+                                  caption: ImageCaption(record: library.selectedImage)) {
                         ImageViewport(model: model, allowsTools: false, onStep: { _ = perform(.step($0)) },
                                       followsMirrorImageMode: true,
                                       showsLoupeOverlay: true)
-                        if !fullScreen.isActive {
-                            Divider()
-                            ImageCaption(record: library.selectedImage)
-                        }
                     }
                 case .compare:
                     compareArea
@@ -776,21 +773,17 @@ struct ContentView: View {
     private var compareArea: some View {
         VStack(spacing: 0) {
             HStack(spacing: 1) {
-                VStack(spacing: 0) {
+                CaptionedPane(caption: ImageCaption(record: compareRecord, title: "Select")) {
                     if let compareModel {
                         ImageViewport(model: compareModel, mirror: model, allowsTools: false)
                     } else {
                         prefs.surroundColor
                     }
-                    Divider()
-                    ImageCaption(record: compareRecord, title: "Select")
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Select pane")
-                VStack(spacing: 0) {
+                CaptionedPane(caption: ImageCaption(record: library.selectedImage, title: "Candidate")) {
                     ImageViewport(model: model, mirror: compareModel, allowsTools: false)
-                    Divider()
-                    ImageCaption(record: library.selectedImage, title: "Candidate")
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Candidate pane")
@@ -1389,6 +1382,8 @@ struct ContentView: View {
             library.refreshFromDisk()
         case .rebuildThumbnails:
             library.rebuildThumbnails(for: library.batchTargets(onlyPrimary: mode != .library))
+        case .importForeignSidecars:
+            ForeignSidecarImportCommand.run(library: library)
         case .createVirtualCopy, .setCopyAsMaster, .removeVirtualCopy, .duplicatePhoto:
             VirtualCopyCommands(library: library, model: model, inGrid: mode == .library, open: { load($0) }).perform(command)
         case .back:

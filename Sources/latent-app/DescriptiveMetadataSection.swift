@@ -21,6 +21,14 @@ struct DescriptiveMetadataSection: View {
     @State private var editingIDs: [DescriptiveField: [Int64]] = [:]
     @State private var editingCatalog: Catalog?
     @FocusState private var focused: DescriptiveField?
+    /// The More fields (headline, location, contact, instructions) shown.
+    @AppStorage("latent.panel.descriptionMoreExpanded") private var moreExpanded = false
+    /// Each field's values elsewhere in the catalog, for its chevron menu;
+    /// worked out when the selection changes, not at every keystroke.
+    @State private var existing: [DescriptiveField: [String]] = [:]
+    @State private var presets: [MetadataPreset] = MetadataPresetStore.load()
+    @State private var namingPreset = false
+    @State private var presetName = ""
 
     private var targets: [ImageRecord] { library.batchTargets(onlyPrimary: false) }
 
@@ -44,18 +52,14 @@ struct DescriptiveMetadataSection: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 6, verticalSpacing: 6) {
-                ForEach(DescriptiveField.allCases, id: \.self) { field in
-                    GridRow {
-                        Text(field.title)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .gridColumnAlignment(.trailing)
-                            .accessibilityHidden(true)
-                        input(field, shared: field.shared(by: targets))
-                    }
-                }
+            fieldGrid(DescriptiveField.primary, targets: targets)
+            DisclosureGroup(isExpanded: $moreExpanded) {
+                fieldGrid(DescriptiveField.more, targets: targets).padding(.top, 4)
+            } label: {
+                Text("More").font(.caption2).foregroundStyle(.secondary)
             }
+            .accessibilityLabel("More descriptive fields")
+            presetMenu(targets: targets)
             if focused == nil, targets.count == 1, let record = targets.first,
                record.copyright == nil, let creator = record.creator {
                 // Built as a plain String: a localized title would print the
@@ -70,8 +74,18 @@ struct DescriptiveMetadataSection: View {
             }
         }
         .controlSize(.small)
-        .onAppear { reload(targets) }
-        .onChange(of: signature(targets)) { reload(self.targets) }
+        .onAppear { reload(targets); existing = library.existingDescriptiveValues() }
+        .onChange(of: signature(targets)) {
+            reload(self.targets)
+            existing = library.existingDescriptiveValues()
+        }
+        .alert("Save Metadata Preset", isPresented: $namingPreset) {
+            TextField("Name", text: $presetName)
+            Button("Save") { savePreset(named: presetName, from: self.targets) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The fields the selected photos share, as typed now, under a name to apply to other photos.")
+        }
         .onChange(of: focused) { old, new in
             if let old, old != new { commit(old) }
             if let new { begin(new) }
@@ -81,11 +95,97 @@ struct DescriptiveMetadataSection: View {
         }
     }
 
+    private func fieldGrid(_ fields: [DescriptiveField], targets: [ImageRecord]) -> some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 6, verticalSpacing: 6) {
+            ForEach(fields, id: \.self) { field in
+                GridRow {
+                    Text(field.title)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .gridColumnAlignment(.trailing)
+                        .accessibilityHidden(true)
+                    input(field, shared: field.shared(by: targets))
+                    existingMenu(field, targets: targets)
+                }
+            }
+        }
+    }
+
+    /// A small chevron listing the field's values on other photos of the
+    /// catalog; choosing one sets it on the selection.
+    private func existingMenu(_ field: DescriptiveField, targets: [ImageRecord]) -> some View {
+        let values = existing[field] ?? []
+        return Menu {
+            ForEach(values, id: \.self) { value in
+                Button(value.count > 60 ? String(value.prefix(60)) + "…" : value) {
+                    save(field, value, ids: targets.compactMap(\.id))
+                }
+            }
+        } label: {
+            Image(systemName: "chevron.down")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(values.isEmpty)
+        .help("Values of \(field.title.lowercased()) used on other photos")
+        .accessibilityLabel("Existing values of \(field.title)")
+    }
+
+    /// Save the shared fields under a name, apply a saved set to the
+    /// selection (one undo step), or delete one.
+    private func presetMenu(targets: [ImageRecord]) -> some View {
+        Menu("Presets") {
+            ForEach(presets) { preset in
+                Button(preset.name) { apply(preset, to: targets) }
+            }
+            if !presets.isEmpty { Divider() }
+            Button("Save Current as Preset…") {
+                presetName = ""
+                namingPreset = true
+            }
+            .disabled(MetadataPreset.values(sharedBy: targets).isEmpty)
+            if !presets.isEmpty {
+                Menu("Delete Preset") {
+                    ForEach(presets) { preset in
+                        Button(preset.name) {
+                            presets.removeAll { $0.id == preset.id }
+                            MetadataPresetStore.save(presets)
+                        }
+                    }
+                }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .font(.caption2)
+        .help("Save the title, copyright and other fields as a preset, or apply one to the selected photos")
+        .accessibilityLabel("Metadata presets")
+    }
+
+    private func savePreset(named name: String, from targets: [ImageRecord]) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let values = MetadataPreset.values(sharedBy: targets)
+        guard !trimmed.isEmpty, !values.isEmpty else { return }
+        presets.removeAll { $0.name == trimmed }
+        presets.append(MetadataPreset(name: trimmed, values: values))
+        presets.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        MetadataPresetStore.save(presets)
+    }
+
+    private func apply(_ preset: MetadataPreset, to targets: [ImageRecord]) {
+        if let focused { commit(focused) }
+        let ids = targets.compactMap(\.id), catalog = library.catalog
+        library.perform("Applying the metadata preset") {
+            try await library.setDescriptive(preset.fields, forImageIDs: ids, in: catalog)
+        }
+    }
+
     @ViewBuilder private func input(_ field: DescriptiveField, shared: DescriptiveField.Shared) -> some View {
         let binding = Binding(get: { text[field] ?? "" }, set: { text[field] = $0 })
         let prompt = Text(shared == .mixed ? "Mixed" : placeholder(field))
         Group {
-            if field == .caption {
+            if field.isMultiline {
                 TextField(field.title, text: binding, prompt: prompt, axis: .vertical)
                     .lineLimit(1...6)
             } else {
@@ -110,6 +210,16 @@ struct DescriptiveMetadataSection: View {
         case .caption: "What the photo shows"
         case .creator: "Your name"
         case .copyright: "© Year Name"
+        case .headline: "A short summary"
+        case .sublocation: "Place within the city"
+        case .city: "City"
+        case .state: "State or province"
+        case .country: "Country"
+        case .countryCode: "ISO code, such as GB"
+        case .creatorJobTitle: "Job title"
+        case .creatorEmail: "Email"
+        case .creatorURL: "Website"
+        case .instructions: "Instructions for the user of the photo"
         }
     }
 
@@ -119,6 +229,16 @@ struct DescriptiveMetadataSection: View {
         case .caption: "A description of the photo (dc:description). Return saves; ⌥Return starts a new line"
         case .creator: "Who made the photo (dc:creator). Separate several names with “;”"
         case .copyright: "The copyright notice (dc:rights), written to the sidecar and to exports"
+        case .headline: "A short synopsis of the photo (photoshop:Headline)"
+        case .sublocation: "The place within the city (Iptc4xmpCore:Location); exported with the location switch"
+        case .city: "The city (photoshop:City); exported with the location switch"
+        case .state: "The state or province (photoshop:State); exported with the location switch"
+        case .country: "The country (photoshop:Country); exported with the location switch"
+        case .countryCode: "The country's ISO code (Iptc4xmpCore:CountryCode); exported with the location switch"
+        case .creatorJobTitle: "The creator's job title (photoshop:AuthorsPosition)"
+        case .creatorEmail: "The creator's email (Iptc4xmpCore:CreatorContactInfo)"
+        case .creatorURL: "The creator's website (Iptc4xmpCore:CreatorContactInfo)"
+        case .instructions: "Instructions such as embargoes or credit (photoshop:Instructions). Return saves; ⌥Return starts a new line"
         }
     }
 
@@ -148,7 +268,7 @@ struct DescriptiveMetadataSection: View {
             // Left empty over different values: nothing was typed.
             if typed.isEmpty { return }
         case .same(let value):
-            if DescriptiveField.normalized(typed, multiline: field == .caption) == value { return }
+            if DescriptiveField.normalized(typed, multiline: field.isMultiline) == value { return }
         }
         library.perform("Saving the \(field.title.lowercased())") {
             try await library.setDescriptive(field, to: typed, forImageIDs: ids, in: catalog)

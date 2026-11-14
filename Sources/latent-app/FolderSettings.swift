@@ -9,6 +9,7 @@ struct FolderSettingsTab: View {
     @ObservedObject private var watching = FolderWatching.shared
     @ObservedObject private var autoImport = AutoImportController.shared
     @State private var presets: [Preset] = []
+    @AppStorage(ForeignSidecar.preferenceKey) private var readsForeignSidecars = true
 
     var body: some View {
         Form {
@@ -16,6 +17,12 @@ struct FolderSettingsTab: View {
                 Toggle("Watch the open folder for changes", isOn: $watching.watchOpenFolder)
                     .help("Photos copied into the open folder (or an included subfolder), deleted or renamed outside Latent show up by themselves.")
                 Text("Photos added, removed or renamed in Finder appear without reopening the folder. Off, use File › Refresh Folder (⌘R). On a network share, changes made from another computer may not be noticed; Refresh always works.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Other apps") {
+                Toggle("Read ratings and keywords from other apps’ sidecars", isOn: $readsForeignSidecars)
+                    .help("A photo catalogued for the first time takes the stars, reject flag, colour label, keywords, title and other fields from a darktable (photo.NEF.xmp) or Lightroom and Capture One (photo.xmp) sidecar beside it. Those files are only read, never changed.")
+                Text("Only for photos new to the catalog with no settings of Latent’s yet. For photos already here, use File › Import Ratings and Keywords from Other Apps’ Sidecars…, which fills only what is empty.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Auto Import") {

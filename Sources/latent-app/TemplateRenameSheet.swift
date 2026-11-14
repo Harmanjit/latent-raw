@@ -107,6 +107,20 @@ struct TemplateRenameSheet: View {
                     .help("Add \(token.token) to the template")
                     .accessibilityLabel("Add \(token.meaning)")
             }
+            // The rest of the naming tokens (lens, ISO, city, keywords…),
+            // with their modifiers explained.
+            Menu("More") {
+                ForEach(RenameTemplate.moreTokens, id: \.token) { token in
+                    Button("\(token.token)  \(token.meaning)") { template += token.token }
+                }
+                Divider()
+                Text("Modifiers: {title|untitled} when empty, {title:upper}, :lower, :title, "
+                     + "{name:1-8} characters, {name/_/-} replace")
+            }
+            .controlSize(.small)
+            .fixedSize()
+            .help("More tokens for the template")
+            .accessibilityLabel("More tokens")
         }
     }
 
