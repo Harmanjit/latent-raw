@@ -196,6 +196,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// The Lensfun model picked by hand for this photo, absent for the
         /// automatic profile. `profile` records which one was used.
         public var manualProfile: String?
+        /// Apply the DNG's own opcode corrections (DNGOpcodeCorrections.swift).
+        /// Absent while off, so edits that never switched it on encode as before.
+        public var embedded: Bool?
 
         public init(distortion: Bool, tca: Bool, vignetting: Bool,
                     manualDistortion: Float, manualVignetting: Float,
@@ -219,6 +222,7 @@ public struct EditStack: Codable, Equatable, Sendable {
             vignettingMidpoint = try c.decodeIfPresent(Float.self, forKey: .vignettingMidpoint)
             autoCA = try c.decodeIfPresent(AutoChromaticAberration.self, forKey: .autoCA)
             manualProfile = try c.decodeIfPresent(String.self, forKey: .manualProfile)
+            embedded = try c.decodeIfPresent(Bool.self, forKey: .embedded)
         }
     }
 
@@ -280,6 +284,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         modules.lens = Lens(distortion: p.lensDistortion, tca: p.lensTCA, vignetting: p.lensVignetting,
                             manualDistortion: p.manualDistortion, manualVignetting: p.manualVignetting,
                             profile: nil, lensfunDb: nil)
+        if p.embeddedDNGCorrections { modules.lens?.embedded = true }
         modules.curve = Curve(master: p.toneCurve, channels: p.channelCurves,
                               parametric: p.parametricCurve, saturation: p.curveSaturation)
         modules.toneranges = p.toneRanges.isNeutral ? nil : p.toneRanges
@@ -350,6 +355,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         if let l = modules.lens {
             p.lensDistortion = l.distortion; p.lensTCA = l.tca; p.lensVignetting = l.vignetting
             p.manualDistortion = l.manualDistortion; p.manualVignetting = l.manualVignetting
+            p.embeddedDNGCorrections = l.embedded ?? false
         }
         if let c = modules.curve {
             let pts = c.points.compactMap { $0.count == 2 ? SIMD2<Float>($0[0], $0[1]) : nil }

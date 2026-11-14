@@ -104,6 +104,10 @@ public final class ImageSession {
     /// when there is one and the database has it, else `lensCorrection`.
     /// None for a merge whose corrections are already in its pixels.
     public func lensCorrection(for p: EditParameters) -> LensCorrection? {
+        // A DNG's own lens corrections, while switched on, replace the profile.
+        if p.embeddedDNGCorrections, !lensCorrectionAlreadyApplied, let embedded = dngCorrections?.lens {
+            return embedded
+        }
         guard let model = p.lensProfile, !lensCorrectionAlreadyApplied else { return lensCorrection }
         let summary = file.summary
         return lensState.withLock { state -> LensCorrection? in
@@ -448,7 +452,10 @@ public final class ImageSession {
         self.profile = cameraProfile
         self.asShotWhiteBalance = cameraProfile?.whiteBalance(fromMultipliers: asShot)
             ?? ColorKit.WhiteBalance()
+        self.cameraWhiteBalanceChoices = CameraWhiteBalanceChoice.choices(
+            for: file.summary.cameraWhiteBalancePresets, profile: cameraProfile)
 
+        self.dngCorrections = file.dngOpcodes.flatMap { DNGEmbeddedCorrections(opcodes: $0, summary: file.summary) }
         self.lensState = Mutex(LensState(automatic: Self.resolveLensCorrection(
             file.summary, alreadyApplied: lensCorrectionAlreadyApplied)))
     }

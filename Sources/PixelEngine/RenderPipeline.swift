@@ -782,6 +782,14 @@ public final class RenderPipeline {
                                                     sensorRect: sourceInfo.sensorRect, binSpan: binSpan,
                                                     session: session, preview: displayRole != .display,
                                                     gpu: gpu, commandBuffer: cmdBuffer)
+        } else if let embedded = session.embeddedGainMapTexture(for: parameters) {
+            // A DNG's own GainMap, while its corrections are switched on
+            // and no reference flat field replaces it (DNGOpcodeCorrections.swift).
+            colourInput = try FlatFieldStage.encode(input: colourInput, gain: embedded, amount: 1,
+                                                    sensorSize: SIMD2(Float(rawW), Float(rawH)),
+                                                    sensorRect: sourceInfo.sensorRect, binSpan: binSpan,
+                                                    session: session, preview: displayRole != .display,
+                                                    gpu: gpu, commandBuffer: cmdBuffer)
         }
 
         // Stage 7: lens corrections, still in camera space.

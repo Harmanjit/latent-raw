@@ -245,6 +245,9 @@ public final class RawFile {
     private let preview: Data?
     /// Diagnostic: the return code from LibRaw's thumbnail call.
     public let lastThumbnailError: Int32
+    /// A DNG's opcode-list corrections (DNGOpcodes.swift), read beside the
+    /// decode for a full open of a DNG that has any; nil otherwise.
+    public internal(set) var dngOpcodes: DNGOpcodeList?
 
     /// `metadataOnly` skips decoding the sensor data — EXIF, the colour
     /// matrix and the embedded preview are still available, at roughly a
@@ -267,6 +270,9 @@ public final class RawFile {
             try self.init(remoteFileDescriptor: fd, metadataOnly: metadataOnly)
         } else {
             try self.init(fileDescriptor: fd, metadataOnly: metadataOnly)
+        }
+        if !metadataOnly, DNGOpcodes.mayHaveOpcodes(path: path) {
+            dngOpcodes = DNGOpcodes.read(url: URL(fileURLWithPath: path))
         }
     }
 
