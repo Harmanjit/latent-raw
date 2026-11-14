@@ -59,6 +59,33 @@ extension EditorModel {
         analysePastedUpright(stack, groups: groups)
     }
 
+    /// Paste Settings (Overwrite) and Reset Edits on the open image: the
+    /// photo starts again from its defaults and takes `groups` from
+    /// `stack`, so every group not pasted is reset. One history step, so
+    /// Undo takes it back. The normal paste (`apply`) keeps them instead.
+    func applyOverwrite(_ stack: EditStack, groups: Set<EditGroup>) {
+        guard hasImage else { return }
+        apply(Self.overwriteStack(stack, groups: groups), groups: Set(EditGroup.allCases))
+    }
+
+    /// The defaults with `groups` from `stack`: what an overwriting paste
+    /// leaves on any photo. The stack's own frame comes along with its
+    /// geometry, so it is still read as from the camera it was written for.
+    nonisolated static func overwriteStack(_ stack: EditStack, groups: Set<EditGroup>) -> EditStack {
+        EditStack().merged(with: stack, groups: groups)
+    }
+
+    /// Puts `stack`, cut down to `groups`, on the pasteboard as Copy
+    /// Settings does: for Copy Settings… and its chosen groups.
+    static func putOnPasteboard(_ stack: EditStack, groups: Set<EditGroup>) -> Bool {
+        guard let json = try? stack.restricted(to: groups).encodeJSON() else { return false }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(json, forType: pasteboardType)
+        pb.setString(json, forType: .string)
+        return true
+    }
+
     func pasteSettings() {
         guard let stack = Self.clipboardStack() else { status = "Nothing to paste"; return }
         apply(stack, groups: pasteGroups.intersection(stack.presentGroups).union(pasteGroups.subtracting(stack.presentGroups)))

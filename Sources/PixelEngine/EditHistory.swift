@@ -102,6 +102,26 @@ public struct EditHistory: Equatable, Sendable, Codable {
         return names.isEmpty ? "Edit" : names.joined(separator: ", ")
     }
 
+    /// The edit groups (as copy, paste and presets know them) whose values
+    /// differ between `a` and `b`: what Sync Last Change to Selection pastes
+    /// for the step from `a` to `b`, darktable's "selective paste of the
+    /// last edited module". Measured on each group as the clipboard would
+    /// hold it (`restricted(to:)`), so it agrees exactly with what a paste
+    /// of those groups carries: a touch-up's faces (never pasted) don't
+    /// count, and neither does a change of process version. `describeChange`
+    /// names the same step for the History list, by module.
+    public static func changedGroups(from a: EditStack, to b: EditStack) -> Set<EditGroup> {
+        guard a != b else { return [] }
+        return Set(EditGroup.allCases.filter { a.restricted(to: [$0]) != b.restricted(to: [$0]) })
+    }
+
+    /// The groups the step into the current state changed, or none when the
+    /// cursor is at the first step.
+    public var lastChangedGroups: Set<EditGroup> {
+        guard cursor > 0 else { return [] }
+        return Self.changedGroups(from: steps[cursor - 1].stack, to: steps[cursor].stack)
+    }
+
     /// Each of the four sliders by its own name, in panel order.
     private static func toneRangeChanges(from a: ToneRanges, to b: ToneRanges) -> [String] {
         var names: [String] = []

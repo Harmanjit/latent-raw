@@ -29,27 +29,30 @@ extension Library {
     /// Makes one virtual copy of each of `records` (a copy of a copy is a
     /// copy of its master), selects the new copies and files the undo.
     /// Returns the new copies' ids. Images that fail are named in the error
-    /// thrown at the end; the others are still copied.
+    /// thrown at the end; the others are still copied. `blank` starts each
+    /// copy from the default edit (Versions › New Blank Copy).
     @discardableResult
-    public func createVirtualCopies(of records: [ImageRecord]) async throws -> [Int64] {
+    public func createVirtualCopies(of records: [ImageRecord], blank: Bool = false) async throws -> [Int64] {
         guard let catalog, !records.isEmpty else { return [] }
         let ledger = VirtualCopyLedger()
         var failures: [(fileName: String, error: any Error)] = []
         for record in records {
             guard let id = record.id else { continue }
             do {
-                ledger.archives.append(try await catalog.createVirtualCopy(of: id))
+                ledger.archives.append(try await catalog.createVirtualCopy(of: id, blank: blank))
             } catch {
                 failures.append((record.fileName, error))
             }
         }
         let ids = ledger.archives.map(\.id)
         if !ids.isEmpty {
-            fileVirtualCopyUndo(Self.undoActionName("Create Virtual Copy", count: ids.count),
+            fileVirtualCopyUndo(Self.undoActionName(blank ? "New Blank Copy" : "Create Virtual Copy", count: ids.count),
                                 step: .remove, ledger: ledger, in: catalog)
             if catalog === self.catalog {
                 try await refresh()
                 setSelection(Set(ids), primary: ids.first)
+                // A blank copy has no thumbnail of its own yet.
+                if blank { startThumbnailGeneration() }
             }
         }
         try Self.throwFailures(failures, total: records.count)
@@ -97,6 +100,29 @@ extension Library {
         guard catalog === self.catalog else { return }
         try await refresh()
         didRestoreImages?([id, masterID], .edits)
+    }
+
+    // MARK: Versions
+
+    /// The master of `record` and its virtual copies, master first and the
+    /// copies by number: the Versions panel's list, from the rows the
+    /// Library holds.
+    public func versions(of record: ImageRecord) -> [ImageRecord] {
+        let file = record.fileRelPath
+        return images.filter { $0.fileRelPath == file }
+            .sorted { ($0.virtualCopyNumber ?? 0) < ($1.virtualCopyNumber ?? 0) }
+    }
+
+    /// The names given to `records` in the Versions panel.
+    public func versionNames(for records: [ImageRecord]) async throws -> [Int64: String] {
+        guard let catalog else { return [:] }
+        return try await catalog.versionNames(forImageIDs: records.compactMap(\.id))
+    }
+
+    /// Names a version (nil or blank takes the name away).
+    public func setVersionName(_ name: String?, for record: ImageRecord) async throws {
+        guard let catalog, let id = record.id else { return }
+        try await catalog.setVersionName(name, forImageID: id)
     }
 
     // MARK: Undo

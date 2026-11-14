@@ -78,6 +78,7 @@ enum GridContextMenu {
         menu.addItem(ClosureMenuItem("Copy Settings", enabled: hasLead, actions.copySettings))
         menu.addItem(ClosureMenuItem("Paste Settings", enabled: count > 0 && actions.canPasteSettings(),
                                      actions.pasteSettings))
+        HistoryCommands.addGridItems(to: menu, actions: actions)
         let presets = actions.presets()
         let presetItem = submenu("Apply Preset", PresetNSMenu.items(
             presets: presets, favourites: presets.filter { PresetCatalog.shared.favourites.contains($0.name) },

@@ -174,6 +174,8 @@ enum Schema {
                 t.add(column: "exif_extras_version", .integer)
             }
         }
+        // Version names for virtual copies (VirtualCopySchema).
+        VirtualCopySchema.registerVersionNames(in: &migrator)
 
         return migrator
     }

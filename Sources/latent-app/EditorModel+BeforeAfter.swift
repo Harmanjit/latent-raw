@@ -7,6 +7,9 @@ import PixelEngine
 struct BeforeOverride: Equatable {
     var url: URL
     var stack: EditStack
+    /// The snapshot it came from (Compare as Before in the History panel),
+    /// named in the Before pane's label; nil for Copy After to Before.
+    var snapshotName: String? = nil
 }
 
 extension EditorModel {
@@ -58,5 +61,26 @@ extension EditorModel {
     /// The Before goes back to the unedited image.
     func resetBefore() {
         beforeOverride = nil
+    }
+
+    // MARK: - A snapshot as the Before
+
+    /// A snapshot becomes the Before, as darktable's snapshots are compared
+    /// with the live edit: the edit itself is untouched, and nothing goes
+    /// into the history. DevelopViewState shows it in a split.
+    func compareSnapshotAsBefore(_ snapshot: EditSnapshot) {
+        guard hasImage, let url = sourceURL else { return }
+        beforeOverride = BeforeOverride(url: url, stack: snapshot.stack, snapshotName: snapshot.name)
+        status = "Comparing with snapshot “\(snapshot.name)”"
+    }
+
+    /// The snapshot the Before shows now, if it is one.
+    var beforeSnapshotName: String? {
+        hasCustomBefore ? beforeOverride?.snapshotName : nil
+    }
+
+    /// The Before pane's label: "Before", or the snapshot it shows.
+    var beforeLabel: String {
+        beforeSnapshotName.map { "Before: \($0)" } ?? "Before"
     }
 }

@@ -165,6 +165,10 @@ enum KeyCommand: Equatable, Sendable {
     /// Keyboard (PresetShortcuts.swift): the named preset on the selection
     /// in the Library, on the open photo in Develop.
     case applyPreset(String)
+    /// Batch edits and versions: Reset Edits, Sync Last Change, Paste
+    /// Overwrite, the selective sheet, Load Settings from File, New Blank
+    /// Copy (LibraryBatchEdits.swift).
+    case history(HistoryCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).

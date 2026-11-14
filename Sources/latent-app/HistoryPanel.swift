@@ -11,6 +11,14 @@ struct HistoryPanel: View {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
     }()
 
+    /// The snapshot becomes the Before, shown in a split when one image
+    /// was showing (DevelopViewState).
+    private func compareAsBefore(_ snapshot: EditSnapshot) {
+        let views = DevelopViewState.shared
+        views.attach(main: model, library: MainWindowModels.shared.library)
+        views.compareSnapshot(snapshot)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -52,16 +60,34 @@ struct HistoryPanel: View {
                 Text("Snapshots").font(.caption2).foregroundStyle(.secondary)
                     .accessibilityAddTraits(.isHeader)
                 ForEach(model.snapshots) { snapshot in
+                    let isBefore = model.beforeSnapshotName == snapshot.name
                     HStack {
                         Button(snapshot.name) { model.restoreSnapshot(snapshot) }.buttonStyle(.plain)
                             .accessibilityHint("Restores this snapshot")
                         Spacer()
+                        // Compare as Before, or Clear Before when it is the Before.
+                        Button {
+                            if isBefore { model.resetBefore() } else { compareAsBefore(snapshot) }
+                        } label: {
+                            Image(systemName: isBefore ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
+                        }
+                        .buttonStyle(.plain).foregroundStyle(isBefore ? Color.accentColor : .secondary)
+                        .help(isBefore ? "Clear Before: back to the unedited photo"
+                                       : "Compare as Before: show this snapshot beside the current edit")
+                        .accessibilityLabel(isBefore ? "Clear Before" : "Compare snapshot \(snapshot.name) as Before")
                         Button { model.deleteSnapshot(snapshot) } label: { Image(systemName: "trash") }
                             .buttonStyle(.plain).foregroundStyle(.secondary)
                             .help("Delete this snapshot")
                             .accessibilityLabel("Delete snapshot \(snapshot.name)")
                     }
                     .font(.caption)
+                    .contextMenu {
+                        Button("Restore Snapshot") { model.restoreSnapshot(snapshot) }
+                        Button("Compare as Before") { compareAsBefore(snapshot) }
+                        if model.hasCustomBefore {
+                            Button("Clear Before") { model.resetBefore() }
+                        }
+                    }
                 }
             }
         }

@@ -109,6 +109,8 @@ struct ContentView: View {
     @State private var renaming: ImageRecord?
     /// The photos Rename with Template is naming, while its sheet is up.
     @State private var templateRenaming: TemplateRenameRequest?
+    /// Copy Settings…, Paste Settings… and Load Settings from File…'s checklist.
+    @State private var selectiveSettings: SelectiveSettingsRequest?
     /// What Undo and Redo would do outside Develop (see LibraryUndo.swift).
     @StateObject private var libraryUndo = LibraryUndoObserver()
     /// Survey's panes (N), each with its own view-only model.
@@ -281,6 +283,10 @@ struct ContentView: View {
                                     }
                                 })
             .motionFollowsAccessibility()
+        }
+        .sheet(item: $selectiveSettings) { request in
+            SelectiveSettingsSheet(request: request)
+                .motionFollowsAccessibility()
         }
         .sheet(item: $renaming) { record in
             RenameSheet(record: record) { name in
@@ -1418,8 +1424,20 @@ struct ContentView: View {
             KeywordEntryFocus.shared.requestFocus()
         case .view(let command):
             developViews.perform(command, load: { load($0) })
+        case .history(let command):
+            historyCommands.perform(command)
         }
         return true
+    }
+
+    /// Reset Edits, Sync Last Change, Paste Overwrite, the selective sheet,
+    /// Load Settings from File and New Blank Copy (LibraryBatchEdits.swift).
+    private var historyCommands: HistoryCommands {
+        HistoryCommands(library: library, model: model, mode: mode,
+                        apply: { applyToSelectionOrEditor($0, groups: $1, what: $3, undoName: $4, overwrite: $2) },
+                        report: { reportOutcome($0) },
+                        present: { selectiveSettings = $0 },
+                        open: { load($0) })
     }
 
     /// The second display's Loupe shows the selection. Loupe, Compare and
@@ -1599,24 +1617,29 @@ struct ContentView: View {
     }
 
     /// `amount` is a preset's Amount (`PresetAmount`); 1 applies `stack` as it is.
+    /// `overwrite` (Paste Settings (Overwrite), Reset Edits) starts each
+    /// photo from its defaults, so groups not applied are reset.
     private func applyToSelectionOrEditor(_ stack: EditStack, groups: Set<EditGroup>, what: String, undoName: String,
-                                          amount: Float = PresetAmount.full) {
+                                          amount: Float = PresetAmount.full, overwrite: Bool = false) {
         let target = SettingsTarget.choose(mode: mode, editorHasImage: model.hasImage)
         // Each open model blends from its own photo's values.
         func forModel(_ m: EditorModel) -> EditStack {
             amount == PresetAmount.full ? stack : m.stack(applying: stack, groups: groups, amount: amount)
         }
+        func put(on m: EditorModel) {
+            if overwrite { m.applyOverwrite(stack, groups: groups) } else { m.apply(forModel(m), groups: groups) }
+        }
         // Compare's Select pane may show the candidate's own photo. It never
         // saves, so it takes the new look directly rather than going stale.
         if target != .selection, mode == .compare, let select = compareRecord?.id, select == library.selectedImageID {
-            if let m = compareModel { m.apply(forModel(m), groups: groups) }
+            if let m = compareModel { put(on: m) }
         }
         // So may a Survey pane, the focused one.
         if target != .selection, mode == .survey, let m = survey.model(for: library.selectedImageID) {
-            m.apply(forModel(m), groups: groups)
+            put(on: m)
         }
         if target == .editor {
-            model.apply(forModel(model), groups: groups)
+            put(on: model)
             return
         }
         // Through perform, so quitting waits for the edits being rewritten.
@@ -1630,7 +1653,8 @@ struct ContentView: View {
                 ) { existing in
                     // An unreadable existing edit throws here and the image
                     // is skipped, never replaced by the pasted modules alone.
-                    let current = try existing.map { try EditStack.decode(json: $0) } ?? EditStack()
+                    let stored = try existing.map { try EditStack.decode(json: $0) } ?? EditStack()
+                    let current = overwrite ? EditStack() : stored
                     let merged = current.applying(stack, groups: groups, amount: amount)
                     return merged == EditStack() ? nil : try merged.encodeJSON()
                 }
@@ -1652,7 +1676,7 @@ struct ContentView: View {
             if let selected = library.selectedImage,
                Self.editorHolds(selected, catalogImageID: model.catalogImageID, imageTitle: model.imageTitle),
                target == .primary || library.selectedImageIDs.contains(selected.id ?? -1) {
-                model.apply(forModel(model), groups: groups)
+                put(on: model)
                 handledByEditor = selected.id
             }
             // A pasted touch-up wants faces the stored edits don't have:
@@ -1894,6 +1918,18 @@ struct ContentView: View {
                         .padding(.top, 8)
                 } label: {
                     disclosureLabel("Presets & Clipboard")
+                }
+
+                DisclosureGroup {
+                    VersionsPanel(library: library, onOpen: { record in
+                        model.flushPendingSave()
+                        if let id = record.id { library.setSelection([id], primary: id) }
+                        load(record)
+                    }, onNewCopy: { _ = perform(.createVirtualCopy) },
+                       onNewBlankCopy: { _ = perform(.history(.newBlankCopy)) })
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Versions")
                 }
 
                 DisclosureGroup {

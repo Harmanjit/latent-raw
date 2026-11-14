@@ -231,6 +231,7 @@ struct CommandState: Equatable {
         case .stack(let stack): isEnabled(stack)
         case .view(let command): isEnabled(command)
         case .applyPreset: hasImage || selectionCount > 0
+        case .history(let command): isEnabled(command)
         }
     }
 
@@ -356,6 +357,7 @@ struct LatentCommands: Commands {
             item("Export Open Image…", .exportOpenImage)
             item("Edit in \(externalEditors.chosen?.name ?? "External Editor")…", .editExternally)
             item("Reveal in Finder", .revealInFinder)
+            item(HistoryCommand.loadSettingsFromFile.title, .history(.loadSettingsFromFile))
             Divider()
             item("Contact Sheet…", .contactSheet)
             item("Print…", .print)
@@ -380,6 +382,10 @@ struct LatentCommands: Commands {
             Divider()
             item("Copy Settings", .copySettings)
             item("Paste Settings", .pasteSettings)
+            item(HistoryCommand.pasteOverwrite.title, .history(.pasteOverwrite))
+            item(HistoryCommand.copySelective.title, .history(.copySelective))
+            item(HistoryCommand.pasteSelective.title, .history(.pasteSelective))
+            item(HistoryCommand.syncLastChange.title, .history(.syncLastChange))
             CullingSelectMenu { AnyView(item($0, $1)) }
             item("Paste Settings From Previous", .pasteFromPrevious)
         }
@@ -449,6 +455,8 @@ struct LatentCommands: Commands {
             item("Create Virtual Copy", .createVirtualCopy)
             item("Set Copy as Master", .setCopyAsMaster)
             item("Remove Virtual Copy", .removeVirtualCopy)
+            item(HistoryCommand.newBlankCopy.title, .history(.newBlankCopy))
+            item(HistoryCommand.resetEdits.title, .history(.resetEdits))
             Divider()
             StackingMenu { AnyView(item($0, $1)) }
             Divider()

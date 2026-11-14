@@ -37,6 +37,38 @@ enum BeforeAfterLayout: String, CaseIterable, Identifiable {
         default: nil
         }
     }
+
+    /// The same with the line at `split` (0.05 to 0.95) of the view across
+    /// or down, as the split line's drag leaves it; at 0.5 it is
+    /// `afterFraction` exactly.
+    func afterFraction(split: CGFloat) -> CGRect? {
+        let s = BeforeAfterSplit.clamped(split)
+        switch self {
+        case .leftRightSplit: return CGRect(x: s, y: 0, width: 1 - s, height: 1)
+        case .topBottomSplit: return CGRect(x: 0, y: s, width: 1, height: 1 - s)
+        default: return nil
+        }
+    }
+}
+
+/// Where a split Before/After view divides: a fraction of the view across
+/// (Left / Right Split) or down (Top / Bottom Split), dragged with the
+/// line, the middle by default and again on a double-click.
+enum BeforeAfterSplit {
+    static let centre: CGFloat = 0.5
+    static let range: ClosedRange<CGFloat> = 0.05...0.95
+
+    static func clamped(_ value: CGFloat) -> CGFloat {
+        guard value.isFinite else { return centre }
+        return min(max(value, range.lowerBound), range.upperBound)
+    }
+
+    /// The fraction for a drag at `location` in a view of `size`.
+    static func fraction(at location: CGPoint, in size: CGSize, stacked: Bool) -> CGFloat {
+        let length = stacked ? size.height : size.width
+        guard length > 0 else { return centre }
+        return clamped((stacked ? location.y : location.x) / length)
+    }
 }
 
 /// Reference view: the reference beside the active photo, or above it.
@@ -139,6 +171,13 @@ final class DevelopViewState: ObservableObject {
     }
     @Published var referenceLayout: ReferenceLayout {
         didSet { defaults.set(referenceLayout.rawValue, forKey: Key.referenceLayout) }
+    }
+    /// Where the split layouts divide (BeforeAfterSplit), for the session.
+    @Published var splitFraction: CGFloat = BeforeAfterSplit.centre {
+        didSet {
+            let clamped = BeforeAfterSplit.clamped(splitFraction)
+            if clamped != splitFraction { splitFraction = clamped }
+        }
     }
     @Published private(set) var reference: ImageRecord?
     @Published var referenceLocked: Bool {
@@ -377,6 +416,18 @@ final class DevelopViewState: ObservableObject {
 
     // MARK: Commands
 
+    /// Compare as Before in the History panel: the snapshot becomes the
+    /// Before, and with one image showing, Left / Right Split shows it.
+    /// A Before/After layout already showing stays.
+    func compareSnapshot(_ snapshot: EditSnapshot) {
+        guard let main, main.hasImage else { return }
+        main.compareSnapshotAsBefore(snapshot)
+        if kind != .beforeAfter {
+            beforeAfterLayout = .leftRightSplit
+            setKind(.beforeAfter)
+        }
+    }
+
     func perform(_ command: ViewCommand, load: (ImageRecord) -> Void) {
         let overlay = LoupeOverlaySettings.shared
         switch command {
@@ -508,19 +559,19 @@ struct DevelopImageArea: View {
     @ViewBuilder
     private var beforeAfter: some View {
         let layout = state.beforeAfterLayout
-        if let fraction = layout.afterFraction {
+        if let fraction = layout.afterFraction(split: state.splitFraction) {
             ZStack {
                 beforePane
                 ImageViewport(model: model, mirror: state.pane, showsLoupeOverlay: true, visibleFraction: fraction)
-                SplitLine(stacked: layout.isStacked)
-                    .allowsHitTesting(false)
-                PaneLabels(first: "Before", second: "After", stacked: layout.isStacked)
+                SplitLine(stacked: layout.isStacked, fraction: $state.splitFraction)
+                PaneLabels(first: model.beforeLabel, second: "After", stacked: layout.isStacked,
+                           fraction: state.splitFraction)
                     .allowsHitTesting(false)
             }
         } else {
             stack(stacked: layout.isStacked) {
                 beforePane
-                    .overlay(alignment: .topLeading) { PaneLabel(text: "Before") }
+                    .overlay(alignment: .topLeading) { PaneLabel(text: model.beforeLabel) }
                 ImageViewport(model: model, mirror: state.pane, showsLoupeOverlay: true)
                     .overlay(alignment: .topLeading) { PaneLabel(text: "After") }
             }
@@ -553,8 +604,10 @@ struct DevelopImageArea: View {
             Button("Swap") { state.perform(.swapBeforeAfter, load: { _ in }) }
                 .help("Exchange the Before and After settings")
             if model.hasCustomBefore {
-                Button("Reset Before") { state.perform(.resetBefore, load: { _ in }) }
-                    .help("The Before goes back to the unedited photo")
+                Button(model.beforeSnapshotName == nil ? "Reset Before" : "Clear Before") {
+                    state.perform(.resetBefore, load: { _ in })
+                }
+                .help("The Before goes back to the unedited photo")
             }
             Spacer()
             Button("Done") { state.perform(.beforeAfter(nil), load: { _ in }) }
@@ -679,38 +732,80 @@ private struct PaneLabel: View {
     }
 }
 
-/// A split view's two labels, each in its own half.
+/// A split view's two labels, each in its own part.
 private struct PaneLabels: View {
     let first: String
     let second: String
     let stacked: Bool
+    var fraction: CGFloat = BeforeAfterSplit.centre
     var body: some View {
         GeometryReader { geo in
             PaneLabel(text: first)
-                .position(x: 50, y: 20)
+                .fixedSize()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             PaneLabel(text: second)
-                .position(x: stacked ? 50 : geo.size.width / 2 + 50, y: stacked ? geo.size.height / 2 + 20 : 20)
+                .fixedSize()
+                .offset(x: stacked ? 0 : geo.size.width * fraction, y: stacked ? geo.size.height * fraction : 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 }
 
-/// The line between a split view's halves.
+/// The line between a split view's parts. It takes the pointer only in a
+/// narrow band along itself, so the image keeps every other click: drag it
+/// to move the split (with the resize pointer over it), double-click it to
+/// put it back in the middle.
 private struct SplitLine: View {
     let stacked: Bool
+    @Binding var fraction: CGFloat
+    /// How wide the band that takes the pointer is, in points.
+    private static let grab: CGFloat = 9
+
     var body: some View {
         GeometryReader { geo in
+            let at = (stacked ? geo.size.height : geo.size.width) * fraction
             Path { path in
                 if stacked {
-                    path.move(to: CGPoint(x: 0, y: geo.size.height / 2))
-                    path.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height / 2))
+                    path.move(to: CGPoint(x: 0, y: at))
+                    path.addLine(to: CGPoint(x: geo.size.width, y: at))
                 } else {
-                    path.move(to: CGPoint(x: geo.size.width / 2, y: 0))
-                    path.addLine(to: CGPoint(x: geo.size.width / 2, y: geo.size.height))
+                    path.move(to: CGPoint(x: at, y: 0))
+                    path.addLine(to: CGPoint(x: at, y: geo.size.height))
                 }
             }
             .stroke(Color.white.opacity(0.85), lineWidth: 1)
+            .allowsHitTesting(false)
+            Color.clear
+                .frame(width: stacked ? geo.size.width : Self.grab, height: stacked ? Self.grab : geo.size.height)
+                .contentShape(Rectangle())
+                .position(x: stacked ? geo.size.width / 2 : at, y: stacked ? at : geo.size.height / 2)
+                .onHover { inside in
+                    if inside {
+                        (stacked ? NSCursor.resizeUpDown : NSCursor.resizeLeftRight).push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+                .onTapGesture(count: 2) { fraction = BeforeAfterSplit.centre }
+                .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .named(Self.space))
+                    .onChanged { drag in
+                        fraction = BeforeAfterSplit.fraction(at: drag.location, in: geo.size, stacked: stacked)
+                    })
+                .accessibilityElement()
+                .accessibilityLabel("Split line")
+                .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
+                .accessibilityAdjustableAction { direction in
+                    switch direction {
+                    case .increment: fraction = BeforeAfterSplit.clamped(fraction + 0.05)
+                    case .decrement: fraction = BeforeAfterSplit.clamped(fraction - 0.05)
+                    @unknown default: break
+                    }
+                }
         }
+        .coordinateSpace(name: Self.space)
     }
+
+    private static let space = "before-after-split"
 }
 
 // MARK: - Menus
