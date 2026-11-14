@@ -421,7 +421,7 @@ final class EditorModel: ObservableObject {
 
     /// `colourSample` is the Colour Range eyedropper; `box` drags a
     /// Select Objects rectangle (EditorModel+MaskComponents.swift).
-    enum MaskTool: String, CaseIterable { case none, linear, radial, brush, erase, prompt, colourSample, box }
+    enum MaskTool: String, CaseIterable { case none, linear, radial, brush, erase, prompt, colourSample, box, lumaSample }
 
     @Published var selectedLocalIndex: Int? {
         didSet {
@@ -446,6 +446,16 @@ final class EditorModel: ObservableObject {
     /// The last scene-linear analysis render the Colour Range eyedropper
     /// read, kept while the edit outside the masks stays the same.
     var colourSampleCache: ColourSampleCache?
+    /// The handle being dragged and the last shape a kept-armed tool
+    /// placed (EditorModel+MaskShapes.swift).
+    var maskShapeEditing = MaskShapeEditing()
+    /// The value a selected Luminance or Channel Range reads under the
+    /// pointer, for the readout beside its range; nil off the image.
+    @Published var maskRangeProbe: Float?
+    /// Show Channel: the selected range component's input drawn as a grey.
+    @Published var showMaskChannel = false {
+        didSet { if showMaskChannel != oldValue { rerender() } }
+    }
     @Published var maskTool: MaskTool = .none {
         didSet {
             guard maskTool != .none, maskTool != oldValue else { return }

@@ -16,6 +16,8 @@ struct ColourSampleCache {
 /// The kinds of component the Add, Subtract and Intersect menus offer.
 enum MaskComponentKind {
     case brush, linear, radial, colourRange, luminanceRange
+    /// One channel (Red … Lab Chroma) between two values (ChannelRange.swift).
+    case channelRange
     case subject(ModelEntry)
     case aiClass(AIMaskKind)
     case clickToSelect(ModelEntry)
@@ -103,6 +105,8 @@ extension EditorModel {
             source = .colour(ColourRange()); tool = .colourSample
         case .luminanceRange:
             source = .luminance(LuminanceRange(low: 0.5, high: 1, feather: 0.1))
+        case .channelRange:
+            source = .channel(ChannelRange())
         case .subject(let entry):
             source = .shape(.ai(kind: AIMaskKind.subject.rawValue, modelVersion: entry.modelVersion))
         case .aiClass(let kind):
@@ -193,7 +197,7 @@ extension EditorModel {
 
     /// The scene-linear working-space colour at a normalised point, from
     /// a small render of the edit without its locals.
-    private func workingColour(at point: SIMD2<Float>) -> SIMD3<Float>? {
+    func workingColour(at point: SIMD2<Float>) -> SIMD3<Float>? {
         guard let session, let pipeline, let gpu = gpuContext else { return nil }
         var key = parameters
         key.locals = []

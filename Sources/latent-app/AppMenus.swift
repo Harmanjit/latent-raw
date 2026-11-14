@@ -120,6 +120,7 @@ struct CommandState: Equatable {
         case .toolSize: mode == .develop && toolSizeAdjustable
         case .addMask: mode == .develop && canAddMask
         case .toggleMaskOverlay: mode == .develop && hasSelectedMask
+        case .toggleMaskChannel: mode == .develop && hasSelectedMask
         case .toggleBlackAndWhite: mode == .develop && hasImage
         case .toggleClipping, .whiteBalanceSelector: mode == .develop && hasImage
         case .toggleSoftProof: mode == .develop && hasImage
@@ -485,6 +486,7 @@ struct LatentCommands: Commands {
                 item("New Click to Select", .addMask(.prompt))
                 Divider()
                 toolToggle("Show Mask Overlay", .toggleMaskOverlay, isOn: state.showMaskOverlay)
+                item("Show Mask Channel", .toggleMaskChannel)
             }
             Divider()
             item("Smaller Brush", .toolSize(-1))

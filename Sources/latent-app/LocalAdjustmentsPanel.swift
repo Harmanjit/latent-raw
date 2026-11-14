@@ -219,21 +219,28 @@ struct LocalAdjustmentsPanel: View {
         case .linear:
             toolHint("Drag on the image from where the effect is full to where it ends.",
                      tool: .linear, label: "Place gradient")
-        case .radial(let c, let r, let feather):
+            MaskShapeToolOptions(model: model)
+        case .radial(let c, let r, let feather, let angle):
             toolHint("Drag from the centre outward to draw; drag inside the circle to move it.",
                      tool: .radial, label: "Place or move")
             slider("Width", Binding(
                 get: { r.x },
-                set: { model.setActiveMaskShape(.radial(centre: c, radii: SIMD2($0, r.y), feather: feather)) }),
+                set: { model.setActiveMaskShape(.radial(centre: c, radii: SIMD2($0, r.y), feather: feather, angle: angle)) }),
                    0.01...1, "%.2f", 0.3)
             slider("Height", Binding(
                 get: { r.y },
-                set: { model.setActiveMaskShape(.radial(centre: c, radii: SIMD2(r.x, $0), feather: feather)) }),
+                set: { model.setActiveMaskShape(.radial(centre: c, radii: SIMD2(r.x, $0), feather: feather, angle: angle)) }),
                    0.01...1, "%.2f", 0.3)
             slider("Feather", Binding(
                 get: { feather },
-                set: { model.setActiveMaskShape(.radial(centre: c, radii: r, feather: $0)) }),
+                set: { model.setActiveMaskShape(.radial(centre: c, radii: r, feather: $0, angle: angle)) }),
                    0...1, "%.2f", 0.5)
+            slider("Angle", Binding(
+                get: { angle ?? 0 },
+                set: { model.setActiveMaskShape(element.shape.withRadialAngle($0)) }),
+                   -180...180, "%+.0f°", 0)
+                .help("Turns the ellipse; drag the handle above it on the image to do the same")
+            MaskShapeToolOptions(model: model)
         case .brush:
             VStack(alignment: .leading, spacing: 6) {
                 Picker("Brush tool", selection: $model.maskTool) {
@@ -397,9 +404,10 @@ struct LocalAdjustmentsPanel: View {
             let lr = Binding(get: { binding.wrappedValue.luminanceRange ?? LuminanceRange() },
                              set: { binding.wrappedValue.luminanceRange = $0 })
             let lrDefault = LuminanceRange()
+            MaskRangeEditor(model: model, band: lr.band, channel: nil, probes: model.selectedMaskComponent == nil)
             slider("Low", lr.low, 0...1, "%.2f", lrDefault.low)
             slider("High", lr.high, 0...1, "%.2f", lrDefault.high)
-            slider("Feather", lr.feather, 0.01...0.5, "%.2f", lrDefault.feather)
+            slider("Feather", lr.bothFeathers, 0.01...0.5, "%.2f", lrDefault.feather)
         }
         Toggle("Hue range", isOn: hueOn).toggleStyle(.checkbox).controlSize(.small)
         if binding.wrappedValue.hueRange != nil {

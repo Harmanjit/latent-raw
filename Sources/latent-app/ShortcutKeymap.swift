@@ -433,6 +433,7 @@ extension Keymap {
             c("maskSubject", .addMask(.subject), "New Subject Mask", develop, in: .develop),
             c("maskPrompt", .addMask(.prompt), "New Click to Select", develop, in: .develop),
             c("toggleMaskOverlay", .toggleMaskOverlay, "Show Mask Overlay", develop, in: .develop),
+            c("toggleMaskChannel", .toggleMaskChannel, "Show Mask Channel", develop, in: .develop),
             c("openFile", .openFile, "Open File…", files),
             c("exportOpenImage", .exportOpenImage, "Export Open Image…", export),
             c("contactSheet", .contactSheet, "Contact Sheet…", export),

@@ -75,6 +75,10 @@ struct MetalImageView: NSViewRepresentable {
     /// Only this part of the view shows, as fractions of it (a
     /// Before/After split); nil, all of it.
     var visibleFraction: CGRect? = nil
+    /// A mouse-wheel notch while a tool is armed: the point (device
+    /// pixels), the delta and whether ⇧ was held. True when the tool took
+    /// it (a mask shape's feather); false lets the wheel pan as usual.
+    var onToolScroll: ((CGPoint, CGFloat, Bool) -> Bool)? = nil
 
     func makeNSView(context: Context) -> MetalLayerView {
         let view = MetalLayerView()
@@ -101,6 +105,7 @@ struct MetalImageView: NSViewRepresentable {
         view.onPointer = onPointer
         view.mirrored = mirrored
         view.visibleFraction = visibleFraction
+        view.onToolScroll = onToolScroll
         view.display(preview: preview, tile: tile, transform: transform, frame: frame,
                      magnifierTile: magnifierTile)
     }
@@ -200,6 +205,7 @@ final class MetalLayerView: NSView {
     var onToolBegan: ((CGPoint, Bool) -> Void)?
     var onToolMoved: ((CGPoint) -> Void)?
     var onToolEnded: (() -> Void)?
+    var onToolScroll: ((CGPoint, CGFloat, Bool) -> Bool)?
 
     /// Top-left origin, like the Metal drawable. Without this AppKit puts
     /// (0,0) at the bottom-left and every y coordinate would need
@@ -459,6 +465,12 @@ final class MetalLayerView: NSView {
     override func scrollWheel(with event: NSEvent) {
         guard magnifier == nil else { return }
         let flags = event.modifierFlags
+        // A mouse wheel (not a trackpad, which keeps panning) over an armed
+        // mask shape changes its feather. ⇧ turns the wheel sideways.
+        if toolActive, !event.hasPreciseScrollingDeltas, let onToolScroll {
+            let delta = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.scrollingDeltaX
+            if delta != 0, onToolScroll(screenPoint(for: event), delta, flags.contains(.shift)) { return }
+        }
         let scroll = ViewerInteraction.WheelEvent(
             precise: event.hasPreciseScrollingDeltas,
             delta: CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY),

@@ -115,6 +115,7 @@ extension EditorModel {
         if pointerOverImage != (screen != nil) { pointerOverImage = screen != nil }
         let readout = screen.flatMap { displayedPixel(atScreen: $0) }.map { PixelReadout(linearDisplayP3: $0) }
         if pixelProbe.readout != readout { pixelProbe.readout = readout }
+        updateMaskRangeProbe(atScreen: screen)
     }
 
     // MARK: - Clipping overlay

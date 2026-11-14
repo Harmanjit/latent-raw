@@ -31,6 +31,9 @@ extension EditorModel {
         case .colourSample:
             addColourRangeMask()
             return
+        case .lumaSample:
+            addLuminanceRangeMask()
+            return
         case .box:
             if let entry = ModelRegistry.shared.defaultPrompted() { addObjectsMask(model: entry) }
             return
@@ -444,7 +447,8 @@ extension EditorModel {
     }
 
     func maskToolBegan(at screen: CGPoint) {
-        guard let element = activeMaskElement else { return }
+        guard let pressed = activeMaskElement else { return }
+        var element = pressed
         if maskTool == .prompt {
             promptClick(at: screen, foreground: !promptModifierExclude)
             return
@@ -454,6 +458,10 @@ extension EditorModel {
             sampleColour(at: p)
             return
         }
+        if maskTool == .lumaSample {
+            beginRangeSample(at: p)
+            return
+        }
         if maskTool == .box {
             guard case .prompted = element.shape else { return }
             isDraggingMask = true
@@ -461,17 +469,30 @@ extension EditorModel {
             maskDragBox = CGRect(x: CGFloat(p.x), y: CGFloat(p.y), width: 0, height: 0)
             return
         }
-        isDraggingMask = true
         radialMoveOffset = nil
+        maskShapeEditing.drag = nil
+        // A handle on the placed gradient or radial reshapes it.
+        if beginMaskHandleDrag(atScreen: screen, normalized: p) {
+            isDraggingMask = true
+            return
+        }
+        // With the tool kept armed, a press away from the shape it placed
+        // starts another one, drawn from here.
+        var spawned = false
+        if let fresh = spawnShapeIfKeptArmed(from: element, at: p) {
+            element = fresh
+            spawned = true
+        }
+        isDraggingMask = true
         // A tool only reshapes an element of its own kind: one left armed
         // over another must never turn its strokes or model mask into a
         // gradient.
         switch (maskTool, element.shape) {
         case (.linear, .linear):
             setActiveMaskShape(.linear(start: p, end: p))
-        case (.radial, .radial(let centre, let radii, let feather)):
+        case (.radial, .radial(let centre, let radii, let feather, _)):
             // A press inside a placed ellipse moves it; outside, draws anew.
-            if isInside(p, centre: centre, radii: radii), max(radii.x, radii.y) > 0.006 {
+            if !spawned, element.shape.contains(p, sensorSize: sensorSizeVector), max(radii.x, radii.y) > 0.006 {
                 radialMoveOffset = p - centre
             } else {
                 setActiveMaskShape(.radial(centre: p, radii: SIMD2(0.001, 0.001), feather: feather))
@@ -488,28 +509,20 @@ extension EditorModel {
         }
     }
 
-    /// Whether a normalised point is inside an ellipse whose radii are
-    /// fractions of the short side.
-    private func isInside(_ p: SIMD2<Float>, centre: SIMD2<Float>, radii: SIMD2<Float>) -> Bool {
-        let short = Float(min(sensorSize.width, sensorSize.height))
-        guard short > 0 else { return false }
-        let d = (p - centre) * SIMD2(Float(sensorSize.width), Float(sensorSize.height)) / (radii * short)
-        return d.x * d.x + d.y * d.y <= 1
-    }
-
     func maskToolMoved(to screen: CGPoint) {
         guard isDraggingMask, let element = activeMaskElement else { return }
         let p = sensorNormalized(screen)
+        if moveMaskHandle(to: p) { return }
         switch (maskTool, element.shape) {
-        case (.box, _):
+        case (.box, _), (.lumaSample, _):
             guard let start = lastDab else { return }
             maskDragBox = CGRect(x: CGFloat(min(start.x, p.x)), y: CGFloat(min(start.y, p.y)),
                                  width: CGFloat(abs(p.x - start.x)), height: CGFloat(abs(p.y - start.y)))
         case (.linear, .linear(let start, _)):
             setActiveMaskShape(.linear(start: start, end: p))
-        case (.radial, .radial(let centre, let radii, let feather)):
+        case (.radial, .radial(let centre, let radii, let feather, let angle)):
             if let offset = radialMoveOffset {
-                setActiveMaskShape(.radial(centre: p - offset, radii: radii, feather: feather))
+                setActiveMaskShape(.radial(centre: p - offset, radii: radii, feather: feather, angle: angle))
                 return
             }
             // Distance in sensor pixels as a fraction of the short side, so
@@ -517,7 +530,7 @@ extension EditorModel {
             // Height in the panel make it an ellipse.
             let d = (p - centre) * SIMD2(Float(sensorSize.width), Float(sensorSize.height))
             let r = max((d.x * d.x + d.y * d.y).squareRoot() / Float(min(sensorSize.width, sensorSize.height)), 0.005)
-            setActiveMaskShape(.radial(centre: centre, radii: SIMD2(r, r), feather: feather))
+            setActiveMaskShape(.radial(centre: centre, radii: SIMD2(r, r), feather: feather, angle: angle))
         case (.brush, .brush(var strokes)), (.erase, .brush(var strokes)):
             // Space dabs at a quarter radius so the stroke reads as continuous.
             guard var last = strokes.popLast() else { return }
@@ -543,12 +556,18 @@ extension EditorModel {
 
     func maskToolEnded() {
         if maskTool == .box, let box = maskDragBox { finishObjectBox(box) }
+        if maskTool == .lumaSample, let box = maskDragBox { finishRangeSample(box) }
         maskDragBox = nil
         isDraggingMask = false
         lastDab = nil
         radialMoveOffset = nil
+        maskShapeEditing.drag = nil
         // A gradient or radial is placed once; further drags would move it
         // again, which is rarely what's wanted. Brushes keep painting.
-        if maskTool == .linear || maskTool == .radial { maskTool = .none }
+        // Keep tool armed (EditorModel+MaskShapes.swift) leaves it armed,
+        // and the next drag away from this shape places another.
+        if maskTool == .linear || maskTool == .radial {
+            if keepMaskToolArmed { maskShapeEditing.placedElement = activeMaskElement?.id } else { maskTool = .none }
+        }
     }
 }

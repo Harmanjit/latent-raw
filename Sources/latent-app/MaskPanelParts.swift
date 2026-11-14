@@ -114,7 +114,8 @@ struct MaskComponentList: View {
             }
             row(id: nil, title: local.shape.componentName, mode: nil, invert: local.invert)
             ForEach(local.components) { component in
-                row(id: component.id, title: component.displayName, mode: component.mode, invert: component.invert)
+                row(id: component.id, title: component.displayName, mode: component.mode, invert: component.invert,
+                    showsChannel: component.showsChannel)
             }
         }
     }
@@ -126,6 +127,7 @@ struct MaskComponentList: View {
             Button("Radial Gradient") { model.addMaskComponent(.radial, mode: mode) }
             Button("Colour Range") { model.addMaskComponent(.colourRange, mode: mode) }
             Button("Luminance Range") { model.addMaskComponent(.luminanceRange, mode: mode) }
+            Button("Channel Range") { model.addMaskComponent(.channelRange, mode: mode) }
             Divider()
             if let subject = ModelMenus.defaultEntry(kind: .subjectSegmentation, registry: .shared) {
                 Button("Subject") { model.addMaskComponent(.subject(subject), mode: mode) }
@@ -150,7 +152,8 @@ struct MaskComponentList: View {
         .accessibilityLabel("\(mode.displayName) a component")
     }
 
-    private func row(id: UUID?, title: String, mode: MaskCombineMode?, invert: Bool) -> some View {
+    private func row(id: UUID?, title: String, mode: MaskCombineMode?, invert: Bool,
+                     showsChannel: Bool = false) -> some View {
         let selected = model.selectedMaskComponentID == id
         return HStack(spacing: 6) {
             if let mode, let id {
@@ -169,6 +172,9 @@ struct MaskComponentList: View {
             }
             Text(title).font(.caption)
             Spacer()
+            if showsChannel, let id {
+                MaskChannelViewButton(model: model, component: id, title: title)
+            }
             Toggle("Invert", isOn: Binding(get: { invert }, set: { setInvert($0, of: id) }))
                 .toggleStyle(.checkbox).font(.caption2)
                 .help("Invert this component")
@@ -238,10 +244,14 @@ struct MaskRangeComponentControls: View {
             }
         case .luminance(let band):
             VStack(alignment: .leading, spacing: 6) {
+                MaskRangeEditor(model: model, band: lumBand(band), channel: nil, probes: true)
                 LocalSliderRow(title: "Low", value: lum(\.low, band), range: 0...1, format: "%.2f", defaultValue: 0.5)
                 LocalSliderRow(title: "High", value: lum(\.high, band), range: 0...1, format: "%.2f", defaultValue: 1)
-                LocalSliderRow(title: "Feather", value: lum(\.feather, band), range: 0.01...0.5, format: "%.2f", defaultValue: 0.1)
+                LocalSliderRow(title: "Feather", value: lum(\.bothFeathers, band), range: 0.01...0.5, format: "%.2f",
+                               defaultValue: 0.1, help: "Both fades at once; drag the outer handles above to set them apart")
             }
+        case .channel(let range):
+            ChannelRangeControls(model: model, range: range, update: { update(.channel($0)) })
         case .shape:
             EmptyView()
         }
@@ -258,6 +268,10 @@ struct MaskRangeComponentControls: View {
 
     private func lum(_ key: WritableKeyPath<LuminanceRange, Float>, _ band: LuminanceRange) -> Binding<Float> {
         Binding(get: { band[keyPath: key] }, set: { var b = band; b[keyPath: key] = $0; update(.luminance(b)) })
+    }
+
+    private func lumBand(_ range: LuminanceRange) -> Binding<MaskRangeBand> {
+        Binding(get: { range.band }, set: { var r = range; r.band = $0; update(.luminance(r)) })
     }
 }
 

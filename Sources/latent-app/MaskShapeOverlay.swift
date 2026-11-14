@@ -27,16 +27,17 @@ struct MaskShapeOverlay: View {
                 }
                 guard let element = model.activeMaskElement else { return }
                 switch element.shape {
-                case .radial(let centre, let radii, let feather):
-                    let short = Float(min(model.sensorSize.width, model.sensorSize.height))
-                    let w = Float(max(model.sensorSize.width, 1)), h = Float(max(model.sensorSize.height, 1))
+                case .radial(let centre, let radii, let feather, let angle):
+                    let size = model.sensorSizeVector
                     // Sample the ellipse in sensor space so rotation and
-                    // crop carry it correctly to the screen.
+                    // crop carry it correctly to the screen; a turned
+                    // ellipse is turned there (MaskShapeGeometry.swift).
                     for (fraction, dashed) in [(Float(1), false), (1 - min(max(feather, 0), 0.999), true)] {
                         var path = Path()
                         for k in 0...48 {
                             let t = Float(k) / 48 * 2 * .pi
-                            let p = centre + SIMD2(cos(t) * radii.x * short / w, sin(t) * radii.y * short / h) * fraction
+                            let p = MaskShape.radialPoint(centre: centre, radii: radii, angle: angle ?? 0, t: t,
+                                                          fraction: fraction, sensorSize: size)
                             let s = point(p, scale: scale)
                             if k == 0 { path.move(to: s) } else { path.addLine(to: s) }
                         }
@@ -44,6 +45,9 @@ struct MaskShapeOverlay: View {
                     }
                     let c = point(centre, scale: scale)
                     context.fill(Path(ellipseIn: CGRect(x: c.x - 3, y: c.y - 3, width: 6, height: 6)), with: .color(.white))
+                    if model.maskHandlesActive {
+                        drawHandles(element.shape, scale: scale, context: context, stroke: stroke)
+                    }
                 case .linear(let start, let end):
                     let d = end - start
                     // Lines across the frame at the start and the end,
@@ -59,12 +63,41 @@ struct MaskShapeOverlay: View {
                         path.addLine(to: point(p + across, scale: scale))
                         stroke(path, dashed: dashed)
                     }
+                    if model.maskHandlesActive {
+                        drawHandles(element.shape, scale: scale, context: context, stroke: stroke)
+                    }
                 default:
                     break
                 }
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+        }
+    }
+
+    /// The shape's handles (MaskShapeGeometry.swift), while its tool is
+    /// armed and they can be dragged: round for the points on the shape,
+    /// a ring for a radial's rotate handle, joined to the outline.
+    private func drawHandles(_ shape: MaskShape, scale: CGFloat, context: GraphicsContext,
+                             stroke: (Path, Bool) -> Void) {
+        let handles = shape.handlePositions(sensorSize: model.sensorSizeVector)
+        if let rotate = handles.first(where: { $0.handle == .radialRotate }),
+           case .radial(let c, let r, _, let a) = shape {
+            let top = MaskShape.radialPoint(centre: c, radii: r, angle: a ?? 0, t: -.pi / 2, sensorSize: model.sensorSizeVector)
+            var line = Path()
+            line.move(to: point(top, scale: scale))
+            line.addLine(to: point(rotate.point, scale: scale))
+            stroke(line, true)
+        }
+        for (handle, p) in handles where handle != .radialCentre {
+            let s = point(p, scale: scale)
+            let rect = CGRect(x: s.x - 4.5, y: s.y - 4.5, width: 9, height: 9)
+            context.fill(Path(ellipseIn: rect.insetBy(dx: -1.5, dy: -1.5)), with: .color(.black.opacity(0.5)))
+            if handle == .radialRotate || handle == .radialFeather {
+                context.stroke(Path(ellipseIn: rect), with: .color(.white), lineWidth: 2)
+            } else {
+                context.fill(Path(ellipseIn: rect), with: .color(.white))
+            }
         }
     }
 

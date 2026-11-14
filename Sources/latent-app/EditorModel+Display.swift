@@ -35,6 +35,7 @@ extension EditorModel {
             output.maskOverlay = i
             output.maskOverlayStyle = MaskOverlaySettings.shared.style
         }
+        applyMaskChannelView(to: &output)
         // Before, while proofing, can be the edit without the proof.
         output.proof = showsUnproofedBefore ? nil : proofLUT
         output.gamutWarningColours = gamutWarningColours

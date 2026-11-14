@@ -1364,6 +1364,8 @@ struct ContentView: View {
             }
         case .toggleMaskOverlay:
             model.showMaskOverlay.toggle()
+        case .toggleMaskChannel:
+            model.showMaskChannel.toggle()
         case .toggleBlackAndWhite:
             model.toggleBlackAndWhite()
         case .toggleClipping:
