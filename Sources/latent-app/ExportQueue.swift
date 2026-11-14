@@ -77,6 +77,9 @@ struct ExportPreset: Codable, Equatable {
     /// (ExportToCatalog.swift). Off in older presets.
     var addToCatalog = false
     var stackWithOriginal: ExportStackPlacement = .off
+    /// Borders, PDF and OpenEXR, bit depths, the rendering intent, sizes
+    /// in cm or inches and the metadata extras (ExportPreset+Formats.swift).
+    var formats = ExportFormatOptions()
 
     var settings: ExportSettings {
         var s = ExportSettings(format: format, quality: quality, hdrGainMap: hdrGainMap,
@@ -135,7 +138,8 @@ struct ExportPreset: Codable, Equatable {
         sharpenStrength = (try? c.decodeIfPresent(OutputSharpening.Strength.self, forKey: .sharpenStrength)) ?? .standard
         sizeLimitEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .sizeLimitEnabled)) ?? false
         sizeLimitKB = max((try? c.decodeIfPresent(Int.self, forKey: .sizeLimitKB)) ?? 500, 1)
-        tiffBitDepth = (try? c.decodeIfPresent(Int.self, forKey: .tiffBitDepth)) == 8 ? 8 : 16
+        let tiffBits = (try? c.decodeIfPresent(Int.self, forKey: .tiffBitDepth)) ?? 16
+        tiffBitDepth = tiffBits == 8 || tiffBits == 32 ? tiffBits : 16
         tiffCompression = (try? c.decodeIfPresent(TIFFCompression.self, forKey: .tiffCompression)) ?? .none
         location = (try? c.decodeIfPresent(ExportLocation.self, forKey: .location)) ?? .chosenFolder
         subfolder = (try? c.decodeIfPresent(String.self, forKey: .subfolder)) ?? ""
@@ -144,10 +148,11 @@ struct ExportPreset: Codable, Equatable {
         openInAppPath = (try? c.decodeIfPresent(String.self, forKey: .openInAppPath)) ?? nil
         addToCatalog = (try? c.decodeIfPresent(Bool.self, forKey: .addToCatalog)) ?? false
         stackWithOriginal = (try? c.decodeIfPresent(ExportStackPlacement.self, forKey: .stackWithOriginal)) ?? .off
+        formats = (try? c.decodeIfPresent(ExportFormatOptions.self, forKey: .formats)) ?? ExportFormatOptions()
     }
 
     var fileExtension: String {
-        let ext = fileKind == .dng ? "dng" : settings.format.fileExtension
+        let ext = fileKind == .dng ? "dng" : fileKind == .pdf ? "pdf" : settings.format.fileExtension
         return uppercaseExtension ? ext.uppercased() : ext
     }
 
@@ -405,6 +410,7 @@ final class ExportQueue: ObservableObject {
                                             captureTime: record.captureTime ?? 0,
                                             sidecar: sidecar)
                     job.dngContent = preset.dngContent
+                    job.pdf = preset.pdfJob(for: record, index: index, catalogName: catalogName)
                     outcome = await Task.detached(priority: .userInitiated) {
                         do { return .success(try await job.run(gpu: gpu)) }
                         catch { return .failure(error) }
@@ -612,10 +618,12 @@ struct ExportSheet: View {
                 groupLabel("Image Sizing")
                 ExportSizingSection(preset: $preset)
                 ExportSharpeningSection(preset: $preset)
+                ExportBorderSection(preset: $preset)
                 ExportWatermarkSection(preset: $preset)
                 ExportMetadataSection(preset: $preset)
             } else {
                 if preset.fileKind == .dng { ExportDNGSection(preset: $preset) }
+                if preset.fileKind == .pdf { ExportPDFSection(preset: $preset) }
                 ExportKindNote(kind: preset.fileKind, dngContent: preset.dngContent)
             }
 
@@ -888,6 +896,10 @@ struct ExportSheet: View {
                 case .skip where plan.count(.skip) > 0:
                     let n = plan.count(.skip)
                     note("\(images(n)) will be skipped: \(n == 1 ? "its file is" : "their files are") already there.")
+                case .replaceIfChanged where plan.existingCount > 0:
+                    let replaced = plan.count(.replace), skipped = plan.count(.skip)
+                    note("\(replaced) existing file\(replaced == 1 ? "" : "s") will be replaced (edited since) and "
+                         + "\(skipped) skipped (unchanged).")
                 default:
                     EmptyView()
                 }

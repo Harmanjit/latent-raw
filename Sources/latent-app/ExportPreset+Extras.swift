@@ -23,7 +23,7 @@ extension ExportPreset {
             rating: includeMetadata ? record.rating : 0,
             includeMetadata: includeMetadata,
             includeLocation: includeMetadata && includeLocation,
-            replacesExisting: collision == .replace)
+            replacesExisting: collision == .replace || collision == .replaceIfChanged)
         if includeMetadata { request.descriptive = record.exportDescription }
         request.sizing = sizing
         request.sizeLimitBytes = sizeLimitBytes
