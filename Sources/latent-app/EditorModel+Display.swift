@@ -143,6 +143,14 @@ extension EditorModel {
             waveform = scopeCalculator?.computeWaveform(from: analysisTexture, inputIsLinear: true)
         case .vectorscope:
             vectorscope = scopeCalculator?.computeVectorscope(from: analysisTexture, inputIsLinear: true)
+        case .parade:
+            waveform = scopeCalculator?.computeWaveform(from: analysisTexture, inputIsLinear: true)
+        case .waveformVectorscope:
+            waveform = scopeCalculator?.computeWaveform(from: analysisTexture, inputIsLinear: true)
+            vectorscope = scopeCalculator?.computeVectorscope(from: analysisTexture, inputIsLinear: true)
+        case .histogramVectorscope:
+            histogram = histogramCalculator?.compute(from: analysisTexture, inputIsLinear: true)
+            vectorscope = scopeCalculator?.computeVectorscope(from: analysisTexture, inputIsLinear: true)
         }
     }
 }

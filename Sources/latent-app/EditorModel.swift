@@ -416,6 +416,8 @@ final class EditorModel: ObservableObject {
     /// The colour under the pointer, in its own object so moving the
     /// pointer redraws the readout and not the whole window.
     let pixelProbe = PixelProbe()
+    /// Colour samples pinned with Option-click, per session.
+    let colourSamples = ColourSamples()
 
     // MARK: - Local adjustments
 
