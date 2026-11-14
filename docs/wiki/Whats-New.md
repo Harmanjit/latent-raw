@@ -13,6 +13,7 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Title, caption, creator and copyright** for one photo or many, carried into every export. See [Title, caption, creator and copyright](Library#title-caption-creator-and-copyright).
 - **Rename with Template** renames a whole selection from tokens such as `{date}` and `{seq}`, with every new name shown first. See [Moving, copying and renaming](Library#moving-copying-and-renaming).
 - **Virtual copies** (⌘') give one photo several versions with their own edits, sharing the raw file; **Duplicate** makes a real second file. See [Virtual copies](Library#virtual-copies).
+- **Versions** in Develop lists a photo's master and copies with thumbnails and names of their own, and **New Blank Copy** starts a copy from the default edit. See [Virtual copies](Library#virtual-copies).
 - **Stacks**: Group into Stack (⌘G), Unstack (⇧⌘G), S to expand or collapse, Move to Top of Stack, and Auto-Stack by Capture Time, with the stack's count on its thumbnail. Exports can be added to the catalog and stacked with their originals. See [Stacks](Library#stacks).
 
 ## Culling and the grid
@@ -112,6 +113,13 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 
 - **Preset Amount** applies a preset at 0–200% strength, and re-blends the last one live. See [Presets and clipboard](Develop#presets-and-clipboard).
 - **Previous** (⌥⌘V) pastes the settings of the photo selected before this one. See [Presets and clipboard](Develop#presets-and-clipboard).
+- **Paste Settings (Overwrite)** resets every group it doesn't paste. See [Presets and clipboard](Develop#presets-and-clipboard).
+- **Copy Settings… and Paste Settings…** take only the groups you tick, from a checklist that remembers your choice. See [Presets and clipboard](Develop#presets-and-clipboard).
+- **Load Settings from File…** applies the edit from a Latent sidecar or an image carrying Latent's edit. See [Presets and clipboard](Develop#presets-and-clipboard).
+- **Reset Edits** puts a whole selection back to the default edit, keeping ratings, labels and keywords. See [Applying edits to many images](Library#applying-edits-to-many-images).
+- **Sync Last Change to Selection** pastes only the groups the lead photo's last step changed onto the rest of the selection. See [Applying edits to many images](Library#applying-edits-to-many-images).
+- **Compare as Before** shows a snapshot beside the current edit in a split. See [History and snapshots](Develop#history-and-snapshots).
+- **A draggable split line** in Before/After's split layouts; double-click it for the middle. See [Before/After](Develop#beforeafter-and-reference-view).
 - **Process versions**: each edit records which rendering it was made with, shown in Calibration, ready for an Update Process Version dialog when the rendering next changes. See [Process versions](Develop#process-versions).
 - **Customisable shortcuts**: Settings › Keyboard lists every command, searchable and grouped, with click-to-record keys, a warning (and an offer to reassign) when keys are taken, reset one or all, and keymap import and export as JSON. Menu commands without a key can be given one. See [Customising the keys](Keyboard-Shortcuts#customising-the-keys).
 
