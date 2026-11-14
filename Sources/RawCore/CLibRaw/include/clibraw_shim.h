@@ -111,6 +111,20 @@ int clibraw_get_summary(CLibRawHandle *handle, CLibRawSummary *out);
 // which case the caller must fall back to a generic profile).
 int clibraw_get_cam_xyz(CLibRawHandle *handle, float *out12);
 
+// One of the camera's own white balance presets, from its maker notes.
+typedef struct {
+    int32_t illuminant; // EXIF LightSource code (LibRaw LIBRAW_WBI_*), 254 for a colour-temperature entry
+    float   kelvin;     // that entry's temperature; 0 for a light source
+    float   coeffs[4];  // R, G1, B, G2 multipliers, in the maker's own scale
+} CLibRawWBPreset;
+
+// Copies up to `capacity` of the camera's per-illuminant white balance
+// presets (LibRaw's imgdata.color.WB_Coeffs light-source slots, then its
+// WBCT_Coeffs colour-temperature table) into `out`, and returns how many.
+// Available after identify(), so metadata-only opens have them too. 0 for
+// a camera LibRaw has none for.
+int clibraw_get_wb_presets(CLibRawHandle *handle, CLibRawWBPreset *out, int capacity);
+
 // Returns a pointer to LibRaw's internal unpacked sensor buffer (one
 // uint16 per photosite, the whole raw_width x raw_height readout, row by
 // row) without copying it, along with its byte length. The caller cuts

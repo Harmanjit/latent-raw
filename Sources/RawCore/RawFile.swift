@@ -124,6 +124,9 @@ public struct RawSummary: Sendable {
     /// rather than a raw, decoded by ImageIO into a linear source (see
     /// `RawFile+RenderedImage.swift`). nil for every raw and DNG.
     public var renderedImage: RenderedImageInfo? = nil
+    /// The camera's own white balance presets from its maker notes
+    /// (`CameraWhiteBalancePreset`); empty when LibRaw has none.
+    public var cameraWhiteBalancePresets: [CameraWhiteBalancePreset] = []
 }
 
 /// What the file says about the lens, beyond its (often empty) name.
@@ -473,7 +476,7 @@ public final class RawFile {
         // all a DNG can hold, has no room for those, so LibRaw's reading of
         // this file would match lens profiles on less than the source did.
         let recipeLens = mergeInfo?.lens
-        return RawSummary(
+        var summary = RawSummary(
             activeArea: SensorActiveArea(
                 left: Int(c.left_margin), top: Int(c.top_margin), width: Int(c.width), height: Int(c.height),
                 fullWidth: Int(c.raw_width), fullHeight: Int(c.raw_height)),
@@ -494,6 +497,8 @@ public final class RawFile {
                 maxApertureAtMinFocal: Double(c.lens_max_ap_min_focal),
                 maxApertureAtMaxFocal: Double(c.lens_max_ap_max_focal),
                 cropFactor: Double(c.crop_factor)))
+        summary.cameraWhiteBalancePresets = isLinear ? [] : CameraWhiteBalancePreset.read(h)
+        return summary
     }
 
     private static func readPreview(_ h: OpaquePointer) -> (Data?, Int32) {

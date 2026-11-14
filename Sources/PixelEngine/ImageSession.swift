@@ -80,6 +80,11 @@ public final class ImageSession {
     /// uses the exact multipliers instead of routing through this.
     public let asShotWhiteBalance: ColorKit.WhiteBalance
 
+    /// The camera's own white balance presets as temperature and tint,
+    /// for the White Balance menu (CameraWhiteBalanceChoices.swift). Empty
+    /// when the file records none or there is no camera profile.
+    public let cameraWhiteBalanceChoices: [CameraWhiteBalanceChoice]
+
     /// Camera RGB -> linear Rec.2020.
     public var cameraToWorkingMatrix: simd_float3x3? { profile?.cameraToWorking }
 

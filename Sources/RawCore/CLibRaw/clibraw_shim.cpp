@@ -287,6 +287,41 @@ extern "C" int clibraw_get_cam_xyz(CLibRawHandle *handle, float *out12) {
     return 0;
 }
 
+// Whether a WB_Coeffs slot names a light source, as opposed to the
+// camera's own As Shot, Auto, Custom, PC-set or Measured slots, which
+// describe one photo or one user, not the camera's presets.
+static bool clibraw_is_light_source(int code) {
+    return (code >= LIBRAW_WBI_Daylight && code <= LIBRAW_WBI_Flash)
+        || (code >= LIBRAW_WBI_FineWeather && code <= LIBRAW_WBI_StudioTungsten)
+        || (code >= LIBRAW_WBI_Sunset && code <= LIBRAW_WBI_HT_Mercury);
+}
+
+extern "C" int clibraw_get_wb_presets(CLibRawHandle *handle, CLibRawWBPreset *out, int capacity) {
+    if (!handle || !out || capacity <= 0) return 0;
+    auto &color = handle->processor.imgdata.color;
+    int n = 0;
+    // The light sources, in LibRaw's (EXIF LightSource) order.
+    for (int code = 0; code < 256 && n < capacity; code++) {
+        if (!clibraw_is_light_source(code)) continue;
+        const int *c = color.WB_Coeffs[code];
+        if (c[0] <= 0 || c[1] <= 0 || c[2] <= 0) continue;
+        out[n].illuminant = code;
+        out[n].kelvin = 0;
+        for (int i = 0; i < 4; i++) out[n].coeffs[i] = static_cast<float>(c[i]);
+        n++;
+    }
+    // The colour-temperature table some makers record.
+    for (int row = 0; row < 64 && n < capacity; row++) {
+        const float *t = color.WBCT_Coeffs[row];
+        if (!(t[0] > 0) || !(t[1] > 0) || !(t[2] > 0) || !(t[3] > 0)) continue;
+        out[n].illuminant = LIBRAW_WBI_Kelvin;
+        out[n].kelvin = t[0];
+        for (int i = 0; i < 4; i++) out[n].coeffs[i] = t[i + 1];
+        n++;
+    }
+    return n;
+}
+
 extern "C" const uint16_t *clibraw_get_raw_plane(CLibRawHandle *handle, size_t *out_length) {
     if (!handle || !out_length) return nullptr;
     auto &raw = handle->processor.imgdata.rawdata;
