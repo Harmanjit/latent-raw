@@ -112,6 +112,9 @@ enum KeyCommand: Equatable, Sendable {
     /// Photo › Match Total Exposures: the selection's Exposure sliders set
     /// to the lead photo's total exposure (MatchTotalExposures.swift).
     case matchTotalExposures
+    /// Photo › Match Exposures by Histogram…: the same, from each photo's
+    /// pixels rather than its Exif (MatchByHistogram.swift). No shortcut.
+    case matchExposuresByHistogram
     case addMask(NewMask), toggleMaskOverlay
     /// V: the open image's treatment, Color or Black & White.
     case toggleBlackAndWhite

@@ -274,6 +274,7 @@ struct ContentView: View {
                            canApply: !exportQueue.isGPUBusy)
                 .motionFollowsAccessibility()
         }
+        .histogramMatchSheet(queue: selectionJobs, model: model, library: library, canMatch: !exportQueue.isGPUBusy)
         .sheet(item: $templateRenaming) { request in
             TemplateRenameSheet(request: request,
                                 plan: { library.renamePlan(for: request.records, template: $0, customText: $1, start: $2) },
@@ -1294,6 +1295,8 @@ struct ContentView: View {
             FileIntegrityModel.shared.showDuplicates(library: library)
         case .matchTotalExposures:
             MatchTotalExposures.run(library: library) { reportOutcome($0) }
+        case .matchExposuresByHistogram:
+            HistogramMatchPresenter.shared.present(library: library)
         case .flatFieldCorrection:
             // The selection in the grid, where the reference is picked
             // among it; the photo shown in the other views.
