@@ -5,6 +5,8 @@ import Foundation
 /// file could break brought into range.
 extension EditStack {
     public struct Saturation: Codable, Equatable, Sendable { public var amount: Float }
+    /// Gamut Compression's and Highlight Purity's modules, 0…1.
+    public struct ColourAmount: Codable, Equatable, Sendable { public var amount: Float }
 
     mutating func setColourControls(_ c: ColourControls) {
         modules.saturation = c.saturation == 0 ? nil : Saturation(amount: c.saturation)
@@ -12,16 +14,26 @@ extension EditStack {
         modules.colorgrading = c.grading.isNeutral ? nil : c.grading
         modules.calibration = c.calibration.isNeutral ? nil : c.calibration
         modules.pointcolor = c.pointColours.isEmpty ? nil : c.pointColours
+        modules.adaptation = c.adaptation.isNeutral ? nil : c.adaptation
+        modules.channelmixer = c.channelMixer.isNeutral ? nil : c.channelMixer
+        modules.gamutcompression = c.gamutCompression == 0 ? nil : ColourAmount(amount: c.gamutCompression)
+        modules.purity = c.purity == 0 ? nil : ColourAmount(amount: c.purity)
     }
 
     var colourControls: ColourControls {
         let s = modules.saturation?.amount ?? 0
-        return ColourControls(
+        var c = ColourControls(
             saturation: s.isFinite ? min(max(s, -1), 1) : 0,
             blackAndWhite: (modules.blackwhite ?? .off).sanitized,
             grading: (modules.colorgrading ?? .neutral).sanitized,
             calibration: (modules.calibration ?? .neutral).sanitized,
             pointColours: (modules.pointcolor ?? []).prefix(PointColour.maximumCount).map(\.sanitized))
+        c.adaptation = (modules.adaptation ?? .neutral).sanitized
+        c.channelMixer = (modules.channelmixer ?? .identity).sanitized
+        func unit(_ v: Float?) -> Float { v.map { $0.isFinite ? min(max($0, 0), 1) : 0 } ?? 0 }
+        c.gamutCompression = unit(modules.gamutcompression?.amount)
+        c.purity = unit(modules.purity?.amount)
+        return c
     }
 }
 
@@ -36,6 +48,10 @@ extension EditHistory {
         if a.colorgrading != b.colorgrading { names.append("Colour Grading") }
         if a.calibration != b.calibration { names.append("Calibration") }
         if a.pointcolor != b.pointcolor { names.append("Point Colour") }
+        if a.adaptation != b.adaptation { names.append("Adaptation") }
+        if a.channelmixer != b.channelmixer { names.append("Channel Mixer") }
+        if a.gamutcompression != b.gamutcompression { names.append("Gamut Compression") }
+        if a.purity != b.purity { names.append("Highlight Purity") }
         return names
     }
 }

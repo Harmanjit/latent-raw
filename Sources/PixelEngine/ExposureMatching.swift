@@ -42,7 +42,8 @@ public enum ExposureMatching {
     /// exposure.
     public static func settingExposure(_ ev: Float, inEditJSON json: String?) throws -> String {
         var stack = try json.map { try EditStack.decode(json: $0) } ?? EditStack()
-        stack.modules.exposure = EditStack.Exposure(ev: ev)
+        // Black Offset, part of the same module, is kept.
+        stack.modules.exposure = EditStack.Exposure(ev: ev, blackOffset: stack.modules.exposure?.blackOffset)
         return try stack.encodeJSON()
     }
 }

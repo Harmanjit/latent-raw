@@ -368,3 +368,36 @@ kernel void rawClipMask(
     bool clipped = any(c >= clipLevel.rgb * 0.995);
     output.write(float4(clipped ? 1.0 : 0.0), gid);
 }
+
+// ---------------------------------------------------------------------
+// Colour Grading's Option-drag range preview (RenderPipeline+GradingRange
+// .swift): the displayed picture replaced by one range's weight, as
+// applyColourGrading in ColorPipeline.metal computes it (and
+// ColourGradingRanges.swift on the CPU), in grey.
+// ---------------------------------------------------------------------
+struct GradingRangeParams {
+    float3x3 toWorking;   // linear Display P3 -> linear Rec.2020
+    float4 info;          // range (0 shadows, 1 midtones, 2 highlights), balance, blending, headroom
+};
+
+kernel void gradingRangeView(
+    texture2d<float, access::read>  input   [[texture(0)]],
+    texture2d<float, access::write> output  [[texture(1)]],
+    constant GradingRangeParams &params     [[buffer(0)]],
+    uint2 gid                               [[thread_position_in_grid]])
+{
+    if (gid.x >= output.get_width() || gid.y >= output.get_height()) return;
+    float4 c = input.read(gid);
+    float headroom = max(params.info.w, 1.0);
+    float3 p = pow(max(params.toWorking * c.rgb / headroom, 0.0), 1.0 / 2.2);
+    float l = dot(p, float3(0.2126, 0.7152, 0.0722));
+    float lb = pow(clamp(l, 0.0, 1.0), exp(-params.info.y));
+    float b = clamp(params.info.z, 0.0, 1.0);
+    float half_ = max(b, 0.02);
+    float wH = smoothstep(0.5 - half_, 0.5 + half_, lb), wS = 1.0 - wH;
+    float wM = 1.0 - smoothstep(0.0, 0.5 + b, abs(lb - 0.5) * 2.0);
+    int range = int(params.info.x + 0.5);
+    float w = range == 0 ? wS : (range == 1 ? wM : wH);
+    // Shown as a perceptual grey: the weight is the gamma 2.2 value.
+    output.write(float4(float3(pow(w, 2.2)), c.a), gid);
+}

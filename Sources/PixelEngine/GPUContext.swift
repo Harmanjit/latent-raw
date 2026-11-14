@@ -145,6 +145,8 @@ public final class GPUContext: @unchecked Sendable {
         case exportOutputSharpen
         // The Colour Mixer's Option-drag hue isolation (Present.metal).
         case hueIsolate
+        // Colour Grading's Option-drag range preview (Present.metal).
+        case gradingRangeView
         // Flat-field correction (FlatField.metal, FlatField.swift).
         case flatFieldApply
     }

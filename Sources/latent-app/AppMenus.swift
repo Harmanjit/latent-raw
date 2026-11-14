@@ -183,6 +183,7 @@ struct CommandState: Equatable {
             && !(redoChangesFiles && (exportQueueRunning || outputJobRunning))
         case .copySettings: hasImage || hasSelection
         case .matchTotalExposures: mode == .library && selectionCount >= 2
+        case .matchExposuresByHistogram: mode == .library && selectionCount >= 2 && editorReady
         case .pasteSettings: hasImage || selectionCount > 0
         case .pasteFromPrevious: hasPreviousPhoto && (hasImage || selectionCount > 0)
         case .clearFilter: filterActive
@@ -474,6 +475,7 @@ struct LatentCommands: Commands {
             item("Verify Files…", .verifyFiles)
             item("Find Duplicates…", .findDuplicates)
             item("Match Total Exposures", .matchTotalExposures)
+            item("Match Exposures by Histogram…", .matchExposuresByHistogram)
             item("Flat-Field Correction…", .flatFieldCorrection)
             Divider()
             item(state.targetCollectionTitle, .addToTargetCollection)

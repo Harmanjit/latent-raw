@@ -83,6 +83,10 @@ extension EditStack {
                 result.modules.colorgrading = other.modules.colorgrading
             case .calibration:
                 result.modules.calibration = other.modules.calibration
+                result.modules.adaptation = other.modules.adaptation
+                result.modules.channelmixer = other.modules.channelmixer
+                result.modules.gamutcompression = other.modules.gamutcompression
+                result.modules.purity = other.modules.purity
             case .detail:
                 result.modules.denoise = other.modules.denoise
                 result.modules.aidenoise = other.modules.aidenoise
@@ -161,7 +165,8 @@ extension EditStack {
             g.insert(.colour)
         }
         if m.splittoning != nil || m.colorgrading != nil { g.insert(.splitToning) }
-        if m.calibration != nil { g.insert(.calibration) }
+        if m.calibration != nil || m.adaptation != nil || m.channelmixer != nil || m.gamutcompression != nil
+            || m.purity != nil { g.insert(.calibration) }
         if m.denoise != nil || m.sharpen != nil || m.demosaic != nil || m.aidenoise != nil { g.insert(.detail) }
         if m.lens != nil || m.defringe != nil { g.insert(.lens) }
         if m.locals != nil { g.insert(.locals) }

@@ -174,6 +174,7 @@ public final class ImageSession {
         case lensBlur, lensBlurPreview     // output of the lens blur stage
         case depthView, depthViewPreview   // the viewport's Show Depth pass
         case hueIsolated, hueIsolatedPreview // the Colour Mixer's Option-drag preview
+        case gradingRange, gradingRangePreview // Colour Grading's Option-drag range preview
         case flatField, flatFieldPreview   // camera RGB after flat-field correction
         case rawClip, rawClipPreview       // View › Show Raw Clipping's mask (r8)
         case reflections, reflectionsPreview // output of the reflection removal stage
