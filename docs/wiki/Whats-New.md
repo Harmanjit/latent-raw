@@ -9,6 +9,13 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **Save Filter as Smart Collection** turns whatever the filter bar is showing into a smart collection. See [Smart collections](Collections-and-Keywords#smart-collections).
 - **Keywords inside keywords**, such as Places › France › Paris, written to sidecars the way Lightroom writes them. See [Keywords inside keywords](Collections-and-Keywords#keywords-inside-keywords).
 - **Keywording a whole selection**, with suggestions as you type, and a **Keyword List** to filter, rename and delete keywords across the folder. See [Keywords](Collections-and-Keywords#keywords).
+- **More smart collection rules**: is between for numbers and dates; title, caption, creator, copyright, folder, exposure time, aspect ratio, edit date, in a stack, virtual copy, kind and edit changes; keyword is empty, and file type is raw. See [Smart collections](Collections-and-Keywords#smart-collections).
+- **Value menus in smart collections** list the cameras, lenses, keywords, folders and other values the folder's photos have. See [Smart collections](Collections-and-Keywords#smart-collections).
+- **And, or and except between smart collection rules**, read from the top down. See [Smart collections](Collections-and-Keywords#smart-collections).
+- **Recent collections** at the top of the Collections section reopen the last eight you looked at. See [Collections](Collections-and-Keywords#collections).
+- **A keyword dictionary** for every folder: dictionary keywords in the Keyword List, New Keyword…, drag to rearrange, and plain-text keyword lists in and out. See [The keyword dictionary](Collections-and-Keywords#the-keyword-dictionary).
+- **Keyword suggestions**: Recent and Often used with chips under the Add keywords field. See [Adding keywords](Collections-and-Keywords#adding-keywords).
+- **Add Keywords…** (⌘K) jumps to the keywording field, and photos dragged onto the Keyword List get that keyword. See [Adding keywords](Collections-and-Keywords#adding-keywords).
 - **Colour labels** with Lightroom's keys, 6 to 9, a label filter and a dot on each thumbnail. See [Colour labels](Library#colour-labels).
 - **Title, caption, creator and copyright** for one photo or many, carried into every export. See [Title, caption, creator and copyright](Library#title-caption-creator-and-copyright).
 - **Rename with Template** renames a whole selection from tokens such as `{date}` and `{seq}`, with every new name shown first. See [Moving, copying and renaming](Library#moving-copying-and-renaming).
