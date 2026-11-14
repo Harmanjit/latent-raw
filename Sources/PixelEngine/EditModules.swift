@@ -183,6 +183,9 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
     public var groups: Set<EditGroup>
     public var stack: EditStack
     public var isBuiltIn: Bool = false
+    /// An optional note shown in Manage Presets. Absent when empty, so a
+    /// preset without one encodes exactly as before it existed.
+    public var details: String?
 
     public var id: String { name }
 
@@ -193,7 +196,10 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
         self.isBuiltIn = isBuiltIn
     }
 
-    private enum CodingKeys: String, CodingKey { case name, groups, stack, isBuiltIn, groupsVersion }
+    private enum CodingKeys: String, CodingKey {
+        case name, groups, stack, isBuiltIn, groupsVersion
+        case details = "description"
+    }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -202,6 +208,7 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
         try c.encode(stack, forKey: .stack)
         try c.encode(isBuiltIn, forKey: .isBuiltIn)
         try c.encode(2, forKey: .groupsVersion)
+        if let details, !details.isEmpty { try c.encode(details, forKey: .details) }
     }
 
     /// `groups` decodes leniently: a group this build doesn't know (a
@@ -218,6 +225,8 @@ public struct Preset: Codable, Equatable, Sendable, Identifiable {
         groups = split >= 2 ? known : EditGroup.upgradingLegacy(known)
         stack = try c.decode(EditStack.self, forKey: .stack)
         isBuiltIn = try c.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
+        // Lenient: a note of the wrong type is dropped, never the preset.
+        details = ((try? c.decodeIfPresent(String.self, forKey: .details)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// A few starting points. Deliberately mild: a preset that a user
