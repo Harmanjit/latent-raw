@@ -427,6 +427,8 @@ final class EditorModel: ObservableObject {
     let pixelProbe = PixelProbe()
     /// Colour samples pinned with Option-click, per session.
     let colourSamples = ColourSamples()
+    /// The tone equalizer's panel and display state (EditorModel+ToneEqualizer.swift).
+    let toneEqualizerState = ToneEqualizerState()
 
     // MARK: - Local adjustments
 

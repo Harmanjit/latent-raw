@@ -190,6 +190,15 @@ final class GoldenImageTests: XCTestCase {
         })
     }
 
+    /// The tone equalizer: shadows lifted, highlights lowered, the mask
+    /// moved up half a stop. The detail window checks that the mask,
+    /// made once for the whole image, holds at full resolution.
+    func testToneEqualizer() throws {
+        try check(Recipe(name: "tone-equalizer", detail: Self.ballCentre) {
+            $0.toneEqualizer = ToneEqualizer(bands: [1.2, 1, 0.8, 0.5, 0.2, 0, -0.3, -0.6, -0.9], maskExposure: 0.5)
+        })
+    }
+
     /// Centre and radius (fraction of the short side) of each spot; the
     /// first is on the ball. Sources 2.75 radii to the right, where the
     /// placer puts them (2/3 turns a short-side fraction into a width one).

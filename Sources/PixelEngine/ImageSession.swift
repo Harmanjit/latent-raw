@@ -178,6 +178,8 @@ public final class ImageSession {
         case flatField, flatFieldPreview   // camera RGB after flat-field correction
         case rawClip, rawClipPreview       // View › Show Raw Clipping's mask (r8)
         case reflections, reflectionsPreview // output of the reflection removal stage
+        case toneEqualized, toneEqualizedPreview // camera RGB after the tone equalizer
+        case toneEqualizerMask, toneEqualizerView, toneEqualizerViewPreview // its mask, and Show Mask
     }
 
     /// Which set of pooled textures a render draws from. Pools never share
@@ -206,6 +208,10 @@ public final class ImageSession {
     /// The pool `texture(width:height:pixelFormat:role:)` hands out from;
     /// set around a render by `withTexturePool`.
     private var currentPool = TexturePool.view
+
+    /// The tone equalizer's whole-image mask and its scratch textures
+    /// (ToneEqualizerStage.swift), kept apart from the pools.
+    let toneEqualizerStore = ToneEqualizerMaskStore()
 
     /// Rasterized brush masks, created on first use.
     private var brushMasks: BrushMaskSet?

@@ -1990,6 +1990,10 @@ struct ContentView: View {
                     HStack { disclosureLabel("Tone Curve"); PanelPresetsMenu(model: model, groups: [.toneCurve], panel: "Tone Curve") }
                 }
 
+                ToneEqualizerDisclosure(model: model) {
+                    disclosureLabel("Tone Equalizer")
+                }
+
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 8) {
                         HSLTargetRow(model: model)

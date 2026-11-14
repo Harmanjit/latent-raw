@@ -82,7 +82,9 @@ struct ImageViewport: View {
                                 visibleFraction: visibleFraction,
                                 overlays: viewing.overlays(developTools: allowsTools),
                                 onOptionClick: allowsTools && !toolArmed && !model.defringePickerActive
-                                    ? { model.pinColourSample(atScreen: $0) } : nil)
+                                    ? { model.pinColourSample(atScreen: $0) } : nil,
+                                onToolScroll: allowsTools && model.toneTool == .toneEqualizer
+                                    ? { model.toneEqualizerScrolled(by: $0, at: $1, gestureEnded: $2) } : nil)
                     .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isImage)
                     .accessibilityLabel(model.imageTitle ?? "Image")

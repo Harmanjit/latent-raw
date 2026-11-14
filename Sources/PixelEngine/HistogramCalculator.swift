@@ -133,3 +133,22 @@ public final class HistogramCalculator {
                           totalPixels: texture.width * texture.height)
     }
 }
+
+extension HistogramCalculator {
+    /// A histogram of plain values, such as the tone equalizer's mask in EV
+    /// (`ToneEqualizerMaskSnapshot`): `bins` counts over `range`, values
+    /// outside it in the end bins, scaled so the fullest bin is 1. The
+    /// mask is a few hundred thousand values read back already, so this
+    /// counts on the CPU rather than in a kernel.
+    public static func normalizedHistogram(of values: [Float], range: ClosedRange<Float>, bins: Int) -> [Float] {
+        guard bins > 0, range.upperBound > range.lowerBound else { return [] }
+        var counts = [Float](repeating: 0, count: bins)
+        let scale = Float(bins) / (range.upperBound - range.lowerBound)
+        for v in values where v.isFinite {
+            let i = min(max(Int((v - range.lowerBound) * scale), 0), bins - 1)
+            counts[i] += 1
+        }
+        let peak = counts.max() ?? 0
+        return peak > 0 ? counts.map { $0 / peak } : counts
+    }
+}

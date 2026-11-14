@@ -83,6 +83,7 @@ public struct EditHistory: Equatable, Sendable, Codable {
         if a.modules.tone != b.modules.tone { names.append("Tone") }
         if a.modules.highlights != b.modules.highlights { names.append("Highlight Recovery") }
         names += toneRangeChanges(from: a.modules.toneranges ?? .neutral, to: b.modules.toneranges ?? .neutral)
+        if a.modules.toneEqualizer != b.modules.toneEqualizer { names.append("Tone Equalizer") }
         if a.modules.curve != b.modules.curve { names.append("Curve") }
         if a.modules.hsl != b.modules.hsl { names.append("HSL") }
         if a.modules.splittoning != b.modules.splittoning { names.append("Split Toning") }

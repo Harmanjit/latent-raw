@@ -99,6 +99,10 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 - **⌥-drag on an HSL slider** shows only the colours it changes, and the Colour Grading wheels take **⇧** (keep the hue) and **⌘** (fine moves). See [Develop](Develop#modules).
 - **HDR Limit** sets how far above white each photo's highlights may go on an HDR screen and in an HDR export. See [HDR Limit](Develop#hdr-limit).
 - **Visualise HDR Ranges** colours what lies above SDR white by stops, and the readout says how far above white a colour is. See [HDR Limit](Develop#hdr-limit).
+- **Tone Equalizer** raises or lowers nine bands of brightness, −8 to 0 EV, through an edge-aware mask, so a sky or a shadowed face moves as a whole and keeps its local contrast. See [Tone Equalizer](Develop#tone-equalizer).
+- **The tone equalizer's Advanced tab** draws the bands as a curve over the histogram of its mask, with nodes to drag, the mask's spread and **Fit Mask**. See [Tone Equalizer](Develop#tone-equalizer).
+- **Show Mask and the on-image tool** show the tone equalizer's mask in grey, add the mask under the pointer to the readout, and raise or lower the band under the pointer by scrolling or dragging on the photo. See [Tone Equalizer](Develop#tone-equalizer).
+- **Range compression presets**: Compress Shadows and Highlights (Soft and Strong) and Lift Shadows with the tone equalizer, and Compress Range with the Highlights, Shadows and Clarity sliders. See [Presets and clipboard](Develop#presets-and-clipboard).
 - **Match Total Exposures** (⌥⇧⌘M) gives a selection one brightness from their shutter, aperture and ISO. See [Applying edits to many images](Library#applying-edits-to-many-images).
 - **Exposure eyedropper**: click or drag over something that should be middle grey and Exposure is set from it; Option-click for another target. See [Develop](Develop#modules).
 - **Black Offset**, under Exposure's Advanced, deepens or lifts the blacks in linear light. See [Develop](Develop#modules).

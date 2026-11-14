@@ -50,6 +50,8 @@ extension EditorModel {
         // or TIFF has no sensor clip level to compare with.
         output.rawClipMask = hasImage && session?.isRenderedImage != true
             && ViewingSettings.shared.rendersRawClipping(for: self)
+        output.toneEqualizerMaskView = hasImage && toneEqualizerState.showMask
+        output.toneEqualizerAnalysis = hasImage && toneEqualizerWantsMask
         return output
     }
 

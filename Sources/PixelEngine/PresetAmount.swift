@@ -8,8 +8,8 @@ import ColorKit
 /// preset's (and past it above 100%): exposure, contrast, the tone ranges,
 /// presence, vibrance and saturation, HSL, the curves' points, split
 /// toning's and colour grading's strengths, Calibration, sharpening and
-/// noise reduction, the effects' amounts, white balance and a creative
-/// profile's Amount. Everything else a preset carries (a switch, a choice,
+/// noise reduction, the effects' amounts, the tone equalizer's bands, white
+/// balance and a creative profile's Amount. Everything else a preset carries (a switch, a choice,
 /// a hue, a mask, a crop) is taken from the preset whole whenever the
 /// Amount is above 0%, since half a Black & White switch or half a hue
 /// means nothing.
@@ -140,6 +140,10 @@ extension EditParameters {
         // Effects.
         out.grain.amount = mix(base.grain.amount, grain.amount, 0...1)
         out.postCropVignette.amount = mix(base.postCropVignette.amount, postCropVignette.amount, u)
+        // The tone equalizer's bands (its mask settings are taken whole).
+        if base.toneEqualizer.bands != toneEqualizer.bands {
+            out.toneEqualizer.bands = mix(base.toneEqualizer.bands, toneEqualizer.bands, ToneEqualizer.gainRange)
+        }
         // A creative profile's Amount, when the preset keeps the profile.
         if let p = profile, p.id == base.profile?.id {
             let a0 = base.profile?.amount ?? 1, a1 = p.amount ?? 1
@@ -154,7 +158,8 @@ extension EditStack {
     /// The groups whose values `EditParameters.blended` mixes. Masks,
     /// crops, retouching and lens switches are taken whole.
     public static let blendableGroups: Set<EditGroup> = [.whiteBalance, .tone, .presence, .toneCurve, .colour,
-                                                         .splitToning, .calibration, .detail, .effects, .profile]
+                                                         .splitToning, .calibration, .detail, .effects, .profile,
+                                                         .toneEqualizer]
 
     /// This stack with `preset`'s `groups` applied at `amount`. At 100% it
     /// is exactly `merged(with:groups:)`; otherwise the blendable groups

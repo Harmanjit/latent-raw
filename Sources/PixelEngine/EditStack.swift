@@ -98,6 +98,9 @@ public struct EditStack: Codable, Equatable, Sendable {
         /// Flat-field correction (FlatField.swift). Absent when there is
         /// none, so edits that never used it encode exactly as before.
         public var flatfield: FlatFieldCorrection?
+        /// The tone equalizer (ToneEqualizer.swift). Absent while neutral,
+        /// so edits that never used it encode exactly as before.
+        public var toneEqualizer: ToneEqualizer?
     }
 
     public struct HDR: Codable, Equatable, Sendable { public var limit: Float }
@@ -311,6 +314,7 @@ public struct EditStack: Codable, Equatable, Sendable {
                    angle: p.crop.angle, aspect: p.crop.aspect)
         storeDetailEffects(from: p)
         modules.flatfield = p.flatField?.sanitized
+        modules.toneEqualizer = p.toneEqualizer.isNeutral ? nil : p.toneEqualizer
         process = p.processVersion
         // Parameters always measure the sensor plane as it is now.
         frame = hasGeometry ? Self.activeAreaFrame : nil
@@ -402,6 +406,7 @@ public struct EditStack: Codable, Equatable, Sendable {
         }
         restoreDetailEffects(into: &p)
         p.flatField = modules.flatfield?.sanitized
+        p.toneEqualizer = (modules.toneEqualizer ?? .neutral).sanitized
         p.processVersion = process
         return p
     }

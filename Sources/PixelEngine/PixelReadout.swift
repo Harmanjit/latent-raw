@@ -14,9 +14,20 @@ import ColorKit
 public struct PixelReadout: Equatable, Sendable {
     /// Linear Display P3, as sampled (may pass 1 with HDR headroom).
     public var linear: SIMD3<Float>
+    /// The tone equalizer's mask under the pointer, in EV with its
+    /// compensation applied (the value its bands are read at), while the
+    /// equalizer is in use; nil otherwise.
+    public var toneEqualizerMaskEV: Float?
 
-    public init(linearDisplayP3: SIMD3<Float>) {
+    public init(linearDisplayP3: SIMD3<Float>, toneEqualizerMaskEV: Float? = nil) {
         linear = linearDisplayP3
+        self.toneEqualizerMaskEV = toneEqualizerMaskEV
+    }
+
+    /// The readout's tone equalizer part: "Mask −4.3 EV", or "" without one.
+    public var toneEqualizerText: String {
+        guard let m = toneEqualizerMaskEV, m.isFinite else { return "" }
+        return String(format: "Mask %+.1f EV", m).replacingOccurrences(of: "-", with: "\u{2212}")
     }
 
     /// How far the brightest channel is above SDR white, in stops, when
