@@ -84,6 +84,9 @@ public actor Catalog {
             setAside = try setAsideDamagedDatabase(at: URL(fileURLWithPath: dbPath), because: error)
             dbQueue = try openMigrated(path: dbPath, configuration: config)
         }
+        // The daily backup (CatalogBackup). A failed backup never stops
+        // the folder opening.
+        if setAside == nil { _ = try? CatalogBackup.backUpIfDue(dbQueue, container: container) }
 
         return Catalog(rootPath: folder, containerPath: container, dbQueue: dbQueue,
                        damagedDatabaseSetAside: setAside)
@@ -100,7 +103,12 @@ public actor Catalog {
     /// so it takes the same route as damage found while opening.
     private static func openMigrated(path: String, configuration: Configuration) throws -> DatabaseQueue {
         let dbQueue = try DatabaseQueue(path: path, configuration: configuration)
-        try Schema.migrator().migrate(dbQueue)
+        let migrator = Schema.migrator()
+        // A copy before the schema changes (CatalogBackup); a database
+        // that can't be read here fails in `migrate` just as before.
+        _ = try? CatalogBackup.backUpBeforeMigration(dbQueue, migrator: migrator,
+                                                     container: URL(fileURLWithPath: path).deletingLastPathComponent())
+        try migrator.migrate(dbQueue)
         let problems = try dbQueue.read { db in try String.fetchAll(db, sql: "PRAGMA quick_check") }
         if problems != ["ok"] {
             throw DatabaseError(resultCode: .SQLITE_CORRUPT,
