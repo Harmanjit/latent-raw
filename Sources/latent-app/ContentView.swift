@@ -170,12 +170,17 @@ struct ContentView: View {
                 ZStack {
                 // Develop's side stays built, under the grid, while the grid
                 // shows (plan fix #32): switching back then doesn't rebuild
-                // the panel's hundreds of controls. The image area itself goes,
-                // so nothing hidden draws or reports a size to the editor.
+                // the panel's hundreds of controls. The image area itself
+                // goes, so nothing hidden reports a size to the editor.
                 if keepsDevelopPanel {
                     HStack(spacing: 0) {
+                        // Drawn after the panel, so its AppKit view coming
+                        // and going leaves the panel's controls where they
+                        // are in the window (SwiftUI keeps the views in
+                        // drawing order, and re-adds every one after an
+                        // insertion).
                         if mode == .develop {
-                            imageArea
+                            imageArea.zIndex(1)
                         } else {
                             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
@@ -1992,8 +1997,7 @@ struct ContentView: View {
         ScrollView {
             ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 20) {
-                // Not while the panel is hidden in Library: it draws.
-                if mode == .develop { NavigatorSection(model: model) }
+                NavigatorSection(model: model)
                 ScopePanel(model: model)
 
                 if let title = model.imageTitle {
@@ -2681,16 +2685,15 @@ private struct CommandContextModifier: ViewModifier {
 }
 
 /// Develop's side while it is kept built but hidden (plan fix #32): under
-/// the grid, which is opaque, and not clickable, in the key-view loop or
-/// read by VoiceOver. Not made transparent: SwiftUI takes a transparent
-/// view's AppKit controls out of the window and puts them back when it
-/// shows again, which is most of what rebuilding it cost.
+/// the grid, which is opaque and takes the clicks, and neither in the
+/// key-view loop nor read by VoiceOver. Not made transparent: SwiftUI
+/// takes a transparent view's AppKit controls out of the window and puts
+/// them back when it shows again, which is most of what rebuilding it cost.
 private struct KeptAlivePane: ViewModifier {
     let hidden: Bool
 
     func body(content: Content) -> some View {
         content
-            .allowsHitTesting(!hidden)
             .accessibilityHidden(hidden)
             .disabled(hidden)
     }
