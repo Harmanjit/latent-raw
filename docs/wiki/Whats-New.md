@@ -2,6 +2,11 @@
 
 What has arrived since the 0.9.0 beta, by area. Each line says what the feature does and links to where it is described in full. For a guided tour of the most useful ones, try the tutorials: [Culling and Organising](Tutorial-Culling-and-Organising), [Editing](Tutorial-Editing) and [Printing and Sharing](Tutorial-Printing-and-Sharing).
 
+## Wave 4
+
+- **Tone Equalizer Auto Align** sets the mask's exposure and contrast compensation so the nine bands span the photo's tonal range, darkest tones on the −8 EV band, brightest on 0 EV. See [Tone Equalizer](Develop#tone-equalizer).
+- **Live band histogram**: grey bars behind the tone equalizer's Simple sliders show how much of the photo each band moves, and the Advanced tab's histogram now follows Mask Exposure and Mask Contrast while you drag, worked out in the background. See [Tone Equalizer](Develop#tone-equalizer).
+
 ## Organising
 
 - **Collections, smart collections and collection sets** gather photos without moving them; smart ones fill themselves from rules such as "rated 4 or more with the keyword Brittany". See [Collections](Collections-and-Keywords#collections).

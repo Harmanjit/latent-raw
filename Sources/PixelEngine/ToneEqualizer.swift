@@ -178,9 +178,14 @@ public struct ToneEqualizerMaskSnapshot: Sendable, Equatable {
     public let height: Int
     public let values: [Float]
     public let exposureEV: Float
+    /// Counts up each time the session reads a new mask back from the GPU,
+    /// so the panel can tell a new mask from the same one seen again
+    /// without comparing every value (`ToneEqualizerMaskStats`).
+    public let generation: Int
 
-    public init(width: Int, height: Int, values: [Float], exposureEV: Float) {
+    public init(width: Int, height: Int, values: [Float], exposureEV: Float, generation: Int = 0) {
         self.width = width; self.height = height; self.values = values; self.exposureEV = exposureEV
+        self.generation = generation
     }
 
     /// The mask at a point given as 0…1 of the sensor, bilinear, exposure

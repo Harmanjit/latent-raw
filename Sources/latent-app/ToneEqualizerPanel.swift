@@ -65,10 +65,15 @@ struct ToneEqualizerSection: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            Text("Each slider raises or lowers the parts of the photo whose smoothed brightness is near its stop, −8 EV (deep shadow) to 0 EV (white). Double-click a slider to reset it.")
+            .background(ToneEqualizerBandShares(shares: state.bandShares).padding(.vertical, 14))
+            Text("Each slider raises or lowers the parts of the photo whose smoothed brightness is near its stop, −8 EV (deep shadow) to 0 EV (white); the grey bars behind them show how much of the photo each one moves. Double-click a slider to reset it.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                autoAlignButton
+            }
         }
     }
 
@@ -83,9 +88,10 @@ struct ToneEqualizerSection: View {
             ToneEqualizerCurve(equalizer: equalizer, histogram: state.histogram,
                                setBand: { model.setToneEqualizerBand($0, to: $1) })
                 .frame(height: 150)
+            spreadText
             HStack {
-                spreadText
                 Spacer()
+                autoAlignButton
                 fitButton
             }
         }
@@ -111,6 +117,12 @@ struct ToneEqualizerSection: View {
         Button("Fit Mask") { model.fitToneEqualizerMask() }
             .controlSize(.small)
             .help("Sets the mask's exposure and contrast compensation so the photo's tones spread across the bands")
+    }
+
+    private var autoAlignButton: some View {
+        Button("Auto Align") { model.autoAlignToneEqualizer() }
+            .controlSize(.small)
+            .help("Sets the mask's exposure and contrast compensation so the nine bands span the photo's tonal range: its darkest tones on the −8 EV band, its brightest on the 0 EV band")
     }
 
     static func ev(_ v: Float) -> String {
@@ -141,9 +153,10 @@ struct ToneEqualizerSection: View {
                 set: { v in model.parameters.toneEqualizer.edgeRefinement = v == ToneEqualizer.defaultEdgeRefinement ? nil : v }),
                 range: 0...1, format: "%.2f", defaultValue: ToneEqualizer.defaultEdgeRefinement,
                 hint: "How closely the mask follows edges: more stops a change spilling across an edge as a halo")
+            spreadText
             HStack {
-                spreadText
                 Spacer()
+                autoAlignButton
                 fitButton
             }
         }
@@ -231,6 +244,40 @@ struct ToneEqualizerBandSlider: View {
         // Snap to 0 near the middle, and to tenths elsewhere.
         let rounded = (v * 10).rounded() / 10
         return abs(rounded) < 0.05 ? 0 : rounded
+    }
+}
+
+/// Behind the Simple tab's sliders: one grey bar per band, as tall as the
+/// share of the photo that band reads (the tallest band full height), so
+/// it shows at a glance which sliders have something to move. Updated
+/// after renders from the mask's statistics (`ToneEqualizerState`).
+struct ToneEqualizerBandShares: View {
+    let shares: [Float]
+
+    /// Each bar's height as a fraction of the full height: shares scaled
+    /// so the largest is 1; zeros when there is nothing to show.
+    static func heights(_ shares: [Float]) -> [CGFloat] {
+        let peak = shares.max() ?? 0
+        guard peak > 0 else { return shares.map { _ in 0 } }
+        return shares.map { CGFloat(max($0, 0) / peak) }
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let heights = Self.heights(shares)
+            HStack(alignment: .bottom, spacing: 0) {
+                ForEach(heights.indices, id: \.self) { i in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.secondary.opacity(0.18))
+                        .frame(height: geo.size.height * heights[i])
+                        .padding(.horizontal, 3)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .animation(.easeOut(duration: 0.2), value: shares)
     }
 }
 

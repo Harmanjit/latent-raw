@@ -255,6 +255,8 @@ final class ToneEqualizerMaskStore {
     /// The exposure the latest render added to the mask.
     var exposureEV: Float = 0
     private(set) var values: (width: Int, height: Int, values: [Float])?
+    /// Counts the read-backs, carried on the snapshot as its `generation`.
+    private(set) var generation = 0
 
     var coefficients: MTLTexture? { key == nil ? nil : current?.coefficients }
 
@@ -288,12 +290,13 @@ final class ToneEqualizerMaskStore {
             mask.getBytes(base, bytesPerRow: w * 4, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
         }
         values = (w, h, out)
+        generation &+= 1
     }
 
     var snapshot: ToneEqualizerMaskSnapshot? {
         guard let values, key != nil else { return nil }
         return ToneEqualizerMaskSnapshot(width: values.width, height: values.height, values: values.values,
-                                         exposureEV: exposureEV)
+                                         exposureEV: exposureEV, generation: generation)
     }
 }
 

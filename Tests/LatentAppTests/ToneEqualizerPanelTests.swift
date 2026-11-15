@@ -44,4 +44,29 @@ final class ToneEqualizerPanelTests: XCTestCase {
         model.setToneEqualizerTool(false)
         XCTAssertEqual(model.toneTool, ToneTool.none)
     }
+
+    func testAutoAlignSetsCompensationAndKeepsBands() {
+        let model = EditorModel()
+        model.setToneEqualizerBand(3, to: 1)
+        let values = (0..<1_001).map { -10 + 6 * Float($0) / 1_000 }
+        model.applyToneEqualizerAutoAlign(stats: ToneEqualizerMaskStats(values: values), exposureEV: 0)
+        let eq = model.parameters.toneEqualizer
+        XCTAssertEqual(eq.bands[3], 1)
+        XCTAssertEqual(eq.compensated(-10), -8, accuracy: 0.1)
+        XCTAssertEqual(eq.compensated(-4), 0, accuracy: 0.1)
+    }
+
+    func testAutoAlignWithoutAMaskOnlySaysSo() {
+        let model = EditorModel()
+        model.status = ""
+        model.autoAlignToneEqualizer()
+        XCTAssertEqual(model.parameters.toneEqualizer, .neutral)
+        XCTAssertFalse(model.status.isEmpty)
+    }
+
+    func testBandShareBarHeights() {
+        XCTAssertEqual(ToneEqualizerBandShares.heights([0.1, 0.4, 0.2]), [0.25, 1, 0.5])
+        XCTAssertEqual(ToneEqualizerBandShares.heights([0, 0]), [0, 0])
+        XCTAssertEqual(ToneEqualizerBandShares.heights([]), [])
+    }
 }
