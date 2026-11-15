@@ -56,7 +56,8 @@ struct ExportFileJob: Sendable {
                                           maxLongEdge: job.maxLongEdge, bitsPerComponent: 8),
                 gpu: gpu)
             try Exporter.writePDF(image.cgImage, options: job.options, caption: job.caption, ppi: job.ppi,
-                                  to: request.destinationURL, replacingExisting: request.replacesExisting)
+                                  to: request.destinationURL, replacingExisting: request.replacesExisting,
+                                  jpegQuality: job.jpegQuality)
             return ExportFileResult(pixelCount: image.cgImage.width * image.cgImage.height,
                                     maskSubstitutions: image.maskSubstitutions)
         case .image:

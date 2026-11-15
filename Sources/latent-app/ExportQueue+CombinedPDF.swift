@@ -118,6 +118,9 @@ extension ExportQueue {
         }
         let resolution = Double(preset.ppiEnabled ? min(max(preset.ppi, 1), 9999) : 300)
         let maxLongEdge = options.combinedMaxLongEdge(ppi: resolution)
+        // Each page's photo as a JPEG at the sheet's Quality, unless the
+        // pages are lossless (docs/Performance-Plan.md #30).
+        let jpegQuality = preset.pdfJPEGQuality
         var cancelled = false
         for (index, record) in records.enumerated() {
             if Task.isCancelled { cancelled = true; break }
@@ -144,7 +147,8 @@ extension ExportQueue {
                                                   userRotation: request.userRotation, colorSpace: request.colorSpace,
                                                   maxLongEdge: maxLongEdge, bitsPerComponent: 8),
                         gpu: gpu)
-                    writer.add(image.cgImage, caption: caption, ppi: resolution)
+                    writer.add(options.pageImage(image.cgImage, jpegQuality: jpegQuality), caption: caption,
+                               ppi: resolution)
                     return .success((image.cgImage.width * image.cgImage.height, image.maskSubstitutions))
                 } catch {
                     return .failure(error)

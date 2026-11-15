@@ -138,6 +138,22 @@ struct ExportPDFSection: View {
             .fixedSize()
             .accessibilityLabel("Insert a caption token")
         }
+        HStack {
+            Picker("Photos stored as", selection: $preset.formats.pdf.imageCompression) {
+                ForEach(ExportPDFOptions.ImageCompression.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .frame(width: 260)
+            .help("JPEG keeps each page a few megabytes and writes quickly, at the Quality beside it. "
+                  + "Lossless keeps every pixel, at about 18 MB for an A4 page at 300 ppi.")
+            if preset.formats.pdf.imageCompression == .jpeg {
+                Text("Quality").accessibilityHidden(true)
+                ResettableSlider(value: $preset.quality, in: 0.3...1, label: "PDF JPEG quality",
+                                 format: SliderValueFormat(decimals: 0, scale: 100)) { preset.quality = 0.92 }
+                Text(String(format: "%.0f", preset.quality * 100)).monospacedDigit().frame(width: 30)
+                    .accessibilityHidden(true)
+            }
+            Spacer()
+        }
         ExportCombinedPDFOptions(options: $preset.formats.pdf)
     }
 }

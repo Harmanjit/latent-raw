@@ -87,6 +87,9 @@ struct ExportPDFJob: Sendable {
     var caption: String?
     var ppi: Double = 300
     var maxLongEdge: Int?
+    /// The JPEG quality of the page's photo (the sheet's Quality, as for a
+    /// JPEG file); unused with lossless pages.
+    var jpegQuality: Double = 0.92
 }
 
 extension ExportPreset {
@@ -123,8 +126,13 @@ extension ExportPreset {
         let maxLongEdge = options.pageSize.portraitPoints.map {
             Int((max($0.width, $0.height) / 72 * resolution).rounded(.up))
         }
-        return ExportPDFJob(options: options, caption: caption, ppi: resolution, maxLongEdge: maxLongEdge)
+        return ExportPDFJob(options: options, caption: caption, ppi: resolution, maxLongEdge: maxLongEdge,
+                            jpegQuality: pdfJPEGQuality)
     }
+
+    /// The quality a PDF page's JPEG is written at: the sheet's Quality
+    /// slider, the same number a JPEG file of the photo would use.
+    var pdfJPEGQuality: Double { Double(min(max(quality, 0.3), 1)) }
 }
 
 extension ExportSizing.Mode {

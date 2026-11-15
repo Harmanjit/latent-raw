@@ -154,4 +154,95 @@ final class CombinedPDFTests: XCTestCase {
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
+
+    // MARK: JPEG pages (docs/Performance-Plan.md #30)
+
+    /// A noisy picture, which a lossless page can't squeeze.
+    private func noisy(_ w: Int, _ h: Int) -> CGImage {
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        var bytes = [UInt8](repeating: 255, count: w * h * 4)
+        var seed: UInt32 = 12345
+        for i in 0..<(w * h * 4) where i % 4 != 3 {
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            bytes[i] = UInt8(truncatingIfNeeded: (seed >> 24) / 2 + UInt32(i / 4 % w) * 128 / UInt32(w))
+        }
+        let provider = CGDataProvider(data: Data(bytes) as CFData)!
+        return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4, space: space,
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue), provider: provider,
+                       decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+    }
+
+    /// The first page drawn into a bitmap, as a viewer shows it.
+    private func renderFirstPage(_ url: URL) throws -> [UInt8] {
+        let document = try XCTUnwrap(CGPDFDocument(url as CFURL))
+        let page = try XCTUnwrap(document.page(at: 1))
+        let box = page.getBoxRect(.mediaBox)
+        let w = Int(box.width), h = Int(box.height)
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        pixels.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: w, height: h, bitsPerComponent: 8,
+                                    bytesPerRow: w * 4, space: space,
+                                    bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+            context.drawPDFPage(page)
+        }
+        return pixels
+    }
+
+    func testOlderOptionsGetJPEGPagesAndLosslessRoundTrips() throws {
+        let old = try JSONDecoder().decode(ExportPDFOptions.self, from: Data(#"{"pageSize":"a4"}"#.utf8))
+        XCTAssertEqual(old.imageCompression, .jpeg)
+        var options = ExportPDFOptions()
+        options.imageCompression = .lossless
+        let back = try JSONDecoder().decode(ExportPDFOptions.self, from: JSONEncoder().encode(options))
+        XCTAssertEqual(back.imageCompression, .lossless)
+        let image = solid(40, 30)
+        XCTAssertTrue(options.pageImage(image, jpegQuality: 0.9) === image, "lossless keeps the image as it is")
+    }
+
+    /// JPEG pages make a much smaller file that still opens and shows the
+    /// picture; lossless stays as it was.
+    func testJPEGPagesAreSmallerAndStillOpen() throws {
+        let image = noisy(1200, 800)
+        var sizes: [ExportPDFOptions.ImageCompression: Int] = [:]
+        var firstPages: [ExportPDFOptions.ImageCompression: [UInt8]] = [:]
+        for compression in ExportPDFOptions.ImageCompression.allCases {
+            var options = ExportPDFOptions()
+            options.combine = true
+            options.marginMM = 0
+            options.imageCompression = compression
+            let url = temporaryPDF()
+            defer { try? FileManager.default.removeItem(at: url) }
+            let writer = try CombinedPDFWriter(url: url, options: options, title: "Shoot")
+            for _ in 0..<3 { writer.add(options.pageImage(image, jpegQuality: 0.92), caption: nil, ppi: 300) }
+            try writer.finish(replacingExisting: false)
+            XCTAssertEqual(try XCTUnwrap(CGPDFDocument(url as CFURL)).numberOfPages, 3)
+            sizes[compression] = try XCTUnwrap(try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int)
+            firstPages[compression] = try renderFirstPage(url)
+        }
+        let jpeg = try XCTUnwrap(sizes[.jpeg]), lossless = try XCTUnwrap(sizes[.lossless])
+        XCTAssertLessThan(Double(jpeg), Double(lossless) / 2, "JPEG \(jpeg) bytes vs lossless \(lossless)")
+        // Both show the same picture, give or take the JPEG's loss.
+        let a = try XCTUnwrap(firstPages[.jpeg]), b = try XCTUnwrap(firstPages[.lossless])
+        XCTAssertEqual(a.count, b.count)
+        var total = 0.0
+        for i in stride(from: 0, to: a.count, by: 4) { total += abs(Double(a[i]) - Double(b[i])) }
+        let mean = total / Double(a.count / 4)
+        XCTAssertLessThan(mean, 12, "the JPEG page shows the same picture (mean difference \(mean))")
+        XCTAssertGreaterThan(a.reduce(0) { $0 + Int($1) } / a.count, 20, "not a blank page")
+    }
+
+    /// The single-photo PDF takes the same option.
+    func testSinglePhotoPDFUsesJPEGWhenAsked() throws {
+        let image = noisy(900, 600)
+        let lossy = temporaryPDF(), exact = temporaryPDF()
+        defer { try? FileManager.default.removeItem(at: lossy); try? FileManager.default.removeItem(at: exact) }
+        let options = ExportPDFOptions()
+        try Exporter.writePDF(image, options: options, caption: "x", ppi: 300, to: lossy, jpegQuality: 0.9)
+        try Exporter.writePDF(image, options: options, caption: "x", ppi: 300, to: exact)
+        let lossySize = try XCTUnwrap(try FileManager.default.attributesOfItem(atPath: lossy.path)[.size] as? Int)
+        let exactSize = try XCTUnwrap(try FileManager.default.attributesOfItem(atPath: exact.path)[.size] as? Int)
+        XCTAssertLessThan(lossySize, exactSize)
+        XCTAssertEqual(try XCTUnwrap(CGPDFDocument(lossy as CFURL)).numberOfPages, 1)
+    }
 }
