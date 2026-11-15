@@ -113,13 +113,17 @@ extension Catalog {
             let key: Data
             let replaces: Bool
         }
+        let fm = FileManager.default
         let jobs = needed.map { job in
-            Work(relPath: job.record.relPath,
-                 source: fileURL(forRelPath: job.record.relPath),
-                 destination: thumbnailURL(forRelPath: job.record.relPath),
-                 editStackJSON: job.editStackJSON,
-                 key: job.expectedKey,
-                 replaces: FileManager.default.fileExists(atPath: thumbnailURL(forRelPath: job.record.relPath).path))
+            let destination = thumbnailURL(forRelPath: job.record.relPath)
+            return Work(relPath: job.record.relPath,
+                        source: fileURL(forRelPath: job.record.relPath),
+                        destination: destination,
+                        editStackJSON: job.editStackJSON,
+                        key: job.expectedKey,
+                        // A version 1 HEIC the grid may have shown counts.
+                        replaces: fm.fileExists(atPath: destination.path)
+                            || fm.fileExists(atPath: Catalog.legacyThumbnailURL(for: destination).path))
         }
         let byPath = Dictionary(jobs.map { ($0.relPath, $0) }, uniquingKeysWith: { first, _ in first })
         let total = jobs.count
@@ -146,6 +150,7 @@ extension Catalog {
                             try Thumbnailer.makeFromEmbeddedPreview(rawFileAt: job.source,
                                                                     to: job.destination, quality: quality)
                         }
+                        if job.replaces { Thumbnailer.removeLegacyFile(replacedBy: job.destination) }
                         return (job.relPath, nil)
                     } catch {
                         return (job.relPath, "\(error)")

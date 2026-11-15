@@ -2,11 +2,13 @@ import Foundation
 import GRDB
 
 /// How thumbnails are made, from Settings › Performance. The defaults are
-/// what Latent always did: HEIC at 0.8, four files at a time at utility
-/// priority (the efficiency cores, DESIGN.md §11).
+/// JPEG at 0.8, four files at a time at utility priority (the efficiency
+/// cores, DESIGN.md §11).
 public struct ThumbnailGenerationSettings: Equatable, Sendable {
-    /// The HEIC quality thumbnails are written at. Applies to thumbnails
-    /// made from now on; Rebuild Thumbnails remakes existing ones.
+    /// The JPEG quality thumbnails are written at. Applies to thumbnails
+    /// made from now on; Rebuild Thumbnails remakes existing ones. Each
+    /// level looks at least as good as the HEIC level it replaced (HEIC
+    /// 0.6, 0.8 and 0.92; `Thumbnailer.cacheVersion`).
     public enum Quality: String, CaseIterable, Sendable, Identifiable {
         case low, standard, high
 
@@ -18,9 +20,9 @@ public struct ThumbnailGenerationSettings: Equatable, Sendable {
             case .high: "High"
             }
         }
-        public var heicQuality: Double {
+        public var jpegQuality: Double {
             switch self {
-            case .low: 0.6
+            case .low: 0.7
             case .standard: Thumbnailer.defaultQuality
             case .high: 0.92
             }
@@ -167,8 +169,18 @@ extension Catalog {
             usage.bytes += bytes
             guard !expected.contains(url.standardizedFileURL.path) else { continue }
             // A pass writes beside the real name, then renames
-            // (`Thumbnailer.writeHEIC`): that file is in use, not orphaned.
+            // (`Thumbnailer.writeJPEG`): that file is in use, not orphaned.
+            // A version 1 HEIC still standing in for its JPEG (shown until
+            // the pass gets to it) is in use as well; the pass removes it.
             if thumbnailPassRunning, url.pathExtension == "tmp", url.lastPathComponent.hasPrefix(".") { continue }
+            if url.pathExtension == Catalog.legacyThumbnailFileExtension {
+                // From the standardized URL: standardizing drops a /private
+                // prefix only from a path that exists, which this may not.
+                let current = url.standardizedFileURL.deletingPathExtension()
+                    .appendingPathExtension(Catalog.thumbnailFileExtension)
+                if expected.contains(current.path),
+                   !FileManager.default.fileExists(atPath: current.path) { continue }
+            }
             usage.orphanFiles += 1
             usage.orphanBytes += bytes
             if removingOrphans { try? FileManager.default.removeItem(at: url) }

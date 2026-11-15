@@ -40,7 +40,7 @@ final class XMPSidecarTests: XCTestCase {
             let sidecar = tmp.appendingPathComponent(name + ".xmp")
             XCTAssertNoThrow(try XMPSidecar.write(fields, to: sidecar), "\(name.utf8.count)-byte name")
             XCTAssertEqual(try XMPSidecar.read(from: sidecar).rating, 2)
-            let thumbnail = tmp.appendingPathComponent(name + ".heic")
+            let thumbnail = tmp.appendingPathComponent(name + ".jpg")
             XCTAssertNoThrow(try Thumbnailer.write(image, to: thumbnail), "\(name.utf8.count)-byte name")
             XCTAssertTrue(FileManager.default.fileExists(atPath: thumbnail.path))
         }

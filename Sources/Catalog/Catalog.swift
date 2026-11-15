@@ -186,9 +186,20 @@ public actor Catalog {
     public nonisolated static func thumbnailURL(forRelPath relPath: String, in thumbnailDirectory: URL) -> URL {
         if let copy = VirtualCopy.parse(relPath) {
             return thumbnailDirectory.appendingPathComponent(VirtualCopy.companionFolder, isDirectory: true)
-                .appendingPathComponent(copy.key.stem + ".heic")
+                .appendingPathComponent(copy.key.stem + "." + thumbnailFileExtension)
         }
-        return thumbnailDirectory.appendingPathComponent(relPath + ".heic")
+        return thumbnailDirectory.appendingPathComponent(relPath + "." + thumbnailFileExtension)
+    }
+
+    /// Thumbnail files are `<image name>.jpg` (`Thumbnailer.cacheVersion` 2).
+    public nonisolated static let thumbnailFileExtension = "jpg"
+    /// Version 1 thumbnails were `<image name>.heic`. Until the pass
+    /// replaces one, the grid shows it rather than an empty cell.
+    public nonisolated static let legacyThumbnailFileExtension = "heic"
+
+    /// Where the version 1 thumbnail of the file `thumbnailURL` names was.
+    public nonisolated static func legacyThumbnailURL(for thumbnailURL: URL) -> URL {
+        thumbnailURL.deletingPathExtension().appendingPathExtension(legacyThumbnailFileExtension)
     }
 
     // MARK: - Queries

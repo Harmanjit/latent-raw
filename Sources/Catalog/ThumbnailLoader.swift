@@ -382,7 +382,13 @@ public final class ThumbnailLoader: @unchecked Sendable {
     // MARK: - Pixels
 
     /// Reads a thumbnail file, decoded now rather than lazily at first draw.
+    /// A missing JPEG falls back to the version 1 HEIC beside it, which the
+    /// grid shows until the thumbnail pass replaces it.
     static let decodeFile: Decoder = { url, maxPixelSize in
+        var url = url
+        if url.pathExtension == Catalog.thumbnailFileExtension, !FileManager.default.fileExists(atPath: url.path) {
+            url = Catalog.legacyThumbnailURL(for: url)
+        }
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
             return nil
         }

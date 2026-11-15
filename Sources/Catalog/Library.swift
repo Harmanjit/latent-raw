@@ -234,7 +234,7 @@ public final class Library: ObservableObject {
 
     public private(set) var catalog: Catalog?
 
-    /// Decoded thumbnails for display, bounded in bytes. The HEIC files in
+    /// Decoded thumbnails for display, bounded in bytes. The JPEG files in
     /// `_latent/thumbnails` are the disk tier.
     public let thumbnailLoader = ThumbnailLoader()
     /// Where the open catalog's thumbnail files are. Changes in the same
@@ -754,7 +754,7 @@ public final class Library: ObservableObject {
                 let report = try await catalog.generateMissingThumbnails(
                     concurrency: settings.concurrency(),
                     first: urgentRelPaths,
-                    quality: settings.quality.heicQuality,
+                    quality: settings.quality.jpegQuality,
                     priority: settings.priority.taskPriority,
                     editedRenderer: renderer, pause: pause
                 ) { done, total in

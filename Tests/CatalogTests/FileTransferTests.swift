@@ -35,7 +35,7 @@ final class FileTransferTests: XCTestCase {
 
     private func exists(_ url: URL) -> Bool { fm.fileExists(atPath: url.path) }
     private func sidecar(_ relPath: String) -> URL { root.appendingPathComponent("_latent/xmp/\(relPath).xmp") }
-    private func thumbnail(_ relPath: String) -> URL { root.appendingPathComponent("_latent/thumbnails/\(relPath).heic") }
+    private func thumbnail(_ relPath: String) -> URL { root.appendingPathComponent("_latent/thumbnails/\(relPath).jpg") }
 
     /// The catalog with "Day 2" included, A rated, keyworded and edited, and
     /// thumbnails made.
@@ -199,7 +199,7 @@ final class FileTransferTests: XCTestCase {
         let gone = try await catalog.image(forRelPath: "A.NEF")
         XCTAssertNil(gone)
         XCTAssertTrue(exists(other.appendingPathComponent("_latent/xmp/A.NEF.xmp")))
-        XCTAssertTrue(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.heic")))
+        XCTAssertTrue(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.jpg")))
 
         let archive = try Catalog.open(at: other)
         let reconcile = try await archive.reconcile()
@@ -234,7 +234,7 @@ final class FileTransferTests: XCTestCase {
         XCTAssertTrue(exists(other.appendingPathComponent("_latent/catalog.sqlite")))
         XCTAssertTrue(exists(other.appendingPathComponent("_latent/xmp/A.NEF.xmp")))
         XCTAssertTrue(exists(other.appendingPathComponent("_latent/xmp/B.NEF.xmp")))
-        XCTAssertTrue(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.heic")))
+        XCTAssertTrue(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.jpg")))
 
         let archive = try Catalog.open(at: other)
         _ = try await archive.reconcile()
@@ -458,7 +458,7 @@ final class FileTransferTests: XCTestCase {
         XCTAssertTrue(exists(root.appendingPathComponent("A.NEF")))
         XCTAssertFalse(exists(other.appendingPathComponent("A.NEF")))
         XCTAssertFalse(exists(other.appendingPathComponent("_latent/xmp/A.NEF.xmp")))
-        XCTAssertFalse(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.heic")))
+        XCTAssertFalse(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.jpg")))
         XCTAssertTrue(exists(sidecar("A.NEF")))
         let row = try await catalog.image(forRelPath: "A.NEF")
         XCTAssertEqual(row?.rating, 4)

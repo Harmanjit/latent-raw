@@ -57,7 +57,7 @@ final class ThumbnailCacheTests: XCTestCase {
         XCTAssertEqual(Priority.high.concurrency(activeProcessors: 4), 4, "never fewer than Normal")
         XCTAssertEqual(Priority.low.taskPriority, .background)
         XCTAssertEqual(Priority.normal.taskPriority, .utility, "the default stays what it always was")
-        XCTAssertEqual(ThumbnailGenerationSettings().quality.heicQuality, Thumbnailer.defaultQuality)
+        XCTAssertEqual(ThumbnailGenerationSettings().quality.jpegQuality, Thumbnailer.defaultQuality)
     }
 
     func testUrgentPassRunsAtHighCappedAtEight() {
@@ -89,7 +89,7 @@ final class ThumbnailCacheTests: XCTestCase {
     func testQualityChangesTheFileWritten() throws {
         let source = root.appendingPathComponent("Big.JPG")
         try RenderedImageCatalogTests.writePicture(to: source, type: .jpeg, seed: 3, width: 900, height: 600)
-        let low = root.appendingPathComponent("low.heic"), high = root.appendingPathComponent("high.heic")
+        let low = root.appendingPathComponent("low.jpg"), high = root.appendingPathComponent("high.jpg")
         try Thumbnailer.makeFromEmbeddedPreview(rawFileAt: source, to: low, quality: 0.3)
         try Thumbnailer.makeFromEmbeddedPreview(rawFileAt: source, to: high, quality: 1)
         let size = { (url: URL) in try XCTUnwrap(url.resourceValues(forKeys: [.fileSizeKey]).fileSize) }

@@ -762,7 +762,8 @@ struct CatalogLocation: Sendable, Equatable {
 
     /// The same layout as `Catalog.thumbnailURL(forRelPath:)`.
     func thumbnailURL(_ relPath: String) -> URL {
-        container.appendingPathComponent("thumbnails", isDirectory: true).appendingPathComponent(relPath + ".heic")
+        container.appendingPathComponent("thumbnails", isDirectory: true)
+            .appendingPathComponent(relPath + "." + Catalog.thumbnailFileExtension)
     }
 }
 
