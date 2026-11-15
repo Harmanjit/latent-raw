@@ -76,6 +76,13 @@ final class ScopeSettings: ObservableObject {
     @Published var plotsSamples: Bool { didSet { defaults.set(plotsSamples, forKey: Keys.plotsSamples) } }
     @Published var sampleSize: PixelSampleSize { didSet { defaults.set(sampleSize.rawValue, forKey: Keys.sampleSize) } }
     @Published var readoutSpace: PixelReadoutSpace { didSet { defaults.set(readoutSpace.rawValue, forKey: Keys.readoutSpace) } }
+    /// Scope menu › Selected Mask Only: every scope measured over the
+    /// selected local adjustment's mask, weighted by it, while one is
+    /// selected (EditorModel+MaskedScopes.swift).
+    @Published var selectedMaskOnly: Bool { didSet { defaults.set(selectedMaskOnly, forKey: Keys.selectedMaskOnly) } }
+    /// Scope menu › Overlay Reference: the reference photo's histogram and
+    /// vectorscope drawn faintly with the active photo's (ReferenceScopes.swift).
+    @Published var overlaysReference: Bool { didSet { defaults.set(overlaysReference, forKey: Keys.overlaysReference) } }
 
     enum Keys {
         static let skinToneLine = "latent.scopes.skinToneLine"
@@ -84,6 +91,8 @@ final class ScopeSettings: ObservableObject {
         static let plotsSamples = "latent.scopes.plotsSamples"
         static let sampleSize = "latent.picker.sampleSize"
         static let readoutSpace = "latent.picker.space"
+        static let selectedMaskOnly = "latent.scopes.selectedMaskOnly"
+        static let overlaysReference = "latent.scopes.overlaysReference"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -94,6 +103,8 @@ final class ScopeSettings: ObservableObject {
         plotsSamples = defaults.object(forKey: Keys.plotsSamples) as? Bool ?? true
         sampleSize = PixelSampleSize(rawValue: defaults.integer(forKey: Keys.sampleSize)) ?? .point
         readoutSpace = PixelReadoutSpace(rawValue: defaults.string(forKey: Keys.readoutSpace) ?? "") ?? .standard
+        selectedMaskOnly = defaults.bool(forKey: Keys.selectedMaskOnly)
+        overlaysReference = defaults.bool(forKey: Keys.overlaysReference)
     }
 }
 

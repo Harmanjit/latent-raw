@@ -187,6 +187,10 @@ final class DevelopViewState: ObservableObject {
         }
     }
     @Published private(set) var pane: EditorModel?
+    /// The reference's histogram and vectorscope, for Scope menu › Overlay
+    /// Reference (ReferenceScopes.swift); nil until measured, and again
+    /// when the reference changes or goes.
+    @Published private(set) var referenceScopes: ReferenceScopes?
 
     private let defaults: UserDefaults
     private weak var main: EditorModel?
@@ -195,6 +199,7 @@ final class DevelopViewState: ObservableObject {
     private var referenceFolder: URL?
     private var observations: [AnyCancellable] = []
     private var paneProblems: AnyCancellable?
+    private var paneRenders: AnyCancellable?
     private var overlayForwarding: AnyCancellable?
     /// Develop's image area is on screen.
     private(set) var isShowing = false
@@ -297,6 +302,10 @@ final class DevelopViewState: ObservableObject {
         paneProblems = made.paneProblems.sink { [weak self] problem in
             MainActor.assumeIsolated { self?.main?.lastError = problem }
         }
+        // Published as the render starts; measured once it has finished.
+        paneRenders = made.$preview.receive(on: RunLoop.main).sink { [weak self] _ in
+            self?.refreshReferenceScopes()
+        }
         pane = made
         return made
     }
@@ -354,6 +363,7 @@ final class DevelopViewState: ObservableObject {
     }
 
     func setReference(_ record: ImageRecord) {
+        if reference?.id != record.id { referenceScopes = nil }
         reference = record
         referenceFolder = library?.folderURL
         rememberReference()
@@ -363,6 +373,7 @@ final class DevelopViewState: ObservableObject {
 
     func clearReference() {
         reference = nil
+        referenceScopes = nil
         referenceFolder = nil
         loadedReferenceID = nil
     }
@@ -412,6 +423,16 @@ final class DevelopViewState: ObservableObject {
                 self.main?.reportFailure("Reading the edit for \(record.fileName)", error)
             }
         }
+    }
+
+    /// Measures the reference's scopes from the pane while it shows the
+    /// reference and Overlay Reference is on. Otherwise the last ones stay
+    /// (a locked reference still overlays after Reference view closes).
+    func refreshReferenceScopes() {
+        guard ScopeSettings.shared.overlaysReference, reference != nil, kind == .reference,
+              let id = reference?.id, loadedReferenceID == id, loadedBefore == nil,
+              let pane, pane.hasImage, let measured = pane.measureReferenceScopes() else { return }
+        referenceScopes = measured
     }
 
     // MARK: Commands

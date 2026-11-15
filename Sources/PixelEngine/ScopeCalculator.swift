@@ -21,6 +21,13 @@ public struct Vectorscope: Sendable {
     /// `size * size` values, row-major, row 0 at the top (highest Cr).
     public let counts: [UInt32]
     public let peak: UInt32
+
+    /// For a vectorscope measured elsewhere (`MaskedScopeAccumulator`) or
+    /// made up in a test.
+    public init(counts: [UInt32], peak: UInt32) {
+        self.counts = counts
+        self.peak = peak
+    }
 }
 
 /// Runs the scope kernels and reads their results back.

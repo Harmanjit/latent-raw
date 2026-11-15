@@ -2,6 +2,11 @@
 
 What has arrived since the 0.9.0 beta, by area. Each line says what the feature does and links to where it is described in full. For a guided tour of the most useful ones, try the tutorials: [Culling and Organising](Tutorial-Culling-and-Organising), [Editing](Tutorial-Editing) and [Printing and Sharing](Tutorial-Printing-and-Sharing).
 
+## Wave 4
+
+- **Scopes for one mask**: Selected Mask Only in the scope menu limits the histogram, waveform, parade and vectorscope to the selected local adjustment's mask, weighted by it. See [The viewport](Develop#the-viewport).
+- **Overlay Reference** draws the reference photo's histogram and vectorscope in amber with the active photo's, for matching colour between photos. See [The viewport](Develop#the-viewport).
+
 ## Organising
 
 - **Collections, smart collections and collection sets** gather photos without moving them; smart ones fill themselves from rules such as "rated 4 or more with the keyword Brittany". See [Collections](Collections-and-Keywords#collections).
