@@ -20,6 +20,11 @@ public actor Catalog {
     /// started while another runs lists only what that one left undone.
     var thumbnailPassRunning = false
     var thumbnailPassWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Finder tags each file had on the last scan, with its status-change
+    /// time then (Reconcile `finderTags(of:relPath:changed:)`), and the
+    /// memo the running scan is building.
+    var scanTagMemo: [String: (changed: timespec, tags: String?)] = [:]
+    var nextScanTagMemo: [String: (changed: timespec, tags: String?)] = [:]
 
     public static let containerName = "_latent"
     /// The container name before the app was renamed (September 2026).

@@ -399,8 +399,12 @@ extension Catalog {
         // 9. Sidecars: re-read only those whose mtime moved. Copies whose
         //    sidecar is here but whose row is not (a rebuilt database) get a
         //    row first, for this pass to fill.
-        _ = restoreVirtualCopiesFromSidecars(report: &report)
-        report.sidecarsRead = try syncSidecars(report: &report, leaving: moved.sidecarsMissing)
+        let restored = restoreVirtualCopiesFromSidecars(report: &report)
+        // A pass that changed no row reuses the rows it read in step 2.
+        let rowsUnchanged = restored == 0 && removals.isEmpty && renames.isEmpty && updates.isEmpty
+            && inserts.isEmpty && tagChanges.isEmpty
+        report.sidecarsRead = try syncSidecars(report: &report, leaving: moved.sidecarsMissing,
+                                               rows: rowsUnchanged ? everything : nil)
         // 10. Photos that arrived with another application's sidecar and
         //     none of Latent's (ForeignSidecar), and EXIF extras for rows
         //     made before they were read (ExifExtras), a batch per pass.
@@ -419,40 +423,46 @@ extension Catalog {
     private func scanFiles(report: inout ReconcileReport) throws -> [DiskFile] {
         var files: [DiskFile] = []
         let defaultMode = try defaultSubfolderMode()
+        nextScanTagMemo = [:]
         try scan(directory: rootPath, relPrefix: "", defaultMode: defaultMode,
                  into: &files, report: &report)
+        // Only files seen this pass are remembered, so the memo never
+        // outgrows the folder.
+        scanTagMemo = nextScanTagMemo
+        nextScanTagMemo = [:]
         return files.sorted { $0.relPath < $1.relPath }
     }
 
     private func scan(directory: URL, relPrefix: String, defaultMode: SubfolderMode,
                       into files: inout [DiskFile], report: inout ReconcileReport) throws {
-        let fm = FileManager.default
-        let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .isRegularFileKey, .isSymbolicLinkKey,
-                                      .fileSizeKey, .contentModificationDateKey, .nameKey,
-                                      .ubiquitousItemDownloadingStatusKey]
-        let entries = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys,
-                                                 options: [.skipsHiddenFiles])
+        // One bulk listing: name, kind, size, times and flags for every
+        // entry, no per-file calls but the Finder-tag read, and that only
+        // for files whose status-change time moved since the last pass.
+        let entries = try DirectoryListing.entries(of: directory)
+            .sorted { $0.name < $1.name }
 
         for entry in entries {
-            let values = try entry.resourceValues(forKeys: Set(keys))
-            let name = values.name ?? entry.lastPathComponent
+            // `.skipsHiddenFiles`, as the listing used to ask for.
+            if entry.isHidden { continue }
+            let name = entry.name
             let relPath = relPrefix.isEmpty ? name : relPrefix + "/" + name
 
             // A symlink could point anywhere on the disk; a catalog is one
             // folder and stays inside it. Files that are links are skipped
             // for the same reason: their sidecar would be written here for
             // a photo that lives elsewhere.
-            if values.isSymbolicLink == true { continue }
+            if entry.kind == .symbolicLink { continue }
 
-            if values.isDirectory == true {
+            if entry.kind == .directory {
                 if name == Self.containerName || name == Self.legacyContainerName { continue }
+                let url = directory.appendingPathComponent(name, isDirectory: true)
                 // A package (a Photos library, an app) is one document to
                 // Finder and the sidebar, and its insides belong to the app
                 // that made it. Rewriting files in there would damage it.
-                if values.isPackage == true { continue }
+                if (try? url.resourceValues(forKeys: [.isPackageKey]))?.isPackage == true { continue }
                 // Independent by existence, under either container name, as
                 // the sidebar and transfers see it.
-                if FolderAccess.hasCatalog(entry) { continue }
+                if FolderAccess.hasCatalog(url) { continue }
 
                 var mode = try subfolderMode(forRelPath: relPath)
                 if mode == nil {
@@ -463,7 +473,7 @@ extension Catalog {
                 }
                 switch mode! {
                 case .included:
-                    try scan(directory: entry, relPrefix: relPath, defaultMode: defaultMode,
+                    try scan(directory: url, relPrefix: relPath, defaultMode: defaultMode,
                              into: &files, report: &report)
                 case .independent:
                     continue
@@ -473,22 +483,43 @@ extension Catalog {
                 continue
             }
 
-            guard Self.indexedExtensions.contains(entry.pathExtension.lowercased()) else { continue }
+            guard Self.indexedExtensions.contains((name as NSString).pathExtension.lowercased()) else { continue }
             // A named pipe or device called *.nef would block the read
             // that hashes it, and the whole catalog with it.
-            guard values.isRegularFile == true else { continue }
+            guard entry.kind == .file else { continue }
+            let url = directory.appendingPathComponent(name, isDirectory: false)
             files.append(DiskFile(
                 relPath: relPath,
-                size: Int64(values.fileSize ?? 0),
-                mtime: ImageRecord.milliseconds(values.contentModificationDate ?? .distantPast),
-                finderTags: FinderTag.encode(FinderTag.read(from: entry)),
-                isDataless: Self.isDataless(entry, values)))
+                size: entry.size,
+                mtime: ImageRecord.milliseconds(DirectoryListing.date(entry.modified)),
+                finderTags: finderTags(of: url, relPath: relPath, changed: entry.changed),
+                isDataless: Self.isDataless(url, flags: entry.flags)))
         }
+    }
+
+    /// The file's Finder tags in stored form. Setting a tag (an extended
+    /// attribute) moves the file's status-change time, so tags read on an
+    /// earlier pass of this catalog still hold while that time hasn't
+    /// moved, and a refresh of an unchanged folder reads none.
+    private func finderTags(of url: URL, relPath: String, changed: timespec) -> String? {
+        if let known = scanTagMemo[relPath], known.changed.tv_sec == changed.tv_sec,
+           known.changed.tv_nsec == changed.tv_nsec {
+            nextScanTagMemo[relPath] = known
+            return known.tags
+        }
+        let tags = FinderTag.encode(FinderTag.read(from: url))
+        nextScanTagMemo[relPath] = (changed, tags)
+        return tags
     }
 
     /// Whether a file's contents are only in the cloud: evicted by
     /// Optimize Mac Storage, or a placeholder from another file provider.
     /// Opening one would download it.
+    static func isDataless(_ url: URL, flags: UInt32) -> Bool {
+        if let override = datalessOverrideForTesting { return override(url) }
+        return flags & UInt32(SF_DATALESS) != 0
+    }
+
     static func isDataless(_ url: URL, _ values: URLResourceValues) -> Bool {
         if let override = datalessOverrideForTesting { return override(url) }
         if values.ubiquitousItemDownloadingStatus == .notDownloaded { return true }
@@ -668,15 +699,21 @@ extension Catalog {
     /// keywords and edit stack overwrite the row's. Returns how many were
     /// read. Rows at `missing` lost their sidecar to a move that failed
     /// this pass and keep what they have.
-    private func syncSidecars(report: inout ReconcileReport, leaving missing: Set<String> = []) throws -> Int {
-        let records = try dbQueue.read { db in try ImageRecord.fetchAll(db) }
-        let fm = FileManager.default
+    ///
+    /// `rows` is every row as it stands, when the caller has them; they're
+    /// read here otherwise.
+    private func syncSidecars(report: inout ReconcileReport, leaving missing: Set<String> = [],
+                              rows: [ImageRecord]? = nil) throws -> Int {
+        let records = try rows ?? dbQueue.read { db in try ImageRecord.fetchAll(db) }
         var applied: [(ImageRecord, XMPSidecar.Fields?, Int64?)] = []
 
         for record in records {
             let url = sidecarURL(forRelPath: record.relPath)
-            guard let attrs = try? fm.attributesOfItem(atPath: url.path),
-                  let date = attrs[.modificationDate] as? Date else {
+            // `lstat` rather than `attributesOfItem` (which also doesn't
+            // follow links) at a tenth of the cost, its time converted as
+            // Foundation converts it.
+            var info = stat()
+            guard lstat(url.path, &info) == 0 else {
                 // No sidecar. If there used to be one, its metadata is gone
                 // with it: the row goes back to defaults.
                 if record.sidecarMtime != nil && !missing.contains(record.relPath) {
@@ -684,7 +721,7 @@ extension Catalog {
                 }
                 continue
             }
-            let mtime = ImageRecord.milliseconds(date)
+            let mtime = ImageRecord.milliseconds(DirectoryListing.date(info.st_mtimespec))
             guard mtime != record.sidecarMtime else { continue }
             let fields: XMPSidecar.Fields
             do {
