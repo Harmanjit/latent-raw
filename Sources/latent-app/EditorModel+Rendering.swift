@@ -178,6 +178,10 @@ extension EditorModel {
         pendingRender?.cancel()
         let start = Date()
         var what: [String] = []
+        // Brush masks that must be redrawn whole are redrawn off the main
+        // thread for these renders (ImageSession.defersBrushRedraws).
+        deferBrushRedraws(in: session)
+        defer { session.defersBrushRedraws = false }
         do {
             what.append(try renderPreview(session: session, pipeline: pipeline))
             if wantsTile {
@@ -198,6 +202,23 @@ extension EditorModel {
         renderReport = what.joined(separator: " + ") + String(format: " · %.1f ms", lastRenderMs)
         refreshMagnifier()
         scheduleHighQualityPreview()
+    }
+
+    /// Lets `session` redraw whole brush masks off the main thread during
+    /// the editor's own renders; each finished redraw comes back here and,
+    /// unless later edits overtook it, renders again to show it.
+    private func deferBrushRedraws(in session: ImageSession) {
+        if session.onBrushRasterReady == nil {
+            // A result for another session (the photo changed) matches
+            // none of the current session's masks and is dropped there.
+            session.onBrushRasterReady = { [weak self] result in
+                Task { @MainActor [weak self] in
+                    guard let self, self.session?.applyBrushRaster(result) == true else { return }
+                    self.rerender()
+                }
+            }
+        }
+        session.defersBrushRedraws = true
     }
 
     /// Returns a short description of what ran, for the status bar.

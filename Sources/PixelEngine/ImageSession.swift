@@ -244,6 +244,30 @@ public final class ImageSession {
     /// built by the first render whose edit has one.
     var brushGuide: BrushGuide?
 
+    /// While true (the editor's interactive renders), a brush mask that
+    /// would have to be redrawn whole (undo, redo, a feather change) is
+    /// redrawn off the calling thread instead of inside the render, and
+    /// the render shows the slice as it was. The finished bitmap goes to
+    /// `onBrushRasterReady`, from any thread; the owner passes it back to
+    /// `applyBrushRaster` on its own thread and renders again. Without a
+    /// handler, or while false (export, High Quality Preview, tests),
+    /// every mask is brought up to date inside the render as before.
+    public var defersBrushRedraws = false
+    public var onBrushRasterReady: (@Sendable (BrushRasterResult) -> Void)?
+
+    /// Takes a redraw `onBrushRasterReady` delivered. True when the
+    /// caller should render again (the next render then shows it); false
+    /// for a result overtaken by later edits, which is dropped.
+    public func applyBrushRaster(_ result: BrushRasterResult) -> Bool {
+        brushMasks?.apply(result) ?? false
+    }
+
+    /// Whether a brush redraw is running or waiting to be shown.
+    public var hasPendingBrushRedraws: Bool { brushMasks?.hasPendingRedraws ?? false }
+
+    /// Where brush redraws run: one at a time, off the main thread.
+    private static let brushRasterQueue = DispatchQueue(label: "latent.brush-raster", qos: .userInitiated)
+
     /// Pixels for AI-generated masks, keyed by local id. Set by the app
     /// after MLKit produces them; the session only stores and uploads.
     private var aiMasks: [UUID: MaskBitmap] = [:]
@@ -343,7 +367,16 @@ public final class ImageSession {
                                           sensorHeight: file.summary.rawHeight)
             }
             guard let set = brushMasks else { return (nil, [:]) }
-            return (set.texture, set.sync(locals: locals, aiMasks: aiMasks, guide: brushGuide))
+            var scheduler: BrushRasterScheduler?
+            if defersBrushRedraws, let ready = onBrushRasterReady {
+                scheduler = { job in
+                    Self.brushRasterQueue.async {
+                        if let result = job.run() { ready(result) }
+                    }
+                }
+            }
+            return (set.texture, set.sync(locals: locals, aiMasks: aiMasks, guide: brushGuide,
+                                          deferRedraws: scheduler))
         }
         if placeholderMasks == nil {
             let d = MTLTextureDescriptor()
