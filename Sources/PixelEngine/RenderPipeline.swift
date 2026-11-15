@@ -777,6 +777,14 @@ public final class RenderPipeline {
             noiseDetail: parameters.noiseDetail, dust: parameters.dust, blemishes: parameters.touchUp.activeBlemishes, heals: parameters.heals,
             redEyes: parameters.redEyes)
         let cachedHealed = session.cachedHealed(for: healKey)
+        /// The heal cache entry this render makes, stored after its
+        /// command buffer completes.
+        var pendingHealStore: (texture: MTLTexture, written: [MTLTexture])?
+        func storePendingHeal() {
+            if let pendingHealStore {
+                session.storeHealed(pendingHealStore.texture, for: healKey, overwriting: pendingHealStore.written)
+            }
+        }
 
         if let cachedHealed {
             colourInput = cachedHealed
@@ -825,10 +833,14 @@ public final class RenderPipeline {
             // so an exposure tick with noise reduction on skips it
             // (docs/Performance-Plan.md fix 5). The demosaic alone is the
             // stage cache's job. A pooled texture is only trustworthy
-            // until the next render writes it, so the store first evicts
-            // every entry pointing at a texture this render wrote.
+            // until the next render writes it, so every entry pointing at
+            // a texture this render writes goes now; the new entry is
+            // added only once the command buffer has completed without
+            // error (`pendingHealStore`), so a render that throws or fails
+            // on the GPU never leaves a key on a texture it didn't fill.
             if colourInput !== cameraRGB {
-                session.storeHealed(colourInput, for: healKey, overwriting: written)
+                session.evictHealed(pointingAt: written + [colourInput])
+                pendingHealStore = (colourInput, written)
             }
         }
         renderInfo = renderInfo.markingHealCached(cachedHealed != nil)
@@ -883,6 +895,7 @@ public final class RenderPipeline {
             cmdBuffer.commit()
             cmdBuffer.waitUntilCompleted()
             if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
+            storePendingHeal()
             info?.pointee = renderInfo
             return colourInput
         }
@@ -1032,6 +1045,7 @@ public final class RenderPipeline {
         cmdBuffer.waitUntilCompleted()
         if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
         if toneEqualizer != nil { session.toneEqualizerStore.renderDidComplete() }
+        storePendingHeal()
 
         info?.pointee = renderInfo
         return final

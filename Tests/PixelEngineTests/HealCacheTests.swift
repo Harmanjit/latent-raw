@@ -256,6 +256,31 @@ final class HealCacheTests: XCTestCase {
         XCTAssertEqual(try TextureReadback.float16Pixels(of: again.texture, gpu: gpu), reference)
     }
 
+    /// The pipeline evicts entries on the textures a render will write as
+    /// it encodes them, and stores the new entry only after the command
+    /// buffer completes: a render that throws later, or fails on the GPU,
+    /// leaves the cache without the entries it was about to overwrite and
+    /// without one for its own key.
+    func testEvictingATextureDropsItsEntryUntilARenderCompletes() throws {
+        let (_, session, pipeline) = try openFixture()
+        var denoised = EditParameters()
+        denoised.denoiseLuminance = 0.5
+        let first = try render(denoised, session: session, pipeline: pipeline)
+        XCTAssertFalse(first.cached)
+        XCTAssertEqual(session.healCacheCount, 1, "stored once the render completed")
+
+        // What the pipeline does while encoding, before anything can fail.
+        let key = try XCTUnwrap(session.healCacheKeys.first)
+        let texture = try XCTUnwrap(session.cachedHealed(for: key))
+        session.evictHealed(pointingAt: [texture])
+        XCTAssertEqual(session.healCacheCount, 0)
+        XCTAssertNil(session.cachedHealed(for: key))
+
+        // A render that completes stores again.
+        XCTAssertFalse(try render(denoised, session: session, pipeline: pipeline).cached)
+        XCTAssertTrue(try render(denoised, session: session, pipeline: pipeline).cached)
+    }
+
     /// The cache never holds more than its limit.
     func testEntriesAreCapped() throws {
         let (_, session, pipeline) = try openFixture(LinearFixtures.orientation6)
