@@ -280,6 +280,7 @@ extension Catalog {
                 fresh.preservedName = previous.preservedName
                 fresh.mergeJSON = previous.mergeJSON
                 fresh.copyDescriptive(from: previous)
+                fresh.carryGeoTime(from: previous)
                 fresh.sidecarMtime = previous.sidecarMtime
                 fresh.thumbKey = nil   // pixels changed; thumbnail is stale
                 updates.append(fresh)
@@ -695,6 +696,8 @@ extension Catalog {
                 row.creator = fields?.creator
                 row.copyright = fields?.copyright
                 for field in DescriptiveField.more { field.set(fields?.more[field], on: &row) }
+                // A capture-time correction and a geotag likewise (GeoTime).
+                row.applyGeoTime(from: fields)
                 row.sidecarMtime = mtime
                 try row.update(db)
 

@@ -264,6 +264,7 @@ extension Catalog {
             fields.creator = row.creator
             fields.copyright = row.copyright
             fields.more = row.moreDescriptive
+            fields.setGeoTime(from: row)
             return fields
         }
     }

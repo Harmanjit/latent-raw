@@ -179,6 +179,9 @@ enum KeyCommand: Equatable, Sendable {
     /// the high-quality preview, fine straightening, Focus Exposure, the
     /// shortcuts overlay and the welcome sheet (ViewingCommands.swift).
     case viewing(ViewingCommand)
+    /// Metadata › Edit Capture Time… and Geotag from GPX Track… on the
+    /// selection (GeoTimeSheets.swift).
+    case metadata(MetadataCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).

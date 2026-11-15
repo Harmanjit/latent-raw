@@ -237,6 +237,7 @@ struct CommandState: Equatable {
         case .applyPreset: hasImage || selectionCount > 0
         case .history(let command): isEnabled(command)
         case .viewing(let command): isEnabled(command)
+        case .metadata(let command): isEnabled(command)
         }
     }
 
@@ -483,6 +484,11 @@ struct LatentCommands: Commands {
             item("Remove from Collection", .removeFromCollection)
             Divider()
             item("Add Keywords…", .addKeywords)
+        }
+
+        CommandMenu("Metadata") {
+            item(MetadataCommand.editCaptureTime.title, .metadata(.editCaptureTime))
+            item(MetadataCommand.geotagFromGPX.title, .metadata(.geotagFromGPX))
         }
 
         CommandMenu("Develop") {

@@ -79,6 +79,17 @@ public struct ImageRecord: Codable, FetchableRecord, MutablePersistableRecord,
     /// Which version of `ExifExtras` read the fields above; nil for a row
     /// made before they existed, which the next reconcile fills in.
     public var exifExtrasVersion: Int? = nil
+    /// Edit Capture Time's correction (GeoTime.swift): seconds already
+    /// added to the file's own time in `captureTime`, nil for none. The
+    /// file is never rewritten; the sidecar holds the truth
+    /// (latent:CaptureTimeOffset) and this mirrors it, so a file changed
+    /// on disk is read afresh and corrected again.
+    public var captureTimeOffset: Int64? = nil
+    /// True when the GPS fields above came from Geotag from GPX Track
+    /// rather than the file (mirrored to the sidecar's exif:GPS* names);
+    /// nil when they are the file's own. Reading the file's EXIF again
+    /// leaves a geotag alone.
+    public var gpsTagged: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, size, mtime, xxhash, camera, lens, iso, shutter, aperture, focal
@@ -101,6 +112,8 @@ public struct ImageRecord: Codable, FetchableRecord, MutablePersistableRecord,
         case meteringMode = "metering_mode"
         case whiteBalanceMode = "white_balance_mode"
         case exifExtrasVersion = "exif_extras_version"
+        case captureTimeOffset = "capture_time_offset"
+        case gpsTagged = "gps_tagged"
         case relPath = "rel_path"
         case preservedName = "preserved_name"
         case captureTime = "capture_time"

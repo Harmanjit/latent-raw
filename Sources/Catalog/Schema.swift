@@ -176,6 +176,14 @@ enum Schema {
         }
         // Version names for virtual copies (VirtualCopySchema).
         VirtualCopySchema.registerVersionNames(in: &migrator)
+        // Edit Capture Time and Geotag from GPX Track (GeoTime.swift).
+        // Existing rows get NULL: no correction and the file's own GPS.
+        migrator.registerMigration("geotime_v1_capture_offset_and_geotag") { db in
+            try db.alter(table: "images") { t in
+                t.add(column: "capture_time_offset", .integer)
+                t.add(column: "gps_tagged", .boolean)
+            }
+        }
 
         return migrator
     }
