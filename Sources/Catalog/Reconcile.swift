@@ -280,10 +280,9 @@ extension Catalog {
 
         // 7. Metadata for new and changed files: read in step 4 for most,
         //    read now for those step 4 left for the plan.
-        let unread = (toInsert.map(\.file) + toUpdate.map(\.file)).filter { readRecords[$0.relPath] == nil }
-        let unreadHashes = Dictionary((toInsert.map { ($0.file.relPath, $0.hash) }
-                                       + toUpdate.map { ($0.file.relPath, $0.hash) }), uniquingKeysWith: { a, _ in a })
-        let late = unread.map { (file: $0, url: fileURL(forRelPath: $0.relPath), hash: unreadHashes[$0.relPath] ?? Data()) }
+        let late = (toInsert.map { ($0.file, $0.hash) } + toUpdate.map { ($0.file, $0.hash) })
+            .filter { readRecords[$0.0.relPath] == nil }
+            .map { (file: $0.0, url: fileURL(forRelPath: $0.0.relPath), hash: $0.1) }
         let lateRecords = ImportWorkers.map(count: late.count, width: width) {
             index, _ -> Result<ImageRecord, any Error> in
             Result { try Self.makeRecord(for: late[index].file, at: late[index].url, hash: late[index].hash) }
