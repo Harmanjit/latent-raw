@@ -122,30 +122,7 @@ public enum FileIntegrity {
     /// from memory, which proves nothing about the copy on disk. The same
     /// value `FileHash.xxh64(ofFileAt:)` gives.
     public static func uncachedXXH64(ofFileAt url: URL) throws -> UInt64 {
-        let fd = open(url.path, O_RDONLY)
-        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        defer { close(fd) }
-        _ = fcntl(fd, F_NOCACHE, 1)
-        var info = stat()
-        guard fstat(fd, &info) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        let length = Int(info.st_size)
-        var data = Data(count: length)
-        let total = data.withUnsafeMutableBytes { buffer -> Int in
-            guard let base = buffer.baseAddress else { return 0 }
-            var done = 0
-            while done < length {
-                let got = Darwin.read(fd, base + done, length - done)
-                if got < 0 {
-                    if errno == EINTR { continue }
-                    return -1
-                }
-                if got == 0 { break }
-                done += got
-            }
-            return done
-        }
-        guard total == length else { throw POSIXError(total < 0 ? (POSIXErrorCode(rawValue: errno) ?? .EIO) : .EIO) }
-        return FileHash.xxh64(data)
+        try FileHash.xxh64(ofFileAt: url, uncached: true)
     }
 
     /// The images a verify run reads for `records`: virtual copies stand

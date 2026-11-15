@@ -132,22 +132,28 @@ extension Catalog {
         }
 
         // 4. Expensive work, outside any transaction: hash the files that
-        //    need it.
+        //    need it, a few at once (ImportWorkers), each read in large
+        //    chunks rather than memory-mapped.
+        let toHash = newFiles.map { fileURL(forRelPath: $0.relPath) }
+            + modifiedFiles.map { fileURL(forRelPath: $0.0.relPath) }
+        let hashes = ImportWorkers.map(count: toHash.count, width: ImportWorkers.width(forFolderAt: rootPath)) {
+            index, buffer -> Result<Data, any Error> in
+            Result { ImageRecord.hashData(try FileHash.xxh64(ofFileAt: toHash[index], uncached: false, buffer: buffer)) }
+        }
         var hashedNew: [(file: DiskFile, hash: Data)] = []
-        for file in newFiles {
-            do {
-                hashedNew.append((file, ImageRecord.hashData(try FileHash.xxh64(ofFileAt: fileURL(forRelPath: file.relPath)))))
-            } catch {
-                report.failures.append((file.relPath, "hash failed: \(error)"))
+        for (file, result) in zip(newFiles, hashes) {
+            switch result {
+            case .success(let hash): hashedNew.append((file, hash))
+            case .failure(let error): report.failures.append((file.relPath, "hash failed: \(error)"))
             }
         }
         var hashedModified: [(file: DiskFile, previous: ImageRecord, hash: Data)] = []
         // A modified file that can't be read keeps its row as it is.
         var heldPaths: [String] = []
-        for (file, previous) in modifiedFiles {
-            do {
-                hashedModified.append((file, previous, ImageRecord.hashData(try FileHash.xxh64(ofFileAt: fileURL(forRelPath: file.relPath)))))
-            } catch {
+        for ((file, previous), result) in zip(modifiedFiles, hashes.dropFirst(newFiles.count)) {
+            switch result {
+            case .success(let hash): hashedModified.append((file, previous, hash))
+            case .failure(let error):
                 report.failures.append((file.relPath, "hash failed: \(error)"))
                 heldPaths.append(file.relPath)
             }

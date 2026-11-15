@@ -15,11 +15,58 @@ import Foundation
 public enum FileHash {
     public static let prefix = "xxh64"
 
-    /// Hashes a whole file. Memory-mapped, so a 30 MB raw doesn't get
-    /// copied into a Data buffer first.
-    public static func xxh64(ofFileAt url: URL) throws -> UInt64 {
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        return xxh64(data)
+    /// How much of a file one `read()` asks for. Large reads keep the SSD
+    /// busy (a memory map faults pages in a few at a time and read about a
+    /// quarter as fast); a multiple of 32 so every chunk but the last is
+    /// whole XXH64 stripes.
+    public static let chunkSize = 4 << 20
+
+    /// Hashes a whole file, read in `chunkSize` pieces into one buffer, so
+    /// a 30 MB raw is never held in memory at once. The same value as
+    /// `xxh64(Data(contentsOf: url))`.
+    ///
+    /// `uncached` (`F_NOCACHE`) keeps what is read out of the page cache,
+    /// so a big import doesn't push everything else out of memory to keep
+    /// files nobody reads again soon. Verify Files uses it to read the
+    /// disk's copy.
+    public static func xxh64(ofFileAt url: URL, uncached: Bool = false) throws -> UInt64 {
+        let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: chunkSize, alignment: 16_384)
+        defer { buffer.deallocate() }
+        return try xxh64(ofFileAt: url, uncached: uncached, buffer: buffer)
+    }
+
+    /// The same, reading through `buffer` (whose size sets the chunk), so
+    /// a worker hashing many files allocates it once.
+    public static func xxh64(ofFileAt url: URL, uncached: Bool,
+                             buffer: UnsafeMutableRawBufferPointer) throws -> UInt64 {
+        let fd = url.withUnsafeFileSystemRepresentation { path in path.map { open($0, O_RDONLY) } ?? -1 }
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(fd) }
+        if uncached { _ = fcntl(fd, F_NOCACHE, 1) }
+        return try xxh64(fileDescriptor: fd, buffer: buffer)
+    }
+
+    /// Reads `fd` from where it stands to the end and hashes what it read.
+    public static func xxh64(fileDescriptor fd: Int32, buffer: UnsafeMutableRawBufferPointer,
+                             seed: UInt64 = 0) throws -> UInt64 {
+        guard let base = buffer.baseAddress, buffer.count > 0 else { throw POSIXError(.EINVAL) }
+        var hasher = Hasher64(seed: seed)
+        while true {
+            // Fill the buffer before hashing it: a short read mid-file
+            // would otherwise split a stripe (handled, but slower).
+            var filled = 0
+            while filled < buffer.count {
+                let got = Darwin.read(fd, base + filled, buffer.count - filled)
+                if got < 0 {
+                    if errno == EINTR { continue }
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+                if got == 0 { break }
+                filled += got
+            }
+            hasher.update(UnsafeRawBufferPointer(start: base, count: filled))
+            if filled < buffer.count { return hasher.finalize() }
+        }
     }
 
     public static func xxh64(_ data: Data, seed: UInt64 = 0) -> UInt64 {
@@ -52,6 +99,113 @@ public enum FileHash {
         var acc = acc ^ round(0, val)
         acc = (acc &* p1) &+ p4
         return acc
+    }
+
+    /// XXH64 fed in pieces: the same value as hashing their concatenation
+    /// in one go (`xxh64(_:seed:)`, kept as the reference).
+    public struct Hasher64 {
+        private var v1, v2, v3, v4: UInt64
+        private let seed: UInt64
+        private var total: UInt64 = 0
+        /// Bytes of a stripe not yet complete.
+        private var pending: (UInt64, UInt64, UInt64, UInt64) = (0, 0, 0, 0)
+        private var pendingCount = 0
+
+        public init(seed: UInt64 = 0) {
+            self.seed = seed
+            v1 = seed &+ FileHash.p1 &+ FileHash.p2
+            v2 = seed &+ FileHash.p2
+            v3 = seed
+            v4 = seed &- FileHash.p1
+        }
+
+        public mutating func update(_ bytes: UnsafeRawBufferPointer) {
+            guard let start = bytes.baseAddress, !bytes.isEmpty else { return }
+            total &+= UInt64(bytes.count)
+            var offset = 0
+            if pendingCount > 0 {
+                let take = min(32 - pendingCount, bytes.count)
+                var stripe = pending
+                let at = pendingCount
+                withUnsafeMutableBytes(of: &stripe) { $0.baseAddress!.advanced(by: at).copyMemory(from: start, byteCount: take) }
+                pending = stripe
+                pendingCount += take
+                offset = take
+                guard pendingCount == 32 else { return }
+                withUnsafeBytes(of: stripe) { consume(stripes: $0) }
+                pendingCount = 0
+            }
+            let whole = (bytes.count - offset) & ~31
+            if whole > 0 { consume(stripes: UnsafeRawBufferPointer(start: start + offset, count: whole)) }
+            let rest = bytes.count - offset - whole
+            if rest > 0 {
+                var stripe = pending
+                withUnsafeMutableBytes(of: &stripe) { $0.baseAddress!.copyMemory(from: start + offset + whole, byteCount: rest) }
+                pending = stripe
+                pendingCount = rest
+            }
+        }
+
+        /// Whole 32-byte stripes, `bytes.count` a multiple of 32.
+        private mutating func consume(stripes bytes: UnsafeRawBufferPointer) {
+            var a = v1, b = v2, c = v3, d = v4
+            var i = 0
+            while i < bytes.count {
+                a = FileHash.round(a, bytes.loadUnaligned(fromByteOffset: i, as: UInt64.self).littleEndian)
+                b = FileHash.round(b, bytes.loadUnaligned(fromByteOffset: i + 8, as: UInt64.self).littleEndian)
+                c = FileHash.round(c, bytes.loadUnaligned(fromByteOffset: i + 16, as: UInt64.self).littleEndian)
+                d = FileHash.round(d, bytes.loadUnaligned(fromByteOffset: i + 24, as: UInt64.self).littleEndian)
+                i += 32
+            }
+            v1 = a; v2 = b; v3 = c; v4 = d
+        }
+
+        public func finalize() -> UInt64 {
+            var h: UInt64
+            if total >= 32 {
+                h = FileHash.rotl(v1, 1) &+ FileHash.rotl(v2, 7) &+ FileHash.rotl(v3, 12) &+ FileHash.rotl(v4, 18)
+                h = FileHash.mergeRound(h, v1)
+                h = FileHash.mergeRound(h, v2)
+                h = FileHash.mergeRound(h, v3)
+                h = FileHash.mergeRound(h, v4)
+            } else {
+                h = seed &+ FileHash.p5
+            }
+            h = h &+ total
+            let count = pendingCount
+            return withUnsafeBytes(of: pending) { stripe in
+                let tail = UnsafeRawBufferPointer(rebasing: stripe[..<count])
+                return FileHash.finish(h, tail: tail)
+            }
+        }
+    }
+
+    /// The tail of fewer than 32 bytes and the final avalanche.
+    @inline(__always) private static func finish(_ start: UInt64, tail bytes: UnsafeRawBufferPointer) -> UInt64 {
+        var h = start
+        var i = 0
+        let len = bytes.count
+        while i + 8 <= len {
+            h ^= round(0, bytes.loadUnaligned(fromByteOffset: i, as: UInt64.self).littleEndian)
+            h = (rotl(h, 27) &* p1) &+ p4
+            i += 8
+        }
+        if i + 4 <= len {
+            h ^= UInt64(bytes.loadUnaligned(fromByteOffset: i, as: UInt32.self).littleEndian) &* p1
+            h = (rotl(h, 23) &* p2) &+ p3
+            i += 4
+        }
+        while i < len {
+            h ^= UInt64(bytes[i]) &* p5
+            h = rotl(h, 11) &* p1
+            i += 1
+        }
+        h ^= h >> 33
+        h = h &* p2
+        h ^= h >> 29
+        h = h &* p3
+        h ^= h >> 32
+        return h
     }
 
     public static func xxh64(_ bytes: UnsafeRawBufferPointer, seed: UInt64 = 0) -> UInt64 {
