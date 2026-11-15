@@ -33,15 +33,24 @@ final class MaskedScopesAsyncTests: XCTestCase {
                                     exposureEV: 0.7)]
         model.parameters = p
         model.selectedLocalIndex = 0
-        model.rerender()
+        // These edits come quicker than `dragTickWindow`, so the editor
+        // takes them for a drag: its analysis render is the draft, and a
+        // settle render follows `dragSettleDelay` later, measuring the
+        // scopes again. On a slow GPU that lands while the measurement
+        // under test runs and rightly overtakes it. Render as an open
+        // does instead: full quality, no settle render waiting.
+        model.rerenderAtFullQuality()
         return model
     }
 
-    /// Stops a throttled measurement queued by the setup from starting a
-    /// newer one (which would rightly drop the result under test).
+    /// Stops a throttled measurement or a drag's settle render queued by
+    /// the setup from starting a newer measurement (which would rightly
+    /// drop the result under test).
     private func settle(_ model: EditorModel) {
         model.pendingScopeMeasurement?.cancel()
         model.pendingScopeMeasurement = nil
+        XCTAssertNil(model.dragRender.settleTask, "no settle render waiting")
+        XCTAssertFalse(model.dragRender.previewIsDraft, "the analysis render is full quality")
     }
 
     /// The measurement as it was made on the main thread before: the mask
@@ -105,7 +114,7 @@ final class MaskedScopesAsyncTests: XCTestCase {
         let model = try await openModel()
         ScopeSettings.shared.selectedMaskOnly = true
         model.showMaskOverlay = true
-        model.rerender()
+        model.rerenderAtFullQuality()
         XCTAssertNotNil(model.displayOutput.maskOverlay, "the analysis render carries the tint")
         model.scope = .waveformVectorscope
         let expected = try reference(model, wanted: [.waveform, .vectorscope])
