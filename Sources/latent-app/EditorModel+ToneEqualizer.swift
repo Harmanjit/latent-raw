@@ -32,18 +32,23 @@ final class ToneEqualizerState: ObservableObject {
     /// The mask's 5th and 95th percentiles, compensation applied, for the
     /// spread readout; nil until a render made the mask.
     @Published var spread: (low: Float, high: Float)?
+    /// The share of the photo each of the nine bands reads (0…1, summing
+    /// to 1), drawn behind the Simple tab's sliders; empty until a render
+    /// made the mask.
+    @Published var bandShares: [Float] = []
 
-    /// The mask and equalizer the histogram shown was worked out from.
-    /// Renders follow every slider step while the panel is open; with the
-    /// same mask and equalizer the histogram is not worked out again.
-    var histogramSource: (mask: ToneEqualizerMaskSnapshot, equalizer: ToneEqualizer)?
-    /// The mask's 5th and 95th percentiles before exposure, with the mask
-    /// values they were read from. Sorting the 512-cell-wide mask took the
-    /// main thread twice per render; now it happens once per new mask, on
-    /// a background task (`percentileTask`), and the spread readout follows
-    /// when it lands.
-    var maskPercentiles: (values: [Float], low: Float?, high: Float?)?
-    var percentileTask: Task<Void, Never>?
+    /// The latest mask's statistics, built off the main thread once per
+    /// new mask (`ToneEqualizerMaskStats`); the histogram, the spread and
+    /// the band shares are derived from it for the current compensation.
+    var stats: ToneEqualizerMaskStats?
+    /// The snapshot generation `stats` was built from.
+    var statsGeneration: Int?
+    /// The exposure of the latest mask snapshot, added when deriving.
+    var statsExposureEV: Float = 0
+    /// A statistics build is running; renders meanwhile only note that a
+    /// newer mask is waiting, so a burst of renders costs one build at a
+    /// time and the newest mask is always built last (the throttle).
+    var statsBuildInFlight = false
 
     /// The Advanced tab's horizontal axis, in EV.
     static let histogramRange: ClosedRange<Float> = -9.5...0.5
@@ -102,74 +107,108 @@ extension EditorModel {
     /// photo's mask over the bands.
     func fitToneEqualizerMask() {
         guard let snapshot = session?.toneEqualizerMask,
-              let percentiles = toneEqualizerMaskPercentiles(snapshot) else {
+              let low = snapshot.percentile(0.05), let high = snapshot.percentile(0.95) else {
             status = "The mask isn't ready yet; try again in a moment"
             return
         }
-        let fit = ToneEqualizer.fittedCompensation(low: percentiles.low, high: percentiles.high)
+        let fit = ToneEqualizer.fittedCompensation(low: low, high: high)
         var eq = parameters.toneEqualizer
         eq.maskExposure = abs(fit.exposure) < 0.005 ? nil : fit.exposure
         eq.maskContrast = abs(fit.contrast) < 0.005 ? nil : fit.contrast
         parameters.toneEqualizer = eq
     }
 
-    /// After the preview renders: the histogram and spread from the mask
-    /// the render left on the session, while the panel is open.
+    /// Auto Align: the mask exposure and contrast compensation that put the
+    /// photo's darkest tones on the −8 EV band and its brightest on the
+    /// 0 EV band (`ToneEqualizer.autoAlignedCompensation`).
+    func autoAlignToneEqualizer() {
+        let state = toneEqualizerState
+        guard let snapshot = session?.toneEqualizerMask else {
+            status = "The mask isn't ready yet; try again in a moment"
+            return
+        }
+        if state.stats == nil || state.statsGeneration != snapshot.generation {
+            // The panel's statistics lag the mask: build them now (a click,
+            // not a drag, so one pass over the mask here is fine).
+            state.stats = ToneEqualizerMaskStats(snapshot: snapshot)
+            state.statsGeneration = snapshot.generation
+        }
+        state.statsExposureEV = snapshot.exposureEV
+        guard let stats = state.stats else { return }
+        applyToneEqualizerAutoAlign(stats: stats, exposureEV: snapshot.exposureEV)
+    }
+
+    /// Auto Align from given statistics (the testable half of
+    /// `autoAlignToneEqualizer`): sets the compensation, bands untouched.
+    func applyToneEqualizerAutoAlign(stats: ToneEqualizerMaskStats, exposureEV: Float) {
+        guard let fit = ToneEqualizer.autoAlignedCompensation(stats: stats, exposureEV: exposureEV) else {
+            status = "The mask isn't ready yet; try again in a moment"
+            return
+        }
+        parameters.toneEqualizer = parameters.toneEqualizer.withCompensation(exposure: fit.exposure,
+                                                                              contrast: fit.contrast)
+    }
+
+    /// After the preview renders, while the panel is open: starts building
+    /// the new mask's statistics in the background when the mask changed,
+    /// and redraws the histogram, spread and band shares for the current
+    /// compensation from the statistics it has.
     func toneEqualizerRenderDidFinish() {
         let state = toneEqualizerState
         guard state.expanded, let snapshot = session?.toneEqualizerMask else {
-            if !state.histogram.isEmpty, session?.toneEqualizerMask == nil { state.histogram = []; state.spread = nil }
+            if session?.toneEqualizerMask == nil, state.stats != nil || !state.histogram.isEmpty {
+                state.stats = nil; state.statsGeneration = nil
+                state.histogram = []; state.spread = nil; state.bandShares = []
+            }
             return
         }
-        let eq = parameters.toneEqualizer
-        if state.histogram.isEmpty || state.histogramSource?.mask != snapshot || state.histogramSource?.equalizer != eq {
-            let values = snapshot.compensatedValues(eq)
-            let histogram = HistogramCalculator.normalizedHistogram(of: values, range: ToneEqualizerState.histogramRange,
-                                                                    bins: ToneEqualizerState.histogramBins)
-            if state.histogram != histogram { state.histogram = histogram }
-            state.histogramSource = (snapshot, eq)
-        }
-        if let kept = state.maskPercentiles, kept.values == snapshot.values {
-            showToneEqualizerSpread(low: kept.low, high: kept.high)
-            return
-        }
-        // A new mask: its percentiles are worked out away from the main
-        // thread, and shown if the mask is still the same when they land.
-        state.percentileTask?.cancel()
-        let values = snapshot.values
-        state.percentileTask = Task { [weak self] in
-            let percentiles = await Task.detached(priority: .userInitiated) {
-                snapshot.valuePercentiles([0.05, 0.95])
-            }.value
-            guard !Task.isCancelled, let self, self.session?.toneEqualizerMask?.values == values else { return }
-            let state = self.toneEqualizerState
-            state.maskPercentiles = (values, percentiles[0], percentiles[1])
-            state.percentileTask = nil
-            self.showToneEqualizerSpread(low: percentiles[0], high: percentiles[1])
-        }
+        state.statsExposureEV = snapshot.exposureEV
+        if state.statsGeneration != snapshot.generation { buildToneEqualizerStats() }
+        refreshToneEqualizerHistogram()
     }
 
-    /// The mask's 5th and 95th percentiles with exposure applied (Fit
-    /// Mask's input): the kept ones when the mask is the one they were
-    /// read from, else worked out now.
-    private func toneEqualizerMaskPercentiles(_ snapshot: ToneEqualizerMaskSnapshot) -> (low: Float, high: Float)? {
-        if let kept = toneEqualizerState.maskPercentiles, kept.values == snapshot.values {
-            guard let low = kept.low, let high = kept.high else { return nil }
-            return (low + snapshot.exposureEV, high + snapshot.exposureEV)
-        }
-        let percentiles = snapshot.percentiles([0.05, 0.95])
-        guard let low = percentiles[0], let high = percentiles[1] else { return nil }
-        return (low, high)
-    }
-
-    /// The spread readout from the mask's percentiles before exposure:
-    /// the current render's exposure and compensation applied.
-    private func showToneEqualizerSpread(low: Float?, high: Float?) {
+    /// Builds the latest mask's statistics off the main thread, one build
+    /// at a time; when it lands and the mask has moved on meanwhile, builds
+    /// again for the newest.
+    private func buildToneEqualizerStats() {
         let state = toneEqualizerState
-        guard let low, let high, let snapshot = session?.toneEqualizerMask else { return }
+        guard !state.statsBuildInFlight, let snapshot = session?.toneEqualizerMask else { return }
+        state.statsBuildInFlight = true
+        let values = snapshot.values, generation = snapshot.generation
+        Task { [weak self] in
+            let stats = await Task.detached(priority: .utility) { ToneEqualizerMaskStats(values: values) }.value
+            guard let self else { return }
+            let state = self.toneEqualizerState
+            state.statsBuildInFlight = false
+            guard let latest = self.session?.toneEqualizerMask else { return }
+            if latest.generation == generation {
+                state.stats = stats
+                state.statsGeneration = generation
+                state.statsExposureEV = latest.exposureEV
+                self.refreshToneEqualizerHistogram()
+            } else if state.expanded {
+                self.buildToneEqualizerStats()
+            }
+        }
+    }
+
+    /// The histogram, spread and band shares for the current exposure and
+    /// compensation, from the statistics: a few thousand operations, so
+    /// cheap enough for every render while a slider is dragged.
+    func refreshToneEqualizerHistogram() {
+        let state = toneEqualizerState
+        guard let stats = state.stats else { return }
         let eq = parameters.toneEqualizer
-        let spread = (eq.compensated(low + snapshot.exposureEV), eq.compensated(high + snapshot.exposureEV))
-        if state.spread?.low != spread.0 || state.spread?.high != spread.1 { state.spread = spread }
+        let ev = state.statsExposureEV
+        let histogram = stats.histogram(equalizer: eq, exposureEV: ev, range: ToneEqualizerState.histogramRange,
+                                        bins: ToneEqualizerState.histogramBins)
+        if state.histogram != histogram { state.histogram = histogram }
+        let shares = stats.bandShares(equalizer: eq, exposureEV: ev)
+        if state.bandShares != shares { state.bandShares = shares }
+        if let low = stats.percentile(0.05, exposureEV: ev), let high = stats.percentile(0.95, exposureEV: ev) {
+            let spread = (eq.compensated(low), eq.compensated(high))
+            if state.spread?.low != spread.0 || state.spread?.high != spread.1 { state.spread = spread }
+        }
     }
 
     /// The mask under a screen point, compensation applied; nil off the
