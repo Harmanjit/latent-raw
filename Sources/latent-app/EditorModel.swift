@@ -671,6 +671,11 @@ final class EditorModel: ObservableObject {
 
     var lastScopeMeasurement: ContinuousClock.Instant?
     var pendingScopeMeasurement: Task<Void, Never>?
+    /// "Selected Mask Only" scopes measured off the main thread
+    /// (EditorModel+MaskedScopes.swift): the one in flight, and a count
+    /// every measurement bumps so an overtaken result is dropped.
+    var maskedScopeTask: Task<Void, Never>?
+    var maskedScopeGeneration = 0
 
     // MARK: - Compare: linked view
 

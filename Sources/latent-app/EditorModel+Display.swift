@@ -146,6 +146,8 @@ extension EditorModel {
         lastScopeMeasurement = .now
         // Scope menu › Selected Mask Only (EditorModel+MaskedScopes.swift).
         if measureMaskedScopes(from: analysisTexture) { return }
+        // A masked measurement still running must not land over this one.
+        maskedScopeGeneration &+= 1
         switch scope {
         case .histogram:
             histogram = histogramCalculator?.compute(from: analysisTexture, inputIsLinear: true)

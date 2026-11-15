@@ -182,3 +182,78 @@ public enum ScopeReadback {
         return halves.map { Float($0) }
     }
 }
+
+/// A copy of a rendered rgba16Float texture, queued on the GPU without
+/// waiting, to read back later on any thread (`floats()`). The copy is
+/// queued behind the commands that drew the texture and ahead of anything
+/// that draws into it again, so the caller may reuse a pooled texture as
+/// soon as `init` returns.
+public final class ScopeTextureCopy: @unchecked Sendable {
+    // Unchecked: after `init` the texture and command buffer are only
+    // touched by `floats()`, which waits for the GPU first.
+    private let copy: MTLTexture
+    private let commandBuffer: MTLCommandBuffer
+    public var width: Int { copy.width }
+    public var height: Int { copy.height }
+
+    public init?(_ texture: MTLTexture, commandQueue: MTLCommandQueue) {
+        guard texture.pixelFormat == .rgba16Float else { return nil }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: texture.width,
+                                                                  height: texture.height, mipmapped: false)
+        descriptor.storageMode = .shared
+        guard let shared = texture.device.makeTexture(descriptor: descriptor),
+              let buffer = commandQueue.makeCommandBuffer(),
+              let blit = buffer.makeBlitCommandEncoder() else { return nil }
+        blit.copy(from: texture, to: shared)
+        blit.endEncoding()
+        buffer.commit()
+        copy = shared
+        commandBuffer = buffer
+    }
+
+    /// The pixels as `ScopeReadback.rgbaFloats` reads them; nil if the
+    /// copy failed.
+    public func floats() -> [Float]? {
+        commandBuffer.waitUntilCompleted()
+        guard commandBuffer.status != .error else { return nil }
+        return ScopeReadback.rgbaFloats(copy, commandQueue: commandBuffer.commandQueue)
+    }
+}
+
+/// "Selected Mask Only" scopes measured off the main thread: the picture
+/// and the "White on Black" mask overlay render, copied on the GPU, are
+/// read back and measured by `measure()` (on any thread) exactly as a
+/// measurement on the spot would, so the scopes are the same.
+public struct MaskedScopeReadback: Sendable {
+    public let picture: ScopeTextureCopy
+    public let mask: ScopeTextureCopy
+    public let wanted: MaskedScopeAccumulator.Wanted
+
+    public init?(picture: ScopeTextureCopy, mask: ScopeTextureCopy, wanted: MaskedScopeAccumulator.Wanted) {
+        guard picture.width == mask.width, picture.height == mask.height else { return nil }
+        self.picture = picture
+        self.mask = mask
+        self.wanted = wanted
+    }
+
+    /// The scopes over the mask; nil if a copy failed.
+    public func measure() -> MaskedScopeAccumulator.Result? {
+        guard let pixels = picture.floats(), let maskPixels = mask.floats() else { return nil }
+        return Self.measure(pixels: pixels, maskPixels: maskPixels, width: picture.width, height: picture.height,
+                            wanted: wanted)
+    }
+
+    /// The scopes of `pixels` weighted by the "White on Black" overlay
+    /// render `maskPixels` (both read back with `ScopeReadback`).
+    public static func measure(pixels: [Float], maskPixels: [Float], width: Int, height: Int,
+                               wanted: MaskedScopeAccumulator.Wanted) -> MaskedScopeAccumulator.Result {
+        let count = width * height
+        var weights = [Float](repeating: 0, count: count)
+        for p in 0..<count {
+            weights[p] = MaskedScopeAccumulator.maskWeight(fromOverlay: maskPixels[p * 4], maskPixels[p * 4 + 1],
+                                                           maskPixels[p * 4 + 2])
+        }
+        return MaskedScopeAccumulator.accumulate(rgba: pixels, weights: weights, width: width, height: height,
+                                                 wanted: wanted)
+    }
+}
