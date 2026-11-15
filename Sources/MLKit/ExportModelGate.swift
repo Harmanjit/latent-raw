@@ -18,7 +18,7 @@ enum ExportModelGate {
     }
 
     /// Runs `body`, alone among exports when `needed`.
-    static func whileHeld<T>(_ needed: Bool, isolation: isolated (any Actor)? = #isolation,
+    static func whileHeld<T: Sendable>(_ needed: Bool, isolation: isolated (any Actor)? = #isolation,
                              _ body: () async throws -> T) async throws -> T {
         guard needed else { return try await body() }
         await semaphore.acquire()
