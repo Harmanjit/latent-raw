@@ -217,4 +217,4 @@ Masks apply one after another, and each component joins what is above it. Drag a
 2. Choose **Presets › Save Selected Mask as Preset…** and give it a name.
 3. On another photo, choose the preset from the same **Presets** menu. It is added as a new mask.
 
-To move a mask straight from one photo to others instead, right-click it and use **Copy Mask** and **Paste Mask** or **Paste Mask to Selection** (see [Copy and paste a mask](#copy-and-paste-a-mask)).
+To move a mask straight from one photo to others instead, right-click it and use **Copy Mask** and **Paste Mask** or **Paste Mask to Selection** (see [Copying a mask to other photos](#copying-a-mask-to-other-photos)).
