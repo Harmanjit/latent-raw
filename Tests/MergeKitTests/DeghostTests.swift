@@ -164,20 +164,34 @@ final class DeghostTests: XCTestCase {
     /// Deghosting keeps a handful of quarter-size textures and one small
     /// mask per frame on the CPU, so five frames peak no higher on the GPU
     /// than three.
+    ///
+    /// `currentAllocatedSize` is the whole process's, the driver's own
+    /// buffers included, and on a slow or paravirtual GPU (the CI runner's)
+    /// what other work and the driver free lands late, so one merge can
+    /// read a page run higher than the next with nothing of its own
+    /// behind it. That only ever adds, so each count is the lowest of two
+    /// merges, run in turn: memory that really grew with the frames shows
+    /// in every five-frame merge, and the limit stays where it was.
     func testGPUMemoryIsFlatWithDeghosting() async throws {
         let three = try HDRTestSupport.noisyBracket()
         let five = try HDRTestSupport.bracket("noisy5", SyntheticBracket.frames([16, 4, 1, 0.25, 0.0625]), noise: true)
         let merger = try HDRTestSupport.merger()
         let options = HDRMergeOptions(deghost: .medium)
         _ = try await HDRTestSupport.merge(three, merger: merger, options: options)
-        let (_, _, threeReport, threeFolder) = try await HDRTestSupport.merge(three, merger: merger, options: options)
-        let (_, _, fiveReport, fiveFolder) = try await HDRTestSupport.merge(five, merger: merger, options: options)
-        try? FileManager.default.removeItem(at: threeFolder)
-        try? FileManager.default.removeItem(at: fiveFolder)
+        var threePeaks: [Int] = [], fivePeaks: [Int] = [], shifts: [String] = []
+        for _ in 0..<2 {
+            for (urls, count) in [(three, 3), (five, 5)] {
+                let (analysis, _, report, folder) = try await HDRTestSupport.merge(urls, merger: merger, options: options)
+                try? FileManager.default.removeItem(at: folder)
+                if count == 3 { threePeaks.append(report.peakGPUBytes) } else { fivePeaks.append(report.peakGPUBytes) }
+                shifts.append("\(count): \(analysis.frames.map { $0.alignmentShiftPixels.map { String(format: "%.2f", $0) } ?? "-" })")
+            }
+        }
+        let threePeak = try XCTUnwrap(threePeaks.min()), fivePeak = try XCTUnwrap(fivePeaks.min())
         let slack = HDRMergeAccumulator.estimatedPeakBytes(width: 1200, height: 800) / 50
-        XCTAssertGreaterThan(threeReport.peakGPUBytes, 0)
-        XCTAssertLessThanOrEqual(fiveReport.peakGPUBytes, threeReport.peakGPUBytes + slack,
-                                 "3 frames peaked at \(threeReport.peakGPUBytes) bytes, 5 at \(fiveReport.peakGPUBytes)")
+        XCTAssertGreaterThan(threePeak, 0)
+        XCTAssertLessThanOrEqual(fivePeak, threePeak + slack,
+                                 "3 frames peaked at \(threePeaks) bytes, 5 at \(fivePeaks); alignment shifts \(shifts)")
     }
 
     /// Options saved before deghosting existed decode with it off.
