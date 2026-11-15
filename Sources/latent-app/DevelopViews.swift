@@ -112,11 +112,15 @@ enum ViewCommand: Equatable {
     case lockReference
     /// The reference becomes the photo being edited, and that the reference.
     case swapReference
+    /// View › Show Navigator: Develop's panel section, and the floating
+    /// card in Loupe, Compare and Survey (`NavigatorSettings`).
+    case toggleNavigator
 }
 
 /// What the menus need of the view state.
 struct ViewCommandState: Equatable {
     var overlayShown = false
+    var navigatorShown = false
     var overlayGrid = false
     var overlayGuides = false
     var overlayLayout = false
@@ -142,6 +146,7 @@ extension CommandState {
         case .setReference: return developing && hasSelection
         case .lockReference: return mode == .develop
         case .swapReference: return developing && views.developView == .reference && views.hasReference && hasSelection
+        case .toggleNavigator: return mode.showsImage
         }
     }
 }
@@ -196,6 +201,7 @@ final class DevelopViewState: ObservableObject {
     private var observations: [AnyCancellable] = []
     private var paneProblems: AnyCancellable?
     private var overlayForwarding: AnyCancellable?
+    private var navigatorForwarding: AnyCancellable?
     /// Develop's image area is on screen.
     private(set) var isShowing = false
     /// What the pane holds: the Before of this file, or this reference.
@@ -209,6 +215,10 @@ final class DevelopViewState: ObservableObject {
         referenceLocked = defaults.bool(forKey: Key.locked)
         // The menus' ticks for the overlay come with this state's.
         overlayForwarding = LoupeOverlaySettings.shared.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        // And View › Show Navigator's.
+        navigatorForwarding = NavigatorSettings.shared.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
     }
@@ -485,6 +495,8 @@ final class DevelopViewState: ObservableObject {
             main?.flushPendingSave()
             setReference(active)
             load(reference)
+        case .toggleNavigator:
+            NavigatorSettings.shared.isShown.toggle()
         }
     }
 
@@ -492,6 +504,7 @@ final class DevelopViewState: ObservableObject {
         let overlay = LoupeOverlaySettings.shared
         var state = ViewCommandState()
         state.overlayShown = overlay.isShown
+        state.navigatorShown = NavigatorSettings.shared.isShown
         state.overlayGrid = overlay.showsGrid
         state.overlayGuides = overlay.showsGuides
         state.overlayLayout = overlay.showsLayoutImage && overlay.layoutImage != nil
@@ -817,6 +830,7 @@ struct ViewModesMenus: View {
     let toggle: (String, KeyCommand, Bool) -> AnyView
 
     var body: some View {
+        toggle("Show Navigator", .view(.toggleNavigator), state.navigatorShown)
         Menu("Loupe Overlay") {
             toggle("Show Overlay", .view(.toggleOverlay), state.overlayShown)
             Divider()

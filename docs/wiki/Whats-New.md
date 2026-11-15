@@ -6,6 +6,7 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 
 <!-- RECONCILE: two branches edited this; merge into one text -->
 <!-- RECONCILE: two branches edited this; merge into one text -->
+<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Faster large folders.** On a 10,000-photo folder, smart collections with date rules evaluate about thirty times faster, rating many photos while a collection is shown no longer stalls the window, the Collections section counts in the background, and search keystrokes, keyword completion and the smart collection sheet do far less work each time. The tone equalizer's mask summary is worked out off the main thread. Nothing looks or behaves differently. See [Thumbnails and performance](Library#thumbnails-and-performance).
 
 - **Edit Capture Time…** (Metadata menu) shifts the selection's capture times by days, hours, minutes and seconds, sets the first photo to an exact time and moves the rest with it, or changes time zone. The raw files are never rewritten; the corrected time is kept in the catalog and sidecar, sorting and date filters use it, and it can be undone. See [Capture time and geotagging](Library#capture-time-and-geotagging).
@@ -14,6 +15,9 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 
 - **Combine into one PDF**: a PDF export can write the whole selection as one file, one photo per page or a contact sheet of several per page with file names. See [PDF export](Export#pdf-export).
 - **File integrity filter and smart collection rule**: show or collect the photos Verify Files found damaged, found OK, or hasn't checked; Save Filter as Smart Collection carries it. See [Verifying files](Library#verifying-files) and [Smart collections](Collections-and-Keywords#smart-collections).
+<!-- /RECONCILE -->
+
+- **Navigator in Loupe, Compare and Survey**: View › Show Navigator floats the Navigator in the image's lower right corner, with Fit, Fill, 50%, 100% and 200% presets; in Compare it follows the pane you last clicked, in Survey the focused pane, and Sync carries its moves to the other panes. Develop's Navigator gains the same presets. See [Loupe, Compare and Survey](Library#loupe-compare-and-survey).
 <!-- /RECONCILE -->
 
 ## Organising

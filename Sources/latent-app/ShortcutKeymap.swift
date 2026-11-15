@@ -427,6 +427,7 @@ extension Keymap {
             // Menu items without a default key, which the user may give one.
             c("swapCompare", .swapCompare, "Swap Select and Candidate", views, in: .compare),
             c("secondaryDisplay", .secondaryDisplay, "Show Loupe on Second Display", views),
+            c("navigator", .view(.toggleNavigator), "Show Navigator", views),
             c("labelPurple", .label(.purple), "Purple Label", rating),
             c("labelNone", .label(nil), "No Label", rating),
             c("resetOrientation", .geometry(.resetOrientation), "Reset to Camera Orientation", rating),

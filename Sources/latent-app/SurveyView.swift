@@ -116,6 +116,10 @@ private struct SurveyPaneView: View {
             // Any non-nil mirror hides the viewport's Open button, which a
             // pane has no use for; the pane's views are linked by the model.
             ImageViewport(model: model, mirror: model, allowsTools: false)
+                // The Navigator follows the focused pane.
+                .overlay(alignment: .bottomTrailing) {
+                    if isFocused { FloatingNavigator(model: model) }
+                }
             Divider()
             ImageCaption(record: record)
         }
@@ -157,8 +161,9 @@ private struct SurveyPaneView: View {
 /// Tells its SwiftUI owner about mouse-downs inside its bounds without
 /// taking them: the image view under it still pans, zooms and
 /// double-clicks. A local event monitor rather than a gesture, which the
-/// Metal view would never let through.
-private struct PaneMouseDownMonitor: NSViewRepresentable {
+/// Metal view would never let through. Compare uses it too, to know which
+/// pane the Navigator follows.
+struct PaneMouseDownMonitor: NSViewRepresentable {
     let onMouseDown: () -> Void
 
     func makeNSView(context: Context) -> MonitorView {
