@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import PixelEngine
 import Catalog
 import MLKit
@@ -79,12 +80,40 @@ extension ExportQueue {
         var substituted = 0
     }
 
-    /// Renders every record into one PDF. Checks for cancel and pause
-    /// before each photo as the per-file loop does; a cancelled run leaves
-    /// no file. Each photo counts one step of the queue's progress.
+    /// One photo of a combined PDF, ready for a worker.
+    struct CombinedPage: Sendable {
+        var name: String
+        var request: ExportWorker.Request
+        var caption: String?
+    }
+
+    /// A photo rendered for its page: the image the page stores.
+    struct RenderedPage: @unchecked Sendable {
+        // CGImage is immutable; @unchecked only for older SDKs that don't
+        // mark it Sendable.
+        var image: CGImage
+        var pixels: Int
+        var substitutions: [String]
+    }
+
+    struct CombinedPageResult: Sendable {
+        var name: String
+        var caption: String?
+        var result: Result<RenderedPage, Error>
+    }
+
+    /// A photo whose edit couldn't be read, for its failure's wording.
+    struct EditUnreadable: Error {
+        var error: Error
+    }
+
+    /// Renders every record into one PDF, `workers` photos at a time, the
+    /// pages in the records' order. Checks for cancel and pause before each
+    /// photo as the per-file loop does; a cancelled run leaves no file.
+    /// Each photo counts one step of the queue's progress.
     nonisolated static func runCombinedPDF(
         records: [ImageRecord], preset: ExportPreset, destination: URL, root: URL, catalog: Catalog,
-        catalogName: String, batchName: String?, gpu: GPUContext, pauseGate: PauseGate,
+        catalogName: String, batchName: String?, gpu: GPUContext, pauseGate: PauseGate, workers: Int = 1,
         report: @escaping @MainActor @Sendable (CombinedPDFEvent) -> Void
     ) async -> CombinedPDFOutcome {
         var outcome = CombinedPDFOutcome()
@@ -118,51 +147,73 @@ extension ExportQueue {
         }
         let resolution = Double(preset.ppiEnabled ? min(max(preset.ppi, 1), 9999) : 300)
         let maxLongEdge = options.combinedMaxLongEdge(ppi: resolution)
+        let jpegQuality = preset.pdfJPEGQuality
         var cancelled = false
-        for (index, record) in records.enumerated() {
-            if Task.isCancelled { cancelled = true; break }
-            if await pauseGate.waitWhilePaused(), Task.isCancelled { cancelled = true; break }
-            let name = batchName.map { "\(record.fileName) (\($0))" } ?? record.fileName
-            await report(.current(name))
-            let json: String?
-            let keywords: [String]
-            do {
-                json = try await catalog.editStack(forImageID: record.id ?? -1)
-                keywords = try await catalog.keywords(forImageID: record.id ?? -1)
-            } catch {
-                await report(.failure(name: name, reason: "could not read its edit: \(error)"))
-                await report(.photoDone)
-                continue
-            }
-            let request = preset.workerRequest(for: record, root: root, destination: target?.url ?? folder,
-                                               editStackJSON: json, keywords: keywords)
-            let caption = preset.combinedPDFCaption(for: record, index: index, catalogName: catalogName)
-            let result: Result<(pixels: Int, substitutions: [String]), Error> = await Task.detached(priority: .userInitiated) {
+        var nextIndex = 0
+        // Photos render `workers` at a time (ExportPipeline); each is made
+        // into its page image (a JPEG, unless the pages are lossless) on its
+        // worker too, and the pages go into the file in the selection's
+        // order as the photos are committed.
+        await ExportPipeline.run(
+            workers: workers,
+            hold: { pauseGate.isPaused },
+            next: { () async -> ExportPipeline.Step<CombinedPage, CombinedPageResult>? in
+                guard nextIndex < records.count else { return nil }
+                if Task.isCancelled { cancelled = true; return nil }
+                if await pauseGate.waitWhilePaused(), Task.isCancelled { cancelled = true; return nil }
+                let index = nextIndex
+                nextIndex += 1
+                let record = records[index]
+                let name = batchName.map { "\(record.fileName) (\($0))" } ?? record.fileName
+                await report(.current(name))
+                let json: String?
+                let keywords: [String]
+                do {
+                    json = try await catalog.editStack(forImageID: record.id ?? -1)
+                    keywords = try await catalog.keywords(forImageID: record.id ?? -1)
+                } catch {
+                    return .done(CombinedPageResult(name: name, result: .failure(EditUnreadable(error: error))))
+                }
+                let request = preset.workerRequest(for: record, root: root, destination: target?.url ?? folder,
+                                                   editStackJSON: json, keywords: keywords)
+                let caption = preset.combinedPDFCaption(for: record, index: index, catalogName: catalogName)
+                return .run(CombinedPage(name: name, request: request, caption: caption))
+            },
+            work: { page in
                 do {
                     let image = try await ExportWorker.renderImage(
-                        ExportWorker.ImageRequest(sourceURL: request.sourceURL, editStackJSON: request.editStackJSON,
-                                                  userRotation: request.userRotation, colorSpace: request.colorSpace,
+                        ExportWorker.ImageRequest(sourceURL: page.request.sourceURL,
+                                                  editStackJSON: page.request.editStackJSON,
+                                                  userRotation: page.request.userRotation,
+                                                  colorSpace: page.request.colorSpace,
                                                   maxLongEdge: maxLongEdge, bitsPerComponent: 8),
                         gpu: gpu)
-                    writer.add(image.cgImage, caption: caption, ppi: resolution)
-                    return .success((image.cgImage.width * image.cgImage.height, image.maskSubstitutions))
+                    let stored = options.pageImage(image.cgImage, jpegQuality: jpegQuality)
+                    return CombinedPageResult(name: page.name, caption: page.caption,
+                                              result: .success(RenderedPage(image: stored,
+                                                                            pixels: image.cgImage.width * image.cgImage.height,
+                                                                            substitutions: image.maskSubstitutions)))
                 } catch {
-                    return .failure(error)
+                    return CombinedPageResult(name: page.name, result: .failure(error))
                 }
-            }.value
-            switch result {
-            case .success(let r):
-                outcome.photos += 1
-                outcome.pixels += r.pixels
-                if !r.substitutions.isEmpty {
-                    outcome.substituted += 1
-                    await report(.note(MaskSubstitutions.exportNote(name: name, missing: r.substitutions)))
+            },
+            commit: { page in
+                switch page.result {
+                case .success(let r):
+                    writer.add(r.image, caption: page.caption, ppi: resolution)
+                    outcome.photos += 1
+                    outcome.pixels += r.pixels
+                    if !r.substitutions.isEmpty {
+                        outcome.substituted += 1
+                        await report(.note(MaskSubstitutions.exportNote(name: page.name, missing: r.substitutions)))
+                    }
+                case .failure(let error as EditUnreadable):
+                    await report(.failure(name: page.name, reason: "could not read its edit: \(error.error)"))
+                case .failure(let error):
+                    await report(.failure(name: page.name, reason: "\(error)"))
                 }
-            case .failure(let error):
-                await report(.failure(name: name, reason: "\(error)"))
-            }
-            await report(.photoDone)
-        }
+                await report(.photoDone)
+            })
         if cancelled || outcome.photos == 0 {
             writer.discard()
             outcome.photos = 0

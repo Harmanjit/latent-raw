@@ -108,7 +108,7 @@ Every file name is planned before anything is written. A line shows the first fi
 
 ## PDF export
 
-**PDF** in the format menu writes one PDF per photo: the edited photo on a page of its own, drawn as Print and Contact Sheet draw theirs. **Page** is **Fit to image** (the photo's own size at the Resolution set for images, 300 ppi when none is) or **A4**, **US Letter** or **A3**, turned to match the photo, which is then rendered at no more pixels than the page holds at that resolution. A **margin** in millimetres goes round the photo, and an optional **caption** under it is made from the same tokens as the file name (`{name}`, `{date}`…). The colour is sRGB, or Display P3 when it was chosen for image files. PDFs aren't added to the catalog.
+**PDF** in the format menu writes one PDF per photo: the edited photo on a page of its own, drawn as Print and Contact Sheet draw theirs. **Page** is **Fit to image** (the photo's own size at the Resolution set for images, 300 ppi when none is) or **A4**, **US Letter** or **A3**, turned to match the photo, which is then rendered at no more pixels than the page holds at that resolution. A **margin** in millimetres goes round the photo, and an optional **caption** under it is made from the same tokens as the file name (`{name}`, `{date}`…). The colour is sRGB, or Display P3 when it was chosen for image files. **Photos stored as** sets how each page holds its photo: **JPEG (smaller)**, the default, at the **Quality** beside it (the same setting a JPEG file uses), makes a page a few megabytes and is quick to write; **Lossless** keeps every pixel as rendered, at about 18 MB for an A4 page at 300 ppi, and takes several times longer. The PDF opens in Preview and other PDF readers either way. PDFs aren't added to the catalog.
 
 **Combine into one PDF** writes the whole selection as one file instead. **One photo per page** gives each photo a page laid out exactly as above; **Contact sheet** puts 2 to 20 photos on each page of the chosen paper (A4 for Fit to image, turned landscape for a wide grid), each with its file name underneath, or the caption when one is set, and renders each photo only as large as its cell needs. The file is named after the catalog's folder unless you type a **File name**, goes in the destination (or its subfolder), and the collision setting decides what happens when the name is taken. Progress, Pause and Cancel work as for any export; a cancelled export leaves no file.
 
@@ -132,13 +132,24 @@ The DNG keeps the camera's name, its colour matrix, the lens, exposure details a
 
 ## The queue
 
-Exports run one at a time in the background, since a full-resolution render already saturates the GPU. While the queue, Export open image…, Edit in External Editor, a print, a contact sheet or AI noise reduction runs, the Mac doesn't go to sleep on its own; the display still can. Progress and any failures show in the left panel; each failure names the file and the reason. A file whose stored edit cannot be read is not exported unedited; it is reported.
+Exports run in the background. Within a batch, several photos are worked on at once (see Photos at once, below), while separate batches, a Photo Merge, a print or a contact sheet still take turns with an export. Names, numbering, progress and the list of failures come out in the selection's order whatever the number at once, and the files are identical to those written one at a time. While the queue, Export open image…, Edit in External Editor, a print, a contact sheet or AI noise reduction runs, the Mac doesn't go to sleep on its own; the display still can. Progress and any failures show in the left panel; each failure names the file and the reason. A file whose stored edit cannot be read is not exported unedited; it is reported.
 
 Each file is written under a hidden temporary name and moved into place only when complete, so a crash, a full disk or a cancelled export never leaves a half-written file, and a file being replaced stays intact until the new one is ready. A replaced file keeps its Finder tags.
 
 Quitting during an export asks whether to finish the image being written and quit, or keep exporting. An export stopped this way doesn't bring Finder forward. Quitting during Export open image… asks too: let the file finish and quit, or keep working. If a file still isn't done after a minute, quitting goes ahead and removes the unfinished temporary file. Quitting while a contact sheet is being saved asks whether to stop it (it isn't saved); while a print is rendering, whether to let it reach the printing system and then quit.
 
-Model-generated masks and AI denoise are recomputed at export time, for the queue and for Export open image alike, so the file matches the screen.
+Model-generated masks and AI denoise are recomputed at export time, for the queue and for Export open image alike, so the file matches the screen. Those steps run for one photo at a time even when several are exporting at once, since their models need memory of their own.
+
+### Photos at once
+
+One photo's export reads and decodes the raw, renders it on the graphics processor, then encodes and writes the file. Done one photo at a time, the graphics processor sits idle most of the time; with several photos under way, one decodes while another renders and a third is written. **Speed › Photos at once** in the export sheet sets how many:
+
+- **Automatic (recommended: N)**, the default, picks the count chosen from measurements, within what your Mac can take: 3 on a 16 GB M4 with 24 MP raws, where it exported about twice as many photos a minute as one at a time (207 against 95 at full size), and 4 added little for much more memory.
+- **1** to the limit sets the count yourself. 1 exports one photo at a time, as earlier versions did.
+
+The line under it says "Your Mac can export up to N photos at a time". The limit comes from the Mac's memory, how much memory the graphics processor can use and its processor cores, and from the size of the photos being exported: each photo under way holds about 1.6 GB (graphics memory included) for a 24 MP raw at full size, more for bigger raws, about 0.3 GB at 2048 pixels. All of them together stay within a third of the Mac's memory, so a 16 GB Mac doesn't run short, and never more than 6. The limit is worked out again for each batch, so if you chose 4 and then export 60 MP photos that allow only 3, the export runs 3 at a time and the progress says so quietly. Your choice is remembered for the next export; it belongs to the Mac, not to export presets.
+
+Pause lets the photos under way finish and starts no others until Resume. Cancel starts no more photos and finishes the ones already started, so a file is never left half-written.
 
 ## From the command line
 
@@ -159,6 +170,7 @@ The options:
 - `--template <naming>`: the sheet's naming tokens, such as `{name}`, `{seq}` and `{date}`.
 - `--on-conflict number|skip|replace`: what happens to a name already taken in the destination, as in the sheet.
 - `--no-metadata`: pixels only.
+- `--jobs <n|auto>`: how many photos to export at once, as Photos at once does in the sheet. `auto`, the default, is the same Automatic choice; a number above what this Mac can take for these photos is lowered, and the first line says so.
 - `--dry-run`: lists each photo, the file it would become, what would happen there and where its edit comes from, and writes nothing.
 
 It prints one line per photo and a summary, and exits with 1 if any photo failed.

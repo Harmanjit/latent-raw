@@ -222,10 +222,11 @@ enum ExportPresetStore {
     }
 }
 
-/// Runs exports one after another on a background task and publishes
-/// progress. One at a time on purpose: the GPU is a single resource, a
-/// full-resolution demosaic already saturates it, and two concurrent
-/// jobs would each be slower while doubling peak memory. The UI never
+/// Runs exports on a background task and publishes progress. Within a
+/// batch several photos are under way at once (Export › Photos at once,
+/// `ExportPipeline`): one decodes while another renders and a third is
+/// encoded, since one photo at a time left the GPU idle most of the time.
+/// Batches, and other full-size GPU jobs, still take turns. The UI never
 /// waits: every render, readback and encode happens off the main thread
 /// and only the counters come back.
 @MainActor
@@ -245,6 +246,12 @@ final class ExportQueue: ObservableObject {
     @Published private(set) var summary = ""
     /// Paused between files (`pause()`); false whenever nothing runs.
     @Published private(set) var isPaused = false
+    /// How many photos the running batch works on at once (Export ›
+    /// Photos at once, ExportQueue+Concurrency.swift); 1 when idle.
+    @Published var photosAtOnce = 1
+    /// Said under the progress when the saved choice was more than the
+    /// batch's photos allow; empty otherwise.
+    @Published var concurrencyNote = ""
 
     private var task: Task<Void, Never>?
     /// Read by the loop before each file: pausing lets the file being
@@ -294,15 +301,17 @@ final class ExportQueue: ObservableObject {
     }
 
     func start(records: [ImageRecord], library: Library, preset: ExportPreset,
-               destination: URL, gpu: GPUContext) {
+               destination: URL, gpu: GPUContext, photosAtOnce: Int = ExportPhotosAtOnce.load()) {
         start(records: records, library: library, batches: [ExportBatch(preset: preset, destination: destination)],
-              gpu: gpu)
+              gpu: gpu, photosAtOnce: photosAtOnce)
     }
 
     /// Exports `records` once per batch, one batch after another: one
     /// preset, or several for a multi-batch export. Each batch plans its
-    /// own names in its own folder.
-    func start(records: [ImageRecord], library: Library, batches: [ExportBatch], gpu: GPUContext) {
+    /// own names in its own folder. `photosAtOnce` is the saved choice
+    /// (Automatic, or a count), clamped per batch to what its photos allow.
+    func start(records: [ImageRecord], library: Library, batches: [ExportBatch], gpu: GPUContext,
+               photosAtOnce: Int = ExportPhotosAtOnce.load()) {
         guard !isGPUBusy else {
             // Said, rather than the sheet closing on nothing.
             if !isRunning { summary = Self.busyRefusal }
@@ -346,10 +355,14 @@ final class ExportQueue: ObservableObject {
                 // Combine into one PDF: every photo a page of one file
                 // (ExportQueue+CombinedPDF.swift), with the same progress,
                 // pause and cancel.
+                let concurrency = Self.concurrency(records: records, preset: preset, choice: photosAtOnce)
+                self?.applyConcurrency(concurrency)
                 let result = await Self.runCombinedPDF(
                     records: records, preset: preset, destination: destination, root: root, catalog: catalog,
                     catalogName: catalogName, batchName: batches.count > 1 ? (batch.name ?? "batch") : nil,
-                    gpu: gpu, pauseGate: pauseGate) { [weak self] event in self?.applyCombinedPDFEvent(event) }
+                    gpu: gpu, pauseGate: pauseGate, workers: concurrency.workers) { [weak self] event in
+                        self?.applyCombinedPDFEvent(event)
+                    }
                 if let url = result.url {
                     written.append(url)
                     writtenInBatch.append(url)
@@ -375,120 +388,127 @@ final class ExportQueue: ObservableObject {
                 }
                 return ExportBatchPlanner.plan(records, into: destination, options: options)
             }.value
-            images: for (index, record) in records.enumerated() {
-                if Task.isCancelled { break batches }
-                // Cancelling (or quitting) a paused export ends the wait,
-                // and the check after it stops the run.
-                if await pauseGate.waitWhilePaused(), Task.isCancelled { break batches }
-                let name = batches.count > 1 ? "\(record.fileName) (\(batch.name ?? "batch"))" : record.fileName
-                await MainActor.run { self?.currentName = name }
+            // Several photos at once (Export › Photos at once), as many as
+            // this batch's photos allow. Names, progress and failures still
+            // come in the batch's order: `next` and `commit` run here, one
+            // photo after another, and only the render and write overlap.
+            let concurrency = Self.concurrency(records: records, preset: preset, choice: photosAtOnce)
+            self?.applyConcurrency(concurrency)
+            var nextIndex = 0
+            var stoppedEarly = false
+            var underWay: [String] = []
+            @MainActor func show(_ names: [String]) { self?.currentName = names.joined(separator: ", ") }
+            await ExportPipeline.run(
+                workers: concurrency.workers,
+                hold: { pauseGate.isPaused },
+                next: { () async -> ExportPipeline.Step<PreparedPhoto, PhotoOutcome>? in
+                    guard nextIndex < records.count else { return nil }
+                    if Task.isCancelled { stoppedEarly = true; return nil }
+                    // Cancelling (or quitting) a paused export ends the wait,
+                    // and the check after it stops the run.
+                    if await pauseGate.waitWhilePaused(), Task.isCancelled { stoppedEarly = true; return nil }
+                    let index = nextIndex
+                    nextIndex += 1
+                    let record = records[index]
+                    let name = batches.count > 1 ? "\(record.fileName) (\(batch.name ?? "batch"))" : record.fileName
+                    show(underWay + [name])
 
-                // Everything the worker needs, gathered on the actor side. A
-                // read failure fails this file; exporting it unedited would
-                // be a wrong file with no warning.
-                let json: String?
-                let keywords: [String]
-                var sidecar: XMPSidecar.Fields?
-                do {
-                    json = try await catalog.editStack(forImageID: record.id ?? -1)
-                    keywords = try await catalog.keywords(forImageID: record.id ?? -1)
-                    if preset.fileKind == .original {
-                        sidecar = try await catalog.sidecarFields(forImageID: record.id ?? -1)
+                    // Everything the worker needs, gathered on the actor side. A
+                    // read failure fails this file; exporting it unedited would
+                    // be a wrong file with no warning.
+                    let json: String?
+                    let keywords: [String]
+                    var sidecar: XMPSidecar.Fields?
+                    do {
+                        json = try await catalog.editStack(forImageID: record.id ?? -1)
+                        keywords = try await catalog.keywords(forImageID: record.id ?? -1)
+                        if preset.fileKind == .original {
+                            sidecar = try await catalog.sidecarFields(forImageID: record.id ?? -1)
+                        }
+                    } catch {
+                        return .done(.failed(name: name, reason: "could not read its edit: \(error)"))
                     }
-                } catch {
-                    await MainActor.run {
-                        self?.failures.append(Failure(name: name, reason: "could not read its edit: \(error)"))
-                        self?.done += 1
+                    // The planned name, checked against the disk once more:
+                    // earlier files of a long batch take a while, and something
+                    // may have appeared under this name meanwhile. Off the main
+                    // actor, with the date folder made there too: on a share
+                    // that answers slowly each call would stall the window.
+                    let settled = await Self.settle(plan, index: index, makeFolder: options.makesFolders)
+                    plan = settled.plan
+                    let output = settled.output
+                    switch output.action {
+                    case .write, .replace:
+                        break
+                    case .skip:
+                        return .done(.skipped(name: name))
+                    case .fail(let reason):
+                        return .done(.failed(name: name, reason: reason))
                     }
-                    continue
-                }
-                // The planned name, checked against the disk once more:
-                // earlier files of a long batch take a while, and something
-                // may have appeared under this name meanwhile. Off the main
-                // actor, with the date folder made there too: on a share
-                // that answers slowly each call would stall the window.
-                let settled = await Self.settle(plan, index: index, makeFolder: options.makesFolders)
-                plan = settled.plan
-                let output = settled.output
-                switch output.action {
-                case .write, .replace:
-                    break
-                case .skip:
-                    skipped += 1
-                    await MainActor.run { self?.done += 1 }
-                    continue
-                case .fail(let reason):
-                    await MainActor.run {
-                        self?.failures.append(Failure(name: name, reason: reason))
-                        self?.done += 1
+                    if let error = settled.folderError {
+                        let folder = output.url.deletingLastPathComponent()
+                        return .done(.failed(name: name, reason: "could not create \(folder.lastPathComponent): \(error)"))
                     }
-                    continue
-                }
-                var target = output.url
-                if let error = settled.folderError {
-                    let folder = target.deletingLastPathComponent()
-                    await MainActor.run {
-                        self?.failures.append(Failure(name: name, reason: "could not create \(folder.lastPathComponent): \(error)"))
-                        self?.done += 1
+                    underWay.append(name)
+                    let photo = PhotoJob(index: index, name: name, record: record, target: output.url, json: json,
+                                         keywords: keywords, sidecar: sidecar)
+                    return .run(PreparedPhoto(photo: photo, job: preset.fileJob(for: photo, root: root,
+                                                                                catalogName: catalogName)))
+                },
+                work: { prepared in await Self.export(prepared, gpu: gpu) },
+                retry: { outcome in
+                    // Only Replace replaces. Otherwise the file is moved into
+                    // place only if its name is still free, so one that appeared
+                    // while the image rendered is kept, and the name is settled
+                    // again by the policy: numbered (rendered again, rarely), or
+                    // skipped.
+                    guard case .finished(var photo, .failure(let error)) = outcome,
+                          error is SafeFileWriter.DestinationExists, photo.attempts < 3, !Task.isCancelled else {
+                        return nil
                     }
-                    continue
-                }
-                // Only Replace replaces. Otherwise the file is moved into place
-                // only if its name is still free, so one that appeared while
-                // the image rendered is kept, and the name is settled again by
-                // the policy: numbered (rendered again, rarely), or skipped.
-                var outcome: Result<ExportFileResult, Error>
-                var attempts = 0
-                while true {
-                    let request = preset.workerRequest(for: record, root: root, destination: target,
-                                                       editStackJSON: json, keywords: keywords)
-                    var job = ExportFileJob(kind: preset.fileKind, request: request, sourceHash: record.hashString,
-                                            captureTime: record.captureTime ?? 0,
-                                            sidecar: sidecar)
-                    job.dngContent = preset.dngContent
-                    job.pdf = preset.pdfJob(for: record, index: index, catalogName: catalogName)
-                    outcome = await Task.detached(priority: .userInitiated) {
-                        do { return .success(try await job.run(gpu: gpu)) }
-                        catch { return .failure(error) }
-                    }.value
-                    attempts += 1
-                    guard case .failure(let error) = outcome, error is SafeFileWriter.DestinationExists,
-                          attempts < 3, !Task.isCancelled else { break }
-                    let resettled = await Self.settle(plan, index: index, makeFolder: false)
+                    let resettled = await Self.settle(plan, index: photo.index, makeFolder: false)
                     plan = resettled.plan
                     switch resettled.output.action {
                     case .write, .replace:
-                        target = resettled.output.url
+                        photo.target = resettled.output.url
+                        photo.attempts += 1
+                        return .run(PreparedPhoto(photo: photo, job: preset.fileJob(for: photo, root: root,
+                                                                                    catalogName: catalogName)))
                     case .skip:
-                        skipped += 1
-                        await MainActor.run { self?.done += 1 }
-                        continue images
+                        return .done(.skipped(name: photo.name))
                     case .fail(let reason):
-                        await MainActor.run {
-                            self?.failures.append(Failure(name: name, reason: reason))
-                            self?.done += 1
-                        }
-                        continue images
+                        return .done(.failed(name: photo.name, reason: reason))
                     }
-                }
-
-                await MainActor.run {
+                },
+                commit: { outcome in
                     guard let self else { return }
                     self.done += 1
-                    switch outcome {
-                    case .success(let o):
-                        totalPixels += o.pixelCount
-                        written.append(target)
-                        writtenInBatch.append(target)
-                        if let file = preset.exportedFile(target, from: record) { toCatalog.append(file) }
-                        if !o.maskSubstitutions.isEmpty {
-                            substituted += 1
-                            self.notes.append(MaskSubstitutions.exportNote(name: name, missing: o.maskSubstitutions))
-                        }
-                    case .failure(let e): self.failures.append(Failure(name: name, reason: "\(e)"))
+                    if let at = underWay.firstIndex(of: outcome.name) {
+                        underWay.remove(at: at)
+                        show(underWay)
                     }
-                }
-            }
+                    switch outcome {
+                    case .skipped:
+                        skipped += 1
+                    case .failed(let name, let reason):
+                        self.failures.append(Failure(name: name, reason: reason))
+                    case .finished(let photo, let result):
+                        switch result {
+                        case .success(let o):
+                            totalPixels += o.pixelCount
+                            written.append(photo.target)
+                            writtenInBatch.append(photo.target)
+                            if let file = preset.exportedFile(photo.target, from: photo.record) { toCatalog.append(file) }
+                            if !o.maskSubstitutions.isEmpty {
+                                substituted += 1
+                                self.notes.append(MaskSubstitutions.exportNote(name: photo.name,
+                                                                               missing: o.maskSubstitutions))
+                            }
+                        case .failure(let e):
+                            self.failures.append(Failure(name: photo.name, reason: "\(e)"))
+                        }
+                    }
+                })
+            if stoppedEarly { break batches }
             if preset.revealWhenDone { revealed += writtenInBatch }
             if let app = preset.openInAppURL, !writtenInBatch.isEmpty { opened.append((app, writtenInBatch)) }
           }
@@ -501,6 +521,8 @@ final class ExportQueue: ObservableObject {
                 self.pauseGate.resume()
                 self.isPaused = false
                 self.currentName = ""
+                self.photosAtOnce = 1
+                self.concurrencyNote = ""
                 let cancelled = Task.isCancelled ? " (cancelled)" : ""
                 let skippedNote = skipped > 0 ? " · \(skipped) skipped (already there)" : ""
                 // Originals aren't rendered, so they have no pixels to count.
@@ -576,10 +598,10 @@ final class ExportQueue: ObservableObject {
     /// as the app goes away.
     private var stoppingForQuit = false
 
-    /// For quitting: stops the run after the file being written and
-    /// returns once that file is complete (at once when nothing is
-    /// running). Cancelling only stops the loop from starting the next
-    /// image; the render and write run in a detached task, which
+    /// For quitting: stops the run after the files being written and
+    /// returns once they're complete (at once when nothing is running).
+    /// Cancelling only stops the pipeline from starting the next image;
+    /// the renders and writes under way run in detached tasks, which
     /// cancellation doesn't reach, so a file is never left half-written.
     func stopAfterCurrentFile() async {
         guard let task else { return }
@@ -627,6 +649,9 @@ struct ExportSheet: View {
     /// Saved presets ticked for a multi-batch export; empty for an
     /// ordinary one with the sheet's settings.
     @State private var batchPresetIDs: Set<UUID> = []
+    /// Export › Photos at once: Automatic (0) or a count, kept for the
+    /// next export (ExportQueue+Concurrency.swift).
+    @State private var photosAtOnce = ExportPhotosAtOnce.load()
     /// The catalog's folder, where Same folder as original writes.
     var catalogRoot: URL?
     let onExport: ([ExportBatch]) -> Void
@@ -729,6 +754,10 @@ struct ExportSheet: View {
             groupLabel("After Export")
             ExportAfterSection(preset: $preset)
             ExportCatalogSection(preset: $preset)
+
+            groupLabel("Speed")
+            ExportPhotosAtOnceSection(choice: $photosAtOnce,
+                                      limit: ExportPhotosAtOnce.limit(records: estimateRecords, preset: preset))
             }
             }
             HStack {
@@ -746,6 +775,7 @@ struct ExportSheet: View {
                     // Saved here too, as the sheet's own settings, when
                     // the run is a multi-batch one of saved presets.
                     preset.save()
+                    ExportPhotosAtOnce.save(photosAtOnce)
                     onExport(batches)
                     dismiss()
                 }

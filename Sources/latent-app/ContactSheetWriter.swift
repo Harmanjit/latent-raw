@@ -107,13 +107,6 @@ enum ContactSheetWriter {
     /// minivu on six photos on a 4K sheet, 15.8 MB became 3 MB. The JPEG
     /// keeps the image's colour profile.
     static func jpegBacked(_ image: CGImage) -> CGImage {
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil)
-        else { return image }
-        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
-        guard CGImageDestinationFinalize(destination),
-              let source = CGImageSourceCreateWithData(data, nil),
-              let jpeg = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return image }
-        return jpeg
+        PDFPageImage.jpegBacked(image, quality: 0.9)
     }
 }

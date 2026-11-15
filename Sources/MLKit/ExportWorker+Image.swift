@@ -79,17 +79,21 @@ extension ExportWorker {
         // A flat-field correction needs its reference's gain map on this Mac.
         FlatFieldCache.shared.ensureGainMap(for: parameters.flatField, photo: request.sourceURL, gpu: gpu)
         let rotation = ExportPlan.rotation(for: file.summary, userRotation: request.userRotation)
-        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
-                                              rotation: rotation, geometry: parameters)
-        try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
-                                   name: request.sourceURL.lastPathComponent, logger: pageLogger)
-        try await regenerateDepth(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
-                                  name: request.sourceURL.lastPathComponent)
-        try await regenerateReflections(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
-                                        name: request.sourceURL.lastPathComponent)
-        if request.runsAIDenoise, parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
-            let denoiser = try await AIDenoiser.shared()
-            try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
+        // The model steps take turns with other exports' (ExportModelGate).
+        let masks = try await ExportModelGate.whileHeld(ExportModelGate.needsModels(parameters)) {
+            let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
+                                                  rotation: rotation, geometry: parameters)
+            try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
+                                       name: request.sourceURL.lastPathComponent, logger: pageLogger)
+            try await regenerateDepth(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
+                                      name: request.sourceURL.lastPathComponent)
+            try await regenerateReflections(parameters, session: session, pipeline: pipeline, gpu: gpu,
+                                            rotation: rotation, name: request.sourceURL.lastPathComponent)
+            if request.runsAIDenoise, parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
+                let denoiser = try await AIDenoiser.shared()
+                try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
+            }
+            return masks
         }
 
         let scale = ExportPlan.scale(for: file.summary, crop: parameters.crop, maxLongEdge: request.maxLongEdge)

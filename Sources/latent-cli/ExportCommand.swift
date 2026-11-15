@@ -27,6 +27,8 @@ enum ExportCommand {
       --template <text>        file naming, e.g. "{date}-{name}" (default {name})
       --on-conflict <policy>   number | skip | replace, for names already taken (default number)
       --no-metadata            write pixels only: no camera, date, keywords or rating
+      --jobs <n|auto>          photos exported at once (default auto: what this Mac can take,
+                               at most the fastest measured count)
       --dry-run                list what would be written and write nothing
     """
 
@@ -48,6 +50,8 @@ enum ExportCommand {
         var collision: ExportNaming.Collision?
         var noMetadata = false
         var dryRun = false
+        /// Photos at once; nil for automatic (`ExportConcurrency`).
+        var jobs: Int?
     }
 
     /// The command line after `export`, or why it can't be used.
@@ -100,6 +104,15 @@ enum ExportCommand {
                 }
             case "--no-metadata":
                 options.noMetadata = true
+            case "--jobs":
+                guard let v = value(arg) else { return .failure("--jobs takes a number or auto") }
+                if v == "auto" {
+                    options.jobs = nil
+                } else if let n = Int(v), n >= 1, n <= ExportConcurrency.hardCap {
+                    options.jobs = n
+                } else {
+                    return .failure("--jobs takes auto or a number from 1 to \(ExportConcurrency.hardCap)")
+                }
             case "--dry-run":
                 options.dryRun = true
             default:
@@ -218,69 +231,112 @@ enum ExportCommand {
             return 1
         }
 
+        // Several photos at once, as the app's export does (ExportPipeline):
+        // names are settled and results printed in order, one photo after
+        // another; only the render and write overlap.
+        let sourceMegapixels = sources.map {
+            ExportConcurrency.estimatedMegapixels(width: $0.record.width, height: $0.record.height,
+                                                  fileBytes: $0.record.size)
+        }.max() ?? 24
+        let limit = ExportConcurrency.limit(machine: .current(device: gpu.device), sourceMegapixels: sourceMegapixels,
+                                            outputMegapixels: preset.outputMegapixels(source: sourceMegapixels))
+        let workers = ExportConcurrency.resolve(choice: options.jobs ?? ExportConcurrency.automaticChoice,
+                                                 limit: limit)
+        print("Photos at once: \(workers.workers) (this Mac can take up to \(limit) of these)"
+              + (workers.clamped ? "; --jobs \(options.jobs ?? 0) is more than that" : ""))
+
         let started = Date()
         var written = 0, skipped = 0, failed = 0
-        for index in plan.outputs.indices {
-            let source = sources[plan.outputs[index].index]
-            let name = source.record.relPath
-            var output = plan.recheck(index)
-            if planOptions.makesFolders, case .write = output.action {
-                try? FileManager.default.createDirectory(at: output.url.deletingLastPathComponent(),
-                                                         withIntermediateDirectories: true)
-            }
-            if let json = source.editStackJSON, (try? EditStack.decode(json: json))?.modules.aidenoise != nil,
-               !AIDenoiser.isAvailable {
-                print("  warning \(name): AI Denoise is in the edit but its model isn't on this Mac; exported without it")
-            }
-            let fileStart = Date()
-            var attempts = 0
-            var result: Result<ExportWorker.Outcome, Error>
-            attemptLoop: while true {
+        var nextIndex = 0
+        await ExportPipeline.run(
+            workers: workers.workers,
+            next: { () async -> ExportPipeline.Step<CLIPhoto, CLIOutcome>? in
+                guard nextIndex < plan.outputs.count else { return nil }
+                let index = nextIndex
+                nextIndex += 1
+                let source = sources[plan.outputs[index].index]
+                let name = source.record.relPath
+                let output = plan.recheck(index)
+                if planOptions.makesFolders, case .write = output.action {
+                    try? FileManager.default.createDirectory(at: output.url.deletingLastPathComponent(),
+                                                             withIntermediateDirectories: true)
+                }
+                if let json = source.editStackJSON, (try? EditStack.decode(json: json))?.modules.aidenoise != nil,
+                   !AIDenoiser.isAvailable {
+                    print("  warning \(name): AI Denoise is in the edit but its model isn't on this Mac; exported without it")
+                }
+                let photo = CLIPhoto(index: index, name: name, output: output, started: Date(),
+                                     request: preset.request(for: source, destination: output.url, settings: settings))
                 switch output.action {
-                case .write, .replace: break
-                case .skip:
-                    result = .failure(SkipFile())
-                    break attemptLoop
-                case .fail(let reason):
-                    result = .failure(PlanFailure(reason: reason))
-                    break attemptLoop
+                case .write, .replace: return .run(photo)
+                case .skip: return .done(CLIOutcome(photo: photo, result: .failure(SkipFile())))
+                case .fail(let reason): return .done(CLIOutcome(photo: photo, result: .failure(PlanFailure(reason: reason))))
                 }
-                let request = preset.request(for: source, destination: output.url, settings: settings)
+            },
+            work: { photo in
                 do {
-                    result = .success(try await ExportWorker.export(request, gpu: gpu))
+                    return CLIOutcome(photo: photo, result: .success(try await ExportWorker.export(photo.request, gpu: gpu)))
                 } catch {
-                    result = .failure(error)
+                    return CLIOutcome(photo: photo, result: .failure(error))
                 }
-                attempts += 1
+            },
+            retry: { outcome in
                 // A file that appeared under the name while this one
                 // rendered: settled again by the policy, as the app does.
-                guard case .failure(let error) = result, error is SafeFileWriter.DestinationExists,
-                      attempts < 3 else { break }
-                output = plan.recheck(index)
-            }
-            switch result {
-            case .success(let outcome):
-                written += 1
-                let seconds = String(format: "%.1f", Date().timeIntervalSince(fileStart))
-                print("  ok      \(name) -> \(output.relativePath(to: outDir))  "
-                      + "(\(outcome.pixelWidth)x\(outcome.pixelHeight), \(seconds) s)")
-                if !outcome.maskSubstitutions.isEmpty {
-                    print("  note    \(name): made with stand-ins for " + outcome.maskSubstitutions.joined(separator: ", "))
+                guard case .failure(let error) = outcome.result, error is SafeFileWriter.DestinationExists,
+                      outcome.photo.attempts < 3 else { return nil }
+                var photo = outcome.photo
+                photo.output = plan.recheck(photo.index)
+                photo.attempts += 1
+                switch photo.output.action {
+                case .write, .replace:
+                    photo.request = preset.request(for: sources[plan.outputs[photo.index].index],
+                                                   destination: photo.output.url, settings: settings)
+                    return .run(photo)
+                case .skip: return .done(CLIOutcome(photo: photo, result: .failure(SkipFile())))
+                case .fail(let reason): return .done(CLIOutcome(photo: photo, result: .failure(PlanFailure(reason: reason))))
                 }
-            case .failure(let error) where error is SkipFile:
-                skipped += 1
-                print("  skip    \(name): \(output.url.lastPathComponent) is already there")
-            case .failure(let error):
-                failed += 1
-                print("  FAILED  \(name): \(error)")
-            }
-        }
+            },
+            commit: { outcome in
+                let name = outcome.photo.name, output = outcome.photo.output
+                switch outcome.result {
+                case .success(let result):
+                    written += 1
+                    let seconds = String(format: "%.1f", Date().timeIntervalSince(outcome.photo.started))
+                    print("  ok      \(name) -> \(output.relativePath(to: outDir))  "
+                          + "(\(result.pixelWidth)x\(result.pixelHeight), \(seconds) s)")
+                    if !result.maskSubstitutions.isEmpty {
+                        print("  note    \(name): made with stand-ins for " + result.maskSubstitutions.joined(separator: ", "))
+                    }
+                case .failure(let error) where error is SkipFile:
+                    skipped += 1
+                    print("  skip    \(name): \(output.url.lastPathComponent) is already there")
+                case .failure(let error):
+                    failed += 1
+                    print("  FAILED  \(name): \(error)")
+                }
+            })
         print(String(format: "%d exported, %d skipped, %d failed in %.1f s", written, skipped, failed,
                      Date().timeIntervalSince(started)))
         return failed == 0 ? 0 : 1
     }
 
     private struct SkipFile: Error {}
+
+    /// One photo on its way through the pipeline.
+    private struct CLIPhoto: Sendable {
+        var index: Int
+        var name: String
+        var output: ExportBatchPlan.Output
+        var started: Date
+        var request: ExportWorker.Request
+        var attempts = 1
+    }
+
+    private struct CLIOutcome: Sendable {
+        var photo: CLIPhoto
+        var result: Result<ExportWorker.Outcome, Error>
+    }
     private struct PlanFailure: Error, CustomStringConvertible {
         let reason: String
         var description: String { reason }
@@ -463,6 +519,15 @@ struct CLIExportPreset {
                                                  dateSubfolders: dateSubfolders, catalogName: catalogName)
         options.subfolder = subfolder
         return options
+    }
+
+    /// The megapixels of a file made from a photo of `source` megapixels
+    /// (3:2 assumed), for the photos-at-once limit.
+    func outputMegapixels(source: Double) -> Double {
+        let height = (source * 1_000_000 / 1.5).squareRoot(), width = height * 1.5
+        let edge = sizing.map { $0.targetLongEdge(width: Int(width), height: Int(height)) } ?? (resize ? maxLongEdge : nil)
+        guard let edge, Double(edge) < width else { return source }
+        return Double(edge) * Double(edge) / 1.5 / 1_000_000
     }
 
     func request(for source: HeadlessSource, destination: URL, settings: ExportSettings) -> ExportWorker.Request {
