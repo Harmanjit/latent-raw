@@ -95,6 +95,9 @@ enum GridContextMenu {
         menu.addItem(ClosureMenuItem("Reveal in Finder", enabled: !library.revealInFinderURLs.isEmpty) {
             revealInFinder(library)
         })
+        menu.addItem(ClosureMenuItem("Similar to This Photo", enabled: hasLead) {
+            actions.command(.libraryView(.similarToPhoto))
+        })
         menu.addItem(.separator())
         let canChange = hasLead && actions.canChangeFiles()
         menu.addItem(ClosureMenuItem(Shortcuts.menuTitle(count > 1 ? "Rename \(count) Images…" : "Rename…", for: .rename),

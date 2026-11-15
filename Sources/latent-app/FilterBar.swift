@@ -39,6 +39,9 @@ struct FilterBar: View {
             KindFilterMenu(filter: $library.filter)
             RangesFilterButton(library: library)
             DateFilterButton(filter: $library.filter)
+            if let similar = library.similarPhotoCriteria {
+                SimilarFilterChip(library: library, criteria: similar)
+            }
 
             SearchScopeMenu(scope: $library.filter.textScope)
             if library.filter.textScope == .everything {

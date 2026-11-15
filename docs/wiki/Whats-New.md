@@ -8,6 +8,7 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 <!-- RECONCILE: two branches edited this; merge into one text -->
 <!-- RECONCILE: two branches edited this; merge into one text -->
 <!-- RECONCILE: two branches edited this; merge into one text -->
+<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Faster large folders.** On a 10,000-photo folder, smart collections with date rules evaluate about thirty times faster, rating many photos while a collection is shown no longer stalls the window, the Collections section counts in the background, and search keystrokes, keyword completion and the smart collection sheet do far less work each time. The tone equalizer's mask summary is worked out off the main thread. Nothing looks or behaves differently. See [Thumbnails and performance](Library#thumbnails-and-performance).
 
 - **Edit Capture Time…** (Metadata menu) shifts the selection's capture times by days, hours, minutes and seconds, sets the first photo to an exact time and moves the rest with it, or changes time zone. The raw files are never rewritten; the corrected time is kept in the catalog and sidecar, sorting and date filters use it, and it can be undone. See [Capture time and geotagging](Library#capture-time-and-geotagging).
@@ -23,6 +24,11 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 
 - **Tone Equalizer Auto Align** sets the mask's exposure and contrast compensation so the nine bands span the photo's tonal range, darkest tones on the −8 EV band, brightest on 0 EV. See [Tone Equalizer](Develop#tone-equalizer).
 - **Live band histogram**: grey bars behind the tone equalizer's Simple sliders show how much of the photo each band moves, and the Advanced tab's histogram now follows Mask Exposure and Mask Contrast while you drag, worked out in the background. See [Tone Equalizer](Develop#tone-equalizer).
+<!-- /RECONCILE -->
+
+- **Remember Filter per Source**, in the filter bar's presets menu, gives each folder and collection its own filter, back when you return. See [The grid](Library#the-grid).
+- **Click the Ranges histograms**: a click on a bar shows that bar's photos, Shift-click extends, double-click clears. See [The grid](Library#the-grid).
+- **Similar to This Photo** filters to the same camera, lens and day as the selected photo, each part switchable in the bar's Similar chip. See [The grid](Library#the-grid).
 <!-- /RECONCILE -->
 
 ## Organising
