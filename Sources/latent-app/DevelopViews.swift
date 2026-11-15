@@ -260,14 +260,14 @@ final class DevelopViewState: ObservableObject {
         self.library = library
         // Published before the change lands: act once it has.
         observations = [
-            main.$parameters.map { _ in () }.merge(with: main.$beforeOverride.map { _ in () },
-                                                   main.$userRotation.map { _ in () },
+            main.parametersPublisher.map { _ in () }.merge(with: main.beforeOverridePublisher.map { _ in () },
+                                                   main.userRotationPublisher.map { _ in () },
                                                    // A compared snapshot deleted or replaced.
-                                                   main.$snapshots.map { _ in () })
+                                                   main.snapshotsPublisher.map { _ in () })
                 .receive(on: RunLoop.main)
                 .sink { [weak self] in self?.syncBefore() },
             // Another image opened in the editor.
-            main.$imageTitle.dropFirst()
+            main.imageTitlePublisher.dropFirst()
                 .receive(on: RunLoop.main)
                 .sink { [weak self] _ in self?.update() },
             library.$folderURL.dropFirst()
@@ -354,7 +354,7 @@ final class DevelopViewState: ObservableObject {
             MainActor.assumeIsolated { self?.main?.lastError = problem }
         }
         // Published as the render starts; measured once it has finished.
-        paneRenders = made.$preview.receive(on: RunLoop.main).sink { [weak self] _ in
+        paneRenders = made.previewPublisher.receive(on: RunLoop.main).sink { [weak self] _ in
             self?.refreshReferenceScopes()
         }
         pane = made
@@ -703,10 +703,10 @@ let imageIDPasteboardType = NSPasteboard.PasteboardType("com.latent.image-id")
 /// or a reference photo beside it.
 struct DevelopImageArea: View {
     @ObservedObject var state: DevelopViewState
-    /// Not observed here: ContentView observes the editor and the library
-    /// and rebuilds this view whenever either changes (its closures are new
-    /// each time). Observing them here too made SwiftUI evaluate this view
-    /// twice in the same update on every slider tick.
+    /// The editor is `@Observable`: what this body reads of it is tracked
+    /// here. The library isn't observed here: ContentView observes it and
+    /// rebuilds this view whenever it changes (its closures are new each
+    /// time).
     let model: EditorModel
     let library: Library
     let onStep: (Int) -> Void

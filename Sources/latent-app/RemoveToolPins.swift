@@ -174,7 +174,7 @@ extension EditorModel {
 /// × to delete; Select All and Delete All underneath. Rows follow the
 /// order patches apply in.
 struct HealPinList: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         let heals = model.parameters.heals
@@ -248,7 +248,7 @@ struct HealPinList: View {
 
 /// Tool Overlay and Visualise Spots for the Remove tool.
 struct HealOverlayOptions: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         HStack(spacing: 8) {

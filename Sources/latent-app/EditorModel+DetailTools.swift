@@ -12,11 +12,15 @@ extension EditorModel {
     // MARK: - Lens profile
 
     /// The Lensfun model this photo's corrections come from, if any.
-    var activeLensProfileName: String? { session?.lensCorrection(for: parameters)?.profileName }
+    var activeLensProfileName: String? {
+        _ = outsideStateRevision
+        return session?.lensCorrection(for: parameters)?.profileName
+    }
 
     /// The profile remembered for every photo from this camera and lens, if
     /// one was saved ("Use for All Photos From This Lens").
     var rememberedLensProfile: String? {
+        _ = outsideStateRevision
         guard let key = session?.lensProfileKey else { return nil }
         return LensProfileOverrides.model(for: key)
     }
@@ -54,7 +58,7 @@ extension EditorModel {
     func lensProfileDefaultsDidChange() {
         guard let session else { return }
         if session.refreshLensProfile() { rerender() }
-        objectWillChange.send()
+        outsideStateRevision &+= 1
     }
 
     // MARK: - Remove Chromatic Aberration

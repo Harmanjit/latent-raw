@@ -8,7 +8,7 @@ import MLKit
 /// model is the user's own (Settings › AI › Models); without one the
 /// slider is off and the panel says how to add one. Nothing is faked.
 struct DistractionRemovalSection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var state: ReflectionState
 
     init(model: EditorModel) {

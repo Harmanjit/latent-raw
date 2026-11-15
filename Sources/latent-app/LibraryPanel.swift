@@ -11,11 +11,10 @@ struct LibraryPanel: View {
     @ObservedObject var photoMerge: PhotoMergeQueue
     /// Remove Dust and Find Faces over a selection.
     @ObservedObject var selectionJobs: SelectionJobQueue
-    /// Not observed here: ContentView observes the editor and rebuilds this
-    /// panel whenever it changes (the panel's closures are new each time).
-    /// Observing it here too made SwiftUI evaluate the panel, and the
-    /// sections inside it, twice in the same update on every slider tick.
-    /// (So the export settings below use plain bindings, not `$model`.)
+    /// The editor is `@Observable`: the few properties this panel reads
+    /// (the export settings, whether an image is open or exporting) are
+    /// tracked here, so a slider tick or a status change doesn't rebuild
+    /// the panel. (The export settings below use plain bindings, not `$model`.)
     let model: EditorModel
     @State private var metadataExpanded = true
     @AppStorage("latent.panel.descriptionExpanded") private var descriptionExpanded = true

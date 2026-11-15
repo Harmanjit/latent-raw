@@ -7,7 +7,7 @@ import PixelEngine
 /// radial shows its ellipse and centre (drag inside it to move it); a
 /// linear gradient shows where the effect is full and where it ends.
 struct MaskShapeOverlay: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         GeometryReader { geo in

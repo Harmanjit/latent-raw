@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import Metal
 import SwiftUI
 import RawCore
@@ -33,9 +34,11 @@ import MLKit
 /// without a force-try that would crash on exactly the failure it claims to
 /// handle. Setup failure is held in `setupError` and surfaced in the UI.
 @MainActor
-final class EditorModel: ObservableObject {
-    @Published var parameters = EditParameters() {
+@Observable
+final class EditorModel {
+    var parameters = EditParameters() {
         didSet {
+            parametersSubject.send(parameters)
             if parameters != oldValue {
                 // Undo, Reset All or a paste can take the selected mask
                 // away; a selection past the end would have the mask
@@ -59,16 +62,16 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Neural denoise
 
-    @Published var aiDenoiseStatus = ""
-    @Published var aiDenoiseRunning = false
-    var aiDenoiseTask: Task<Void, Never>?
+    var aiDenoiseStatus = ""
+    var aiDenoiseRunning = false { didSet { aiDenoiseRunningSubject.send(aiDenoiseRunning) } }
+    @ObservationIgnored var aiDenoiseTask: Task<Void, Never>?
     /// Numbers the runs, so only the current one may report back.
-    var aiDenoiseRun = 0
+    @ObservationIgnored var aiDenoiseRun = 0
     static var sharedDenoisers: [AIDenoiser.Variant: AIDenoiser] = [:]
 
     /// Which network to use. Changing it drops the cached result and, if
     /// the strength is up, runs the new one.
-    @Published var aiDenoiseVariant: AIDenoiser.Variant = AIDenoiser.preferredVariant {
+    var aiDenoiseVariant: AIDenoiser.Variant = AIDenoiser.preferredVariant {
         didSet {
             guard aiDenoiseVariant != oldValue else { return }
             AIDenoiser.preferredVariant = aiDenoiseVariant
@@ -83,7 +86,7 @@ final class EditorModel: ObservableObject {
     /// Click a spot to heal it (the source is picked beside it); drag from
     /// a spot to choose the source yourself; drag either circle of an
     /// existing patch to move it.
-    @Published var healToolActive = false {
+    var healToolActive = false {
         didSet {
             guard healToolActive != oldValue else { return }
             if healToolActive {
@@ -95,60 +98,60 @@ final class EditorModel: ObservableObject {
             }
         }
     }
-    @Published var selectedHealIndex: Int?
+    var selectedHealIndex: Int?
     /// Patches selected alongside `selectedHealIndex` (Select All, ⌘-click
     /// in the pin list), deleted with it (RemoveToolPins.swift).
-    @Published var healPinSelection: Set<UUID> = []
+    var healPinSelection: Set<UUID> = []
     /// The Option-drag marquee in progress, screen points; spots inside it
     /// are deleted when the mouse is let go.
-    @Published var healMarquee: CGRect?
+    var healMarquee: CGRect?
     /// When the tool's pins are drawn: Lightroom's Tool Overlay setting.
-    @Published var healToolOverlay: HealToolOverlay = .saved {
+    var healToolOverlay: HealToolOverlay = .saved {
         didSet { if healToolOverlay != oldValue { healToolOverlay.save() } }
     }
     /// Whether the pointer is over the image, for Tool Overlay's Auto.
-    @Published var pointerOverImage = false
+    var pointerOverImage = false
     /// Defaults for the next patch; editing a selected patch updates these too.
-    @Published var healRadius: Float = 0.02
-    @Published var healFeather: Float = 0.35
-    @Published var healMode: HealPatch.Mode = .heal
+    var healRadius: Float = 0.02
+    var healFeather: Float = 0.35
+    var healMode: HealPatch.Mode = .heal
     /// Opacity of the next patch, 0…1.
-    @Published var healOpacity: Float = 1
+    var healOpacity: Float = 1
 
     enum HealDrag {
         case placing(Int), movingTarget(Int, SIMD2<Float>), movingSource(Int, SIMD2<Float>), painting
         /// An Option-drag from this screen point: the delete marquee.
         case marquee(CGPoint)
     }
-    var healDrag: HealDrag?
+    @ObservationIgnored var healDrag: HealDrag?
     /// Whether a drag on empty image paints a stroke instead of placing a circle.
-    @Published var healShape: HealShape = .spot
+    var healShape: HealShape = .spot
     /// The stroke being painted, in normalized sensor coordinates. Drawn by
     /// the overlay and committed as one patch when the drag ends, so the
     /// image isn't re-rendered for every mouse move.
-    @Published var paintingHealStroke: [SIMD2<Float>] = []
+    var paintingHealStroke: [SIMD2<Float>] = []
 
     // MARK: - Point Colour picker (EditorModel+Colour.swift)
 
     /// Armed by Point Colour's Pick button: the next click on the image
     /// adds a swatch. Takes that click before any other tool.
-    @Published var pointColourPicking = false
+    var pointColourPicking = false
     /// The Point Colour swatch whose sliders the panel shows.
-    @Published var selectedPointColour: Int?
+    var selectedPointColour: Int?
     /// The mask a pick adds its swatch to, or nil for the global panel.
-    @Published var pointColourPickLocal: UUID?
+    var pointColourPickLocal: UUID?
 
     // MARK: - Content-aware Remove (EditorModel+Remove.swift)
 
     /// Whether a new Remove patch is refined to the outline of the object
     /// under it (Detect Objects).
-    @Published var removeDetectsObjects = true
+    var removeDetectsObjects = true
     /// Remove patches whose object is being detected, by id.
-    @Published var detectingObjectIDs: Set<UUID> = []
+    var detectingObjectIDs: Set<UUID> = []
 
     // MARK: - Red-eye tool (EditorModel+RedEye.swift)
 
-    @Published var redEyeToolActive = false {
+    var redEyeToolActive = false {
         didSet {
             guard redEyeToolActive != oldValue else { return }
             if redEyeToolActive {
@@ -159,22 +162,22 @@ final class EditorModel: ObservableObject {
             }
         }
     }
-    @Published var selectedRedEyeIndex: Int?
+    var selectedRedEyeIndex: Int?
     /// Default size of the next spot; editing a selected spot updates it too.
-    @Published var redEyeRadius: Float = RedEyeSpot.defaultRadius
-    @Published var detectingRedEyes = false
+    var redEyeRadius: Float = RedEyeSpot.defaultRadius
+    var detectingRedEyes = false
     /// Red Eye or Pet Eye for the next spot (EditorModel+PetEye.swift).
-    @Published var redEyeKind: RedEyeSpot.Kind = .human
+    var redEyeKind: RedEyeSpot.Kind = .human
     /// Whether a new Pet Eye spot gets a catchlight.
-    @Published var petEyeCatchlight = true
-    var redEyeDrag: RedEyeDrag?
+    var petEyeCatchlight = true
+    @ObservationIgnored var redEyeDrag: RedEyeDrag?
 
     // MARK: - Sensor dust (EditorModel+Dust.swift)
 
     /// Shows the dust spots as rings: click a ring to remove a false one,
     /// click the image to add one. Arming it disarms every other on-image
     /// tool, as they disarm it.
-    @Published var dustToolActive = false {
+    var dustToolActive = false {
         didSet {
             guard dustToolActive != oldValue else { return }
             if dustToolActive {
@@ -187,28 +190,28 @@ final class EditorModel: ObservableObject {
         }
     }
     /// Find Spots is looking for dust.
-    @Published var findingDust = false
-    @Published var dustSensitivity = 50
-    @Published var dustSize: DustSpotSize = .medium
+    var findingDust = false
+    var dustSensitivity = 50
+    var dustSize: DustSpotSize = .medium
     /// The Visualise Spots pass over the viewport (never exports).
-    @Published var visualiseSpots = false {
+    var visualiseSpots = false {
         didSet { if visualiseSpots != oldValue { rerender() } }
     }
-    @Published var visualiseThreshold: Float = 0.5 {
+    var visualiseThreshold: Float = 0.5 {
         didSet { if visualiseSpots, visualiseThreshold != oldValue { rerender() } }
     }
-    @Published var selectedDustIndex: Int?
+    var selectedDustIndex: Int?
     /// The map Find Spots detected on, kept so the sensitivity and size
     /// controls re-detect without another render. Dropped on image change,
     /// on disarm and at memory warning.
-    var dustAnalysis: DustDetector.Analysis?
+    @ObservationIgnored var dustAnalysis: DustDetector.Analysis?
 
     // MARK: - Touch-up (EditorModel+TouchUp.swift)
 
     /// Shows the enabled faces' boxes and a ring per blemish: click a ring
     /// to keep that spot, click skin to add one. Same exclusivity as the
     /// dust tool.
-    @Published var touchUpToolActive = false {
+    var touchUpToolActive = false {
         didSet {
             guard touchUpToolActive != oldValue else { return }
             if touchUpToolActive {
@@ -219,27 +222,27 @@ final class EditorModel: ObservableObject {
             }
         }
     }
-    @Published var findingFaces = false
-    @Published var findingBlemishes = false
-    @Published var selectedBlemishIndex: Int?
+    var findingFaces = false
+    var findingBlemishes = false
+    var selectedBlemishIndex: Int?
     /// Show Skin Mask: the skin slice tinted over the image (viewport only).
-    @Published var showSkinMask = false {
+    var showSkinMask = false {
         didSet { if showSkinMask != oldValue { rerender() } }
     }
     /// Sharpening's Masking preview, shown while the Masking slider is
     /// dragged with Option held (viewport only, never part of the edit).
-    @Published var sharpenMaskPreview = false {
+    var sharpenMaskPreview = false {
         didSet { if sharpenMaskPreview != oldValue { rerender() } }
     }
     /// Option-drag on a Colour Mixer slider: the band whose colours the
     /// viewport keeps while the rest goes grey. Display only.
-    @Published var hueIsolationBand: Int? = nil {
+    var hueIsolationBand: Int? = nil {
         didSet { if hueIsolationBand != oldValue { rerender() } }
     }
     /// Option-drag on a Colour Grading luminance slider: the range (0
     /// shadows, 1 midtones, 2 highlights) whose weight the viewport shows
     /// in grey. Display only.
-    @Published var gradingRangePreview: Int? = nil {
+    var gradingRangePreview: Int? = nil {
         didSet { if gradingRangePreview != oldValue { rerender() } }
     }
     /// Where a press with the Exposure eyedropper began and where the
@@ -247,25 +250,25 @@ final class EditorModel: ObservableObject {
     var exposurePickDrag: (start: CGPoint, end: CGPoint)?
     /// The defringe eyedropper is armed: the next click on the image picks
     /// a fringe colour (EditorModel+DetailTools.swift).
-    @Published var defringePickerActive = false
+    var defringePickerActive = false
     /// Remove Chromatic Aberration is measuring the photo.
-    @Published var measuringChromaticAberration = false
+    var measuringChromaticAberration = false
     /// What the last measurement or pick found, for the Lens panel.
-    @Published var lensToolStatus = ""
+    var lensToolStatus = ""
     /// Saves or clears the per-lens profile choice in the catalog. Set by
     /// `LensProfileDefaults`; nil without a catalog.
-    var onRememberLensProfile: ((_ model: String?, _ key: LensProfileOverrides.Key) -> Void)?
+    @ObservationIgnored var onRememberLensProfile: ((_ model: String?, _ key: LensProfileOverrides.Key) -> Void)?
     /// A 40 pt upright thumbnail per face, by the face's id, for the panel.
-    @Published var faceThumbnails: [UUID: CGImage] = [:]
+    var faceThumbnails: [UUID: CGImage] = [:]
     /// "Looking for faces…" and the like, for the panel.
-    @Published var touchUpStatus = ""
+    var touchUpStatus = ""
     /// The mask regeneration under way, if any; a newer one replaces it.
-    var touchUpMaskTask: Task<Void, Never>?
+    @ObservationIgnored var touchUpMaskTask: Task<Void, Never>?
     /// Critical pressure took the touch-up masks; build them again once
     /// memory recovers rather than in the middle of the shortage.
-    var touchUpReleasedUnderPressure = false
+    @ObservationIgnored var touchUpReleasedUnderPressure = false
     /// The geometry the masks were built for; a change regenerates them.
-    var touchUpGeometryKey: String?
+    @ObservationIgnored var touchUpGeometryKey: String?
 
     // MARK: - Lens Blur (EditorModel+LensBlur.swift)
 
@@ -280,7 +283,7 @@ final class EditorModel: ObservableObject {
 
     /// While on, the viewport shows the whole (straightened) sensor with
     /// the crop rectangle drawn over it; off, it shows only the crop.
-    @Published var cropToolActive = false {
+    var cropToolActive = false {
         didSet {
             guard cropToolActive != oldValue else { return }
             if !cropToolActive {
@@ -301,9 +304,9 @@ final class EditorModel: ObservableObject {
     /// The crop as it was before the straighten slider started moving, so
     /// turning the angle back re-grows the crop instead of leaving it at
     /// whatever the largest angle forced it to.
-    var straightenBase: CropParameters?
+    @ObservationIgnored var straightenBase: CropParameters?
     /// Upright, Guided Upright and the straighten ruler (EditorModel+Geometry.swift).
-    @Published var geometry = GeometryToolState()
+    var geometry = GeometryToolState()
 
     // MARK: - Saving
 
@@ -316,101 +319,101 @@ final class EditorModel: ObservableObject {
     /// can't read it, and every save rebuilds the stack from parameters in
     /// this build's format, so saving would erase the newer edit. Edits to
     /// that image are shown but never written back.
-    var newerEditImageID: Int64?
+    @ObservationIgnored var newerEditImageID: Int64?
     /// True while the open image's stored edit must not be overwritten.
     var storedEditIsReadOnly: Bool { catalogImageID != nil && catalogImageID == newerEditImageID }
     /// The fresh parameters for this image (as-shot white balance and so
     /// on). A stack equal to these is "no edit" and isn't stored.
     var defaultParameters = EditParameters()
-    var pendingSave: Task<Void, Never>?
+    @ObservationIgnored var pendingSave: Task<Void, Never>?
 
     /// Called with the edit to persist, or nil when the image is back to
     /// defaults. The library owns the actual write. Set by ContentView.
-    var onEditSettled: ((_ imageID: Int64, _ editStackJSON: String?) -> Void)?
+    @ObservationIgnored var onEditSettled: ((_ imageID: Int64, _ editStackJSON: String?) -> Void)?
     /// Called, just before `onEditSettled`, with the thumbnail of a settled
     /// edit rendered from the open session (`offerSettledThumbnail`). Set by
     /// ContentView.
-    var onSettledThumbnail: ((_ imageID: Int64, _ editStackJSON: String, _ image: CGImage) -> Void)?
+    @ObservationIgnored var onSettledThumbnail: ((_ imageID: Int64, _ editStackJSON: String, _ image: CGImage) -> Void)?
 
     // MARK: - Rendered result and status
 
     /// The whole image at preview resolution. Always drawn, so the view is
     /// never empty however far the user pans or zooms mid-gesture.
-    @Published var preview: PresentLayer?
+    var preview: PresentLayer? { didSet { previewSubject.send(preview) } }
     /// A full-resolution render of (a margin around) the visible area,
     /// drawn on top of the preview when zoomed in close enough to need it.
-    @Published var tile: PresentLayer?
-    @Published var viewport = ViewportTransform(zoom: 1, center: .zero)
-    @Published var histogram: Histogram?
-    @Published var waveform: Waveform?
-    @Published var vectorscope: Vectorscope?
+    var tile: PresentLayer? { didSet { tileSubject.send(tile) } }
+    var viewport = ViewportTransform(zoom: 1, center: .zero)
+    var histogram: Histogram?
+    var waveform: Waveform?
+    var vectorscope: Vectorscope?
     /// Only the visible scope is computed (efficiency rule 2). Switching
     /// re-measures the current analysis texture without re-rendering.
-    @Published var scope: ScopeKind = .histogram {
+    var scope: ScopeKind = .histogram {
         didSet { if scope != oldValue { updateScopes() } }
     }
-    @Published var status = "Open a raw file to begin"
-    @Published var imageTitle: String?
-    @Published var lastRenderMs: Double = 0
+    var status = "Open a raw file to begin" { didSet { statusSubject.send(status) } }
+    var imageTitle: String? { didSet { imageTitleSubject.send(imageTitle) } }
+    var lastRenderMs: Double = 0
     /// What the last action rendered, for the status bar: "preview 3016×2016
     /// · 3.1 ms", "tile · demosaic cached · 1.2 ms", or "pan · no render".
-    @Published var renderReport = ""
+    var renderReport = ""
 
     // MARK: - Export
 
     /// Export settings persist across exports within a session, so a second
     /// export doesn't mean re-choosing format and quality.
-    @Published var exportSettings = ExportSettings()
-    @Published var isExporting = false
+    var exportSettings = ExportSettings()
+    var isExporting = false
 
     // MARK: - Display
 
     /// Show highlights above paper white using the display's EDR range.
     /// Off means the on-screen image matches what an SDR export will look
     /// like, which is useful for judging a file before exporting it.
-    @Published var hdrDisplayEnabled = true {
+    var hdrDisplayEnabled = true {
         didSet { if hdrDisplayEnabled != oldValue { rerender() } }
     }
     /// How far above 1.0 the screen could reach with EDR on (its potential
     /// headroom, which doesn't move with brightness). Exactly 1.0 on an
     /// SDR display, in which case the toggle has nothing to do.
-    @Published var displayHeadroom: CGFloat = 1
+    var displayHeadroom: CGFloat = 1
     /// The Loupe on a second display (SecondaryDisplay.swift), while it
     /// shows: its drawable size in pixels and its screen's potential
     /// headroom. It draws this model's preview, so that is rendered for it too.
-    var secondaryDrawableSize: CGSize = .zero
-    var secondaryDisplayHeadroom: CGFloat?
+    @ObservationIgnored var secondaryDrawableSize: CGSize = .zero
+    @ObservationIgnored var secondaryDisplayHeadroom: CGFloat?
 
     // MARK: - Soft proofing
 
-    @Published var proofEnabled = false { didSet { if proofEnabled != oldValue { rebuildProof() } } }
+    var proofEnabled = false { didSet { if proofEnabled != oldValue { rebuildProof() } } }
     /// The last target chosen (SoftProofSettings.swift); proofing itself
     /// starts off.
-    @Published var proofTarget: SoftProofTarget = SoftProofTargetStore().restored() {
+    var proofTarget: SoftProofTarget = SoftProofTargetStore().restored() {
         didSet { if proofTarget != oldValue { rebuildProof() } }
     }
-    @Published var gamutWarning = false { didSet { if gamutWarning != oldValue { rerender() } } }
-    @Published var proofStatus = ""
-    var proofLUT: SoftProofLUT?
+    var gamutWarning = false { didSet { if gamutWarning != oldValue { rerender() } } }
+    var proofStatus = ""
+    @ObservationIgnored var proofLUT: SoftProofLUT?
     /// Intent and paper simulation (EditorModel+SoftProof.swift),
     /// remembered between launches.
-    @Published var proofOptions = SoftProofOptionsStore().options {
+    var proofOptions = SoftProofOptionsStore().options {
         didSet { if proofOptions != oldValue { SoftProofOptionsStore().options = proofOptions; rebuildProof() } }
     }
-    @Published var monitorGamutWarning = false {
+    var monitorGamutWarning = false {
         didSet { if monitorGamutWarning != oldValue { rebuildMonitorGamut() } }
     }
-    var monitorGamutLUT: SoftProofLUT?
+    @ObservationIgnored var monitorGamutLUT: SoftProofLUT?
     /// The warning colours and what Before shows while proofing, remembered
     /// between launches (SoftProofSettings.swift).
-    @Published var gamutWarningColours = SoftProofSettingsStore().warningColours {
+    var gamutWarningColours = SoftProofSettingsStore().warningColours {
         didSet {
             guard gamutWarningColours != oldValue else { return }
             SoftProofSettingsStore().warningColours = gamutWarningColours
             if proofLUT != nil { rerender() }
         }
     }
-    @Published var proofBeforeShowsUnproofed = SoftProofSettingsStore().beforeShowsUnproofed {
+    var proofBeforeShowsUnproofed = SoftProofSettingsStore().beforeShowsUnproofed {
         didSet {
             guard proofBeforeShowsUnproofed != oldValue else { return }
             SoftProofSettingsStore().beforeShowsUnproofed = proofBeforeShowsUnproofed
@@ -423,18 +426,18 @@ final class EditorModel: ObservableObject {
     /// The White Balance Selector or a Targeted Adjustment Tool, armed on
     /// the image. Arming one disarms the other image tools, and arming any
     /// of those disarms it.
-    @Published var toneTool: ToneTool = .none {
+    var toneTool: ToneTool = .none {
         didSet { if toneTool != oldValue { toneToolDidChange() } }
     }
     /// Whether the Tone Curve panel shows points or regions; the curve's
     /// targeted tool adjusts whichever is showing.
-    @Published var curveEditorMode: CurveEditorMode = .point
+    var curveEditorMode: CurveEditorMode = .point
     /// The clipping overlay on the viewport (J). Display only.
-    @Published var clipping: ClippingIndicators = []
+    var clipping: ClippingIndicators = []
     /// The last Auto white balance and the image it was for, so the White
     /// Balance menu can go on calling that setting Auto.
-    @Published var autoWhiteBalance: (url: URL?, balance: ColorKit.WhiteBalance)?
-    var toneToolDrag: ToneToolDrag?
+    var autoWhiteBalance: (url: URL?, balance: ColorKit.WhiteBalance)?
+    @ObservationIgnored var toneToolDrag: ToneToolDrag?
     /// The colour under the pointer, in its own object so moving the
     /// pointer redraws the readout and not the whole window.
     let pixelProbe = PixelProbe()
@@ -449,7 +452,7 @@ final class EditorModel: ObservableObject {
     /// Select Objects rectangle (EditorModel+MaskComponents.swift).
     enum MaskTool: String, CaseIterable { case none, linear, radial, brush, erase, prompt, colourSample, box, lumaSample }
 
-    @Published var selectedLocalIndex: Int? {
+    var selectedLocalIndex: Int? {
         didSet {
             if selectedLocalIndex != oldValue {
                 maskTool = .none
@@ -460,32 +463,32 @@ final class EditorModel: ObservableObject {
     }
     /// The component of the selected local the mask tools work on; nil
     /// for the local's own shape (EditorModel+MaskComponents.swift).
-    @Published var selectedMaskComponentID: UUID? {
+    var selectedMaskComponentID: UUID? {
         didSet { if selectedMaskComponentID != oldValue { maskTool = .none } }
     }
     /// A Select Objects rectangle being dragged, in normalised output
     /// coordinates, for the overlay; nil otherwise.
-    @Published var maskDragBox: CGRect?
+    var maskDragBox: CGRect?
     /// A radial drag that began inside the ellipse moves it rather than
     /// drawing a new one: the offset from the centre to the press.
-    var radialMoveOffset: SIMD2<Float>?
+    @ObservationIgnored var radialMoveOffset: SIMD2<Float>?
     /// The last scene-linear analysis render the Colour Range eyedropper
     /// read, kept while the edit outside the masks stays the same.
-    var colourSampleCache: ColourSampleCache?
+    @ObservationIgnored var colourSampleCache: ColourSampleCache?
     /// The handle being dragged and the last shape a kept-armed tool
     /// placed (EditorModel+MaskShapes.swift).
-    var maskShapeEditing = MaskShapeEditing()
+    @ObservationIgnored var maskShapeEditing = MaskShapeEditing()
     /// The value a selected Luminance or Channel Range reads under the
     /// pointer, for the readout beside its range; nil off the image.
-    @Published var maskRangeProbe: Float?
+    var maskRangeProbe: Float?
     /// Multi-sample Pick Range and Colour Range sample points, drawn while
     /// the eyedropper is armed (EditorModel+MaskSampling.swift).
-    @Published var maskSampling = MaskSamplingState()
+    var maskSampling = MaskSamplingState()
     /// Show Channel: the selected range component's input drawn as a grey.
-    @Published var showMaskChannel = false {
+    var showMaskChannel = false {
         didSet { if showMaskChannel != oldValue { rerender() } }
     }
-    @Published var maskTool: MaskTool = .none {
+    var maskTool: MaskTool = .none {
         didSet {
             guard maskTool != .none, maskTool != oldValue else { return }
             // Exclusive like every other pair of on-image tools: the drag
@@ -500,41 +503,41 @@ final class EditorModel: ObservableObject {
             toneTool = .none
         }
     }
-    @Published var showMaskOverlay = false {
+    var showMaskOverlay = false {
         didSet { if showMaskOverlay != oldValue { rerender() } }
     }
-    @Published var brushRadius: Float = 0.04    // fraction of the short side
-    @Published var brushFeather: Float = 0.5
-    @Published var brushFlow: Float = 1.0
+    var brushRadius: Float = 0.04    // fraction of the short side
+    var brushFeather: Float = 0.5
+    var brushFlow: Float = 1.0
     /// The most a brush stroke builds up to, 0.1…1 (Density).
-    @Published var brushDensity: Float = 1.0
+    var brushDensity: Float = 1.0
     /// Auto Mask: new strokes paint only where the picture is like the
     /// colour under the brush (BrushAutoMask.swift).
-    @Published var brushAutoMask = false
-    var isDraggingMask = false {
+    var brushAutoMask = false
+    @ObservationIgnored var isDraggingMask = false {
         didSet { if isDraggingMask != oldValue { rerender() } }
     }
-    var lastDab: SIMD2<Float>?
+    @ObservationIgnored var lastDab: SIMD2<Float>?
 
     /// Names of AI locals whose masks are being generated right now.
-    @Published var generatingMasks: Set<UUID> = []
+    var generatingMasks: Set<UUID> = []
     /// The lens and keystone settings (`touchUpGeometryKey`) each model
     /// mask on the session was made on, by local id. Masks are sampled on
     /// the output grid those settings define, so a change makes them
     /// again (EditorModel+Masks.swift).
-    var modelMaskGeometry: [UUID: String] = [:]
+    @ObservationIgnored var modelMaskGeometry: [UUID: String] = [:]
     /// The shape (model and prompt points) each model mask on the
     /// session was made, or is being made, for, by local id. The pixels
     /// outlive their local (Undo of a paste removes the local, not the
     /// pixels), so a later local with the same id but another shape is
     /// told apart by this record, not by the edit it replaced.
-    var modelMaskShapes: [UUID: MaskShape] = [:]
+    @ObservationIgnored var modelMaskShapes: [UUID: MaskShape] = [:]
     /// The rebuild queued after a geometry change, 300 ms after the last.
-    var modelMaskGeometryTask: Task<Void, Never>?
+    @ObservationIgnored var modelMaskGeometryTask: Task<Void, Never>?
 
     /// Option held during the click: the view passes it through so a
     /// prompt click can mean "exclude this".
-    var promptModifierExclude = false
+    @ObservationIgnored var promptModifierExclude = false
 
     // MARK: Click-to-select (Segment Anything 2)
 
@@ -544,13 +547,13 @@ final class EditorModel: ObservableObject {
     /// (hundreds of ms, once per image and model); every click after it
     /// is a few milliseconds. Reset in `closeImage` and the failed-open
     /// path (EditorModel+Masks.swift).
-    var promptSessions: [String: SAM2Session] = [:]
-    var promptEncoding: [String: Task<SAM2Session?, Never>] = [:]
+    @ObservationIgnored var promptSessions: [String: SAM2Session] = [:]
+    @ObservationIgnored var promptEncoding: [String: Task<SAM2Session?, Never>] = [:]
     /// The geometry key each model's encoding was made on: a click
     /// answered against an encoding of another grid lands off target.
-    var promptSessionGeometry: [String: String] = [:]
+    @ObservationIgnored var promptSessionGeometry: [String: String] = [:]
     /// What the mask row says about each model's encoding.
-    @Published var promptStatus: [String: String] = [:]
+    var promptStatus: [String: String] = [:]
 
     // MARK: - GPU and the open image
 
@@ -559,19 +562,19 @@ final class EditorModel: ObservableObject {
 
     // Set once, when the shared GPU context is ready (see init).
     var gpuContext: GPUContext?
-    var pipeline: RenderPipeline?
+    @ObservationIgnored var pipeline: RenderPipeline?
     private var presenterInstance: Presenter?
-    var histogramCalculator: HistogramCalculator?
-    var scopeCalculator: ScopeCalculator?
+    @ObservationIgnored var histogramCalculator: HistogramCalculator?
+    @ObservationIgnored var scopeCalculator: ScopeCalculator?
     /// The small render the scopes measure. Kept so switching scope
     /// doesn't need a render; replaced on every preview render.
-    var analysisTexture: MTLTexture?
+    @ObservationIgnored var analysisTexture: MTLTexture?
     var session: ImageSession?
     var sourceURL: URL?
 
     /// The camera's own white balance, for the "As Shot" button and for
     /// showing the user where the camera set things.
-    @Published var asShotWhiteBalance = ColorKit.WhiteBalance()
+    var asShotWhiteBalance = ColorKit.WhiteBalance()
 
     /// The viewport's size in device pixels, reported by the Metal view.
     /// Zero until the view first appears.
@@ -581,58 +584,58 @@ final class EditorModel: ObservableObject {
     /// fitted rather than preserving an arbitrary zoom.
     var fitMode = true
 
-    var pendingRender: Task<Void, Never>?
+    @ObservationIgnored var pendingRender: Task<Void, Never>?
     /// The render that shows a brush mask redrawn off the main thread,
     /// unless an edit renders first (EditorModel+Rendering.swift).
-    var brushRedrawRender: Task<Void, Never>?
+    @ObservationIgnored var brushRedrawRender: Task<Void, Never>?
 
     /// What the last renders used, so a viewport change can decide whether
     /// anything actually needs re-rendering.
-    var previewQuads = 0
+    @ObservationIgnored var previewQuads = 0
     /// Whether the last renders were the cheaper drag-time kind, and when
     /// the full-quality one follows (EditorModel+DragRender.swift).
-    var dragRender = DragRenderState()
+    @ObservationIgnored var dragRender = DragRenderState()
     /// Screen pixels per point where the main image view is, reported
     /// with its size: a drag renders about one preview pixel per point.
     var viewBackingScale: CGFloat = 2
-    var tileSize = CGSize.zero
+    @ObservationIgnored var tileSize = CGSize.zero
     /// The part of the tile that heals as the whole frame does, so a pan
     /// may reuse it (`HealPatch.isSelfContained`).
-    var tileHealedCoverage = CGRect.null
+    @ObservationIgnored var tileHealedCoverage = CGRect.null
 
     /// The press-and-hold magnifier's full-resolution render of the area
     /// under the pointer, and what it was rendered for
     /// (EditorModel+Magnifier.swift).
-    @Published var magnifierTile: PresentLayer?
-    var magnifierState = MagnifierRenderState()
+    var magnifierTile: PresentLayer?
+    @ObservationIgnored var magnifierState = MagnifierRenderState()
 
     /// An image asked for before the GPU was ready, opened when it is.
-    var openWhenGPUReady: (() -> Void)?
+    @ObservationIgnored var openWhenGPUReady: (() -> Void)?
     /// Numbers the opens and closes. An open whose decode finishes after a
     /// newer open or a close began finds the number moved on and drops its
     /// result, so a stale photo never replaces a newer one
     /// (EditorModel+Opening.swift).
-    var openGeneration = 0
+    @ObservationIgnored var openGeneration = 0
     /// The open photo's decode and its neighbours' (RawDecodeCache.swift).
     let decodeCache = RawDecodeCache()
     /// Set while `open` lays the new photo's settings in place: their
     /// didSet must not render, because `open` renders once itself when
     /// everything is in place (plan fix #8).
-    var applyingOpenedImage = false
+    @ObservationIgnored var applyingOpenedImage = false
     /// Set by an open, cleared by an edit or the first high-quality
     /// preview: right after an open nothing is being dragged, so the
     /// high-quality preview need not wait for things to settle (plan
     /// fix #10, EditorModel+HighQualityPreview.swift).
-    var highQualityPreviewFollowsOpen = false
+    @ObservationIgnored var highQualityPreviewFollowsOpen = false
     /// The camera's embedded JPEG of a photo being opened, shown in Loupe
     /// until the decode and the first render are done (plan fix #18).
-    @Published var openingPlaceholder: OpeningPlaceholder?
+    var openingPlaceholder: OpeningPlaceholder? { didSet { openingPlaceholderSubject.send(openingPlaceholder) } }
     /// The catalog id that deferred open is for, and that image's stored
     /// history and snapshots if their read arrived before the GPU did:
     /// they are loaded once the open has happened
     /// (`loadHistory(steps:snapshots:forImage:)`).
-    var deferredOpenCatalogImageID: Int64?
-    var deferredHistory: (steps: [(stackJSON: String, createdAt: Int64)],
+    @ObservationIgnored var deferredOpenCatalogImageID: Int64?
+    @ObservationIgnored var deferredHistory: (steps: [(stackJSON: String, createdAt: Int64)],
                           snapshots: [(name: String, stackJSON: String)])?
 
     /// Every model shares the process's one GPU context, built off the
@@ -660,7 +663,6 @@ final class EditorModel: ObservableObject {
     /// the launch task after an open already took it, do nothing.
     func attachGPU(_ built: Result<GPUContext, any Error>) {
         guard gpuContext == nil, setupError == nil else { return }
-        objectWillChange.send()
         switch built {
         case .success(let gpu):
             gpuContext = gpu
@@ -698,7 +700,7 @@ final class EditorModel: ObservableObject {
     /// What the camera says the orientation was.
     var cameraRotation: ImageRotation = .none
     /// Quarter turns the user added on top (kept in the catalog).
-    @Published var userRotation = 0
+    var userRotation = 0 { didSet { userRotationSubject.send(userRotation) } }
     /// What's actually shown: camera orientation plus the user's turns.
     var rotation: ImageRotation { cameraRotation.rotated(by: userRotation) }
 
@@ -709,13 +711,13 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Scopes
 
-    var lastScopeMeasurement: ContinuousClock.Instant?
-    var pendingScopeMeasurement: Task<Void, Never>?
+    @ObservationIgnored var lastScopeMeasurement: ContinuousClock.Instant?
+    @ObservationIgnored var pendingScopeMeasurement: Task<Void, Never>?
     /// "Selected Mask Only" scopes measured off the main thread
     /// (EditorModel+MaskedScopes.swift): the one in flight, and a count
     /// every measurement bumps so an overtaken result is dropped.
-    var maskedScopeTask: Task<Void, Never>?
-    var maskedScopeGeneration = 0
+    @ObservationIgnored var maskedScopeTask: Task<Void, Never>?
+    @ObservationIgnored var maskedScopeGeneration = 0
 
     // MARK: - Compare: linked view
 
@@ -723,26 +725,26 @@ final class EditorModel: ObservableObject {
     /// Every zoom and pan made here is shown there as the same
     /// `RelativeView`, so both panes show the same part of the scene even
     /// when their crops, rotations or pixel sizes differ.
-    weak var linkedPane: EditorModel?
+    @ObservationIgnored weak var linkedPane: EditorModel?
 
     /// Survey's panes while its Sync is on: `linkedPane` for any number of
     /// panes. Each zoom and pan made here reaches every other member.
-    weak var linkedGroup: (any LinkedPaneGroup)?
+    @ObservationIgnored weak var linkedGroup: (any LinkedPaneGroup)?
 
     /// Whether renders measure the scopes. Off for Survey's panes, which
     /// show no histogram, so their renders don't measure one.
-    var measuresScopes = true
+    @ObservationIgnored var measuresScopes = true
 
     /// Set when this pane has just taken the linked pane's view, until the
     /// main queue next turns. Compare's zoom buttons and Z key send each
     /// command to both panes; once the first has carried it over, the copy
     /// arriving here must not apply it again (Z would toggle straight back
     /// to fit, and + would zoom twice).
-    var tookLinkedViewThisTurn = false
+    @ObservationIgnored var tookLinkedViewThisTurn = false
 
     // MARK: - Memory pressure
 
-    var memoryPressureMonitor: MemoryPressureMonitor?
+    @ObservationIgnored var memoryPressureMonitor: MemoryPressureMonitor?
 
     /// True while this model's image isn't on screen (Compare's Select pane
     /// outside Compare). Under pressure such a model closes its image
@@ -751,11 +753,47 @@ final class EditorModel: ObservableObject {
 
     /// Critical pressure took the neural denoise result; run it again once
     /// memory recovers rather than in the middle of the shortage.
-    var aiDenoiseReleasedUnderPressure = false
+    @ObservationIgnored var aiDenoiseReleasedUnderPressure = false
 
     /// Set on Survey's panes, which take turns: a denoise the image needs
     /// is asked for here rather than started (`SurveyModel`).
-    var aiDenoiseTurn: (@MainActor (EditorModel) -> Void)?
+    @ObservationIgnored var aiDenoiseTurn: (@MainActor (EditorModel) -> Void)?
+
+    // MARK: - Observation
+
+    /// Bumped when something the views show changes outside the model's
+    /// own properties: the session's resolved lens profile, a flat-field
+    /// gain map arriving, the Heal tool's remembered defaults. The
+    /// properties derived from those read it, so their views draw again.
+    var outsideStateRevision = 0
+
+    /// What `$preview` and the like gave while this was an
+    /// ObservableObject, for the few that react to a change rather than
+    /// draw it: Survey's pane housekeeping, the colour samples, tests.
+    /// Each sends the current value on subscribing and then every
+    /// assignment, after it is made.
+    @ObservationIgnored private let previewSubject = CurrentValueSubject<PresentLayer?, Never>(nil)
+    @ObservationIgnored private let tileSubject = CurrentValueSubject<PresentLayer?, Never>(nil)
+    @ObservationIgnored private let aiDenoiseRunningSubject = CurrentValueSubject<Bool, Never>(false)
+    @ObservationIgnored private let openingPlaceholderSubject = CurrentValueSubject<OpeningPlaceholder?, Never>(nil)
+    @ObservationIgnored private let statusSubject = CurrentValueSubject<String, Never>("Open a raw file to begin")
+    @ObservationIgnored private let lastErrorSubject = CurrentValueSubject<String?, Never>(nil)
+    @ObservationIgnored private let parametersSubject = CurrentValueSubject<EditParameters, Never>(EditParameters())
+    @ObservationIgnored private let imageTitleSubject = CurrentValueSubject<String?, Never>(nil)
+    @ObservationIgnored private let userRotationSubject = CurrentValueSubject<Int, Never>(0)
+    @ObservationIgnored private let snapshotsSubject = CurrentValueSubject<[EditSnapshot], Never>([])
+    @ObservationIgnored private let beforeOverrideSubject = CurrentValueSubject<BeforeOverride?, Never>(nil)
+    var previewPublisher: AnyPublisher<PresentLayer?, Never> { previewSubject.eraseToAnyPublisher() }
+    var tilePublisher: AnyPublisher<PresentLayer?, Never> { tileSubject.eraseToAnyPublisher() }
+    var aiDenoiseRunningPublisher: AnyPublisher<Bool, Never> { aiDenoiseRunningSubject.eraseToAnyPublisher() }
+    var openingPlaceholderPublisher: AnyPublisher<OpeningPlaceholder?, Never> { openingPlaceholderSubject.eraseToAnyPublisher() }
+    var statusPublisher: AnyPublisher<String, Never> { statusSubject.eraseToAnyPublisher() }
+    var lastErrorPublisher: AnyPublisher<String?, Never> { lastErrorSubject.eraseToAnyPublisher() }
+    var parametersPublisher: AnyPublisher<EditParameters, Never> { parametersSubject.eraseToAnyPublisher() }
+    var imageTitlePublisher: AnyPublisher<String?, Never> { imageTitleSubject.eraseToAnyPublisher() }
+    var userRotationPublisher: AnyPublisher<Int, Never> { userRotationSubject.eraseToAnyPublisher() }
+    var snapshotsPublisher: AnyPublisher<[EditSnapshot], Never> { snapshotsSubject.eraseToAnyPublisher() }
+    var beforeOverridePublisher: AnyPublisher<BeforeOverride?, Never> { beforeOverrideSubject.eraseToAnyPublisher() }
 
     // MARK: - Errors
 
@@ -766,7 +804,7 @@ final class EditorModel: ObservableObject {
 
     /// A failure the user must see: shown in red in the status bar in
     /// every mode until dismissed, and logged with the full error.
-    @Published var lastError: String?
+    var lastError: String? { didSet { lastErrorSubject.send(lastError) } }
 
     func reportFailure(_ what: String, _ error: Error) {
         lastError = "\(what) failed: \(error)"
@@ -777,7 +815,7 @@ final class EditorModel: ObservableObject {
 
     /// Groups to carry on the next paste. Persisted so the checklist
     /// remembers what the user usually wants.
-    @Published var pasteGroups: Set<EditGroup> = {
+    var pasteGroups: Set<EditGroup> = {
         if let raw = UserDefaults.standard.array(forKey: "latent.pasteGroups") as? [String] {
             let groups = Set(raw.compactMap(EditGroup.init(rawValue:)))
             // Saved before Crop's transform was split into its own groups.
@@ -792,39 +830,42 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    @Published var presets: [Preset] = PresetStore.load()
+    var presets: [Preset] = PresetStore.load()
 
     // MARK: - History (undo / redo) and snapshots
 
-    @Published var history = EditHistory(initial: EditStack())
-    @Published var snapshots: [EditSnapshot] = []
+    var history = EditHistory(initial: EditStack())
+    var snapshots: [EditSnapshot] = [] { didSet { snapshotsSubject.send(snapshots) } }
     /// Set by ContentView so history and snapshots reach the catalog.
-    var onHistoryChanged: ((_ imageID: Int64, _ steps: [(stackJSON: String, createdAt: Int64)]) -> Void)?
-    var onSnapshotsChanged: ((_ imageID: Int64, _ snapshots: [(name: String, stackJSON: String)]) -> Void)?
+    @ObservationIgnored var onHistoryChanged: ((_ imageID: Int64, _ steps: [(stackJSON: String, createdAt: Int64)]) -> Void)?
+    @ObservationIgnored var onSnapshotsChanged: ((_ imageID: Int64, _ snapshots: [(name: String, stackJSON: String)]) -> Void)?
     /// True while applying a history/snapshot state so it isn't re-recorded.
-    var restoringState = false
+    @ObservationIgnored var restoringState = false
     /// Whether the stored history and snapshots of a catalog image have
     /// been read (`loadHistory`). Both are written back as whole lists, so
     /// until they are read, or when reading them failed, writing would
     /// replace the stored ones with the few made since opening.
-    var storedHistoryLoaded = false
+    @ObservationIgnored var storedHistoryLoaded = false
     /// Stored rows this version cannot decode. They are written back with
     /// the rest rather than deleted by the next save.
-    var undecodableHistorySteps: [(stackJSON: String, createdAt: Int64)] = []
-    var undecodableSnapshots: [(name: String, stackJSON: String)] = []
+    @ObservationIgnored var undecodableHistorySteps: [(stackJSON: String, createdAt: Int64)] = []
+    @ObservationIgnored var undecodableSnapshots: [(name: String, stackJSON: String)] = []
 
     // MARK: - Before / after
 
     /// While held, the image renders with its defaults so the edit can be
     /// judged against the starting point. Display state, never saved.
-    @Published var showingBefore = false {
+    var showingBefore = false {
         didSet { if showingBefore != oldValue { rerender() } }
     }
 
     /// The Before when it is not the unedited image: set by Copy After to
     /// Before and Swap (EditorModel+BeforeAfter.swift), for one image, for
     /// the session. Never saved.
-    @Published var beforeOverride: BeforeOverride? {
-        didSet { if showingBefore && beforeOverride != oldValue { rerender() } }
+    var beforeOverride: BeforeOverride? {
+        didSet {
+            beforeOverrideSubject.send(beforeOverride)
+            if showingBefore && beforeOverride != oldValue { rerender() }
+        }
     }
 }

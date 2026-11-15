@@ -5,7 +5,7 @@ import PixelEngine
 /// and Blue, under the profile and automatic switches, added on top of
 /// whichever of those is on.
 struct ManualTCASliders: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         DetailSliderRow(title: "Red", value: $model.parameters.manualTCARed, range: ManualTCA.range,

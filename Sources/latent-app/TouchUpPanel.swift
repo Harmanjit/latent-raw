@@ -6,7 +6,7 @@ import PixelEngine
 /// blemishes and the skin mask. Everything runs on this Mac; the footnote
 /// says so where the button is.
 struct TouchUpSection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     private var faces: [TouchUpFace] { model.parameters.touchUp.faces }
 

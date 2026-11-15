@@ -7,7 +7,7 @@ import RawCore
 /// replaced, like Sensor Dust's status line. Only for a raw: a JPEG, TIFF
 /// or merged DNG has no sensor mosaic left to clean.
 struct HotPixelsSection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     /// Whether the open image has a Bayer mosaic to test.
     private var hasMosaic: Bool { model.session?.sourceKind == .bayer }

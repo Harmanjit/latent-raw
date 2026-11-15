@@ -11,7 +11,7 @@ enum HealModeHelp {
 /// Objects, and for the selected Remove patch, detecting again or going
 /// back to the brushed area.
 struct RemoveOptions: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     private var selectedRemoval: HealPatch? {
         guard let patch = model.selectedHeal, patch.mode == .remove else { return nil }
@@ -61,7 +61,7 @@ struct RemoveOptions: View {
 /// Fill's colour and brightness or Blur's radius. Both work with the Spot
 /// and Brush shapes and take Feather and Opacity like the other modes.
 struct HealFillBlurOptions: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     private var mode: HealPatch.Mode { model.activeHealMode }
 

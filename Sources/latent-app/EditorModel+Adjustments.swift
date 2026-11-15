@@ -29,7 +29,10 @@ extension EditorModel {
         if c.vignetting != nil { parts.append("vignetting") }
         return "\(c.profileName) · \(parts.joined(separator: ", ")) · lensfun \(c.databaseVersion)"
     }
-    var hasLensProfile: Bool { session?.lensCorrection(for: parameters) != nil }
+    var hasLensProfile: Bool {
+        _ = outsideStateRevision
+        return session?.lensCorrection(for: parameters) != nil
+    }
 
     // MARK: - White balance and resets
 

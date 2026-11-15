@@ -3,7 +3,7 @@ import PixelEngine
 
 /// Spot / Brush for the spot removal tool, under Spot Removal.
 struct HealShapePicker: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         HStack(spacing: 8) {
@@ -26,7 +26,7 @@ struct HealShapePicker: View {
 
 /// Red-eye removal, under Spot Removal. Y arms the tool; Auto finds eyes.
 struct RedEyeSection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

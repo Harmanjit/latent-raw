@@ -16,7 +16,7 @@ import PixelEngine
 /// a line instead: let go and the picture is straightened so the line is
 /// level, or plumb if it was nearer upright.
 struct CropOverlay: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @AppStorage(CropToolPreferences.guideKey) private var guide: CropGuide = .thirds
     @AppStorage(CropToolPreferences.orientationKey) private var guideOrientation = 0
     @AppStorage(CropToolPreferences.maskOpacityKey) private var maskOpacity = CropToolPreferences.defaultMaskOpacity

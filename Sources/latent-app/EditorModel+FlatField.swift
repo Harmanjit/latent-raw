@@ -17,13 +17,14 @@ extension EditorModel {
                 FlatFieldCache.shared.ensureGainMap(for: flat, photo: url, gpu: gpu)
             }.value
             guard let self else { return }
-            self.objectWillChange.send()
+            self.outsideStateRevision &+= 1
             if found, self.parameters.flatField?.hash == flat.hash { self.rerender() }
         }
     }
 
     /// What the panel says about the correction when it can't apply it.
     var flatFieldProblem: String? {
+        _ = outsideStateRevision
         guard let flat = parameters.flatField, FlatFieldCache.shared.gainMap(for: flat.hash) == nil else { return nil }
         return FlatFieldCache.shared.failure(for: flat.hash).map { $0 + " The correction is off." }
             ?? "Measuring the reference…"
@@ -50,7 +51,7 @@ extension EditorModel {
 /// use, its Amount and a way to take it off. Choosing a reference is
 /// Photo › Flat-Field Correction…, which works over a selection.
 struct FlatFieldSection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

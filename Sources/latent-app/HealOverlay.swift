@@ -14,7 +14,7 @@ import PixelEngine
 /// grid, while the view shows the corrected image: every point is placed
 /// through the lens map (`outputNormalized`), as DustOverlay does.
 struct HealOverlay: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {

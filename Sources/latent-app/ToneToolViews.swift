@@ -12,7 +12,7 @@ import PixelEngine
 /// The White Balance menu (As Shot, Auto, the light sources) and the
 /// selector, above the Temperature and Tint sliders.
 struct WhiteBalancePresetRow: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         HStack(spacing: 8) {
@@ -87,7 +87,7 @@ struct ToneToolHint: View {
 
 /// The Tone Curve's targeted tool switch.
 struct CurveTargetButton: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         Toggle(isOn: Binding(get: { model.toneTool == .curve },
@@ -105,7 +105,7 @@ struct CurveTargetButton: View {
 /// The HSL panel's targeted tool: which of hue, saturation or luminance
 /// a drag on the photo changes, or off.
 struct HSLTargetRow: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     private var selection: Binding<Int> {
         Binding(get: {
@@ -138,7 +138,7 @@ struct HSLTargetRow: View {
 /// The Tone Curve group: point or region editor, presets, the targeted
 /// tool and Refine Saturation.
 struct ToneCurveControls: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -358,7 +358,7 @@ private struct Triangle: Shape {
 /// Under the histogram: the colour under the pointer, and the two
 /// clipping switches (J turns both on or off).
 struct PixelReadoutBar: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     /// The clipping warning's options (ViewingSettingsViews.swift).
     @State private var showsClippingOptions = false
 
@@ -441,7 +441,7 @@ struct PixelReadoutText: View {
 /// Exposure, Highlights, Whites from left to right. Hovering names the
 /// region.
 struct HistogramAdjustOverlay: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @State private var hovered: HistogramRegion?
     @State private var drag: (region: HistogramRegion, start: Float)?
 

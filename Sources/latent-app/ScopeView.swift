@@ -29,7 +29,7 @@ enum ScopeKind: String, CaseIterable, Identifiable {
 /// The scope area at the top of the adjustments panel: a picker and the
 /// chosen scope beneath it.
 struct ScopePanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var settings = ScopeSettings.shared
     @ObservedObject var develop = DevelopViewState.shared
 
@@ -301,7 +301,7 @@ extension ScopeBitmap {
 /// pinned colour samples as numbered dots. Right-click for the guides;
 /// drag on it, while a harmony shows, to turn the harmony.
 struct GuidedVectorscope: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var samples: ColourSamples
     @ObservedObject var settings = ScopeSettings.shared
     /// The reference photo's vectorscope, outlined over this one.
@@ -350,7 +350,7 @@ struct GuidedVectorscope: View {
 /// The scopes that aren't in the segmented control: a parade and the
 /// two-up views. Choosing one leaves the segments unselected.
 struct MoreScopesMenu: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var settings = ScopeSettings.shared
 
     var body: some View {

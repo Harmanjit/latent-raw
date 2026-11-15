@@ -11,7 +11,7 @@ import PixelEngine
 /// map (`outputNormalized`) before it is placed: a ring sits on the
 /// blemish it heals, and the box round the face it was found on.
 struct TouchUpOverlay: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {

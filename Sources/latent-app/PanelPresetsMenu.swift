@@ -6,7 +6,7 @@ import PixelEngine
 /// applied to the open photo at the Presets panel's Amount, and Save Panel
 /// as Preset…, which saves only this panel's settings.
 struct PanelPresetsMenu: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let groups: Set<EditGroup>
     /// The panel's name, for the menu's label and the save sheet.
     var panel = ""

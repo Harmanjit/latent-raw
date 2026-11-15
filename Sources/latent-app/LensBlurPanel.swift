@@ -8,7 +8,7 @@ import MLKit
 /// and Show Depth, and where the depth came from. Everything runs on this
 /// Mac; the footnote says so.
 struct LensBlurSection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var state: LensBlurState
 
     init(model: EditorModel) {

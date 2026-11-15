@@ -8,7 +8,7 @@ import PixelEngine
 /// uses (`ProcessVersion`). Choosing another version changes the photo's
 /// edit like any slider, with its own undo step.
 struct ProcessVersionMenu: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @AppStorage(ProcessUpdatePrompt.dontShowKey) private var dontShow = false
 
     var body: some View {
@@ -57,7 +57,7 @@ enum ProcessUpdatePrompt {
 /// photo in the filmstrip, to the current version; preview it first; and
 /// don't show it again.
 struct ProcessUpdatePromptModifier: ViewModifier {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let library: Library
     @AppStorage(ProcessUpdatePrompt.dontShowKey) private var dontShow = false
     @State private var trackedURL: URL?
@@ -93,7 +93,7 @@ struct ProcessUpdatePromptModifier: ViewModifier {
 }
 
 struct ProcessUpdateDialog: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let library: Library
     let fromVersion: String
     @Binding var dontShow: Bool

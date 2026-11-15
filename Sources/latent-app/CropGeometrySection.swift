@@ -7,7 +7,7 @@ import PixelEngine
 /// Transform sliders, the flips and Constrain Crop. R opens the crop
 /// tool; the rectangle is edited on the image.
 struct CropGeometrySection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @AppStorage(CropToolPreferences.guideKey) private var guide: CropGuide = .thirds
     @AppStorage(CropToolPreferences.maskOpacityKey) private var maskOpacity = CropToolPreferences.defaultMaskOpacity
     @State private var transformExpanded = false
@@ -176,7 +176,7 @@ struct CropGeometrySection: View {
 /// `setTransform`, so Constrain Crop can refit the crop in the same edit
 /// step and Undo takes both back together.
 struct TransformPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

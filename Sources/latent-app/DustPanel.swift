@@ -8,7 +8,7 @@ import PixelEngine
 /// faint shadows on screen; dust maps carry one photo's spots to others.
 /// The content of the `DisclosureGroup("Sensor Dust")`, like RedEyeSection.
 struct DustSection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     /// From dust map…: opens the Remove Dust sheet on the open image
     /// (ContentView presents it; the sheet's Remove calls `applyDustMap`).
     var fromDustMap: () -> Void = {}

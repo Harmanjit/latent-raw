@@ -6,7 +6,7 @@ import PixelEngine
 /// Colour, Colour Grading and Calibration, each a disclosure group like the
 /// panel's others.
 struct ColourSections: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @State private var blackAndWhiteExpanded = false
     @State private var pointColourExpanded = false
     @State private var gradingExpanded = false
@@ -125,7 +125,7 @@ struct ColourSliderRow: View {
 /// The treatment switch and the grey mix: one slider per HSL colour, how
 /// light that colour turns in black and white.
 struct BlackAndWhitePanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     private static let swatches: [Color] = [
         .red, .orange, .yellow, .green, .cyan, .blue, .purple, Color(red: 1, green: 0, blue: 0.6),
@@ -189,7 +189,7 @@ struct BlackAndWhitePanel: View {
 /// Picked colours, each with a shift in hue, saturation and luminance for
 /// the colours near it.
 struct PointColourPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     private var swatches: [PointColour] { model.parameters.colour.pointColours }
 

@@ -43,7 +43,7 @@ enum AppMode: String, CaseIterable, Identifiable {
 /// (`FolderSidebar`) is on the left.
 struct ContentView: View {
     // Not the window's own: reopening the window must not build a second set.
-    @ObservedObject private var model = MainWindowModels.shared.model
+    @Bindable private var model = MainWindowModels.shared.model
     @ObservedObject private var library = MainWindowModels.shared.library
     @ObservedObject private var exportQueue = MainWindowModels.shared.exportQueue
     @ObservedObject private var photoMerge = MainWindowModels.shared.photoMerge
@@ -167,7 +167,9 @@ struct ContentView: View {
                 case .loupe:
                     CaptionedPane(showsCaption: !fullScreen.isActive,
                                   caption: ImageCaption(record: library.selectedImage)) {
-                        ImageViewport(model: model, allowsTools: false, onStep: { _ = perform(.step($0)) },
+                        // The state's one swipe closure, so the viewport's
+                        // inputs compare equal when this view rebuilds.
+                        ImageViewport(model: model, allowsTools: false, onStep: developViews.step,
                                       followsMirrorImageMode: true,
                                       showsLoupeOverlay: true,
                                       showsOpeningPlaceholder: true)
@@ -208,11 +210,13 @@ struct ContentView: View {
                            })
         .background(navigationShortcuts)
         .overlay { ShortcutsOverlay(mode: mode) }
-        .focusedSceneValue(\.commandContext, CommandContext(state: commandState) { command in
+        // Built in a modifier of its own: the command state reads much of
+        // the editor (its parameters among it), and this body must not.
+        .modifier(CommandContextModifier { CommandContext(state: commandState) { command in
             // A sheet over the window has the keyboard; menus wait, as keys do.
             guard NSApp.mainWindow?.attachedSheet == nil else { return }
             _ = perform(command)
-        })
+        } })
         .onChange(of: mode) { old, _ in modeDidChange(from: old) }
         .onChange(of: library.selectedImageID) { followSelectionOnSecondDisplay() }
         .onChange(of: library.selectedImageID) { old, new in
@@ -319,6 +323,8 @@ struct ContentView: View {
         .onAppear {
             viewing.setPrimaryEditor(model)
             viewing.showWelcomeIfFirstRun()
+            // Loupe's swipes, before Develop's image area has ever appeared.
+            developViews.stepHandler = { _ = perform(.step($0)) }
         }
         .sheet(item: $renaming) { record in
             RenameSheet(record: record) { name in
@@ -1942,6 +1948,7 @@ struct ContentView: View {
     }
 
     private var adjustmentPanel: some View {
+        ObservationScope {
         ScrollView {
             ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 20) {
@@ -1958,19 +1965,19 @@ struct ContentView: View {
                 ProfilePicker(model: model)
 
                 DisclosureGroup(isExpanded: $whiteBalanceExpanded) {
-                    whiteBalanceSection.padding(.top, 8)
+                    ObservationScope { whiteBalanceSection }.padding(.top, 8)
                 } label: {
                     disclosureLabel("White Balance")
                 }
 
                 DisclosureGroup(isExpanded: $toneExpanded) {
-                    toneSection.padding(.top, 8)
+                    ObservationScope { toneSection }.padding(.top, 8)
                 } label: {
                     HStack { disclosureLabel("Tone"); PanelPresetsMenu(model: model, groups: [.tone], panel: "Tone") }
                 }
 
                 DisclosureGroup(isExpanded: $presenceExpanded) {
-                    presenceSection.padding(.top, 8)
+                    ObservationScope { presenceSection }.padding(.top, 8)
                 } label: {
                     disclosureLabel("Presence")
                 }
@@ -2010,7 +2017,7 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
-                    aiDenoiseSection.padding(.top, 8)
+                    ObservationScope { aiDenoiseSection }.padding(.top, 8)
                 } label: {
                     disclosureLabel("AI Noise Reduction")
                 }
@@ -2026,6 +2033,7 @@ struct ContentView: View {
                 // JPEG or TIFF, whose clipping was settled when it was made.
                 if !model.isRenderedImage {
                     DisclosureGroup {
+                        ObservationScope {
                         VStack(alignment: .leading, spacing: 10) {
                             HighlightMethodPicker(model: model)
                             sliderRow(title: "Recovery",
@@ -2034,6 +2042,7 @@ struct ContentView: View {
                             sliderRow(title: "Threshold",
                                        value: $model.parameters.highlightThreshold,
                                        range: 0.5...1.0, format: "%.2f", defaultValue: 0.85)
+                        }
                         }
                         .padding(.top, 8)
                     } label: {
@@ -2058,8 +2067,10 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup(isExpanded: $localAdjustmentsExpanded) {
+                    ObservationScope {
                     LocalAdjustmentsPanel(model: model, pasteMaskToSelection: commandState.isEnabled(.mask(.pasteToSelection))
                                           ? { _ = perform(.mask(.pasteToSelection)) } : nil)
+                    }
                         .padding(.top, 8)
                 } label: {
                     disclosureLabel("Local Adjustments")
@@ -2067,7 +2078,7 @@ struct ContentView: View {
                 .id(Self.localAdjustmentsGroup)
 
                 DisclosureGroup(isExpanded: $healExpanded) {
-                    healSection.padding(.top, 8)
+                    ObservationScope { healSection }.padding(.top, 8)
                 } label: {
                     HStack {
                         disclosureLabel("Spot Removal")
@@ -2168,6 +2179,7 @@ struct ContentView: View {
         // A number typed for one photo must not land on the next.
         .sliderFieldSubject(model.sourceURL)
         .modifier(ProcessUpdatePromptModifier(model: model, library: library))
+        }
     }
 
     /// Scroll targets in the adjustments panel.
@@ -2468,6 +2480,7 @@ struct ContentView: View {
     private var currentProblem: String? { model.setupError ?? library.lastError ?? model.lastError }
 
     private var statusBar: some View {
+        ObservationScope {
         HStack(spacing: 12) {
             Picker("Mode", selection: modeBinding) {
                 ForEach(AppMode.allCases) { Text($0.title).tag($0) }
@@ -2527,6 +2540,7 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(Color.red)
             } else {
+                ObservationScope {
                 Text(mode == .library
                      ? Self.libraryStatusText(handOffNotice: handOff.notice, gridNotice: gridNotice.text,
                                               folderStatus: library.statusText)
@@ -2535,6 +2549,7 @@ struct ContentView: View {
                     .foregroundStyle(Color.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                }
             }
 
             Spacer()
@@ -2542,6 +2557,7 @@ struct ContentView: View {
             // Zoom controls. Pinch, option-scroll and double-click do the
             // same things from the image itself; these exist for the
             // keyboard and for people who like buttons.
+            ObservationScope {
             HStack(spacing: 6) {
                 Button("−") { viewedModel.zoomOut(); mirrorModel?.zoomOut() }
                     .accessibilityLabel("Zoom out")
@@ -2564,7 +2580,9 @@ struct ContentView: View {
             // buttons, which would otherwise lose their labels.
             .fixedSize()
             .disabled(!viewedModel.hasImage || !mode.showsImage)
+            }
 
+            ObservationScope {
             if !model.renderReport.isEmpty && mode == .develop && prefs.showRenderTimings {
                 // What the last action rendered and how long it took, on
                 // screen during development: the Phase 1 exit criterion is
@@ -2577,9 +2595,11 @@ struct ContentView: View {
                     .foregroundStyle(model.lastRenderMs < 16 ? Color.secondary : Color.orange)
                     .lineLimit(1)
             }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        }
     }
 }
 
@@ -2604,5 +2624,17 @@ final class GridNotice: ObservableObject {
             guard !Task.isCancelled else { return }
             self?.text = nil
         }
+    }
+}
+
+/// Hands the menu bar the command state (plan fix #16). Built in this
+/// modifier's body rather than ContentView's, so the editor properties the
+/// state reads, its parameters among them, are tracked here: a slider tick
+/// rebuilds this and not the window.
+private struct CommandContextModifier: ViewModifier {
+    let context: () -> CommandContext
+
+    func body(content: Content) -> some View {
+        content.focusedSceneValue(\.commandContext, context())
     }
 }

@@ -51,7 +51,7 @@ struct DetailSubheading: View {
 /// The Detail panel: demosaic, sharpening (with Detail and Masking) and
 /// noise reduction (with Detail, Contrast and Smoothness).
 struct DetailPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -134,7 +134,7 @@ struct DetailPanel: View {
 /// three switches, Remove Chromatic Aberration, the manual sliders and
 /// defringe with its hue ranges and eyedropper.
 struct LensCorrectionsPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -321,7 +321,7 @@ struct HueRangeRow: View {
 
 /// The Effects panel: post-crop vignetting and grain.
 struct EffectsPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -378,7 +378,7 @@ struct EffectsPanel: View {
 /// While the defringe eyedropper is armed: a crosshair cursor over the
 /// image, and the click goes to the picker instead of panning.
 struct DefringePickerOverlay: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         GeometryReader { geo in

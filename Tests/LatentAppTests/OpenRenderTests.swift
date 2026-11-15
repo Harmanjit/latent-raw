@@ -24,7 +24,7 @@ final class OpenRenderTests: XCTestCase {
         model.viewportDidResize(to: CGSize(width: 1200, height: 800))
         model.open(url: url, catalogImageID: 1)
         var renders = 0
-        let watch = model.$preview.dropFirst().sink { if $0 != nil { renders += 1 } }
+        let watch = model.previewPublisher.dropFirst().sink { if $0 != nil { renders += 1 } }
         defer { watch.cancel() }
         var stored = EditParameters()
         stored.exposureEV = 1.3

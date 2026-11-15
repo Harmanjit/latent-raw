@@ -8,7 +8,7 @@ import PixelEngine
 /// drag and the mask's spread; Masking sets how the mask is made. Show
 /// Mask, the on-image tool and Reset sit under every tab.
 struct ToneEqualizerSection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var state: ToneEqualizerState
 
     init(model: EditorModel) {
@@ -379,7 +379,7 @@ struct ToneEqualizerCurve: View {
 /// open or closed state redraws, and so opening it starts the mask (its
 /// histogram and the readout need one even with every band at 0).
 struct ToneEqualizerDisclosure<Label: View>: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var state: ToneEqualizerState
     let label: Label
 

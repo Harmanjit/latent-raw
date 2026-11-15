@@ -45,7 +45,7 @@ extension EditorModel {
 
 /// Highlight Reconstruction's method: today's blend, or Inpaint Opposed.
 struct HighlightMethodPicker: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         Picker("Method", selection: $model.parameters.highlightMethod) {
@@ -63,7 +63,7 @@ struct HighlightMethodPicker: View {
 /// The Lens Corrections panel's switch for a DNG's own corrections, shown
 /// only for a DNG that carries some.
 struct EmbeddedDNGCorrectionsToggle: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         if let description = model.embeddedDNGCorrectionsDescription {

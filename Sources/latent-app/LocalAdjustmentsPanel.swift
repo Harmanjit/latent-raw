@@ -5,7 +5,7 @@ import MLKit
 /// The Local Adjustments panel: a list of masks, and for the selected
 /// one, its tool, its sliders and its range refinements.
 struct LocalAdjustmentsPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     /// Paste Mask to Selection, from ContentView, which owns the Library;
     /// nil when it can't run (nothing copied, no selection).
     var pasteMaskToSelection: (() -> Void)? = nil

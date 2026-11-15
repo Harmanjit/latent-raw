@@ -70,7 +70,7 @@ extension EditorModel {
 /// and an Advanced disclosure holding Black Offset. Neither replaces a
 /// control the panel already has.
 struct ExposureToolsRow: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @State private var choosingTarget = false
     @State private var advancedExpanded = false
     @State private var target: ExposurePicking.Target = EditorModel.exposurePickTarget

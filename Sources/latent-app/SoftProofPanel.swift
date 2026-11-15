@@ -8,7 +8,7 @@ import PixelEngine
 /// and in what colours, what Before shows, and a proof copy of the edit.
 /// Everything but the proof copy is a view setting, never part of the edit.
 struct SoftProofPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject private var profiles = ProofProfileLibrary.shared
 
     var body: some View {
@@ -157,7 +157,7 @@ struct SoftProofPanel: View {
 /// HDR Limit: the ceiling of this photo's HDR rendition, in stops above
 /// SDR white. Part of the edit, so it is undoable and copied with Tone.
 struct HDRLimitSlider: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         let format = "%.1f stops"
