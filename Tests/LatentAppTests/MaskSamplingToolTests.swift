@@ -90,3 +90,58 @@ final class MaskSamplingToolTests: XCTestCase {
         XCTAssertEqual(model.selectedLocalIndex, 1)
     }
 }
+
+/// Copy Mask and Paste Mask on the open photo, and when the commands are
+/// offered (MaskClipboardCommands.swift).
+@MainActor
+final class MaskClipboardCommandTests: XCTestCase {
+    func testPasteAddsACopyAndNeverReplaces() async throws {
+        let url = try TestAssets.d750URL()
+        _ = try await GPUContext.shared()
+        let model = EditorModel()
+        model.onEditSettled = { _, _ in }
+        model.open(url: url, catalogImageID: 1, editStackJSON: nil)
+        XCTAssertTrue(model.hasImage)
+        let clipboard = MaskClipboard()
+        XCTAssertFalse(model.pasteMask(from: clipboard), "nothing copied yet")
+
+        model.addLocal(.radial)
+        model.parameters.locals[0].exposureEV = 0.8
+        model.parameters.locals[0].components = [MaskComponent(mode: .subtract, source: .mask(id: UUID()))]
+        model.copyMask(at: 0, to: clipboard)
+        XCTAssertTrue(model.status.contains("Linked Mask"), model.status)
+        model.flushPendingSave()
+        XCTAssertTrue(model.pasteMask(from: clipboard))
+        model.flushPendingSave()
+        XCTAssertTrue(model.pasteMask(from: clipboard))
+        XCTAssertEqual(model.parameters.locals.count, 3, "each paste adds a mask")
+        XCTAssertEqual(model.parameters.locals[1].exposureEV, 0.8)
+        XCTAssertTrue(model.parameters.locals[1].components.isEmpty, "the link to this photo's mask is dropped")
+        XCTAssertEqual(Set(model.parameters.locals.map(\.id)).count, 3, "fresh ids every time")
+        XCTAssertEqual(model.selectedLocalIndex, 2)
+        model.undo()
+        XCTAssertEqual(model.parameters.locals.count, 2, "one paste is one undo step")
+    }
+
+    func testCommandsNeedACopiedMask() {
+        var state = CommandState()
+        state.mode = .develop
+        state.hasImage = true
+        state.canAddMask = true
+        state.hasSelectedMask = true
+        state.selectionCount = 2
+        XCTAssertTrue(state.isEnabled(.mask(.copy)))
+        XCTAssertFalse(state.isEnabled(.mask(.paste)))
+        XCTAssertFalse(state.isEnabled(.mask(.pasteToSelection)))
+        state.hasCopiedMask = true
+        XCTAssertTrue(state.isEnabled(.mask(.paste)))
+        XCTAssertTrue(state.isEnabled(.mask(.pasteToSelection)))
+        state.canAddMask = false
+        XCTAssertFalse(state.isEnabled(.mask(.paste)), "no room for another mask")
+        state.mode = .survey
+        XCTAssertFalse(state.isEnabled(.mask(.pasteToSelection)), "Survey's panes are never written")
+        for command in MaskClipboardCommand.allCases {
+            XCTAssertNotNil(Keymap.info(for: .mask(command)), "\(command) is in the keymap catalog")
+        }
+    }
+}

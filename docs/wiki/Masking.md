@@ -135,6 +135,10 @@ All of these are ordinary edits: ⌘Z undoes them, and they travel in copy, past
 
 **Presets ▸ Save Selected Mask as Preset…** keeps the selected mask under a name: its shape, components, ranges and every slider. Choose a preset from the same menu to add its mask to the open photo as a new mask (existing masks are never replaced); **Rename** and **Delete** are in the menu too. Brush strokes are kept as drawn, in proportion to the frame, and Subject, class and Click to Select masks are kept as their kind and clicks and are made again from each photo. A component that uses another mask of the photo (Using another mask, above) can't travel and is left out; the save sheet lists it. Mask presets are files in `~/Library/Application Support/latent/mask-presets`, beside the edit presets' folder.
 
+### Copying a mask to other photos
+
+Right-click a mask in the list (or use **Develop ▸ Masks**) for **Copy Mask**, **Paste Mask** and **Paste Mask to Selection**. Copy takes the mask's shape, components, ranges and adjustment sliders. **Paste Mask** adds it to the open photo as a new mask; **Paste Mask to Selection** adds it to every selected photo. Neither ever replaces a mask, and a photo that already has eight masks is left alone and counted in the status bar. As with mask presets, gradients and brush strokes are copied as drawn, in proportion to the frame, and Subject, class and Click to Select parts are made again from each photo's own pixels (when the photo is opened in Develop). A part that uses another mask of the source photo is left out, and the status bar says so. Paste Mask is one step in the photo's history; Paste Mask to Selection is undone in one go from the Library, like Paste Settings.
+
 ## Seeing the mask
 
 **Show mask** draws the selected mask on the image. **Overlay** chooses how:

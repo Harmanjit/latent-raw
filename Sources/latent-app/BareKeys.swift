@@ -182,6 +182,9 @@ enum KeyCommand: Equatable, Sendable {
     /// Metadata › Edit Capture Time… and Geotag from GPX Track… on the
     /// selection (GeoTimeSheets.swift).
     case metadata(MetadataCommand)
+    /// Develop › Masks › Copy Mask, Paste Mask and Paste Mask to Selection
+    /// (MaskClipboardCommands.swift).
+    case mask(MaskClipboardCommand)
 
     /// Develop › Masks › New…: the gradients and the brush, and the two
     /// model-made masks (the default subject and click-to-select models).
