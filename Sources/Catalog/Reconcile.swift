@@ -60,7 +60,7 @@ extension Catalog {
     ]
 
     /// A file as seen on disk during the scan.
-    struct DiskFile {
+    struct DiskFile: Sendable {
         let relPath: String
         let size: Int64
         let mtime: Int64
@@ -131,14 +131,29 @@ extension Catalog {
             }
         }
 
-        // 4. Expensive work, outside any transaction: hash the files that
-        //    need it, a few at once (ImportWorkers), each read in large
-        //    chunks rather than memory-mapped.
-        let toHash = newFiles.map { fileURL(forRelPath: $0.relPath) }
-            + modifiedFiles.map { fileURL(forRelPath: $0.0.relPath) }
-        let hashes = ImportWorkers.map(count: toHash.count, width: ImportWorkers.width(forFolderAt: rootPath)) {
-            index, buffer -> Result<Data, any Error> in
-            Result { ImageRecord.hashData(try FileHash.xxh64(ofFileAt: toHash[index], uncached: false, buffer: buffer)) }
+        // 4. Expensive work, outside any transaction, in one pass over each
+        //    new or changed file, a few files at once (ImportWorkers): its
+        //    hash, read in large chunks, then its metadata while its header
+        //    is still in memory. Metadata is read now only for files that
+        //    can't be a rename: a rename keeps the size, so a file whose
+        //    size no claimable row has is new or changed in place. The rest
+        //    wait for the plan (step 5) and are read in step 7 if needed.
+        let claimableSizes = Set(knownByPath.values.map(\.size)).union(modifiedFiles.map(\.1.size))
+        let jobs: [(file: DiskFile, url: URL, wantsRecord: Bool)] = (newFiles + modifiedFiles.map(\.0)).map {
+            ($0, fileURL(forRelPath: $0.relPath), !claimableSizes.contains($0.size))
+        }
+        let width = ImportWorkers.width(forFolderAt: rootPath)
+        let passed = ImportWorkers.map(count: jobs.count, width: width) {
+            index, buffer -> (hash: Result<Data, any Error>, record: Result<ImageRecord, any Error>?) in
+            let job = jobs[index]
+            let hash = Result { ImageRecord.hashData(try FileHash.xxh64(ofFileAt: job.url, uncached: false, buffer: buffer)) }
+            guard job.wantsRecord, case .success(let value) = hash else { return (hash, nil) }
+            return (hash, Result { try Self.makeRecord(for: job.file, at: job.url, hash: value) })
+        }
+        let hashes = passed.map(\.hash)
+        var readRecords: [String: Result<ImageRecord, any Error>] = [:]
+        for (job, result) in zip(jobs, passed) where result.record != nil {
+            readRecords[job.file.relPath] = result.record
         }
         var hashedNew: [(file: DiskFile, hash: Data)] = []
         for (file, result) in zip(newFiles, hashes) {
@@ -263,19 +278,32 @@ extension Catalog {
         renames = moved.renames
         toInsert.removeAll { moved.blockedPaths.contains($0.file.relPath) }
 
-        // 7. Metadata for new and changed files.
+        // 7. Metadata for new and changed files: read in step 4 for most,
+        //    read now for those step 4 left for the plan.
+        let unread = (toInsert.map(\.file) + toUpdate.map(\.file)).filter { readRecords[$0.relPath] == nil }
+        let unreadHashes = Dictionary((toInsert.map { ($0.file.relPath, $0.hash) }
+                                       + toUpdate.map { ($0.file.relPath, $0.hash) }), uniquingKeysWith: { a, _ in a })
+        let late = unread.map { (file: $0, url: fileURL(forRelPath: $0.relPath), hash: unreadHashes[$0.relPath] ?? Data()) }
+        let lateRecords = ImportWorkers.map(count: late.count, width: width) {
+            index, _ -> Result<ImageRecord, any Error> in
+            Result { try Self.makeRecord(for: late[index].file, at: late[index].url, hash: late[index].hash) }
+        }
+        for (job, result) in zip(late, lateRecords) { readRecords[job.file.relPath] = result }
+
         var inserts: [ImageRecord] = []
         for entry in toInsert {
             do {
-                inserts.append(try makeRecord(for: entry.file, hash: entry.hash))
+                guard let read = readRecords[entry.file.relPath] else { continue }
+                inserts.append(try read.get())
             } catch {
                 report.failures.append((entry.file.relPath, "\(error)"))
             }
         }
         var updates: [ImageRecord] = []
-        for (file, previous, hash) in toUpdate {
+        for (file, previous, _) in toUpdate {
             do {
-                var fresh = try makeRecord(for: file, hash: hash)
+                guard let read = readRecords[file.relPath] else { continue }
+                var fresh = try read.get()
                 // Content changed but it's the same photo as far as the
                 // user is concerned: keep everything they've done to it.
                 fresh.id = previous.id
@@ -471,8 +499,9 @@ extension Catalog {
     // MARK: - Metadata
 
     /// Reads what the catalog needs from a raw file without decoding it.
-    private func makeRecord(for file: DiskFile, hash: Data) throws -> ImageRecord {
-        let url = fileURL(forRelPath: file.relPath)
+    /// Static and touching nothing of the catalog's, so import workers can
+    /// run it off the actor.
+    static func makeRecord(for file: DiskFile, at url: URL, hash: Data) throws -> ImageRecord {
         let raw = try RawFile(path: url.path, metadataOnly: true)
         let s = raw.summary
         // TODO(Photo Merge): a merge result copied in from Finder arrives
