@@ -113,15 +113,27 @@ extension EditorModel {
         // Set once the photo is in place: a placeholder decoded later than
         // the raw must not cover the render.
         let applied = OpenProgress()
+        // An open that ends here without laying its photo in place takes
+        // back what it put up: its "Opening…" status and the camera's JPEG,
+        // unless a newer open has replaced them. A placeholder still
+        // decoding is never shown (`applied.done`). Without this, a photo
+        // filtered out while it decoded left its JPEG over the previous
+        // photo until some later open.
+        let abandon = { [weak self] in
+            applied.done = true
+            guard let self, self.openGeneration == generation else { return }
+            self.openingPlaceholder = nil
+            self.status = statusBefore
+        }
 
         let editStackJSON: String?
         do {
             editStackJSON = try await readEdit()
         } catch {
-            if openGeneration == generation { status = statusBefore }
+            abandon()
             return .editUnreadable
         }
-        guard stillWanted() else { return .superseded }
+        guard stillWanted() else { abandon(); return .superseded }
 
         // The camera's JPEG matches the render's framing only without a
         // crop or perspective change; with one it would jump, so the
@@ -133,17 +145,22 @@ extension EditorModel {
             }
         }
 
-        guard let gpu = await gpuForOpening() else { return stillWanted() ? .failed : .superseded }
-        guard stillWanted() else { return .superseded }
+        guard let gpu = await gpuForOpening() else {
+            let failed = stillWanted()
+            abandon()
+            return failed ? .failed : .superseded
+        }
+        guard stillWanted() else { abandon(); return .superseded }
         let file: RawFile
         do {
             file = try await job.value()
         } catch {
-            guard stillWanted() else { return .superseded }
+            guard stillWanted() else { abandon(); return .superseded }
+            applied.done = true
             failOpen(url: url, error)
             return .failed
         }
-        guard stillWanted() else { return .superseded }
+        guard stillWanted() else { abandon(); return .superseded }
         applied.done = true
         apply(file, url: url, userRotation: userRotation, catalogImageID: catalogImageID,
               editStackJSON: editStackJSON, gpu: gpu)
