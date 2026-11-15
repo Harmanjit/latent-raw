@@ -27,6 +27,13 @@ extension EditorModel {
         return LensProfileOverrides.choices(cameraMake: summary.cameraMake, cameraModel: summary.cameraModel)
     }
 
+    /// The same lenses grouped by maker, as the picker's menu shows them.
+    /// Kept per camera by LensKit, so asking on every redraw is cheap.
+    var lensProfileMenu: LensProfileOverrides.PickerMenu {
+        guard let summary = session?.file.summary else { return .init(fitting: [], others: []) }
+        return LensProfileOverrides.pickerMenu(cameraMake: summary.cameraMake, cameraModel: summary.cameraModel)
+    }
+
     /// Picks a profile for this photo, or nil for the automatic one.
     func chooseLensProfile(_ model: String?) {
         guard hasImage, session?.lensCorrectionAlreadyApplied != true else { return }

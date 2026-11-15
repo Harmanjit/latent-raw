@@ -11,7 +11,12 @@ struct LibraryPanel: View {
     @ObservedObject var photoMerge: PhotoMergeQueue
     /// Remove Dust and Find Faces over a selection.
     @ObservedObject var selectionJobs: SelectionJobQueue
-    @ObservedObject var model: EditorModel
+    /// Not observed here: ContentView observes the editor and rebuilds this
+    /// panel whenever it changes (the panel's closures are new each time).
+    /// Observing it here too made SwiftUI evaluate the panel, and the
+    /// sections inside it, twice in the same update on every slider tick.
+    /// (So the export settings below use plain bindings, not `$model`.)
+    let model: EditorModel
     @State private var metadataExpanded = true
     @AppStorage("latent.panel.descriptionExpanded") private var descriptionExpanded = true
     @State private var historyExpanded = false
@@ -159,7 +164,8 @@ struct LibraryPanel: View {
                 .disabled(n == 0 || exportQueue.isGPUBusy)
 
             // The open image, straight from the editor's render.
-            Picker("Format", selection: $model.exportSettings.format) {
+            Picker("Format", selection: Binding(get: { model.exportSettings.format },
+                                                set: { model.exportSettings.format = $0 })) {
                 ForEach(ExportSettings.Format.available, id: \.self) { format in
                     Text(format.displayName).tag(format)
                 }
@@ -170,7 +176,9 @@ struct LibraryPanel: View {
             if model.exportSettings.format.supportsQuality {
                 HStack {
                     Text("Quality").font(.caption)
-                    ResettableSlider(value: $model.exportSettings.quality, in: 0.3...1.0, label: "Export quality",
+                    ResettableSlider(value: Binding(get: { model.exportSettings.quality },
+                                                    set: { model.exportSettings.quality = $0 }),
+                                     in: 0.3...1.0, label: "Export quality",
                                      format: SliderValueFormat(decimals: 2)) {
                         model.exportSettings.quality = 0.92
                     }

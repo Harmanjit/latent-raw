@@ -94,18 +94,115 @@ public enum LensProfileOverrides {
     /// grouped by maker, makers and models in alphabetical order. Lenses
     /// that fit the camera's mount (when the database knows the camera)
     /// come first within the list as `fitting`; the rest are `others`.
+    ///
+    /// Worked out once per database and camera and then kept: the picker
+    /// asks on every redraw of the Lens Corrections panel, and filtering
+    /// and sorting the whole database each time cost several milliseconds
+    /// per slider tick. The database is read-only once loaded, so a list
+    /// kept for it never goes stale; a different database starts afresh.
     public static func choices(cameraMake: String, cameraModel: String,
                                in db: LensfunDatabase = .shared) -> (fitting: [LensfunLens], others: [LensfunLens]) {
-        let usable = db.lenses.filter { !$0.distortion.isEmpty || !$0.tca.isEmpty || !$0.vignetting.isEmpty }
-        var seen = Set<String>()
-        let unique = usable.filter { seen.insert($0.model).inserted }
-            .sorted { ($0.maker.lowercased(), $0.model.lowercased()) < ($1.maker.lowercased(), $1.model.lowercased()) }
-        guard let camera = LensMatcher.findCamera(make: cameraMake, model: cameraModel, in: db) else {
-            return ([], unique)
+        let lists = entry(cameraMake: cameraMake, cameraModel: cameraModel, in: db)
+        return (lists.fitting, lists.others)
+    }
+
+    /// One maker's lenses in the picker, models in alphabetical order.
+    public struct MakerGroup: Sendable, Equatable {
+        public var maker: String
+        public var lenses: [LensfunLens]
+    }
+
+    /// The picker's lists already grouped by maker, makers in
+    /// alphabetical order (ignoring case), as `choices` orders them.
+    public struct PickerMenu: Sendable, Equatable {
+        public var fitting: [MakerGroup]
+        public var others: [MakerGroup]
+
+        public init(fitting: [MakerGroup], others: [MakerGroup]) {
+            self.fitting = fitting
+            self.others = others
         }
-        let mounts = db.mountsAccepted(by: camera.mount)
-        let fitting = unique.filter { !mounts.isDisjoint(with: $0.mounts) }
-        let fittingModels = Set(fitting.map(\.model))
-        return (fitting, unique.filter { !fittingModels.contains($0.model) })
+    }
+
+    /// `choices`, grouped by maker for the menu, from the same kept lists.
+    public static func pickerMenu(cameraMake: String, cameraModel: String,
+                                  in db: LensfunDatabase = .shared) -> PickerMenu {
+        entry(cameraMake: cameraMake, cameraModel: cameraModel, in: db).menu
+    }
+
+    private static func entry(cameraMake: String, cameraModel: String, in db: LensfunDatabase) -> Entry {
+        let camera = CameraKey(make: cameraMake, model: cameraModel)
+        if let kept = menuCache.withLock({ $0.db === db ? $0.menus[camera] : nil }) { return kept }
+        let unique = usableLenses(in: db)
+        let fitting: [LensfunLens], others: [LensfunLens]
+        if let body = LensMatcher.findCamera(make: cameraMake, model: cameraModel, in: db) {
+            let mounts = db.mountsAccepted(by: body.mount)
+            fitting = unique.filter { !mounts.isDisjoint(with: $0.mounts) }
+            let fittingModels = Set(fitting.map(\.model))
+            others = unique.filter { !fittingModels.contains($0.model) }
+        } else {
+            (fitting, others) = ([], unique)
+        }
+        let made = Entry(fitting: fitting, others: others,
+                         menu: PickerMenu(fitting: groupedByMaker(fitting), others: groupedByMaker(others)))
+        menuCache.withLock { cache in
+            if cache.db !== db { cache = MenuCache(db: db) }
+            cache.menus[camera] = made
+        }
+        return made
+    }
+
+    private struct CameraKey: Hashable {
+        var make: String
+        var model: String
+    }
+
+    /// The kept lists, for one database at a time.
+    private struct MenuCache: Sendable {
+        var db: LensfunDatabase?
+        var usable: [LensfunLens]?
+        var menus: [CameraKey: Entry] = [:]
+    }
+
+    /// One camera's lists, flat (as `choices` returns them) and grouped.
+    private struct Entry: Sendable {
+        var fitting: [LensfunLens]
+        var others: [LensfunLens]
+        var menu: PickerMenu
+    }
+
+    private static let menuCache = Mutex(MenuCache())
+
+    /// Every lens with correction data, one per model, sorted by maker then
+    /// model ignoring case; worked out once per database.
+    private static func usableLenses(in db: LensfunDatabase) -> [LensfunLens] {
+        if let kept = menuCache.withLock({ $0.db === db ? $0.usable : nil }) { return kept }
+        var seen = Set<String>()
+        let unique = db.lenses
+            .filter { (!$0.distortion.isEmpty || !$0.tca.isEmpty || !$0.vignetting.isEmpty) && seen.insert($0.model).inserted }
+            .map { (key: ($0.maker.lowercased(), $0.model.lowercased()), lens: $0) }
+            .sorted { $0.key < $1.key }
+            .map(\.lens)
+        menuCache.withLock { cache in
+            if cache.db !== db { cache = MenuCache(db: db) }
+            cache.usable = unique
+        }
+        return unique
+    }
+
+    /// Splits a list sorted by maker (ignoring case) into one group per
+    /// maker name, in order of first appearance.
+    static func groupedByMaker(_ lenses: [LensfunLens]) -> [MakerGroup] {
+        var index: [String: Int] = [:]
+        var groups: [MakerGroup] = []
+        for lens in lenses {
+            if let i = index[lens.maker] {
+                groups[i].lenses.append(lens)
+            } else {
+                index[lens.maker] = groups.count
+                groups.append(MakerGroup(maker: lens.maker, lenses: [lens]))
+            }
+        }
+        return groups
     }
 }

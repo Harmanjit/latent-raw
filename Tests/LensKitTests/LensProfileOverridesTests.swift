@@ -77,4 +77,36 @@ final class LensProfileOverridesTests: XCTestCase {
         XCTAssertTrue(unknown.fitting.isEmpty)
         XCTAssertEqual(unknown.others.count, choices.fitting.count + choices.others.count)
     }
+
+    func testPickerMenuGroupsTheChoicesByMaker() {
+        let choices = LensProfileOverrides.choices(cameraMake: "Nikon", cameraModel: "D750", in: Self.db)
+        let menu = LensProfileOverrides.pickerMenu(cameraMake: "Nikon", cameraModel: "D750", in: Self.db)
+        XCTAssertEqual(menu.fitting.flatMap(\.lenses).map(\.model).sorted(), choices.fitting.map(\.model).sorted())
+        XCTAssertEqual(menu.others.flatMap(\.lenses).map(\.model).sorted(), choices.others.map(\.model).sorted())
+        for groups in [menu.fitting, menu.others] {
+            let makers = groups.map(\.maker)
+            XCTAssertEqual(Set(makers).count, makers.count, "one group per maker")
+            XCTAssertEqual(makers, makers.sorted { $0.lowercased() < $1.lowercased() }, "makers in alphabetical order")
+            for group in groups {
+                XCTAssertTrue(group.lenses.allSatisfy { $0.maker == group.maker })
+                let models = group.lenses.map { $0.model.lowercased() }
+                XCTAssertEqual(models, models.sorted(), "models in alphabetical order")
+            }
+        }
+        XCTAssertEqual(LensProfileOverrides.pickerMenu(cameraMake: "Nikon", cameraModel: "D750", in: Self.db), menu,
+                       "asking again gives the kept lists")
+    }
+
+    func testKeptChoicesBelongToTheirDatabase() throws {
+        let lens = try XCTUnwrap(Self.db.lenses.first { !$0.distortion.isEmpty })
+        let tiny = LensfunDatabase(cameras: [], lenses: [lens], mountCompatibility: [:], version: "test")
+        _ = LensProfileOverrides.choices(cameraMake: "Nikon", cameraModel: "D750", in: Self.db)
+        let fromTiny = LensProfileOverrides.choices(cameraMake: "Nikon", cameraModel: "D750", in: tiny)
+        XCTAssertEqual(fromTiny.fitting.map(\.model) + fromTiny.others.map(\.model), [lens.model],
+                       "a different database is not answered from another's kept lists")
+        let empty = LensfunDatabase(cameras: [], lenses: [], mountCompatibility: [:], version: "empty")
+        XCTAssertTrue(LensProfileOverrides.pickerMenu(cameraMake: "Nikon", cameraModel: "D750", in: empty).others.isEmpty)
+        XCTAssertGreaterThan(LensProfileOverrides.choices(cameraMake: "Nikon", cameraModel: "D750", in: Self.db)
+                                .fitting.count, 1, "and back to the real database")
+    }
 }
