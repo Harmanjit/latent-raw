@@ -13,6 +13,7 @@ final class FinderTagTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        Catalog.tagMemoTrustOverrideForTesting = nil
         if let folder { try? FileManager.default.removeItem(at: folder) }
     }
 
@@ -121,5 +122,52 @@ final class FinderTagTests: XCTestCase {
         XCTAssertEqual(FinderTag.read(from: renamed).map(\.name), ["Blue"], "read, never rewritten")
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: renamed.path)[.modificationDate] as? Date,
                        mtime, "the original's content date is untouched")
+    }
+
+    /// The memo is trusted on APFS only, where the temporary folder lives.
+    func testTagMemoIsTrustedOnAPFSOnly() {
+        XCTAssertTrue(Catalog.tagMemoTrusted(for: folder), "the temporary folder is on APFS")
+        XCTAssertFalse(Catalog.tagMemoTrusted(for: folder.appendingPathComponent("missing")),
+                       "a volume that can't be asked is not trusted")
+        Catalog.tagMemoTrustOverrideForTesting = { _ in false }
+        XCTAssertFalse(Catalog.tagMemoTrusted(for: folder))
+    }
+
+    /// On exFAT or FAT (a camera card) setting a tag moves neither the
+    /// mtime nor the status-change time. The memo is made to hold the new
+    /// status-change time with the old tags, as such a volume would leave
+    /// it: trusted, the stale tags win; untrusted, the tags are read again.
+    func testTagChangeWithUnmovedChangeTimeIsSeenWhenMemoUntrusted() async throws {
+        let sample = try TestAssets.d750Path()
+        let file = folder.appendingPathComponent("A.NEF")
+        try FileManager.default.copyItem(atPath: sample, toPath: file.path)
+        try Self.setFinderTags(["Red\n6"], on: file)
+        let catalog = try Catalog.open(at: folder)
+        _ = try await catalog.reconcile()
+        let stale = FinderTag.encode([FinderTag(name: "Red", colorIndex: 6)])
+        var images = try await catalog.allImages()
+        XCTAssertEqual(images.first?.finderTags, stale)
+
+        try Self.setFinderTags(["Work\n0"], on: file)
+        var info = stat()
+        XCTAssertEqual(lstat(file.path, &info), 0)
+        await catalog.setScanTagMemoForTesting("A.NEF", changed: info.st_ctimespec, tags: stale)
+        var report = try await catalog.reconcile()
+        XCTAssertEqual(report.tagsChanged, 0, "trusted, the memo answers: the case the trust check exists for")
+
+        Catalog.tagMemoTrustOverrideForTesting = { _ in false }
+        await catalog.setScanTagMemoForTesting("A.NEF", changed: info.st_ctimespec, tags: stale)
+        report = try await catalog.reconcile()
+        XCTAssertEqual(report.tagsChanged, 1, "untrusted, the tags are read on every pass")
+        images = try await catalog.allImages()
+        XCTAssertEqual(images.first?.tags.map(\.name), ["Work"])
+        let memoEmpty = await catalog.scanTagMemo.isEmpty
+        XCTAssertTrue(memoEmpty, "nothing is memoized where it can't be trusted")
+    }
+}
+
+extension Catalog {
+    func setScanTagMemoForTesting(_ relPath: String, changed: timespec, tags: String?) {
+        scanTagMemo[relPath] = (changed, tags)
     }
 }

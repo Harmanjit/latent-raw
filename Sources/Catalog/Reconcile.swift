@@ -74,6 +74,10 @@ extension Catalog {
     /// on purpose. Nil in the app.
     nonisolated(unsafe) static var datalessOverrideForTesting: (@Sendable (URL) -> Bool)?
 
+    /// Tests stand in for a card's exFAT or FAT volume with this: whether
+    /// the Finder-tag memo may be trusted for a directory. Nil in the app.
+    nonisolated(unsafe) static var tagMemoTrustOverrideForTesting: (@Sendable (URL) -> Bool)?
+
     /// Brings the database in line with the folder (DESIGN.md §5.3).
     ///
     /// Cheap by design: unchanged files are recognised by name, size and
@@ -110,7 +114,9 @@ extension Catalog {
                     report.unchanged += 1
                     unchangedPaths.append(file.relPath)
                     // Tagging in Finder moves no mtime, so tags are compared
-                    // on every pass; only changed rows are written.
+                    // on every pass (read again where the status-change time
+                    // moved, or always off APFS, see `finderTags(of:...)`);
+                    // only changed rows are written.
                     if record.finderTags != file.finderTags, let id = record.id {
                         tagChanges.append((id, file.finderTags))
                     }
@@ -439,6 +445,8 @@ extension Catalog {
         // for files whose status-change time moved since the last pass.
         let entries = try DirectoryListing.entries(of: directory)
             .sorted { $0.name < $1.name }
+        // Asked per directory: a subfolder can be another volume's mount.
+        let tagMemoTrusted = Self.tagMemoTrusted(for: directory)
 
         for entry in entries {
             // `.skipsHiddenFiles`, as the listing used to ask for.
@@ -491,24 +499,41 @@ extension Catalog {
                 relPath: relPath,
                 size: entry.size,
                 mtime: ImageRecord.milliseconds(DirectoryListing.date(entry.modified)),
-                finderTags: finderTags(of: url, relPath: relPath, changed: entry.changed),
+                finderTags: finderTags(of: url, relPath: relPath, changed: entry.changed,
+                                       memoTrusted: tagMemoTrusted),
                 isDataless: Self.isDataless(url, flags: entry.flags)))
         }
     }
 
-    /// The file's Finder tags in stored form. Setting a tag (an extended
-    /// attribute) moves the file's status-change time, so tags read on an
-    /// earlier pass of this catalog still hold while that time hasn't
-    /// moved, and a refresh of an unchanged folder reads none.
-    private func finderTags(of url: URL, relPath: String, changed: timespec) -> String? {
-        if let known = scanTagMemo[relPath], known.changed.tv_sec == changed.tv_sec,
+    /// The file's Finder tags in stored form. On APFS, setting a tag (an
+    /// extended attribute) moves the file's status-change time, kept to the
+    /// nanosecond, so tags read on an earlier pass of this catalog still
+    /// hold while that time hasn't moved, and a refresh of an unchanged
+    /// folder reads none. Elsewhere the memo is not used: on exFAT and FAT
+    /// (camera cards) the attribute goes into the `._` AppleDouble file and
+    /// neither time moves, and HFS+ keeps whole seconds only.
+    private func finderTags(of url: URL, relPath: String, changed: timespec, memoTrusted: Bool) -> String? {
+        if memoTrusted, let known = scanTagMemo[relPath], known.changed.tv_sec == changed.tv_sec,
            known.changed.tv_nsec == changed.tv_nsec {
             nextScanTagMemo[relPath] = known
             return known.tags
         }
         let tags = FinderTag.encode(FinderTag.read(from: url))
-        nextScanTagMemo[relPath] = (changed, tags)
+        if memoTrusted { nextScanTagMemo[relPath] = (changed, tags) }
         return tags
+    }
+
+    /// Whether the volume holding `directory` moves a file's status-change
+    /// time, at nanosecond resolution, when an extended attribute is set:
+    /// APFS only. Unknown is untrusted.
+    static func tagMemoTrusted(for directory: URL) -> Bool {
+        if let override = tagMemoTrustOverrideForTesting { return override(directory) }
+        var fs = statfs()
+        guard statfs(directory.path, &fs) == 0 else { return false }
+        let name = withUnsafeBytes(of: &fs.f_fstypename) { raw in
+            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        }
+        return name == "apfs"
     }
 
     /// Whether a file's contents are only in the cloud: evicted by
