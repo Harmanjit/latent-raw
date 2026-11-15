@@ -88,26 +88,30 @@ extension ExportWorker {
         let parameters = content == .fullLook ? edit : ExportPlan.sceneReferred(edit, defaults: defaults)
 
         let rotation = ExportPlan.rotation(for: file.summary, userRotation: content == .original ? 0 : userRotation)
-        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
-                                              rotation: rotation, geometry: parameters)
-        if !masks.substituted.isEmpty {
-            dngLogger.notice("\(sourceURL.lastPathComponent, privacy: .private): DNG masks made without \(masks.substituted.joined(separator: ", "), privacy: .public)")
-        }
-        var substituted = masks.substituted
-        if content == .fullLook {
-            // The look's own masks, as an image export makes them.
-            try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
-                                       name: sourceURL.lastPathComponent, logger: dngLogger)
-            if let standIn = try await regenerateDepth(parameters, session: session, pipeline: pipeline, gpu: gpu,
-                                                       rotation: rotation, name: sourceURL.lastPathComponent) {
-                substituted.append(standIn)
+        // The model steps take turns with other exports' (ExportModelGate).
+        let substituted = try await ExportModelGate.whileHeld(ExportModelGate.needsModels(parameters)) {
+            let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
+                                                  rotation: rotation, geometry: parameters)
+            if !masks.substituted.isEmpty {
+                dngLogger.notice("\(sourceURL.lastPathComponent, privacy: .private): DNG masks made without \(masks.substituted.joined(separator: ", "), privacy: .public)")
             }
-        }
-        try Task.checkCancellation()
-        if parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
-            let denoiser = try await AIDenoiser.shared()
-            try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
+            var substituted = masks.substituted
+            if content == .fullLook {
+                // The look's own masks, as an image export makes them.
+                try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu,
+                                           rotation: rotation, name: sourceURL.lastPathComponent, logger: dngLogger)
+                if let standIn = try await regenerateDepth(parameters, session: session, pipeline: pipeline, gpu: gpu,
+                                                           rotation: rotation, name: sourceURL.lastPathComponent) {
+                    substituted.append(standIn)
+                }
+            }
             try Task.checkCancellation()
+            if parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
+                let denoiser = try await AIDenoiser.shared()
+                try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
+                try Task.checkCancellation()
+            }
+            return substituted
         }
 
         let exporter = Exporter(gpu: gpu)

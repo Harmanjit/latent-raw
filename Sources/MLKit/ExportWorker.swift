@@ -223,30 +223,34 @@ public enum ExportWorker {
                                                         rawHeight: file.summary.rawHeight, crop: parameters.crop,
                                                         rotation: rotation)
         }
-        let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
-                                              rotation: rotation, geometry: parameters)
-        // Nor are the touch-up region masks: built again the way the
-        // editor built them, so the export smooths the same skin.
-        try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
-                                   name: request.sourceURL.lastPathComponent, logger: exportLogger)
-        // And Lens Blur's depth map (LensBlurDepth.swift).
-        let depthStandIn = try await regenerateDepth(parameters, session: session, pipeline: pipeline, gpu: gpu,
-                                                     rotation: rotation, name: request.sourceURL.lastPathComponent)
-        try await regenerateReflections(parameters, session: session, pipeline: pipeline, gpu: gpu,
-                                        rotation: rotation, name: request.sourceURL.lastPathComponent)
-        lap("masks")
-        try Task.checkCancellation()
-
-        // Neural denoise is computed, not stored: run it for the export.
-        // Not for linear sources, which the denoiser refuses; the pipeline
-        // doesn't blend a strength in for them either.
-        if parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
-            // Shared across the batch: loading the network per image cost
-            // seconds each.
-            let denoiser = try await AIDenoiser.shared()
-            try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
-            lap("denoise")
+        // The model steps take turns with other exports' (ExportModelGate).
+        let (masks, depthStandIn) = try await ExportModelGate.whileHeld(ExportModelGate.needsModels(parameters)) {
+            let masks = try await regenerateMasks(parameters.locals, session: session, pipeline: pipeline, gpu: gpu,
+                                                  rotation: rotation, geometry: parameters)
+            // Nor are the touch-up region masks: built again the way the
+            // editor built them, so the export smooths the same skin.
+            try regenerateTouchUpMasks(parameters, session: session, pipeline: pipeline, gpu: gpu, rotation: rotation,
+                                       name: request.sourceURL.lastPathComponent, logger: exportLogger)
+            // And Lens Blur's depth map (LensBlurDepth.swift).
+            let depthStandIn = try await regenerateDepth(parameters, session: session, pipeline: pipeline, gpu: gpu,
+                                                         rotation: rotation, name: request.sourceURL.lastPathComponent)
+            try await regenerateReflections(parameters, session: session, pipeline: pipeline, gpu: gpu,
+                                            rotation: rotation, name: request.sourceURL.lastPathComponent)
+            lap("masks")
             try Task.checkCancellation()
+
+            // Neural denoise is computed, not stored: run it for the export.
+            // Not for linear sources, which the denoiser refuses; the pipeline
+            // doesn't blend a strength in for them either.
+            if parameters.aiDenoise > 0, session.supportsAIDenoise, AIDenoiser.isAvailable {
+                // Shared across the batch: loading the network per image cost
+                // seconds each.
+                let denoiser = try await AIDenoiser.shared()
+                try await AIDenoiseWorker.run(session: session, pipeline: pipeline, gpu: gpu, denoiser: denoiser)
+                lap("denoise")
+                try Task.checkCancellation()
+            }
+            return (masks, depthStandIn)
         }
 
         let scale = ExportPlan.scale(for: file.summary, crop: parameters.crop, maxLongEdge: maxLongEdge)

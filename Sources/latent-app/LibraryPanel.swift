@@ -324,6 +324,10 @@ struct LibraryPanel: View {
                     .accessibilityValue("\(exportQueue.done) of \(exportQueue.total)")
                 Text(exportQueue.currentName).font(.caption2).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
+                if !exportQueue.concurrencyNote.isEmpty {
+                    Text(exportQueue.concurrencyNote).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
