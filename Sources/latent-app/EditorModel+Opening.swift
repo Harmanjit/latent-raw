@@ -128,7 +128,9 @@ extension EditorModel {
             stopAIDenoise()
             aiDenoiseReleasedUnderPressure = false
             dustImageDidOpen()
-            rerender()
+            // An open's own render, never a drag tick however soon after
+            // the one `parameters` just made.
+            rerenderAtFullQuality()
             regenerateMissingAIMasks()
             regenerateTouchUpMasksIfNeeded()
             regenerateDepthMapIfNeeded()
@@ -164,5 +166,6 @@ extension EditorModel {
         redEyeDrag = nil
         paintingHealStroke = []
         straightenBase = nil
+        resetDragRender()
     }
 }

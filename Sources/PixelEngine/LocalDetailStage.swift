@@ -75,7 +75,7 @@ enum LocalDetailStage {
     static func encode(input: MTLTexture, output: MTLTexture, maskA: MTLTexture, maskB: MTLTexture,
                        params: [LocalDetailGPU], blurs: Blurs, isLinear: Bool, headroom: Float,
                        curveTable: [Float]? = nil, frame: LocalDetailFrameGPU = .init(tileOrigin: .zero, binSpan: 1, seed: 0),
-                       needsBlurs: Bool = true,
+                       needsBlurs: Bool = true, coarseBlurs: Bool = false,
                        session: ImageSession, gpu: GPUContext, commandBuffer: MTLCommandBuffer) throws {
         guard input.width == output.width, input.height == output.height, !params.isEmpty else {
             throw RenderError.commandBufferFailed
@@ -106,9 +106,8 @@ enum LocalDetailStage {
         }
 
         func blurred(sigma: Float, role: ImageSession.TextureRole,
-                     scratch: ImageSession.TextureRole) throws -> MTLTexture {
-            var factor = 1
-            while sigma / Float(factor) > 10, factor < 16 { factor *= 2 }
+                     scratch: ImageSession.TextureRole, limit: Float = RenderPipeline.fullBlurSigma) throws -> MTLTexture {
+            let factor = RenderPipeline.blurDownsampleFactor(sigma: sigma, limit: limit)
             var source = pair
             var bw = w, bh = h
             if factor > 1 {
@@ -137,8 +136,12 @@ enum LocalDetailStage {
         // Only the curve, Point Colour or grain: no blur is read, so the
         // unblurred pair stands in for all three.
         let small = needsBlurs ? try blurred(sigma: blurs.small, role: .localDetailSmall, scratch: .localDetailDownA) : pair
-        let medium = needsBlurs ? try blurred(sigma: blurs.medium, role: .localDetailMedium, scratch: .localDetailDownB) : pair
-        let large = needsBlurs ? try blurred(sigma: blurs.large, role: .localDetailLarge, scratch: .localDetailDownC) : pair
+        // A drag tick takes the wider two from a coarser copy, as presence does.
+        let limit = coarseBlurs ? RenderPipeline.coarseBlurSigma : RenderPipeline.fullBlurSigma
+        let medium = needsBlurs ? try blurred(sigma: blurs.medium, role: .localDetailMedium, scratch: .localDetailDownB,
+                                              limit: limit) : pair
+        let large = needsBlurs ? try blurred(sigma: blurs.large, role: .localDetailLarge, scratch: .localDetailDownC,
+                                             limit: limit) : pair
         // Metal wants the curve buffer bound even when no mask reads it.
         let table = curveTable ?? [Float](repeating: 0, count: 4)
         guard let curves = gpu.device.makeBuffer(bytes: table, length: table.count * 4, options: .storageModeShared) else {
@@ -231,6 +234,7 @@ extension RenderPipeline {
                                     curveTable: LocalToneColour.curveTable(for: locals, slots: slots),
                                     frame: LocalDetailFrameGPU(tileOrigin: tileOrigin, binSpan: binSpan, seed: seed),
                                     needsBlurs: LocalDetailStage.needsBlurs(locals),
+                                    coarseBlurs: output.coarseBlurs,
                                     session: session, gpu: gpu, commandBuffer: cmdBuffer)
         return result
     }

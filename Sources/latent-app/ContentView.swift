@@ -251,7 +251,9 @@ struct ContentView: View {
                 guard let gpu = model.gpu else { return }
                 // Flush the editor's pending edit so the export sees it.
                 model.flushPendingSave()
-                exportQueue.start(records: library.selectedImages, library: library, batches: batches, gpu: gpu)
+                // On the GPU's background queue, so Develop's renders don't wait
+                // behind the export's (GPUContext.background).
+                exportQueue.start(records: library.selectedImages, library: library, batches: batches, gpu: gpu.background)
             }
             .motionFollowsAccessibility()
         }
@@ -341,7 +343,7 @@ struct ContentView: View {
             // Quitting flushes and waits for these (AppDelegate).
             AppDelegate.register(model: model, library: library, exportQueue: exportQueue)
             if let gpu = model.gpu {
-                library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu)
+                library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu.background)
             }
             // Once per launch: the window closed and opened again still has
             // its folder and image, and reopening them would close the image.
@@ -621,7 +623,7 @@ struct ContentView: View {
     /// getting unedited thumbnails for its edited images.
     private func attachEditedThumbnailRenderer() async {
         guard library.thumbnailRenderer == nil, let gpu = try? await GPUContext.shared() else { return }
-        library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu)
+        library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu.background)
     }
 
     private func openInEditor(_ record: ImageRecord) {
@@ -1322,7 +1324,7 @@ struct ContentView: View {
         case .exportWithPrevious:
             guard let gpu = model.gpu else { return false }
             model.flushPendingSave()
-            exportQueue.exportWithPrevious(records: library.selectedImages, library: library, gpu: gpu)
+            exportQueue.exportWithPrevious(records: library.selectedImages, library: library, gpu: gpu.background)
         case .exportOpenImage:
             LibraryPanel.exportOpenImage(model: model, library: library)
         case .print:

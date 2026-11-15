@@ -310,8 +310,14 @@ final class ExportQueue: ObservableObject {
     /// preset, or several for a multi-batch export. Each batch plans its
     /// own names in its own folder. `photosAtOnce` is the saved choice
     /// (Automatic, or a count), clamped per batch to what its photos allow.
-    func start(records: [ImageRecord], library: Library, batches: [ExportBatch], gpu: GPUContext,
+    ///
+    /// Always renders on `gpu.background`, whichever context the caller
+    /// passes, so no entry point (the Export sheet, Export with Previous)
+    /// puts a batch on the editor's command queue in front of its renders
+    /// (docs/Performance-Plan.md fix 24).
+    func start(records: [ImageRecord], library: Library, batches: [ExportBatch], gpu editorGPU: GPUContext,
                photosAtOnce: Int = ExportPhotosAtOnce.load()) {
+        let gpu = editorGPU.background
         guard !isGPUBusy else {
             // Said, rather than the sheet closing on nothing.
             if !isRunning { summary = Self.busyRefusal }

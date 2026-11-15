@@ -584,6 +584,12 @@ final class EditorModel: ObservableObject {
     /// What the last renders used, so a viewport change can decide whether
     /// anything actually needs re-rendering.
     var previewQuads = 0
+    /// Whether the last renders were the cheaper drag-time kind, and when
+    /// the full-quality one follows (EditorModel+DragRender.swift).
+    var dragRender = DragRenderState()
+    /// Screen pixels per point where the main image view is, reported
+    /// with its size: a drag renders about one preview pixel per point.
+    var viewBackingScale: CGFloat = 2
     var tileSize = CGSize.zero
     /// The part of the tile that heals as the whole frame does, so a pan
     /// may reuse it (`HealPatch.isSelfContained`).

@@ -465,10 +465,46 @@ public final class ImageSession {
     /// the same texture first. Cleared by `releasePooledTextures()` (all),
     /// `releasePooledTextures(in:)` (entries whose texture was released)
     /// and `setAIDenoised(_:model:)` (the blend's input changed).
-    func storeHealed(_ texture: MTLTexture, for key: HealKey) {
-        healCache = healCache.filter { $0.value !== texture }
+    ///
+    /// `overwriting` names every other texture the render wrote on its way
+    /// (the denoise pass before the heal, say): entries pointing at those
+    /// hold pixels that are no longer theirs either. At most
+    /// `healCacheLimit` entries are kept, the oldest going first; they are
+    /// pooled textures, so the cap bounds what the cache keeps alive
+    /// past a pool release, not new allocations.
+    ///
+    /// Call it only once the render that wrote `texture` has completed
+    /// without error: until then the texture may still hold an earlier
+    /// render's pixels. `evictHealed(pointingAt:)` is the half that runs
+    /// while the render is being encoded.
+    func storeHealed(_ texture: MTLTexture, for key: HealKey, overwriting: [MTLTexture] = []) {
+        evictHealed(pointingAt: overwriting + [texture])
+        healOrder.removeAll { $0 == key }
+        while healOrder.count >= Self.healCacheLimit {
+            healCache[healOrder.removeFirst()] = nil
+        }
         healCache[key] = texture
+        healOrder.append(key)
     }
+
+    /// Drops every heal cache entry pointing at one of `textures`, for a
+    /// render about to write them: whatever they held is no longer the
+    /// pixels of those entries' keys, whether or not the render succeeds.
+    func evictHealed(pointingAt textures: [MTLTexture]) {
+        healCache = healCache.filter { entry in !textures.contains { $0 === entry.value } }
+        healOrder.removeAll { healCache[$0] == nil }
+    }
+
+    /// Most heal cache entries kept at once: the preview's, the tile's,
+    /// the scopes', the magnifier's and a few spare.
+    static let healCacheLimit = 8
+    /// The heal cache's keys, oldest first.
+    private var healOrder: [HealKey] = []
+
+    /// How many entries the heal cache holds, for tests.
+    var healCacheCount: Int { healCache.count }
+    /// The heal cache's keys, oldest first, for tests.
+    var healCacheKeys: [HealKey] { healOrder }
 
     public init(file: RawFile, gpu: GPUContext) throws {
         let buffer: MTLBuffer?

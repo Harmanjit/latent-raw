@@ -432,6 +432,12 @@ public struct RenderOutput: Sendable, Equatable {
     /// Work out the tone equalizer's mask even while every band is at 0,
     /// for its panel's histogram and the readout. Changes no pixel.
     public var toneEqualizerAnalysis = false
+    /// A drag tick on the viewport: presence and the local detail stage
+    /// take their ~4 px and frame-wide blurs from a coarser copy
+    /// (`RenderPipeline.coarseBlurSigma`), slightly softer and much
+    /// cheaper. The full render follows when the drag stops; a file, the
+    /// goldens and the high-quality preview never set it.
+    public var coarseBlurs = false
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -468,6 +474,7 @@ public struct RenderOutput: Sendable, Equatable {
             && a.depthVisualisation == b.depthVisualisation
             && a.hueIsolation == b.hueIsolation
             && a.gradingRangePreview == b.gradingRangePreview
+            && a.coarseBlurs == b.coarseBlurs
             && a.toneEqualizerMaskView == b.toneEqualizerMaskView
             && a.toneEqualizerAnalysis == b.toneEqualizerAnalysis
     }
@@ -770,10 +777,22 @@ public final class RenderPipeline {
             noiseDetail: parameters.noiseDetail, dust: parameters.dust, blemishes: parameters.touchUp.activeBlemishes, heals: parameters.heals,
             redEyes: parameters.redEyes)
         let cachedHealed = session.cachedHealed(for: healKey)
+        /// The heal cache entry this render makes, stored after its
+        /// command buffer completes.
+        var pendingHealStore: (texture: MTLTexture, written: [MTLTexture])?
+        func storePendingHeal() {
+            if let pendingHealStore {
+                session.storeHealed(pendingHealStore.texture, for: healKey, overwriting: pendingHealStore.written)
+            }
+        }
 
         if let cachedHealed {
             colourInput = cachedHealed
         } else {
+            // Every texture stages 3 to 5 write in this render: an entry
+            // still pointing at one of them would hand out these pixels
+            // under its own, older key.
+            var written: [MTLTexture] = []
             // Stage 3: neural denoise. Blend the session's cached full-frame
             // result in, re-binned and re-white-balanced to match this render.
             // Never for a linear source (`ImageSession.supportsAIDenoise`): an
@@ -783,6 +802,7 @@ public final class RenderPipeline {
                                                  denoised: denoised, strength: parameters.aiDenoise,
                                                  multipliers: multipliers, renderInfo: sourceInfo,
                                                  outputRole: displayRole == .display ? .aiDenoised : .aiDenoisedPreview)
+                written.append(colourInput)
             }
 
             // Stage 4: noise reduction, in camera space, before the matrix.
@@ -790,7 +810,7 @@ public final class RenderPipeline {
                 // colourInput, not cameraRGB: it may already carry the AI denoise blend.
                 colourInput = try applyDenoise(session: session, cmdBuffer: cmdBuffer,
                                                input: colourInput, parameters: parameters,
-                                               binSpan: binSpan)
+                                               binSpan: binSpan, written: &written)
             }
 
             // Stage 5: spot removal, in camera space, before the lens stage
@@ -807,12 +827,20 @@ public final class RenderPipeline {
                 colourInput = try applyHeal(session: session, cmdBuffer: cmdBuffer, input: colourInput,
                                             patches: activeHeals, redEyes: activeRedEyes, cameraToWorking: cameraToWorking,
                                             renderInfo: sourceInfo, binSpan: binSpan, preview: displayRole != .display)
-                // Only a texture the heal stage wrote is worth keeping: it
-                // has its own role, so nothing but a later heal render
-                // overwrites it, and `storeHealed` evicts that entry then.
-                // A denoised-only result lives in a role other renders
-                // reuse, and the demosaic alone is the stage cache's job.
-                session.storeHealed(colourInput, for: healKey)
+                written.append(colourInput)
+            }
+            // Kept whenever a stage ran, noise reduction alone included,
+            // so an exposure tick with noise reduction on skips it
+            // (docs/Performance-Plan.md fix 5). The demosaic alone is the
+            // stage cache's job. A pooled texture is only trustworthy
+            // until the next render writes it, so every entry pointing at
+            // a texture this render writes goes now; the new entry is
+            // added only once the command buffer has completed without
+            // error (`pendingHealStore`), so a render that throws or fails
+            // on the GPU never leaves a key on a texture it didn't fill.
+            if colourInput !== cameraRGB {
+                session.evictHealed(pointingAt: written + [colourInput])
+                pendingHealStore = (colourInput, written)
             }
         }
         renderInfo = renderInfo.markingHealCached(cachedHealed != nil)
@@ -867,6 +895,7 @@ public final class RenderPipeline {
             cmdBuffer.commit()
             cmdBuffer.waitUntilCompleted()
             if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
+            storePendingHeal()
             info?.pointee = renderInfo
             return colourInput
         }
@@ -1016,6 +1045,7 @@ public final class RenderPipeline {
         cmdBuffer.waitUntilCompleted()
         if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
         if toneEqualizer != nil { session.toneEqualizerStore.renderDidComplete() }
+        storePendingHeal()
 
         info?.pointee = renderInfo
         return final
@@ -1273,6 +1303,30 @@ public final class RenderPipeline {
 
     /// Gaussian taps up to 65 wide (sigma ≤ ~10). Larger blurs run on a
     /// downsampled copy instead of a wider kernel.
+    /// The largest sigma a blur runs at before it downsamples first: 10
+    /// output pixels normally, 2.5 for the medium and large blurs while
+    /// `RenderOutput.coarseBlurs` is set (the ~1 px blur, which carries
+    /// Texture, never coarsens).
+    static let fullBlurSigma: Float = 10
+    static let coarseBlurSigma: Float = 2.5
+
+    /// How far a blur at `sigma` downsamples first: a power of two up to
+    /// 16, until the sigma left is at most `limit`.
+    static func blurDownsampleFactor(sigma: Float, limit: Float) -> Int {
+        var factor = 1
+        while sigma / Float(factor) > limit, factor < 16 { factor *= 2 }
+        return factor
+    }
+
+    /// Whether `RenderOutput.coarseBlurs` changes anything for this edit:
+    /// presence, or a mask's local detail stage that blurs. Without
+    /// either, a drag render is already the full one.
+    public static func coarseBlursApply(to p: EditParameters) -> Bool {
+        if p.wantsLocalContrast { return true }
+        let locals = Array(p.locals.prefix(LocalAdjustment.maximumCount))
+        return wantsLocalDetail(p) && LocalDetailStage.needsBlurs(locals)
+    }
+
     static func wideGaussianWeights(sigma: Float) -> [Float] {
         let s = max(sigma, 0.3)
         let half = min(Int((3 * s).rounded(.up)), 32)
@@ -1314,9 +1368,8 @@ public final class RenderPipeline {
         // 2. Blur at a given sigma (in output pixels), downsampling first
         //    when the kernel would be too wide.
         func blurred(sigma: Float, role: ImageSession.TextureRole,
-                     scratch: ImageSession.TextureRole) throws -> MTLTexture {
-            var factor = 1
-            while sigma / Float(factor) > 10, factor < 16 { factor *= 2 }
+                     scratch: ImageSession.TextureRole, limit: Float = RenderPipeline.fullBlurSigma) throws -> MTLTexture {
+            let factor = Self.blurDownsampleFactor(sigma: sigma, limit: limit)
             var source = pair
             var bw = w, bh = h
             if factor > 1 {
@@ -1345,8 +1398,10 @@ public final class RenderPipeline {
 
         // Scales in sensor pixels, converted to this render's pixels.
         let small = try blurred(sigma: 1.0 / binSpan, role: .presenceSmall, scratch: .presenceDownA)
-        let medium = try blurred(sigma: 4.0 / binSpan, role: .presenceMedium, scratch: .presenceDownB)
-        let large = try blurred(sigma: 0.012 * shortSide / binSpan, role: .presenceLarge, scratch: .presenceDownC)
+        let limit = output.coarseBlurs ? Self.coarseBlurSigma : Self.fullBlurSigma
+        let medium = try blurred(sigma: 4.0 / binSpan, role: .presenceMedium, scratch: .presenceDownB, limit: limit)
+        let large = try blurred(sigma: 0.012 * shortSide / binSpan, role: .presenceLarge, scratch: .presenceDownC,
+                                limit: limit)
 
         // 3. Apply.
         let result = try session.texture(width: w, height: h, pixelFormat: .rgba16Float, role: outputRole)
@@ -1483,11 +1538,13 @@ public final class RenderPipeline {
 
     // MARK: - Detail stages
 
+    /// `written` gains every texture the stage writes, for the heal cache.
     private func applyDenoise(session: ImageSession, cmdBuffer: MTLCommandBuffer,
                               input: MTLTexture, parameters: EditParameters,
-                              binSpan: Float) throws -> MTLTexture {
+                              binSpan: Float, written: inout [MTLTexture]) throws -> MTLTexture {
         let output = try session.texture(width: input.width, height: input.height,
                                          pixelFormat: .rgba16Float, role: .denoised)
+        written.append(output)
         guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             throw RenderError.commandBufferFailed
         }
@@ -1509,8 +1566,10 @@ public final class RenderPipeline {
         encoder.endEncoding()
         // Contrast and Smoothness, a second pass only when either is on.
         if parameters.noiseDetail.wantsRefinePass {
-            return try refineDenoise(session: session, cmdBuffer: cmdBuffer, original: input, denoised: output,
-                                     parameters: parameters, binSpan: binSpan)
+            let refined = try refineDenoise(session: session, cmdBuffer: cmdBuffer, original: input, denoised: output,
+                                            parameters: parameters, binSpan: binSpan)
+            written.append(refined)
+            return refined
         }
         return output
     }
