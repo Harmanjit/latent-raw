@@ -81,8 +81,11 @@ extension Catalog {
     /// efficiency cores, unless the user asked for otherwise).
     /// While `pause` is paused no new file is started; the files under way
     /// finish, and the pass carries on from the next one on Resume.
+    /// `first` names images to make before the rest, in that order (the
+    /// photos a paste just changed, as the grid shows them).
     public func generateMissingThumbnails(
         concurrency: Int = 4,
+        first: [String] = [],
         quality: Double = Thumbnailer.defaultQuality,
         priority: TaskPriority = .utility,
         editedRenderer: (any EditedThumbnailRenderer)? = nil,
@@ -94,8 +97,11 @@ extension Catalog {
         let start = Date()
         var report = ThumbnailReport()
         guard !Task.isCancelled else { return report }
-        let needed = try thumbnailJobs().filter { $0.editStackJSON == nil || editedRenderer != nil }
+        var needed = try thumbnailJobs().filter { $0.editStackJSON == nil || editedRenderer != nil }
         guard !needed.isEmpty else { return report }
+        if !first.isEmpty {
+            needed = Self.ordered(needed, first: first)
+        }
 
         // Absolute paths resolved here, on the actor; the workers get
         // plain values and never touch catalog state.
@@ -179,6 +185,16 @@ extension Catalog {
         }
         report.duration = Date().timeIntervalSince(start)
         return report
+    }
+
+    /// `jobs` with those named in `first` moved to the front, in `first`'s
+    /// order; the others keep theirs.
+    static func ordered(_ jobs: [ThumbnailJob], first: [String]) -> [ThumbnailJob] {
+        var rank: [String: Int] = [:]
+        for (i, relPath) in first.enumerated() where rank[relPath] == nil { rank[relPath] = i }
+        let front = jobs.filter { rank[$0.record.relPath] != nil }
+            .sorted { rank[$0.record.relPath]! < rank[$1.record.relPath]! }
+        return front + jobs.filter { rank[$0.record.relPath] == nil }
     }
 
     /// Synchronous on purpose: GRDB's async write gives up when the task is

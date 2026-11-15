@@ -60,6 +60,32 @@ final class ThumbnailCacheTests: XCTestCase {
         XCTAssertEqual(ThumbnailGenerationSettings().quality.heicQuality, Thumbnailer.defaultQuality)
     }
 
+    func testUrgentPassRunsAtHighCappedAtEight() {
+        let normal = ThumbnailGenerationSettings(priority: .normal)
+        XCTAssertEqual(normal.concurrency(activeProcessors: 10), 4)
+        let urgent = normal.urgent()
+        XCTAssertEqual(urgent.priority, .high)
+        XCTAssertEqual(urgent.priority.taskPriority, .userInitiated)
+        XCTAssertEqual(urgent.concurrency(activeProcessors: 10), 8)
+        XCTAssertEqual(urgent.concurrency(activeProcessors: 16), 8, "capped for a 16 GB Mac")
+        XCTAssertEqual(urgent.concurrency(activeProcessors: 4), 4, "never fewer than Normal")
+        XCTAssertEqual(ThumbnailGenerationSettings(priority: .low).urgent().priority, .high)
+        // Already High: as the user set it, not capped.
+        let high = ThumbnailGenerationSettings(priority: .high)
+        XCTAssertEqual(high.urgent().concurrency(activeProcessors: 16), 14)
+    }
+
+    func testOrderedPutsTheNamedJobsFirstInTheirOrder() {
+        func job(_ relPath: String) -> Catalog.ThumbnailJob {
+            Catalog.ThumbnailJob(record: ImageRecord(relPath: relPath, size: 1, mtime: 0, xxhash: Data(count: 8),
+                                                     captureTime: nil, camera: nil, rating: 0, flag: 0),
+                                 editStackJSON: nil)
+        }
+        let jobs = ["a", "b", "c", "d", "e"].map(job)
+        let ordered = Catalog.ordered(jobs, first: ["d", "x", "b", "d"])
+        XCTAssertEqual(ordered.map(\.record.relPath), ["d", "b", "a", "c", "e"])
+    }
+
     func testQualityChangesTheFileWritten() throws {
         let source = root.appendingPathComponent("Big.JPG")
         try RenderedImageCatalogTests.writePicture(to: source, type: .jpeg, seed: 3, width: 900, height: 600)

@@ -254,6 +254,12 @@ public final class Library: ObservableObject {
     /// Quality and priority of thumbnail passes (Settings › Performance).
     /// Takes effect from the next pass.
     public var thumbnailGeneration = ThumbnailGenerationSettings()
+    /// Photos whose thumbnails someone is waiting for (Paste Settings, a
+    /// preset or a batch job just changed them), in grid order. Passes make
+    /// them first and run urgently (`ThumbnailGenerationSettings.urgent`)
+    /// until one has gone through them; a pass cancelled by a newer one
+    /// hands them on.
+    private var urgentThumbnailRelPaths: [String] = []
     /// How often a pass's progress reaches the status bar, at most.
     static let thumbnailProgressInterval: TimeInterval = 0.1
 
@@ -640,6 +646,7 @@ public final class Library: ObservableObject {
             willReplaceCatalog?()
             if let old = self.catalog, old !== catalog { dropUndo(for: old) }
             thumbnailTask?.cancel()
+            urgentThumbnailRelPaths = []
             setThumbnailsPaused(false)
             // Image ids belong to a catalog: nothing decoded for the old one
             // may be shown, or cached, under the new one's ids. Ids also
@@ -705,8 +712,18 @@ public final class Library: ObservableObject {
         thumbnailTask?.cancel()
     }
 
-    func startThumbnailGeneration() {
+    /// Starts a pass over every stale thumbnail. `urgent` names photos the
+    /// user is waiting to see (their edits just changed in bulk): they go
+    /// first, and the pass runs at High priority (plan #13).
+    func startThumbnailGeneration(urgent: some Collection<String> = [String]()) {
         guard let catalog else { return }
+        if !urgent.isEmpty {
+            let changed = Set(urgent).subtracting(urgentThumbnailRelPaths)
+            // Grid order, so the cells on screen near the selection come
+            // before those far down the list.
+            urgentThumbnailRelPaths += images.lazy.map(\.relPath).filter { changed.contains($0) }
+        }
+        let urgentRelPaths = urgentThumbnailRelPaths
         thumbnailTask?.cancel()
         thumbnailsDone = 0
         thumbnailsTotal = 0
@@ -716,17 +733,27 @@ public final class Library: ObservableObject {
                 let needed = try await catalog.imagesNeedingThumbnails().count
                 // Every hop back checks the catalog is still the open one:
                 // cancelling doesn't stop a generation already under way.
-                await MainActor.run { if self?.catalog === catalog { self?.thumbnailsTotal = needed } }
+                await MainActor.run {
+                    guard let self, self.catalog === catalog else { return }
+                    self.thumbnailsTotal = needed
+                    // Nothing stale: the photos waited for are up to date.
+                    if needed == 0, !urgentRelPaths.isEmpty, !Task.isCancelled {
+                        let done = Set(urgentRelPaths)
+                        self.urgentThumbnailRelPaths.removeAll { done.contains($0) }
+                    }
+                }
                 guard needed > 0 else { return }
                 let renderer = await self?.thumbnailRenderer
                 let pause = self?.thumbnailPause
-                let settings = await self?.thumbnailGeneration ?? ThumbnailGenerationSettings()
+                var settings = await self?.thumbnailGeneration ?? ThumbnailGenerationSettings()
+                if !urgentRelPaths.isEmpty { settings = settings.urgent() }
                 // Every published change redraws the whole main window, so
                 // progress lands at most ten times a second rather than per
                 // file (twice per file before: done and total).
                 let throttle = ProgressThrottle(interval: Library.thumbnailProgressInterval)
                 let report = try await catalog.generateMissingThumbnails(
-                    concurrency: settings.priority.concurrency(),
+                    concurrency: settings.concurrency(),
+                    first: urgentRelPaths,
                     quality: settings.quality.heicQuality,
                     priority: settings.priority.taskPriority,
                     editedRenderer: renderer, pause: pause
@@ -744,8 +771,14 @@ public final class Library: ObservableObject {
                         }
                     }
                 }
+                let finished = !Task.isCancelled
                 await MainActor.run {
                     guard let self, self.catalog === catalog else { return }
+                    // Gone through: the next pass needn't hurry for them.
+                    if finished, !urgentRelPaths.isEmpty {
+                        let done = Set(urgentRelPaths)
+                        self.urgentThumbnailRelPaths.removeAll { done.contains($0) }
+                    }
                     // Files that replaced an older thumbnail replace what the
                     // cache holds; first-time files can't be cached stale.
                     if !report.replacedRelPaths.isEmpty {
@@ -1025,6 +1058,7 @@ public final class Library: ObservableObject {
                                        _ transform: (String?) throws -> String?) async throws -> TransformOutcome {
         guard let catalog else { return TransformOutcome() }
         var outcome = TransformOutcome()
+        var changedRelPaths: [String] = []
         var before: [Int64: StoredEdit?] = [:], after: [Int64: StoredEdit?] = [:]
         defer {
             fileFreshUndo(undoName, count: before.count, in: catalog, undo: .edits(before), redo: .edits(after))
@@ -1054,9 +1088,10 @@ public final class Library: ObservableObject {
                     if next == nil { editedImageIDs.remove(id) } else { editedImageIDs.insert(id) }
                 }
                 outcome.changed += 1
+                changedRelPaths.append(record.relPath)
             }
         }
-        if outcome.changed > 0, catalog === self.catalog { startThumbnailGeneration() }
+        if outcome.changed > 0, catalog === self.catalog { startThumbnailGeneration(urgent: changedRelPaths) }
         return outcome
     }
 
@@ -1075,6 +1110,7 @@ public final class Library: ObservableObject {
                          undoName: String) async throws -> TransformOutcome {
         guard let catalog else { return TransformOutcome() }
         var outcome = TransformOutcome()
+        var changedRelPaths: [String] = []
         var before: [Int64: StoredEdit?] = [:], after: [Int64: StoredEdit?] = [:]
         defer {
             fileFreshUndo(undoName, count: before.count, in: catalog, undo: .edits(before), redo: .edits(after))
@@ -1109,8 +1145,9 @@ public final class Library: ObservableObject {
                 if next == nil { editedImageIDs.remove(id) } else { editedImageIDs.insert(id) }
             }
             outcome.changed += 1
+            changedRelPaths.append(record.relPath)
         }
-        if outcome.changed > 0, catalog === self.catalog { startThumbnailGeneration() }
+        if outcome.changed > 0, catalog === self.catalog { startThumbnailGeneration(urgent: changedRelPaths) }
         return outcome
     }
 
