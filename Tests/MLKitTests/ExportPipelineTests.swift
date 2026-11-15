@@ -137,12 +137,16 @@ final class ExportPipelineTests: XCTestCase {
         let full24 = ExportConcurrency.limit(machine: mac16, sourceMegapixels: 24.3, outputMegapixels: 24.3)
         let full45 = ExportConcurrency.limit(machine: mac16, sourceMegapixels: 45.7, outputMegapixels: 45.7)
         let small24 = ExportConcurrency.limit(machine: mac16, sourceMegapixels: 24.3, outputMegapixels: 2.8)
-        XCTAssertGreaterThanOrEqual(full24, 2, "a 16 GB Mac takes at least the recommended 2")
+        XCTAssertEqual(full24, 3, "a 16 GB Mac takes 3 full-size 24 MP photos (1.6 GB each, measured)")
+        XCTAssertEqual(ExportConcurrency.automatic(limit: full24), 3)
         XCTAssertLessThan(full45, full24, "bigger photos lower the limit")
         XCTAssertGreaterThanOrEqual(small24, full24, "a small file needs less")
         // All in flight together stay within a quarter of the memory.
         let perPhoto = ExportConcurrency.perPhotoBytes(sourceMegapixels: 45.7, outputMegapixels: 45.7)
-        XCTAssertLessThanOrEqual(UInt64(full45) * perPhoto, UInt64(16 << 30) / 4)
+        XCTAssertLessThanOrEqual(UInt64(full45) * perPhoto, UInt64(16 << 30) / 3)
+        XCTAssertLessThanOrEqual(UInt64(full24) * ExportConcurrency.perPhotoBytes(sourceMegapixels: 24.3,
+                                                                                 outputMegapixels: 24.3),
+                                 UInt64(16 << 30) / 3, "within a third of the memory")
 
         let mac8 = ExportConcurrency.Machine(physicalMemory: 8 << 30, gpuWorkingSet: 5_726_623_744, activeCores: 8)
         XCTAssertLessThan(ExportConcurrency.limit(machine: mac8, sourceMegapixels: 24.3, outputMegapixels: 24.3),

@@ -73,7 +73,7 @@ enum ExportPhotosAtOnce {
     static func help(limit: Int) -> String {
         "Your Mac can export up to \(limit) photo\(limit == 1 ? "" : "s") at a time, worked out from its memory, "
             + "its graphics processor and the size of these photos. More at once is faster until the graphics "
-            + "processor is busy all the time; Automatic picks the fastest measured count."
+            + "processor is busy all the time; Automatic picks the count that measured best."
     }
 }
 
