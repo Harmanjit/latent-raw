@@ -165,6 +165,8 @@ final class EditorFixesTests: XCTestCase {
         // As at launch, before the GPU context is built.
         let gpu = model.gpuContext
         model.gpuContext = nil
+        EditorModel.builtSharedGPU = { nil }
+        defer { EditorModel.builtSharedGPU = { GPUContext.sharedIfBuilt } }
         model.open(url: url, catalogImageID: 7)
         XCTAssertNotNil(model.openWhenGPUReady)
         XCTAssertNil(model.catalogImageID)

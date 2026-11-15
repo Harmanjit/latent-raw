@@ -14,6 +14,16 @@ extension EditorModel {
     /// before the full-resolution render starts. A slider drag renders the
     /// binned preview on every tick and never waits on this.
     static let highQualityPreviewDelay: Duration = .milliseconds(400)
+    /// The wait right after a photo opens (plan fix #10): nothing is being
+    /// dragged then, so only long enough for the binned preview to reach
+    /// the screen first. It made "selection to sharp" 400 ms longer.
+    static let highQualityPreviewDelayAfterOpen: Duration = .milliseconds(20)
+
+    /// The wait before the next high-quality preview: short right after an
+    /// open, until an edit or that preview itself.
+    var highQualityPreviewWait: Duration {
+        highQualityPreviewFollowsOpen ? Self.highQualityPreviewDelayAfterOpen : Self.highQualityPreviewDelay
+    }
 
     /// Whether the fitted view should be replaced by a full-resolution
     /// render: View › High Quality Preview is on, this is the main window's
@@ -32,8 +42,9 @@ extension EditorModel {
         HighQualityPreviewJobs.pending[key]?.cancel()
         HighQualityPreviewJobs.pending[key] = nil
         guard wantsHighQualityPreview, let generation = preview?.generation else { return }
+        let wait = highQualityPreviewWait
         HighQualityPreviewJobs.pending[key] = Task { [weak self] in
-            try? await Task.sleep(for: Self.highQualityPreviewDelay)
+            try? await Task.sleep(for: wait)
             guard !Task.isCancelled else { return }
             HighQualityPreviewJobs.pending[key] = nil
             guard let self, self.wantsHighQualityPreview, self.preview?.generation == generation else { return }
@@ -45,6 +56,8 @@ extension EditorModel {
     /// the binned preview, resampled to the size it is shown at.
     func renderHighQualityPreview() {
         guard let session, let pipeline, let current = preview else { return }
+        // From here on, changes wait for things to settle again.
+        highQualityPreviewFollowsOpen = false
         let longEdge = Int((max(sensorSize.width, sensorSize.height) * viewport.zoom).rounded(.up))
         let start = Date()
         do {

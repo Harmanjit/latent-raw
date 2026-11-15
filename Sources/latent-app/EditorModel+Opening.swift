@@ -27,9 +27,19 @@ extension EditorModel {
     /// `userRotation` and `editStackJSON` are the catalog's stored state
     /// for this image, if it came from one; `catalogImageID` lets edits
     /// made here be saved back.
+    ///
+    /// Decodes on the calling (main) thread unless the file is already in
+    /// `decodeCache`; the catalog's opens use the asynchronous
+    /// `open(url:userRotation:catalogImageID:readEdit:isCurrent:)` below,
+    /// which never blocks main on the decode. Kept for Open File…, a file
+    /// opened from Finder, the Compare and Survey panes, and tests, which
+    /// expect the image open on return.
     func open(url: URL, userRotation: Int = 0, catalogImageID: Int64? = nil,
               editStackJSON: String? = nil) {
-        guard let gpu = gpuContext else {
+        // Any open still decoding is older than this one.
+        openGeneration += 1
+        openingPlaceholder = nil
+        guard let gpu = gpuForOpeningNow() else {
             if setupError == nil {
                 // The caller reads this image's history next and finds no
                 // open image to give it to: it is parked and loaded after
@@ -44,13 +54,178 @@ extension EditorModel {
             }
             return
         }
+        let file: RawFile
+        do {
+            file = try decodeCache.decodedFile(for: url) ?? Self.decodeForOpening(url)
+        } catch {
+            failOpen(url: url, error)
+            return
+        }
+        apply(file, url: url, userRotation: userRotation, catalogImageID: catalogImageID,
+              editStackJSON: editStackJSON, gpu: gpu)
+    }
+
+    /// How an asynchronous open ended.
+    enum OpenOutcome: Equatable {
+        /// The photo is open.
+        case opened
+        /// A newer open or a close came first, or the caller's photo is no
+        /// longer wanted (`isCurrent`): nothing changed.
+        case superseded
+        /// The decode or the GPU failed; the editor says so and has closed
+        /// the previous photo.
+        case failed
+        /// `readEdit` threw: nothing was opened, so that the next save
+        /// can't replace the edit that couldn't be read. The caller reports it.
+        case editUnreadable
+    }
+
+    /// Opens a catalog photo without blocking the main thread on its
+    /// decode (plan fixes #7, #9, #17). The decode starts at once on a
+    /// background thread, beside `readEdit` (the stored edit's read) and,
+    /// at launch, the GPU's start; the photo is laid in place on main once
+    /// all three are done. Until then the previous photo stays on screen
+    /// and in the editor, with, if `placeholder` is set (Loupe), the
+    /// camera's embedded JPEG over it (#18).
+    ///
+    /// Latest wins: an open, a synchronous `open` or `closeImage` started
+    /// meanwhile makes this one return `.superseded` without touching
+    /// anything, as does `isCurrent` turning false (the selection moved on
+    /// or another catalog opened). Its decode, if it hasn't begun, is
+    /// dropped by the newer open.
+    func open(url: URL, userRotation: Int = 0, catalogImageID: Int64?,
+              placeholder: Bool = false,
+              readEdit: @MainActor () async throws -> String?,
+              isCurrent: @escaping @MainActor () -> Bool = { true }) async -> OpenOutcome {
+        // Already passed by (a held arrow key): don't disturb the newer
+        // open's decode.
+        guard isCurrent() else { return .superseded }
+        openGeneration += 1
+        let generation = openGeneration
+        let stillWanted: @MainActor () -> Bool = { [weak self] in self?.openGeneration == generation && isCurrent() }
+        openingPlaceholder = nil
+        let statusBefore = status
+        status = "Opening \(url.lastPathComponent)…"
+        let job = decodeCache.jobForOpening(url)
+        // Not for a photo already decoded (a neighbour kept): it opens at once.
+        let placeholderImage = placeholder && !job.isFinished
+            ? Self.startPlaceholder(url: url, userRotation: userRotation) : nil
+        // Set once the photo is in place: a placeholder decoded later than
+        // the raw must not cover the render.
+        let applied = OpenProgress()
+        // An open that ends here without laying its photo in place takes
+        // back what it put up: its "Opening…" status and the camera's JPEG,
+        // unless a newer open has replaced them. A placeholder still
+        // decoding is never shown (`applied.done`). Without this, a photo
+        // filtered out while it decoded left its JPEG over the previous
+        // photo until some later open.
+        let abandon = { [weak self] in
+            applied.done = true
+            guard let self, self.openGeneration == generation else { return }
+            self.openingPlaceholder = nil
+            self.status = statusBefore
+        }
+
+        let editStackJSON: String?
+        do {
+            editStackJSON = try await readEdit()
+        } catch {
+            abandon()
+            return .editUnreadable
+        }
+        guard stillWanted() else { abandon(); return .superseded }
+
+        // The camera's JPEG matches the render's framing only without a
+        // crop or perspective change; with one it would jump, so the
+        // previous photo stays until the render instead.
+        if let placeholderImage, Self.placeholderMatchesFraming(editStackJSON) {
+            Task { [weak self] in
+                guard let image = await placeholderImage.value, let self, stillWanted(), !applied.done else { return }
+                self.openingPlaceholder = image
+            }
+        }
+
+        guard let gpu = await gpuForOpening() else {
+            let failed = stillWanted()
+            abandon()
+            return failed ? .failed : .superseded
+        }
+        guard stillWanted() else { abandon(); return .superseded }
+        let file: RawFile
+        do {
+            file = try await job.value()
+        } catch {
+            guard stillWanted() else { abandon(); return .superseded }
+            applied.done = true
+            failOpen(url: url, error)
+            return .failed
+        }
+        guard stillWanted() else { abandon(); return .superseded }
+        applied.done = true
+        apply(file, url: url, userRotation: userRotation, catalogImageID: catalogImageID,
+              editStackJSON: editStackJSON, gpu: gpu)
+        return hasImage ? .opened : .failed
+    }
+
+    /// Starts decoding `url` for an open about to be asked for from a new
+    /// task. A task begins only once the main thread is free, which at
+    /// launch is after the window's first layout (about 400 ms); the
+    /// decode needn't wait for that. The open picks up the same decode.
+    func startDecoding(_ url: URL) {
+        _ = decodeCache.jobForOpening(url)
+    }
+
+    /// Decodes `urls` (the neighbours of the photo just opened) ahead of
+    /// time, so stepping to one needs no decode. Others kept are dropped
+    /// past the cache's budget.
+    func prefetch(_ urls: [URL]) {
+        decodeCache.prefetch(urls, keeping: sourceURL)
+    }
+
+    /// The GPU context if it can be had now: the model's own, or the shared
+    /// one already built but not yet attached, because the launch task that
+    /// attaches it waits behind the first layout of the window (plan fix #9).
+    func gpuForOpeningNow() -> GPUContext? {
+        if gpuContext == nil, let built = Self.builtSharedGPU() { attachGPU(built) }
+        return gpuContext
+    }
+
+    /// The shared context if its build has ended; tests stand in a launch
+    /// whose build is still running.
+    static var builtSharedGPU: () -> Result<GPUContext, any Error>? = { GPUContext.sharedIfBuilt }
+
+    /// The GPU context, waiting for its build if it is still running.
+    /// nil if it failed (`setupError`).
+    func gpuForOpening() async -> GPUContext? {
+        if let gpu = gpuForOpeningNow() { return gpu }
+        guard setupError == nil else { return nil }
+        do {
+            attachGPU(.success(try await GPUContext.shared()))
+        } catch {
+            attachGPU(.failure(error))
+        }
+        return gpuContext
+    }
+
+    /// The decode or session failed. Nothing of the previous photo may
+    /// outlive a failed open: with its id, history or denoise run still
+    /// here, Undo or a history load would write that photo's edit onto
+    /// this one.
+    private func failOpen(url: URL, _ error: any Error) {
+        closeImage()
+        status = "Could not open: \(error)"
+    }
+
+    /// Lays a decoded photo in place: its session, stored edit, history
+    /// and tools, then one render.
+    private func apply(_ file: RawFile, url: URL, userRotation: Int, catalogImageID: Int64?,
+                       editStackJSON: String?, gpu: GPUContext) {
         resetToolStateForNewImage()
         flushPendingSave()
         // The analysis and the tool belong to the image being left.
         dustImageWillChange()
         status = "Opening \(url.lastPathComponent)…"
         do {
-            let file = try RawFile(path: url.path)
             let newSession = try ImageSession(file: file, gpu: gpu)
             // Only once the image has opened: until then the parameters and
             // history on hand are the previous photo's.
@@ -99,7 +274,12 @@ extension EditorModel {
             }
             pendingSave?.cancel()   // the assignment below must not save
             pendingSave = nil
-            parameters = restored   // triggers rerender via didSet
+            // Its didSet keeps its other work (crop, masks, touch-up) but
+            // not its render: the one below renders once everything is in
+            // place (plan fix #8; it used to render twice).
+            applyingOpenedImage = true
+            parameters = restored
+            applyingOpenedImage = false
             pendingSave?.cancel()
             pendingSave = nil
             joinLinkedPane()   // after the crop is restored: it sets the canvas
@@ -129,8 +309,12 @@ extension EditorModel {
             aiDenoiseReleasedUnderPressure = false
             dustImageDidOpen()
             // An open's own render, never a drag tick however soon after
-            // the one `parameters` just made.
+            // the one `parameters` just made. Nothing is being dragged: the
+            // high-quality preview, if on, follows this render without the
+            // settle delay (plan fix #10).
+            highQualityPreviewFollowsOpen = true
             rerenderAtFullQuality()
+            openingPlaceholder = nil
             regenerateMissingAIMasks()
             regenerateTouchUpMasksIfNeeded()
             regenerateDepthMapIfNeeded()
@@ -138,11 +322,8 @@ extension EditorModel {
             regenerateAIDenoiseIfNeeded()
             ensureFlatFieldGainMap()
         } catch {
-            // Nothing of the previous photo may outlive a failed open: with
-            // its id, history or denoise run still here, Undo or a history
-            // load would write that photo's edit onto this one.
-            closeImage()
-            status = "Could not open: \(error)"
+            applyingOpenedImage = false
+            failOpen(url: url, error)
         }
     }
 
@@ -168,4 +349,10 @@ extension EditorModel {
         straightenBase = nil
         resetDragRender()
     }
+}
+
+/// Whether an asynchronous open has laid its photo in place.
+@MainActor
+private final class OpenProgress {
+    var done = false
 }

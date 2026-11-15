@@ -40,9 +40,10 @@ check "NVIDIA's licence for SegFormer" grep -q "NVIDIA Source Code License" "$RE
 check "the BSD notice for LibRaw's DCB/FBDD code" grep -q "Jacek Gozdz" "$RES/Licences/LibRaw-DCB-FBDD-BSD.txt"
 check "the BSD notice for LibRaw's X3F code" grep -q "Roland Karlsson" "$RES/Licences/LibRaw-X3F-BSD.txt"
 check "the Lensfun CC-BY-SA notice" grep -q "Attribution-ShareAlike 3.0" "$RES/Help/Licences.md"
-# Latent handles no open-documents event, so it must not claim document
-# types Finder would then offer it (see make_app.sh).
-check "no document types claimed" bash -c "! /usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes' '$APP/Contents/Info.plist'"
+# Open With and Dock drops: raw images and folders are claimed, as a
+# Viewer, and AppDelegate handles the request (see make_app.sh).
+check "raw images claimed for Open With" bash -c "/usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:LSItemContentTypes' '$APP/Contents/Info.plist' | grep -q public.camera-raw-image"
+check "folders claimed for Open With" bash -c "/usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:LSItemContentTypes' '$APP/Contents/Info.plist' | grep -q public.folder"
 check "the signature verifies" codesign --verify --deep --strict "$APP"
 
 if [ "$failed" != 0 ]; then

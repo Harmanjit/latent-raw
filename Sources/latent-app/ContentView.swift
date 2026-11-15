@@ -169,7 +169,8 @@ struct ContentView: View {
                                   caption: ImageCaption(record: library.selectedImage)) {
                         ImageViewport(model: model, allowsTools: false, onStep: { _ = perform(.step($0)) },
                                       followsMirrorImageMode: true,
-                                      showsLoupeOverlay: true)
+                                      showsLoupeOverlay: true,
+                                      showsOpeningPlaceholder: true)
                             .overlay(alignment: .bottomTrailing) {
                                 if !fullScreen.isActive { FloatingNavigator(model: model) }
                             }
@@ -330,6 +331,9 @@ struct ContentView: View {
             }
             .motionFollowsAccessibility()
         }
+        // The window closed (Settings can stay open): what Finder asks to
+        // open waits for it, and asks for it to open again.
+        .onDisappear { ExternalOpenRequests.shared.detach() }
         .onAppear {
             LensfunDatabase.warmUp()
             wireEditSaving()
@@ -345,6 +349,10 @@ struct ContentView: View {
             if let gpu = model.gpu {
                 library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu.background)
             }
+            // Files and folders from Finder, the Dock or `open` while the
+            // window shows; one that came while it was closed opens now.
+            // Last, so the launch below takes its own item first.
+            defer { ExternalOpenRequests.shared.attach { openExternal($0) } }
             // Once per launch: the window closed and opened again still has
             // its folder and image, and reopening them would close the image.
             guard !MainWindowModels.shared.openedAtLaunch else { return }
@@ -352,24 +360,40 @@ struct ContentView: View {
             #if DEBUG
             if SnapshotHarness.start(model: model, library: library, perform: perform, exportSheet: $showingExportSheet) { return }
             #endif
-            // Developer convenience: `swift run latent-app <folder-or-file>`
-            // opens it straight away, skipping the dialogs. Defaults
-            // overrides such as `-AppleLanguages (en)` are skipped.
-            if let path = LaunchArguments.paths(from: Array(CommandLine.arguments.dropFirst())).first {
-                var isDir: ObjCBool = false
-                FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
-                if isDir.boolValue {
-                    openFolder(URL(fileURLWithPath: path, isDirectory: true))
-                } else {
-                    model.open(url: URL(fileURLWithPath: path))
-                    mode = .develop
-                }
+            // `swift run latent-app <folder-or-file>`, `Latent file.NEF`,
+            // Finder's Open With or a drop on the Dock icon: opened straight
+            // away, skipping the dialogs. Defaults overrides such as
+            // `-AppleLanguages (en)` are skipped.
+            if let target = ExternalOpenRequests.shared.takeLaunchTarget(
+                arguments: Array(CommandLine.arguments.dropFirst())) {
+                openExternal(target)
             } else {
                 // Off the main thread: resolving the bookmark and looking
                 // for its volume ask the file system there, and a share that
                 // has stopped answering would hold the window until it times out.
                 Task { await reopenLastFolder() }
             }
+        }
+    }
+
+    /// A folder or file Latent was asked to open from outside: a folder
+    /// becomes the catalog, a file opens in Develop on its own, as Open
+    /// File… opens one (the switch keeps it rather than loading the grid
+    /// selection over it).
+    private func openExternal(_ target: LaunchArguments.Target) {
+        switch target {
+        case .folder(let url):
+            openFolder(url)
+        case .file(let url):
+            if mode != .develop {
+                keepOpenedFileOnModeChange = true
+                mode = .develop
+            }
+            // Decoded off the main thread: at launch, beside the GPU's
+            // start and the window's first layout (plan fix #9), so the
+            // decode starts now rather than when the task first runs.
+            model.startDecoding(url)
+            Task { _ = await model.open(url: url, catalogImageID: nil, readEdit: { nil }) }
         }
     }
 
@@ -664,25 +688,45 @@ struct ContentView: View {
         guard let url = library.fileURL(for: record) else { return }
         let catalog = library.catalog
         library.selectedImageID = record.id
+        model.startDecoding(url)
         Task {
-            let stack: String?
-            do {
-                stack = try await library.editStack(for: record)
-            } catch {
+            // The decode runs off the main thread, beside the edit's read;
+            // the previous photo stays on screen (in Loupe, the camera's
+            // JPEG over it) until both are done.
+            var editReadError: (any Error)?
+            let outcome = await model.open(
+                url: url, userRotation: record.userRotation, catalogImageID: record.id,
+                placeholder: mode == .loupe,
+                readEdit: {
+                    do {
+                        return try await library.editStack(for: record)
+                    } catch {
+                        editReadError = error
+                        throw error
+                    }
+                },
+                // Another folder may have opened meanwhile. The record and
+                // its id belong to the old catalog; opened now, its edits
+                // would be saved onto whatever photo has that id in the new
+                // one. And the selection may have moved on: a held arrow key
+                // starts a load per image passed; only the last one opens.
+                isCurrent: {
+                    Self.loadIsCurrent(recordID: record.id, selectedImageID: library.selectedImageID,
+                                       catalogUnchanged: library.catalog === catalog)
+                })
+            switch outcome {
+            case .opened:
+                break
+            case .editUnreadable:
                 // Don't open at defaults over an edit we couldn't read: the
                 // next save would replace it. Say so and stop.
-                model.reportFailure("Reading the edit for \(record.fileName)", error)
+                if let editReadError { model.reportFailure("Reading the edit for \(record.fileName)", editReadError) }
+                return
+            case .superseded, .failed:
                 return
             }
-            // Another folder may have opened meanwhile. The record and its
-            // id belong to the old catalog; opened now, its edits would be
-            // saved onto whatever photo has that id in the new one. And the
-            // selection may have moved on: a held arrow key starts a load
-            // per image passed, and each would decode its image in turn.
-            guard Self.loadIsCurrent(recordID: record.id, selectedImageID: library.selectedImageID,
-                                     catalogUnchanged: library.catalog === catalog) else { return }
-            model.open(url: url, userRotation: record.userRotation,
-                       catalogImageID: record.id, editStackJSON: stack)
+            // Stepping on to a neighbour then needs no decode.
+            model.prefetch(neighbourURLs(of: record))
             // History and snapshots follow, from the catalog.
             do {
                 let steps = try await library.history(for: record)
@@ -695,6 +739,14 @@ struct ContentView: View {
                 model.reportFailure("Reading history for \(record.fileName)", error)
             }
         }
+    }
+
+    /// The files beside `record` in the grid's order, the next first: the
+    /// photos an arrow key opens next.
+    private func neighbourURLs(of record: ImageRecord) -> [URL] {
+        let list = library.visibleImages
+        guard let index = list.firstIndex(where: { $0.id == record.id }) else { return [] }
+        return [index + 1, index - 1].filter(list.indices.contains).compactMap { library.fileURL(for: list[$0]) }
     }
 
     /// Whether a load whose edit read has just finished should still open

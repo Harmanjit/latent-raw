@@ -42,7 +42,12 @@ final class EditorModel: ObservableObject {
                 // panel's parts read a mask that isn't there.
                 if let i = selectedLocalIndex, i >= parameters.locals.count { selectedLocalIndex = nil }
                 if parameters.crop != oldValue.crop { canvasDidChange() }
-                rerender()
+                // An open renders once, itself, when everything is in place.
+                if !applyingOpenedImage {
+                    // An edit: the high-quality preview waits for it to settle.
+                    highQualityPreviewFollowsOpen = false
+                    rerender()
+                }
                 scheduleSave()
                 touchUpParametersDidChange(from: oldValue)
                 modelMaskParametersDidChange(from: oldValue)
@@ -603,6 +608,25 @@ final class EditorModel: ObservableObject {
 
     /// An image asked for before the GPU was ready, opened when it is.
     var openWhenGPUReady: (() -> Void)?
+    /// Numbers the opens and closes. An open whose decode finishes after a
+    /// newer open or a close began finds the number moved on and drops its
+    /// result, so a stale photo never replaces a newer one
+    /// (EditorModel+Opening.swift).
+    var openGeneration = 0
+    /// The open photo's decode and its neighbours' (RawDecodeCache.swift).
+    let decodeCache = RawDecodeCache()
+    /// Set while `open` lays the new photo's settings in place: their
+    /// didSet must not render, because `open` renders once itself when
+    /// everything is in place (plan fix #8).
+    var applyingOpenedImage = false
+    /// Set by an open, cleared by an edit or the first high-quality
+    /// preview: right after an open nothing is being dragged, so the
+    /// high-quality preview need not wait for things to settle (plan
+    /// fix #10, EditorModel+HighQualityPreview.swift).
+    var highQualityPreviewFollowsOpen = false
+    /// The camera's embedded JPEG of a photo being opened, shown in Loupe
+    /// until the decode and the first render are done (plan fix #18).
+    @Published var openingPlaceholder: OpeningPlaceholder?
     /// The catalog id that deferred open is for, and that image's stored
     /// history and snapshots if their read arrived before the GPU did:
     /// they are loaded once the open has happened
@@ -632,7 +656,10 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    private func attachGPU(_ built: Result<GPUContext, any Error>) {
+    /// Takes the shared context (or its failure) once; later calls, from
+    /// the launch task after an open already took it, do nothing.
+    func attachGPU(_ built: Result<GPUContext, any Error>) {
+        guard gpuContext == nil, setupError == nil else { return }
         objectWillChange.send()
         switch built {
         case .success(let gpu):
