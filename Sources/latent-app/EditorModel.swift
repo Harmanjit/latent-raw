@@ -577,6 +577,9 @@ final class EditorModel: ObservableObject {
     var fitMode = true
 
     var pendingRender: Task<Void, Never>?
+    /// The render that shows a brush mask redrawn off the main thread,
+    /// unless an edit renders first (EditorModel+Rendering.swift).
+    var brushRedrawRender: Task<Void, Never>?
 
     /// What the last renders used, so a viewport change can decide whether
     /// anything actually needs re-rendering.
@@ -675,6 +678,11 @@ final class EditorModel: ObservableObject {
 
     var lastScopeMeasurement: ContinuousClock.Instant?
     var pendingScopeMeasurement: Task<Void, Never>?
+    /// "Selected Mask Only" scopes measured off the main thread
+    /// (EditorModel+MaskedScopes.swift): the one in flight, and a count
+    /// every measurement bumps so an overtaken result is dropped.
+    var maskedScopeTask: Task<Void, Never>?
+    var maskedScopeGeneration = 0
 
     // MARK: - Compare: linked view
 

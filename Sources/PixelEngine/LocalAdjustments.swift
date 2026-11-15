@@ -478,42 +478,79 @@ final class BrushMaskRasterizer {
     var bytesPerRow: Int { context.bytesPerRow }
     var data: UnsafeMutableRawPointer? { context.data }
 
-    /// Brings the bitmap up to date with `strokes`. Returns true if
-    /// anything was drawn (so the texture needs re-uploading).
-    func update(strokes: [BrushStroke], guide: BrushGuide? = nil) -> Bool {
+    /// How `update` would bring the bitmap up to date with `strokes`:
+    /// nothing to do, draw only what was added, or redraw everything.
+    enum Plan: Equatable { case upToDate, appendPoints, appendStroke, redraw }
+
+    func plan(strokes: [BrushStroke], guide: BrushGuide? = nil) -> Plan {
         let fingerprints = strokes.map(StrokeFingerprint.init)
         let usesGuide = strokes.contains(where: \.isAutoMasked)
         let guideChanged = usesGuide && guide?.id != drawnGuide
-        self.guide = guide
-        if usesGuide { drawnGuide = guide?.id }
         let extendsDrawn = !guideChanged && !strokes.isEmpty
             && fingerprints == drawnFingerprint
             && strokes.last!.points.count >= drawnPointsInLast
         let extendsWithNewStroke = !guideChanged && strokes.count == drawnFingerprint.count + 1
             && Array(fingerprints.dropLast()) == drawnFingerprint
             && (drawnFingerprint.isEmpty || drawnPointsInLast == strokeBefore(strokes).count)
-
         if extendsDrawn {
+            return strokes[strokes.count - 1].points.count == drawnPointsInLast ? .upToDate : .appendPoints
+        }
+        return extendsWithNewStroke ? .appendStroke : .redraw
+    }
+
+    /// Brings the bitmap up to date with `strokes`. Returns true if
+    /// anything was drawn (so the texture needs re-uploading).
+    func update(strokes: [BrushStroke], guide: BrushGuide? = nil) -> Bool {
+        let plan = plan(strokes: strokes, guide: guide)
+        noteGuide(guide, for: strokes)
+        switch plan {
+        case .upToDate:
+            return false
+        case .appendPoints:
             let last = strokes[strokes.count - 1]
-            let newPoints = last.points[drawnPointsInLast...]
-            if newPoints.isEmpty { return false }
-            draw(last, points: Array(newPoints))
+            draw(last, points: Array(last.points[drawnPointsInLast...]))
             drawnPointsInLast = last.points.count
             return true
-        }
-        if extendsWithNewStroke {
+        case .appendStroke:
             let last = strokes[strokes.count - 1]
             draw(last, points: last.points)
-            drawnFingerprint = fingerprints
+            drawnFingerprint = strokes.map(StrokeFingerprint.init)
             drawnPointsInLast = last.points.count
             return true
+        case .redraw:
+            // Start over.
+            context.setBlendMode(.normal)
+            context.setFillColor(gray: 0, alpha: 1)
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            for stroke in strokes { draw(stroke, points: stroke.points) }
+            drawnFingerprint = strokes.map(StrokeFingerprint.init)
+            drawnPointsInLast = strokes.last?.points.count ?? 0
+            return true
         }
-        // Anything else: start over.
-        context.setBlendMode(.normal)
-        context.setFillColor(gray: 0, alpha: 1)
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        for stroke in strokes { draw(stroke, points: stroke.points) }
-        drawnFingerprint = fingerprints
+    }
+
+    private func noteGuide(_ guide: BrushGuide?, for strokes: [BrushStroke]) {
+        self.guide = guide
+        if strokes.contains(where: \.isAutoMasked) { drawnGuide = guide?.id }
+    }
+
+    /// The bitmap's bytes, row by row (`bytesPerRow` apart), for drawing
+    /// somewhere else and handing over (`adopt`).
+    func pixels() -> [UInt8] {
+        guard let data else { return [] }
+        return [UInt8](UnsafeRawBufferPointer(start: data, count: bytesPerRow * height))
+    }
+
+    /// Takes over a bitmap drawn elsewhere (`BrushRasterJob`) from
+    /// `strokes` and `guide`, exactly as if `update` had redrawn it here:
+    /// the same pixels, and later strokes draw on incrementally. False,
+    /// changing nothing, if the bitmap is not this one's shape.
+    func adopt(_ raster: BrushRaster, strokes: [BrushStroke], guide: BrushGuide?) -> Bool {
+        guard raster.width == width, raster.height == height, raster.bytesPerRow == bytesPerRow,
+              raster.bytes.count == bytesPerRow * height, let data else { return false }
+        raster.bytes.withUnsafeBytes { data.copyMemory(from: $0.baseAddress!, byteCount: $0.count) }
+        noteGuide(guide, for: strokes)
+        drawnFingerprint = strokes.map(StrokeFingerprint.init)
         drawnPointsInLast = strokes.last?.points.count ?? 0
         return true
     }
@@ -559,6 +596,48 @@ final class BrushMaskRasterizer {
     }
 }
 
+/// A brush bitmap drawn away from the render (`BrushRasterJob`): the
+/// pixels of a `BrushMaskRasterizer` of the same size.
+struct BrushRaster: Sendable {
+    let width: Int, height: Int, bytesPerRow: Int
+    let bytes: [UInt8]
+}
+
+/// Redrawing one brush element's whole bitmap, which costs milliseconds
+/// (every dab of every stroke), handed off by an interactive render
+/// (`BrushMaskSet.sync(..., deferRedraws:)`) so it runs off the main
+/// thread. Painting appends dabs and never needs one; undo, redo and a
+/// feather or flow change that rewrites the strokes do.
+public struct BrushRasterJob: Sendable {
+    /// The `BrushMaskSet` that asked, and which of its requests this is.
+    let setID: UUID
+    let token: UInt64
+    let elementID: UUID
+    let strokes: [BrushStroke]
+    let guide: BrushGuide?
+    let sensorWidth: Int, sensorHeight: Int
+
+    /// Draws the bitmap exactly as `BrushMaskRasterizer.update` redraws
+    /// one. Safe on any thread: it touches nothing but its own bitmap.
+    public func run() -> BrushRasterResult? {
+        guard let raster = BrushMaskRasterizer(sensorWidth: sensorWidth, sensorHeight: sensorHeight) else { return nil }
+        _ = raster.update(strokes: strokes, guide: guide)
+        let pixels = BrushRaster(width: raster.width, height: raster.height, bytesPerRow: raster.bytesPerRow,
+                                 bytes: raster.pixels())
+        return BrushRasterResult(job: self, raster: pixels)
+    }
+}
+
+/// A finished `BrushRasterJob`, for `ImageSession.applyBrushRaster`.
+public struct BrushRasterResult: Sendable {
+    let job: BrushRasterJob
+    let raster: BrushRaster
+}
+
+/// Where a `BrushMaskSet` hands its redraws: runs the job somewhere and
+/// passes the result back to the set on the thread that owns it.
+typealias BrushRasterScheduler = @Sendable (BrushRasterJob) -> Void
+
 /// Owns the mask texture array for one image and keeps its slices in
 /// step with the brush and model-mask elements of the current locals: a
 /// local's own shape and each shape component get a slice of their own.
@@ -567,8 +646,30 @@ final class BrushMaskRasterizer {
 final class BrushMaskSet {
     private(set) var texture: MTLTexture
     private let device: MTLDevice
-    private var rasterizers: [UUID: (slice: Int, raster: BrushMaskRasterizer)] = [:]
+    private var rasterizers: [UUID: BrushSlot] = [:]
     private let sensorWidth: Int, sensorHeight: Int
+    private let id = UUID()
+    private var nextToken: UInt64 = 0
+    /// Where the last deferring sync sent its redraws, for starting the
+    /// next one when a result arrives (`apply`).
+    private var scheduler: BrushRasterScheduler?
+
+    /// One brush element's slice and bitmap, and any redraw running for it
+    /// off the render.
+    final class BrushSlot {
+        let slice: Int
+        let raster: BrushMaskRasterizer
+        /// The strokes (and guide) the latest deferring sync wanted while
+        /// the bitmap lags behind; nil while it is current.
+        var wanted: (strokes: [BrushStroke], guide: BrushGuide?)?
+        /// The one redraw whose result is still welcome; any other that
+        /// arrives is stale and dropped.
+        var inFlight: UInt64?
+        /// The bitmap changed without reaching the texture (a redraw was
+        /// adopted); the next sync that leaves it current uploads it.
+        var needsUpload = false
+        init(slice: Int, raster: BrushMaskRasterizer) { self.slice = slice; self.raster = raster }
+    }
 
     /// Model masks already uploaded: element id -> (slice, the bitmap as
     /// made, the feather and edge it was refined with).
@@ -614,7 +715,18 @@ final class BrushMaskSet {
     /// element id -> slice. `aiMasks` supplies the pixels for model
     /// elements, by element id; one without pixels yet gets no slice
     /// (and masks nothing).
-    func sync(locals: [LocalAdjustment], aiMasks: [UUID: MaskBitmap], guide: BrushGuide? = nil) -> [UUID: Int32] {
+    ///
+    /// With `deferRedraws` (interactive renders only), a brush element
+    /// that already has a bitmap and would have to redraw all of it keeps
+    /// its slice as it is for this render and the redraw goes to the
+    /// scheduler; `apply` takes the result, and the next sync uploads it.
+    /// Only the latest wanted strokes are ever uploaded: a result for
+    /// strokes since replaced is never shown. Without it (export, High
+    /// Quality Preview, every render outside the editor) every slice is
+    /// brought up to date here, as always.
+    func sync(locals: [LocalAdjustment], aiMasks: [UUID: MaskBitmap], guide: BrushGuide? = nil,
+              deferRedraws scheduler: BrushRasterScheduler? = nil) -> [UUID: Int32] {
+        if let scheduler { self.scheduler = scheduler }
         let elements = locals.flatMap(\.maskElements).filter { $0.shape.usesMaskSlice }
         // Room for every element: grow the array, starting the slices
         // over (the rasterizers redraw and the model masks upload again).
@@ -640,17 +752,36 @@ final class BrushMaskSet {
         for element in elements {
             switch element.shape {
             case .brush(let strokes):
-                let entry: (slice: Int, raster: BrushMaskRasterizer)
+                let entry: BrushSlot
+                var isNew = false
                 if let existing = rasterizers[element.id] {
                     entry = existing
                 } else {
                     guard let slice = freeSlice(),
                           let raster = BrushMaskRasterizer(sensorWidth: sensorWidth, sensorHeight: sensorHeight)
                     else { continue }
-                    entry = (slice, raster)
+                    entry = BrushSlot(slice: slice, raster: raster)
                     rasterizers[element.id] = entry
+                    isNew = true
                 }
-                let drew = entry.raster.update(strokes: strokes, guide: guide)
+                assignment[element.id] = Int32(entry.slice)
+                // A slice with nothing in it yet is drawn now: showing it
+                // empty for a moment would flash the adjustment off.
+                if let scheduler, !isNew, entry.raster.plan(strokes: strokes, guide: guide) == .redraw {
+                    deferRedraw(entry, elementID: element.id, strokes: strokes, guide: guide, scheduler: scheduler)
+                    continue
+                }
+                entry.wanted = nil
+                // A deferring render leaves this slice current, so the
+                // render showing it is up to date: a redraw still running
+                // is no longer needed. A render that does not defer (the
+                // magnifier, masked scopes, export) only fills its own
+                // texture, while the editor's preview may still show the
+                // old pixels an earlier deferring render kept: the running
+                // redraw stays welcome, and its landing (`apply`) then asks
+                // the editor for the render that shows this slice.
+                if scheduler != nil { entry.inFlight = nil }
+                let drew = entry.raster.update(strokes: strokes, guide: guide) || entry.needsUpload
                 let refineKey = MaskEdgeRefineKey(element.refine, guide: guide)
                 if drew || refinedWith[element.id] != refineKey, let bytes = entry.raster.data {
                     if refineKey != nil, let guide, let refined = entry.raster.bitmap()?.edgeRefined(element.refine, guide: guide) {
@@ -661,8 +792,8 @@ final class BrushMaskSet {
                                         bytesPerRow: entry.raster.bytesPerRow, bytesPerImage: 0)
                     }
                     refinedWith[element.id] = refineKey
+                    entry.needsUpload = false
                 }
-                assignment[element.id] = Int32(entry.slice)
 
             case .ai, .prompted:
                 guard let bitmap = aiMasks[element.id] else { continue }
@@ -691,6 +822,68 @@ final class BrushMaskSet {
         }
         return assignment
     }
+
+    /// Notes that `entry` should show `strokes` and starts a redraw for
+    /// them unless one for exactly these is already running; with one for
+    /// older strokes running, the new one starts when it lands (`apply`).
+    private func deferRedraw(_ entry: BrushSlot, elementID: UUID, strokes: [BrushStroke], guide: BrushGuide?,
+                             scheduler: BrushRasterScheduler) {
+        if let wanted = entry.wanted, wanted.strokes == strokes, wanted.guide?.id == guide?.id,
+           entry.inFlight != nil { return }
+        // A redraw running with nothing wanted only stands for a slice a
+        // render that does not defer brought current (see `sync`): its
+        // bitmap is older than that, so start a fresh one, whose landing
+        // also asks for the render.
+        let runningIsWanted = entry.inFlight != nil && entry.wanted != nil
+        entry.wanted = (strokes, guide)
+        if !runningIsWanted { startRedraw(entry, elementID: elementID, scheduler: scheduler) }
+    }
+
+    private func startRedraw(_ entry: BrushSlot, elementID: UUID, scheduler: BrushRasterScheduler) {
+        guard let wanted = entry.wanted else { return }
+        nextToken &+= 1
+        entry.inFlight = nextToken
+        scheduler(BrushRasterJob(setID: id, token: nextToken, elementID: elementID, strokes: wanted.strokes,
+                                 guide: wanted.guide, sensorWidth: sensorWidth, sensorHeight: sensorHeight))
+    }
+
+    /// Takes a finished redraw. True when the caller should render again:
+    /// the bitmap can now be brought to the wanted strokes without another
+    /// redraw, so the next sync uploads it, or a render that does not
+    /// defer already brought the slice current while the caller's last
+    /// render still shows the old pixels. A result that is no longer
+    /// welcome (a newer render brought the slice up to date itself, the
+    /// element is gone, the set was replaced) changes nothing.
+    func apply(_ result: BrushRasterResult) -> Bool {
+        let job = result.job
+        guard job.setID == id, let entry = rasterizers[job.elementID], entry.inFlight == job.token else { return false }
+        entry.inFlight = nil
+        // A render that does not defer already brought the slice current
+        // (and uploaded it) while this ran, but the editor's preview still
+        // shows the pixels the deferring render kept: nothing to adopt,
+        // only a render to ask for.
+        guard entry.wanted != nil else { return true }
+        // Even a redraw for strokes since replaced is a full, consistent
+        // bitmap to continue from; it is only uploaded once current.
+        guard entry.raster.adopt(result.raster, strokes: job.strokes, guide: job.guide) else {
+            entry.wanted = nil
+            return false
+        }
+        entry.needsUpload = true
+        guard let wanted = entry.wanted else { return true }
+        if wanted.strokes == job.strokes, wanted.guide?.id == job.guide?.id {
+            entry.wanted = nil
+            return true
+        }
+        // The strokes moved on while it ran: catch up by appending if that
+        // is enough, else redraw again for the latest.
+        if entry.raster.plan(strokes: wanted.strokes, guide: wanted.guide) != .redraw { return true }
+        if let scheduler { startRedraw(entry, elementID: job.elementID, scheduler: scheduler) }
+        return false
+    }
+
+    /// Whether a redraw is running or wanted for any element, for tests.
+    var hasPendingRedraws: Bool { rasterizers.values.contains { $0.wanted != nil || $0.inFlight != nil } }
 
     /// Writes a mask bitmap of the slices' size into `slice`.
     private func upload(_ bitmap: MaskBitmap, slice: Int) {
