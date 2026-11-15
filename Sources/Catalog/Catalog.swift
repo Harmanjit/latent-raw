@@ -20,6 +20,9 @@ public actor Catalog {
     /// started while another runs lists only what that one left undone.
     var thumbnailPassRunning = false
     var thumbnailPassWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Pictures handed to the thumbnail pass: previews a reconcile already
+    /// read, edits rendered by the open editor (plan #28, #29).
+    public nonisolated let thumbnailHandoff = ThumbnailHandoff()
 
     public static let containerName = "_latent"
     /// The container name before the app was renamed (September 2026).

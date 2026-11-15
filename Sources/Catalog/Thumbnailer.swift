@@ -79,8 +79,14 @@ public enum Thumbnailer {
         }
         let raw = try RawFile(path: source.path, metadataOnly: true)
         guard let jpeg = raw.embeddedJPEGPreview() else { throw ThumbnailError.noEmbeddedPreview }
-        let image = try decodeDownscaled(jpeg, orientation: raw.summary.orientation)
-        try writeJPEG(image, to: destination, quality: quality)
+        try makeFromEmbeddedPreview(jpeg, orientation: raw.summary.orientation, to: destination, quality: quality)
+    }
+
+    /// The same from a raw's embedded JPEG already in hand (a reconcile
+    /// read it; `ThumbnailHandoff`). `orientation` is LibRaw's `flip`.
+    public static func makeFromEmbeddedPreview(_ jpeg: Data, orientation: Int, to destination: URL,
+                                               quality: Double = defaultQuality) throws {
+        try writeJPEG(try decodeDownscaled(jpeg, orientation: orientation), to: destination, quality: quality)
     }
 
     /// Decodes `jpeg` at no more than `size` px on the long edge, then

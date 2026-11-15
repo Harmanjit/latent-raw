@@ -469,6 +469,11 @@ extension Catalog {
         let url = fileURL(forRelPath: file.relPath)
         let raw = try RawFile(path: url.path, metadataOnly: true)
         let s = raw.summary
+        // The embedded JPEG came over XPC with the metadata; the thumbnail
+        // pass takes it from here instead of fetching it again (plan #29).
+        if !RenderedImageFormat.handles(path: url.path), let preview = raw.embeddedJPEGPreview() {
+            thumbnailHandoff.offerPreview(preview, orientation: s.orientation, relPath: file.relPath, hash: hash)
+        }
         // TODO(Photo Merge): a merge result copied in from Finder arrives
         // without its sidecar, but the DNG carries the same latent:Merge
         // block in its embedded XMP packet (tag 700). Once RawCore hands
