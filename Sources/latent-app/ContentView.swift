@@ -1890,102 +1890,6 @@ struct ContentView: View {
                     disclosureLabel("Presence")
                 }
 
-                DisclosureGroup(isExpanded: $cropExpanded) {
-                    cropSection.padding(.top, 8)
-                } label: {
-                    HStack {
-                        disclosureLabel("Crop & Straighten")
-                        if model.cropToolActive { activeToolBadge }
-                    }
-                }
-
-                DisclosureGroup(isExpanded: $healExpanded) {
-                    healSection.padding(.top, 8)
-                } label: {
-                    HStack {
-                        disclosureLabel("Spot Removal")
-                        if model.healToolActive || model.redEyeToolActive { activeToolBadge }
-                    }
-                }
-
-                DisclosureGroup(isExpanded: $dustExpanded) {
-                    DustSection(model: model, fromDustMap: { presentRemoveDust(inMemory: true) }).padding(.top, 8)
-                } label: {
-                    HStack {
-                        disclosureLabel("Sensor Dust")
-                        if model.dustToolActive { activeToolBadge }
-                    }
-                }
-                .id(Self.sensorDustGroup)
-
-                DisclosureGroup(isExpanded: $touchUpExpanded) {
-                    TouchUpSection(model: model).padding(.top, 8)
-                } label: {
-                    HStack {
-                        disclosureLabel("Touch-up")
-                        if model.touchUpToolActive { activeToolBadge }
-                    }
-                }
-                .id(Self.touchUpGroup)
-
-                EmptyView()
-                // Rebuilding clipped sensor channels means nothing for a
-                // JPEG or TIFF, whose clipping was settled when it was made.
-                if !model.isRenderedImage {
-                    DisclosureGroup {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HighlightMethodPicker(model: model)
-                            sliderRow(title: "Recovery",
-                                       value: $model.parameters.highlightRecovery,
-                                       range: 0...1, format: "%.2f", defaultValue: 1.0)
-                            sliderRow(title: "Threshold",
-                                       value: $model.parameters.highlightThreshold,
-                                       range: 0.5...1.0, format: "%.2f", defaultValue: 0.85)
-                        }
-                        .padding(.top, 8)
-                    } label: {
-                        disclosureLabel("Highlight Reconstruction")
-                    }
-                }
-
-                DisclosureGroup {
-                    PresetsPanel(model: model, onApply: { applyPresetToSelection($0) }, onApplyMode: applyPreset)
-                        .padding(.top, 8)
-                } label: {
-                    disclosureLabel("Presets & Clipboard")
-                }
-
-                DisclosureGroup {
-                    VersionsPanel(library: library, onOpen: { record in
-                        model.flushPendingSave()
-                        if let id = record.id { library.setSelection([id], primary: id) }
-                        load(record)
-                    }, onNewCopy: { _ = perform(.createVirtualCopy) },
-                       onNewBlankCopy: { _ = perform(.history(.newBlankCopy)) })
-                        .padding(.top, 8)
-                } label: {
-                    disclosureLabel("Versions")
-                }
-
-                DisclosureGroup {
-                    LocalAdjustmentsPanel(model: model)
-                        .padding(.top, 8)
-                } label: {
-                    disclosureLabel("Local Adjustments")
-                }
-
-                DisclosureGroup {
-                    LensBlurSection(model: model).padding(.top, 8)
-                } label: {
-                    disclosureLabel("Lens Blur")
-                }
-
-                DisclosureGroup {
-                    DistractionRemovalSection(model: model).padding(.top, 8)
-                } label: {
-                    disclosureLabel("Distraction Removal")
-                }
-
                 DisclosureGroup {
                     ToneCurveControls(model: model)
                         .padding(.top, 8)
@@ -2013,24 +1917,10 @@ struct ContentView: View {
                 ColourSections(model: model)
 
                 DisclosureGroup {
-                    LensCorrectionsPanel(model: model)
-                        .padding(.top, 8)
-                } label: {
-                    HStack { disclosureLabel("Lens Corrections"); PanelPresetsMenu(model: model, groups: [.lens], panel: "Lens Corrections") }
-                }
-
-                DisclosureGroup {
                     DetailPanel(model: model)
                         .padding(.top, 8)
                 } label: {
                     HStack { disclosureLabel("Detail"); PanelPresetsMenu(model: model, groups: [.detail], panel: "Detail") }
-                }
-
-                DisclosureGroup {
-                    EffectsPanel(model: model)
-                        .padding(.top, 8)
-                } label: {
-                    HStack { disclosureLabel("Effects"); PanelPresetsMenu(model: model, groups: [.effects], panel: "Effects") }
                 }
 
                 DisclosureGroup {
@@ -2040,11 +1930,119 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
+                    LensCorrectionsPanel(model: model)
+                        .padding(.top, 8)
+                } label: {
+                    HStack { disclosureLabel("Lens Corrections"); PanelPresetsMenu(model: model, groups: [.lens], panel: "Lens Corrections") }
+                }
+
+                // Rebuilding clipped sensor channels means nothing for a
+                // JPEG or TIFF, whose clipping was settled when it was made.
+                if !model.isRenderedImage {
+                    DisclosureGroup {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HighlightMethodPicker(model: model)
+                            sliderRow(title: "Recovery",
+                                       value: $model.parameters.highlightRecovery,
+                                       range: 0...1, format: "%.2f", defaultValue: 1.0)
+                            sliderRow(title: "Threshold",
+                                       value: $model.parameters.highlightThreshold,
+                                       range: 0.5...1.0, format: "%.2f", defaultValue: 0.85)
+                        }
+                        .padding(.top, 8)
+                    } label: {
+                        disclosureLabel("Highlight Reconstruction")
+                    }
+                }
+
+                DisclosureGroup {
+                    EffectsPanel(model: model)
+                        .padding(.top, 8)
+                } label: {
+                    HStack { disclosureLabel("Effects"); PanelPresetsMenu(model: model, groups: [.effects], panel: "Effects") }
+                }
+
+                DisclosureGroup(isExpanded: $cropExpanded) {
+                    cropSection.padding(.top, 8)
+                } label: {
+                    HStack {
+                        disclosureLabel("Crop & Straighten")
+                        if model.cropToolActive { activeToolBadge }
+                    }
+                }
+
+                DisclosureGroup {
+                    LocalAdjustmentsPanel(model: model)
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Local Adjustments")
+                }
+
+                DisclosureGroup(isExpanded: $healExpanded) {
+                    healSection.padding(.top, 8)
+                } label: {
+                    HStack {
+                        disclosureLabel("Spot Removal")
+                        if model.healToolActive || model.redEyeToolActive { activeToolBadge }
+                    }
+                }
+
+                DisclosureGroup {
+                    DistractionRemovalSection(model: model).padding(.top, 8)
+                } label: {
+                    disclosureLabel("Distraction Removal")
+                }
+
+                DisclosureGroup(isExpanded: $dustExpanded) {
+                    DustSection(model: model, fromDustMap: { presentRemoveDust(inMemory: true) }).padding(.top, 8)
+                } label: {
+                    HStack {
+                        disclosureLabel("Sensor Dust")
+                        if model.dustToolActive { activeToolBadge }
+                    }
+                }
+                .id(Self.sensorDustGroup)
+
+                DisclosureGroup(isExpanded: $touchUpExpanded) {
+                    TouchUpSection(model: model).padding(.top, 8)
+                } label: {
+                    HStack {
+                        disclosureLabel("Touch-up")
+                        if model.touchUpToolActive { activeToolBadge }
+                    }
+                }
+                .id(Self.touchUpGroup)
+
+                DisclosureGroup {
+                    LensBlurSection(model: model).padding(.top, 8)
+                } label: {
+                    disclosureLabel("Lens Blur")
+                }
+
+                DisclosureGroup {
+                    PresetsPanel(model: model, onApply: { applyPresetToSelection($0) }, onApplyMode: applyPreset)
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Presets & Clipboard")
+                }
+
+                DisclosureGroup {
+                    VersionsPanel(library: library, onOpen: { record in
+                        model.flushPendingSave()
+                        if let id = record.id { library.setSelection([id], primary: id) }
+                        load(record)
+                    }, onNewCopy: { _ = perform(.createVirtualCopy) },
+                       onNewBlankCopy: { _ = perform(.history(.newBlankCopy)) })
+                        .padding(.top, 8)
+                } label: {
+                    disclosureLabel("Versions")
+                }
+
+                DisclosureGroup {
                     SoftProofPanel(model: model).padding(.top, 8)
                 } label: {
                     disclosureLabel("Soft Proof")
                 }
-
                 HStack {
                     Button("Previous") { _ = perform(.pasteFromPrevious) }
                         .disabled(!model.hasImage
