@@ -59,6 +59,7 @@ These are the default keys. Settings › Keyboard changes any of them, gives key
 | `\` | Before / after |
 | ⇧Y | Develop: Before and After side by side, then split, then one above the other, then split across, then one image again |
 | ⌥⇧⌘←, ⌥⇧⌘→, ⌥⇧⌘↑ | Develop: copy the After's settings to the Before, the Before's to the After (undoable), or swap them |
+| ⌃⌥←, ⌃⌥→ | Develop, comparing snapshots (History & Snapshots › Compare…): the previous or next snapshot in the right pane |
 | ⇧R | Develop: Reference view, a reference photo beside the one you edit (drag one in from the filmstrip) |
 | ⌥⌘O | Loupe and Develop: show or hide the loupe overlay (grid, guides, layout image; View › Loupe Overlay) |
 | ⌘U | Auto adjust |

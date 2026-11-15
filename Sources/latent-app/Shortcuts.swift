@@ -152,6 +152,9 @@ enum Shortcuts {
         Shortcut(.view(.copyAfterToBefore), .leftArrow, [.option, .shift, .command]),
         Shortcut(.view(.copyBeforeToAfter), .rightArrow, [.option, .shift, .command]),
         Shortcut(.view(.swapBeforeAfter), .upArrow, [.option, .shift, .command]),
+        // Comparing two snapshots: the right pane steps through them.
+        Shortcut(.view(.stepComparison(-1)), .leftArrow, [.control, .option], in: .develop),
+        Shortcut(.view(.stepComparison(1)), .rightArrow, [.control, .option], in: .develop),
         Shortcut(.autoAdjust, "u", .command),
         // Lightroom's key.
         Shortcut(.matchTotalExposures, "m", [.option, .shift, .command]),
@@ -372,6 +375,7 @@ extension Shortcuts {
             ShortcutPageRow([.beforeAfter], "Before / after"),
             ShortcutPageRow([.view(.cycleBeforeAfter)], "Develop: Before and After side by side, then split, then one above the other, then split across, then one image again"),
             ShortcutPageRow([.view(.copyAfterToBefore), .view(.copyBeforeToAfter), .view(.swapBeforeAfter)], "Develop: copy the After's settings to the Before, the Before's to the After (undoable), or swap them"),
+            ShortcutPageRow([.view(.stepComparison(-1)), .view(.stepComparison(1))], "Develop, comparing snapshots (History & Snapshots › Compare…): the previous or next snapshot in the right pane"),
             ShortcutPageRow([.view(.referenceView)], "Develop: Reference view, a reference photo beside the one you edit (drag one in from the filmstrip)"),
             ShortcutPageRow([.view(.toggleOverlay)], "Loupe and Develop: show or hide the loupe overlay (grid, guides, layout image; View › Loupe Overlay)"),
             ShortcutPageRow([.autoAdjust], "Auto adjust"),
