@@ -117,6 +117,31 @@ final class RenderQueueTests: XCTestCase {
                           "the binned preview, not the high-quality one")
     }
 
+    /// A High Quality Preview request and a settle waiting behind the same
+    /// pass: with no draft on screen the settle renders nothing, so the
+    /// high-quality pass still runs instead of being dropped.
+    func testHighQualityPreviewIsNotDroppedByASettleThatRendersNothing() async throws {
+        let model = try await openModel()
+        let settings = ViewingSettings.shared
+        let wasOn = settings.highQualityPreview
+        defer { settings.highQualityPreview = wasOn }
+        settings.highQualityPreview = true
+        settings.setPrimaryEditor(model)
+
+        model.parameters.exposureEV = 0.2
+        XCTAssertTrue(model.renderInFlight)
+        XCTAssertFalse(model.dragRender.previewIsDraft, "a single edit is not a drag's draft")
+        model.settleDragRender()
+        model.renderHighQualityPreview()
+        XCTAssertTrue(model.renderQueue.pending.settle)
+        XCTAssertNotNil(model.renderQueue.pending.highQuality)
+        await model.renderSettled()
+        let longEdge = Int((max(model.sensorSize.width, model.sensorSize.height) * model.viewport.zoom).rounded(.up))
+        let shown = try XCTUnwrap(model.preview)
+        XCTAssertEqual(max(shown.texture.width, shown.texture.height), longEdge, "the high-quality layer")
+        XCTAssertTrue(model.renderReport.hasPrefix("high quality"), model.renderReport)
+    }
+
     /// A photo change doesn't wait for the last photo's render.
     func testAnotherPhotoRendersWithoutWaitingForTheLast() async throws {
         let model = try await openModel()

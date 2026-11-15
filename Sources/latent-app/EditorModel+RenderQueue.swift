@@ -36,8 +36,10 @@ final class EditorRenderQueue {
         /// A zoom, pan or resize: re-render what the view now needs.
         var viewport = false
         /// The high-quality preview, for the preview generation it was
-        /// queued for. Dropped when anything else is waiting: that changes
-        /// the preview, and its completion queues a new one.
+        /// queued for. Dropped when an edit, a view change or a settle
+        /// that renders is waiting: that changes the preview, and its
+        /// completion queues a new one. A settle with no draft to replace
+        /// renders nothing, so the high-quality pass goes ahead.
         var highQuality: UInt64?
 
         var isEmpty: Bool { edit == nil && !settle && !viewport && highQuality == nil }
@@ -141,7 +143,7 @@ extension EditorModel {
         if work.viewport {
             encodeViewportPass(into: &outcome)
         }
-        if let generation = work.highQuality, work.edit == nil, !work.settle, !work.viewport {
+        if let generation = work.highQuality, work.edit == nil, !work.viewport, !outcome.schedulesHighQuality {
             encodeHighQualityPass(generation: generation, into: &outcome)
         }
         guard let submission = session.takeDeferredSubmission() else {
