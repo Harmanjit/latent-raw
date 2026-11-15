@@ -258,7 +258,7 @@ struct MaskRangeComponentControls: View {
                 HStack(spacing: 6) {
                     Button(model.maskTool == .colourSample ? "Sampling…" : "Sample Colour") { model.maskTool = .colourSample }
                         .disabled(model.maskTool == .colourSample)
-                        .help("Click the image to pick a colour; each click adds one, up to five")
+                        .help("Click the image to pick a colour; each click adds one, up to five. Option-click takes away the nearest.")
                     Button("Clear") { model.clearColourSamples() }
                         .disabled(range.samples.isEmpty)
                         .help("Forget the picked colours")
@@ -272,7 +272,7 @@ struct MaskRangeComponentControls: View {
                 }
                 .controlSize(.small)
                 Text(range.samples.isEmpty ? "Click the colour to select on the image."
-                     : "\(range.samples.count) colour\(range.samples.count == 1 ? "" : "s") picked.")
+                     : "\(range.samples.count) colour\(range.samples.count == 1 ? "" : "s") picked. Option-click removes the nearest.")
                     .font(.caption2).foregroundStyle(.secondary)
                 LocalSliderRow(title: "Refine", value: binding(\.refine, in: range), range: 0...1, format: "%.2f",
                                defaultValue: 0.5, help: "Higher selects colours further from the samples")

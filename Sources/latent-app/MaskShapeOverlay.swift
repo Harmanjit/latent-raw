@@ -18,6 +18,17 @@ struct MaskShapeOverlay: View {
                     context.stroke(path, with: .color(.black.opacity(0.5)), style: StrokeStyle(lineWidth: 3, dash: style.dash))
                     context.stroke(path, with: .color(.white), style: style)
                 }
+                // The eyedropper's samples while it is armed: a ring with
+                // a dot, numbered in the order they were taken.
+                for (n, sample) in model.maskSamplePoints.enumerated() {
+                    let s = point(sample, scale: scale)
+                    let ring = CGRect(x: s.x - 5, y: s.y - 5, width: 10, height: 10)
+                    context.stroke(Path(ellipseIn: ring), with: .color(.black.opacity(0.6)), lineWidth: 3.5)
+                    context.stroke(Path(ellipseIn: ring), with: .color(.white), lineWidth: 1.5)
+                    context.fill(Path(ellipseIn: CGRect(x: s.x - 1.5, y: s.y - 1.5, width: 3, height: 3)), with: .color(.white))
+                    context.draw(Text("\(n + 1)").font(.caption2.bold()).foregroundStyle(.white),
+                                 at: CGPoint(x: s.x + 9, y: s.y - 9))
+                }
                 if let box = model.maskDragBox {
                     let a = point(SIMD2(Float(box.minX), Float(box.minY)), scale: scale)
                     let b = point(SIMD2(Float(box.maxX), Float(box.maxY)), scale: scale)
@@ -113,10 +124,11 @@ struct MaskShapeOverlay: View {
 
 extension EditorModel {
     /// Whether the outline overlay has anything to draw: a radial or
-    /// gradient is selected with its tool armed or the overlay on, or a
-    /// box is being dragged.
+    /// gradient is selected with its tool armed or the overlay on, a box
+    /// is being dragged, or an armed eyedropper has sample points to show.
     var showsMaskShapeOverlay: Bool {
         if maskDragBox != nil { return true }
+        if !maskSamplePoints.isEmpty, !cropToolActive { return true }
         guard let element = activeMaskElement, !cropToolActive else { return false }
         switch element.shape {
         case .radial, .linear: return maskToolActive || showMaskOverlay

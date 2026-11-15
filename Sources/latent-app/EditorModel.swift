@@ -465,6 +465,9 @@ final class EditorModel: ObservableObject {
     /// The value a selected Luminance or Channel Range reads under the
     /// pointer, for the readout beside its range; nil off the image.
     @Published var maskRangeProbe: Float?
+    /// Multi-sample Pick Range and Colour Range sample points, drawn while
+    /// the eyedropper is armed (EditorModel+MaskSampling.swift).
+    @Published var maskSampling = MaskSamplingState()
     /// Show Channel: the selected range component's input drawn as a grey.
     @Published var showMaskChannel = false {
         didSet { if showMaskChannel != oldValue { rerender() } }

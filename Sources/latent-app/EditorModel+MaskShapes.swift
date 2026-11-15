@@ -144,7 +144,11 @@ extension EditorModel {
         return local.luminanceRange != nil ? (nil, nil) : nil
     }
 
-    func beginRangeSample(at p: SIMD2<Float>) {
+    /// `mode`: a plain press replaces the samples (and puts the tool away
+    /// when it ends, as before), Shift adds a sample, Option takes away
+    /// the nearest (EditorModel+MaskSampling.swift).
+    func beginRangeSample(at p: SIMD2<Float>, mode: MaskSampleMode = .replace) {
+        maskSampling.pressMode = mode
         isDraggingMask = true
         lastDab = p
         maskDragBox = CGRect(x: CGFloat(p.x), y: CGFloat(p.y), width: 0, height: 0)
@@ -153,15 +157,46 @@ extension EditorModel {
     /// A click sets Low and High 10% either side of the value under it; a
     /// dragged rectangle sets them to the least and most inside it. The
     /// fades stay as they were. The eyedropper puts itself away.
+    /// With Shift or Option held at the press the samples are added to or
+    /// taken from instead, and the eyedropper stays armed.
     func finishRangeSample(_ box: CGRect) {
+        let mode = maskSampling.pressMode
+        maskSampling.pressMode = .replace
+        if mode != .replace {
+            finishRangeSample(box, mode: mode)
+            return
+        }
         defer { maskTool = .none }
-        guard let target = selectedRangeTarget, let i = selectedLocalIndex, i < parameters.locals.count else { return }
+        guard selectedRangeTarget != nil, let i = selectedLocalIndex, i < parameters.locals.count,
+              let values = rangeSampleValues(in: box) else { return }
+        let picked = values.count == 1
+        setSelectedRangeBand { band in
+            if picked {
+                var around = MaskRangeBand.around(values[0], feather: band.featherLow)
+                around.featherHigh = band.featherHigh
+                return around.sanitised()
+            }
+            return MaskRangeBand(low: values.min() ?? band.low, high: values.max() ?? band.high,
+                                 featherLow: band.featherLow, featherHigh: band.featherHigh).sanitised()
+        }
+        if let band = selectedRangeBand {
+            recordReplacingRangeSample(values: values, box: box, band: band)
+            status = String(format: "Range set from the %@: %.2f to %.2f", picked ? "picked spot" : "rectangle",
+                            band.low, band.high)
+        }
+    }
+
+    /// The values the selected range reads for a press: the one under a
+    /// click, or a grid of them inside a dragged rectangle. Nil when
+    /// nothing can be read there.
+    func rangeSampleValues(in box: CGRect) -> [Float]? {
+        guard let target = selectedRangeTarget else { return nil }
         let inputs = { (w: SIMD3<Float>) in
             MaskRangeInputs(working: w, contrast: self.parameters.contrast, greyPoint: self.parameters.greyPoint,
                             toneRanges: self.parameters.toneRanges).value(target.channel)
         }
         let centre = SIMD2(Float(box.midX), Float(box.midY))
-        guard let w = workingColour(at: centre) else { return }
+        guard let w = workingColour(at: centre) else { return nil }
         var values = [inputs(w)]
         if box.width > 0.003 || box.height > 0.003, let cache = colourSampleCache, cache.width > 0, cache.height > 0 {
             let x0 = max(Int(box.minX * CGFloat(cache.width)), 0), x1 = min(Int(box.maxX * CGFloat(cache.width)), cache.width - 1)
@@ -177,20 +212,7 @@ extension EditorModel {
                 }
             }
         }
-        let picked = values.count == 1
-        setSelectedRangeBand { band in
-            if picked {
-                var around = MaskRangeBand.around(values[0], feather: band.featherLow)
-                around.featherHigh = band.featherHigh
-                return around.sanitised()
-            }
-            return MaskRangeBand(low: values.min() ?? band.low, high: values.max() ?? band.high,
-                                 featherLow: band.featherLow, featherHigh: band.featherHigh).sanitised()
-        }
-        if let band = selectedRangeBand {
-            status = String(format: "Range set from the %@: %.2f to %.2f", picked ? "picked spot" : "rectangle",
-                            band.low, band.high)
-        }
+        return values
     }
 
     /// The selected range's band (component or the mask's own range).

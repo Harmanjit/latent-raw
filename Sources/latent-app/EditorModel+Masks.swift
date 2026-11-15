@@ -455,11 +455,13 @@ extension EditorModel {
         }
         let p = sensorNormalized(screen)
         if maskTool == .colourSample {
-            sampleColour(at: p)
+            // Option takes away the nearest sample; a click (with or
+            // without Shift) adds one, as it always has.
+            if promptModifierExclude { removeColourSample(near: p) } else { sampleColour(at: p) }
             return
         }
         if maskTool == .lumaSample {
-            beginRangeSample(at: p)
+            beginRangeSample(at: p, mode: MaskSampleMode.current(optionHeld: promptModifierExclude))
             return
         }
         if maskTool == .box {

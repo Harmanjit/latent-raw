@@ -232,9 +232,12 @@ extension EditorModel {
               let working = workingColour(at: point) else { return }
         let sample = ColourRange.sample(working: working, contrast: parameters.contrast,
                                         greyPoint: parameters.greyPoint, toneRanges: parameters.toneRanges)
-        if range.samples.count >= ColourRange.maximumSamples { range.samples.removeLast() }
+        let countBefore = range.samples.count
+        let droppedLast = countBefore >= ColourRange.maximumSamples
+        if droppedLast { range.samples.removeLast() }
         range.samples.append(sample)
         parameters.locals[i].components[c].source = .colour(range)
+        recordColourSamplePosition(point, component: id, countBefore: countBefore, droppedLast: droppedLast)
         status = String(format: "Colour sample %d: hue %.0f°, saturation %.0f%%",
                         range.samples.count, sample.hue, sample.saturation * 100)
     }
