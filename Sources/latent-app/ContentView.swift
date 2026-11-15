@@ -2037,7 +2037,7 @@ struct ContentView: View {
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 8) {
                         HSLTargetRow(model: model)
-                        HSLPanel(hsl: $model.parameters.hsl, onIsolate: { model.hueIsolationBand = $0 })
+                        HSLPanel(hsl: model.parameterBinding(\.hsl), onIsolate: { model.hueIsolationBand = $0 })
                             .disabled(!model.hasImage)
                     }
                     .padding(.top, 8)
@@ -2077,10 +2077,10 @@ struct ContentView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             HighlightMethodPicker(model: model)
                             sliderRow(title: "Recovery",
-                                       value: $model.parameters.highlightRecovery,
+                                       value: model.parameterBinding(\.highlightRecovery),
                                        range: 0...1, format: "%.2f", defaultValue: 1.0)
                             sliderRow(title: "Threshold",
-                                       value: $model.parameters.highlightThreshold,
+                                       value: model.parameterBinding(\.highlightThreshold),
                                        range: 0.5...1.0, format: "%.2f", defaultValue: 0.85)
                         }
                         }
@@ -2269,7 +2269,7 @@ struct ContentView: View {
                     WhiteBalancePresetRow(model: model)
                     temperatureRow
                     sliderRow(title: "Tint",
-                               value: $model.parameters.whiteBalance.tint,
+                               value: model.parameterBinding(\.whiteBalance.tint),
                                range: ColorKit.WhiteBalance.tintRange,
                                format: "%+.0f", defaultValue: model.asShotWhiteBalance.tint)
                     HStack {
@@ -2298,16 +2298,16 @@ struct ContentView: View {
                         Spacer()
                     }
                     sliderRow(title: "Exposure",
-                               value: $model.parameters.exposureEV,
+                               value: model.parameterBinding(\.exposureEV),
                                range: -5...5, format: "%+.2f EV")
                     ExposureToolsRow(model: model)
                     sliderRow(title: "Contrast",
-                               value: $model.parameters.contrast,
+                               value: model.parameterBinding(\.contrast),
                                range: 0.5...3.0, format: "%.2f", defaultValue: 1.5)
                     sliderRow(title: "Mid Grey",
-                               value: $model.parameters.greyPoint,
+                               value: model.parameterBinding(\.greyPoint),
                                range: 0.05...0.5, format: "%.3f", defaultValue: 0.1845)
-                    ToneRangeSliders(ranges: $model.parameters.toneRanges, auto: { model.autoToneSlider($0) })
+                    ToneRangeSliders(ranges: model.parameterBinding(\.toneRanges), auto: { model.autoToneSlider($0) })
                         .disabled(!model.hasImage)
 
                     // Only offered on screens that can actually show more
@@ -2337,11 +2337,11 @@ struct ContentView: View {
     /// for on most images, so this group starts open.
     private var presenceSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sliderRow(title: "Texture", value: $model.parameters.texture, range: -1...1, format: "%+.2f")
-            sliderRow(title: "Clarity", value: $model.parameters.clarity, range: -1...1, format: "%+.2f")
-            sliderRow(title: "Dehaze", value: $model.parameters.dehaze, range: -1...1, format: "%+.2f")
-            sliderRow(title: "Vibrance", value: $model.parameters.vibrance, range: -1...1, format: "%+.2f")
-            sliderRow(title: "Saturation", value: $model.parameters.colour.saturation, range: -1...1, format: "%+.2f")
+            sliderRow(title: "Texture", value: model.parameterBinding(\.texture), range: -1...1, format: "%+.2f")
+            sliderRow(title: "Clarity", value: model.parameterBinding(\.clarity), range: -1...1, format: "%+.2f")
+            sliderRow(title: "Dehaze", value: model.parameterBinding(\.dehaze), range: -1...1, format: "%+.2f")
+            sliderRow(title: "Vibrance", value: model.parameterBinding(\.vibrance), range: -1...1, format: "%+.2f")
+            sliderRow(title: "Saturation", value: model.parameterBinding(\.colour.saturation), range: -1...1, format: "%+.2f")
                 .help("Every colour equally: -1 is black and white. Double-click to reset.")
         }
     }

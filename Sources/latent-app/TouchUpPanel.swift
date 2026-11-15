@@ -46,15 +46,15 @@ struct TouchUpSection: View {
                 faceRow(index: index, face: face)
             }
 
-            row("Skin Smoothing", value: $model.parameters.touchUp.skinSmoothing,
+            row("Skin Smoothing", value: model.parameterBinding(\.touchUp.skinSmoothing),
                 hint: "Softens the skin's fine texture on the enabled faces")
-            row("Teeth Whitening", value: $model.parameters.touchUp.teethWhitening,
+            row("Teeth Whitening", value: model.parameterBinding(\.touchUp.teethWhitening),
                 hint: "Takes the yellow out of the teeth")
-            row("Brighten Eyes", value: $model.parameters.touchUp.eyes,
+            row("Brighten Eyes", value: model.parameterBinding(\.touchUp.eyes),
                 hint: "Lifts the whites and the irises")
 
             HStack(spacing: 8) {
-                Toggle("Remove blemishes", isOn: $model.parameters.touchUp.blemishRemoval)
+                Toggle("Remove blemishes", isOn: model.parameterBinding(\.touchUp.blemishRemoval))
                     .help("Heal the blemishes found; off keeps the list without healing")
                     .accessibilityHint("Heals the blemishes Find Blemishes found")
                 Button {

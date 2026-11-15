@@ -48,7 +48,7 @@ struct HighlightMethodPicker: View {
     @Bindable var model: EditorModel
 
     var body: some View {
-        Picker("Method", selection: $model.parameters.highlightMethod) {
+        Picker("Method", selection: model.parameterBinding(\.highlightMethod)) {
             ForEach(HighlightReconstructionMethod.allCases, id: \.self) { method in
                 Text(method.displayName).tag(method)
             }
@@ -68,7 +68,7 @@ struct EmbeddedDNGCorrectionsToggle: View {
     var body: some View {
         if let description = model.embeddedDNGCorrectionsDescription {
             VStack(alignment: .leading, spacing: 4) {
-                Toggle("Apply embedded DNG corrections", isOn: $model.parameters.embeddedDNGCorrections)
+                Toggle("Apply embedded DNG corrections", isOn: model.parameterBinding(\.embeddedDNGCorrections))
                     .help("Applies the corrections the camera wrote into this DNG (\(description)). Its lens model replaces the profile while on; a flat-field reference, if the photo has one, replaces its shading map.")
                 Text("This DNG corrects \(description).")
                     .font(.caption2).foregroundStyle(.secondary)

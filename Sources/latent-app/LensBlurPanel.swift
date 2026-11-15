@@ -43,7 +43,7 @@ struct LensBlurSection: View {
             .controlSize(.small)
             .disabled(!blur.isActive)
 
-            row("Boost Highlights", value: $model.parameters.lensBlur.boost,
+            row("Boost Highlights", value: model.parameterBinding(\.lensBlur.boost),
                 hint: "Brightens highlights in the blur so points of light open into visible discs")
                 .disabled(!blur.isActive)
             }

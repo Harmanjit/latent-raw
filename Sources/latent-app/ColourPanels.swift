@@ -46,8 +46,8 @@ struct ColourSections: View {
         DisclosureGroup(isExpanded: $calibrationExpanded) {
             VStack(alignment: .leading, spacing: 10) {
                 ProcessVersionMenu(model: model)
-                CalibrationPanel(calibration: $model.parameters.colour.calibration)
-                CalibrationExtrasPanel(colour: $model.parameters.colour)
+                CalibrationPanel(calibration: model.parameterBinding(\.colour.calibration))
+                CalibrationExtrasPanel(colour: model.parameterBinding(\.colour))
             }
             .disabled(!model.hasImage)
             .padding(.top, 8)
@@ -56,7 +56,7 @@ struct ColourSections: View {
         }
 
         DisclosureGroup(isExpanded: $channelMixerExpanded) {
-            ChannelMixerPanel(mixer: $model.parameters.colour.channelMixer)
+            ChannelMixerPanel(mixer: model.parameterBinding(\.colour.channelMixer))
                 .disabled(!model.hasImage)
                 .padding(.top, 8)
         } label: {

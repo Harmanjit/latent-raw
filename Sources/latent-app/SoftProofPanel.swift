@@ -165,10 +165,10 @@ struct HDRLimitSlider: View {
             HStack {
                 Text("HDR Limit").font(.subheadline).accessibilityHidden(true)
                 Spacer()
-                SliderValueField(value: $model.parameters.hdrLimitStops, in: HDRLimit.range,
+                SliderValueField(value: model.parameterBinding(\.hdrLimitStops), in: HDRLimit.range,
                                  format: SliderValueFormat(printf: format), label: "HDR Limit")
             }
-            ResettableSlider(value: $model.parameters.hdrLimitStops, in: HDRLimit.range, label: "HDR Limit",
+            ResettableSlider(value: model.parameterBinding(\.hdrLimitStops), in: HDRLimit.range, label: "HDR Limit",
                              format: SliderValueFormat(printf: format)) {
                 model.parameters.hdrLimitStops = HDRLimit.defaultStops
             }

@@ -40,6 +40,11 @@ final class EditorModel {
         didSet {
             parametersSubject.send(parameters)
             if parameters != oldValue {
+                // Each view reading one parameter (`parameter(_:)`) is
+                // told when that one changed, not on every edit.
+                for field in parameterFields.values where field.changed(oldValue, parameters) {
+                    field.revision.count &+= 1
+                }
                 // Undo, Reset All or a paste can take the selected mask
                 // away; a selection past the end would have the mask
                 // panel's parts read a mask that isn't there.
@@ -795,6 +800,43 @@ final class EditorModel {
     var snapshotsPublisher: AnyPublisher<[EditSnapshot], Never> { snapshotsSubject.eraseToAnyPublisher() }
     var beforeOverridePublisher: AnyPublisher<BeforeOverride?, Never> { beforeOverrideSubject.eraseToAnyPublisher() }
 
+    // MARK: - One parameter at a time (plan fix #23)
+
+    /// Observation tracks `parameters` as a whole, so a view reading any
+    /// one of them is redrawn on every slider tick. These are counted per
+    /// parameter instead, by key path, created as views first ask.
+    @ObservationIgnored private var parameterFields: [AnyKeyPath: ParameterField] = [:]
+
+    private struct ParameterField {
+        let revision: ParameterRevision
+        let changed: (EditParameters, EditParameters) -> Bool
+    }
+
+    /// `parameters[keyPath: path]`, observed on its own: a view whose body
+    /// reads it is redrawn when this value changes, not on every edit.
+    /// Not for a path through an array subscript: the path is kept and
+    /// compared on every later edit, when that element may be gone.
+    func parameter<Value: Equatable>(_ path: KeyPath<EditParameters, Value>) -> Value {
+        let field: ParameterField
+        if let known = parameterFields[path] {
+            field = known
+        } else {
+            field = ParameterField(revision: ParameterRevision(),
+                                   changed: { $0[keyPath: path] != $1[keyPath: path] })
+            parameterFields[path] = field
+        }
+        _ = field.revision.count
+        // The storage itself, which observation doesn't see.
+        return _parameters[keyPath: path]
+    }
+
+    /// A binding to one parameter that reads it with `parameter(_:)`, for
+    /// a slider or field that should redraw only when its own value moves.
+    /// Writing goes through `parameters`, as `model.parameterBinding(\.x)` does.
+    func parameterBinding<Value: Equatable>(_ path: WritableKeyPath<EditParameters, Value>) -> Binding<Value> {
+        Binding(get: { self.parameter(path) }, set: { self.parameters[keyPath: path] = $0 })
+    }
+
     // MARK: - Errors
 
     /// Lets other parts of the app put a message in the status bar.
@@ -868,4 +910,10 @@ final class EditorModel {
             if showingBefore && beforeOverride != oldValue { rerender() }
         }
     }
+}
+
+/// How many times one edit parameter has changed (`EditorModel.parameter(_:)`).
+@MainActor @Observable
+final class ParameterRevision {
+    var count = 0
 }

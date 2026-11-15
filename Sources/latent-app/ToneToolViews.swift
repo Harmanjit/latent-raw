@@ -159,14 +159,14 @@ struct ToneCurveControls: View {
             switch model.curveEditorMode {
             case .point:
                 presetRow
-                ToneCurvePanel(master: $model.parameters.toneCurve, channels: $model.parameters.channelCurves)
+                ToneCurvePanel(master: model.parameterBinding(\.toneCurve), channels: model.parameterBinding(\.channelCurves))
                 if !model.parameters.parametricCurve.isNeutral {
                     Text("The region curve is also on; it applies before these points.")
                         .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             case .parametric:
-                ParametricCurvePanel(curve: $model.parameters.parametricCurve)
+                ParametricCurvePanel(curve: model.parameterBinding(\.parametricCurve))
             }
 
             refineSaturationRow
@@ -204,10 +204,10 @@ struct ToneCurveControls: View {
             HStack {
                 Text("Refine Saturation").font(.subheadline).accessibilityHidden(true)
                 Spacer()
-                SliderValueField(value: $model.parameters.curveSaturation, in: -1...1, format: format,
+                SliderValueField(value: model.parameterBinding(\.curveSaturation), in: -1...1, format: format,
                                  label: "Refine Saturation")
             }
-            ResettableSlider(value: $model.parameters.curveSaturation, in: -1...1, label: "Refine Saturation",
+            ResettableSlider(value: model.parameterBinding(\.curveSaturation), in: -1...1, label: "Refine Saturation",
                              format: format) { model.parameters.curveSaturation = 0 }
                 .help("How much colour the curve's contrast adds: left keeps only its brightness change, right strengthens it. Double-click to reset")
         }

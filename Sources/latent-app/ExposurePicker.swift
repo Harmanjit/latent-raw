@@ -82,7 +82,7 @@ struct ExposureToolsRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 DisclosureGroup(isExpanded: $advancedExpanded) {
-                    ColourSliderRow(title: "Black Offset", value: $model.parameters.blackOffset,
+                    ColourSliderRow(title: "Black Offset", value: model.parameterBinding(\.blackOffset),
                                     range: EditParameters.blackOffsetRange,
                                     format: SliderValueFormat(decimals: 3, signed: true),
                                     help: "Subtracts a little light everywhere, in linear light, right after Exposure: above zero deepens the blacks, below zero lifts them. Blacks still works as before on top.")
