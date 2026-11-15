@@ -26,6 +26,7 @@ final class RawDecodeCacheTests: XCTestCase {
         Self.hold?.open()
         Self.hold = nil
         RawDecodeJob.decode = { try EditorModel.decodeForOpening($0) }
+        RawDecodeJob.bytesOf = { $0.sensorPlane?.allocationLength ?? $0.linearPlane?.allocationLength ?? 0 }
     }
 
     private func holdDecodes() -> DecodeGate {
@@ -128,5 +129,64 @@ final class RawDecodeCacheTests: XCTestCase {
         // urls[0] may have begun before the second prefetch; urls[1] can't have.
         XCTAssertEqual(decodes.count(urls[1]), 0)
         XCTAssertFalse(cache.keptPaths.contains(urls[1].standardizedFileURL.path))
+    }
+
+    /// Waits for the main-actor trims that follow finished decodes.
+    private func settle(_ cache: RawDecodeCache) async throws {
+        for job in cache.keptJobs { _ = try? await job.value() }
+        for _ in 0..<20 { await Task.yield(); try await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    /// Large decodes (a folder of linear merges): a neighbour whose
+    /// estimated size doesn't fit beside the open photo isn't decoded.
+    func testANeighbourThatWouldPassTheByteBudgetIsNotDecoded() async throws {
+        RawDecodeJob.bytesOf = { _ in 100 }
+        let cache = RawDecodeCache(maxEntries: 3, maxBytes: 250)
+        cache.estimatedBytes = { _, _ in 100 }
+        let urls = try files(3)
+        _ = try await cache.jobForOpening(urls[0]).value()
+        cache.prefetch([urls[1], urls[2]], keeping: urls[0])
+        try await settle(cache)
+        XCTAssertLessThanOrEqual(cache.totalBytes, 250)
+        XCTAssertEqual(cache.count, 2)
+        XCTAssertNotNil(cache.decodedFile(for: urls[0]), "the open photo is kept")
+        XCTAssertEqual(decodes.count(urls[2]), 0, "the second neighbour didn't fit and wasn't decoded")
+    }
+
+    /// Neighbours guessed small but decoding large are dropped once their
+    /// real size is known, so the cache doesn't sit past the budget.
+    func testNeighboursGuessedLowAreTrimmedOnceDecoded() async throws {
+        RawDecodeJob.bytesOf = { _ in 100 }
+        let cache = RawDecodeCache(maxEntries: 3, maxBytes: 250)
+        cache.estimatedBytes = { _, _ in 10 }
+        let urls = try files(3)
+        _ = try await cache.jobForOpening(urls[0]).value()
+        cache.prefetch([urls[1], urls[2]], keeping: urls[0])
+        XCTAssertEqual(cache.count, 3, "both fit by their guesses")
+        try await settle(cache)
+        XCTAssertLessThanOrEqual(cache.totalBytes, 250)
+        XCTAssertEqual(cache.count, 2)
+        XCTAssertNotNil(cache.decodedFile(for: urls[0]), "the open photo is kept")
+    }
+
+    /// The open photo alone may be past the budget; then no neighbour is
+    /// decoded, and neighbours kept from before are dropped.
+    func testAnOpenPhotoPastTheBudgetKeepsNoNeighbours() async throws {
+        RawDecodeJob.bytesOf = { _ in 100 }
+        let cache = RawDecodeCache(maxEntries: 3, maxBytes: 250)
+        cache.estimatedBytes = { _, _ in 100 }
+        let urls = try files(4)
+        _ = try await cache.jobForOpening(urls[0]).value()
+        cache.prefetch([urls[1]], keeping: urls[0])
+        try await settle(cache)
+        XCTAssertEqual(cache.count, 2)
+        // Stepping on to a far larger photo.
+        RawDecodeJob.bytesOf = { _ in 400 }
+        cache.estimatedBytes = { _, _ in 400 }
+        _ = try await cache.jobForOpening(urls[3]).value()
+        cache.prefetch([urls[2]], keeping: urls[3])
+        try await settle(cache)
+        XCTAssertEqual(cache.keptPaths, [urls[3].standardizedFileURL.path])
+        XCTAssertEqual(decodes.count(urls[2]), 0)
     }
 }

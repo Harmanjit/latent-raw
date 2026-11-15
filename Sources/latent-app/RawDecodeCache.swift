@@ -21,6 +21,12 @@ final class RawDecodeJob: @unchecked Sendable {
 
     let url: URL
     let lane: Lane
+    /// What the decode is expected to hold before it has finished, for the
+    /// cache's byte budget (`RawDecodeCache.estimatedBytes`).
+    let estimatedBytes: Int
+    /// Called on the decode queue once a decode has run (not for one
+    /// cancelled before it began): the cache then counts its real size.
+    private let onFinish: (@Sendable () -> Void)?
 
     // Everything below is guarded by `lock`.
     private let lock = NSLock()
@@ -41,9 +47,17 @@ final class RawDecodeJob: @unchecked Sendable {
         try EditorModel.decodeForOpening(url)
     }
 
-    init(url: URL, lane: Lane) {
+    /// The bytes a decoded file holds (its sensor or linear plane); tests
+    /// put a stand-in here.
+    nonisolated(unsafe) static var bytesOf: @Sendable (RawFile) -> Int = { file in
+        file.sensorPlane?.allocationLength ?? file.linearPlane?.allocationLength ?? 0
+    }
+
+    init(url: URL, lane: Lane, estimatedBytes: Int = 0, onFinish: (@Sendable () -> Void)? = nil) {
         self.url = url
         self.lane = lane
+        self.estimatedBytes = estimatedBytes
+        self.onFinish = onFinish
     }
 
     /// Queues the decode on its lane's queue.
@@ -60,6 +74,7 @@ final class RawDecodeJob: @unchecked Sendable {
         }
         guard proceed else { return }
         finish(Result { try Self.decode(url) })
+        onFinish?()
     }
 
     /// Whether the decode has begun (or ended); a job that hasn't can be
@@ -108,11 +123,19 @@ final class RawDecodeJob: @unchecked Sendable {
         for continuation in waiting { continuation.resume(with: result) }
     }
 
-    /// Bytes the decoded file holds (its sensor or linear plane), for the
-    /// cache's budget; 0 until it has decoded.
+    /// Bytes the job holds or will hold, for the cache's budget: the
+    /// decoded file's plane once it has decoded, the estimate while it is
+    /// queued or decoding, nothing once it has failed or been cancelled.
     var byteCount: Int {
-        guard let file else { return 0 }
-        return file.sensorPlane?.allocationLength ?? file.linearPlane?.allocationLength ?? 0
+        let state: (finished: Bool, file: RawFile?) = lock.withLock {
+            switch outcome {
+            case nil: return (false, nil)
+            case .success(let file)?: return (true, file)
+            case .failure?: return (true, nil)
+            }
+        }
+        guard state.finished else { return estimatedBytes }
+        return state.file.map(Self.bytesOf) ?? 0
     }
 }
 
@@ -120,10 +143,15 @@ final class RawDecodeJob: @unchecked Sendable {
 /// the next or previous photo needs no decode at all (plan fix #17).
 ///
 /// Bounded: at most `maxEntries` files and `maxBytes` of planes (a D750
-/// raw is about 49 MB), the oldest dropped first. Emptied when memory runs
-/// short and when the catalog changes (`removeAll`). A file changed on
-/// disk since its decode (another size or modification date) is decoded
-/// again.
+/// raw is about 49 MB). Only the open photo (and an open still decoding)
+/// may go past `maxBytes`: a neighbour whose estimated size doesn't fit
+/// isn't decoded, and once a decode finishes and its real size is known
+/// the cache is trimmed again, neighbours no longer wanted first, then the
+/// oldest. Linear files (Photo Merge's DNGs, rendered TIFF and JPEG) take
+/// 8 bytes a pixel, so a folder of large merges keeps no neighbours rather
+/// than gigabytes of them. Emptied when memory runs short and when the
+/// catalog changes (`removeAll`). A file changed on disk since its decode
+/// (another size or modification date) is decoded again.
 @MainActor
 final class RawDecodeCache {
     /// The open photo and a neighbour on each side.
@@ -152,6 +180,14 @@ final class RawDecodeCache {
 
     private var entries: [String: Entry] = [:]
     private var clock = 0
+    /// The photo open or being opened, never dropped for the byte budget.
+    private var currentKey: String?
+    /// The neighbours last asked for, kept ahead of other entries.
+    private var wantedKeys: Set<String> = []
+
+    /// What a decode of `url` (`fileSize` bytes on disk) is expected to
+    /// hold, before it has run; tests put a stand-in here.
+    var estimatedBytes: (URL, Int) -> Int = RawDecodeCache.estimatedBytes(of:fileSize:)
 
     init(maxEntries: Int = 3, maxBytes: Int = 400 << 20) {
         self.maxEntries = maxEntries
@@ -159,6 +195,20 @@ final class RawDecodeCache {
     }
 
     private static func key(_ url: URL) -> String { url.standardizedFileURL.path }
+
+    /// A cheap guess at a decode's size from the file's size alone (reading
+    /// the dimensions through ImageIO costs about 90 ms the first time, on
+    /// main). Raws decode to 2 bytes a pixel and pack about 1 to 1.5 bytes
+    /// a pixel; a linear DNG or TIFF packs up to 6 and decodes to 8; JPEG
+    /// and HEIC pack about a quarter of a byte and decode to 8. Low guesses
+    /// are put right once the decode has finished and the cache trims again.
+    nonisolated static func estimatedBytes(of url: URL, fileSize: Int) -> Int {
+        switch url.pathExtension.lowercased() {
+        case "jpg", "jpeg", "heic", "heif", "avif", "webp": return fileSize * 32
+        case "png": return fileSize * 4
+        default: return fileSize * 2
+        }
+    }
 
     /// The job decoding `url` for an open: the kept or prefetched one if
     /// there is one for the file as it is now, else a new one, started.
@@ -172,20 +222,40 @@ final class RawDecodeCache {
             entry.job.cancel()
             entries[other] = nil
         }
+        currentKey = key
         return job(for: url, lane: .open)
     }
 
     /// Starts decoding `urls` ahead of time, unless kept or under way.
     /// Neighbours queued for an earlier photo and not wanted now are
     /// dropped before they start.
+    ///
+    /// Only `current` is exempt from the byte budget: neighbours kept from
+    /// before that no longer fit are dropped, and a neighbour not kept is
+    /// decoded only if its estimated size fits beside what is kept.
     func prefetch(_ urls: [URL], keeping current: URL?) {
+        if let current { currentKey = Self.key(current) }
         let wanted = Set((urls + (current.map { [$0] } ?? [])).map(Self.key))
+        wantedKeys = wanted
         for (key, entry) in entries where !wanted.contains(key) && entry.job.lane == .prefetch && !entry.job.hasStarted {
             entry.job.cancel()
             entries[key] = nil
         }
-        for url in urls { _ = job(for: url, lane: .prefetch) }
-        trim(protecting: wanted)
+        // Make room first: what isn't wanted any more goes before anything
+        // new is weighed against the budget.
+        trim()
+        for url in urls {
+            let key = Self.key(url)
+            let identity = FileIdentity(url: url)
+            if let entry = entries[key], entry.identity == identity, !Self.failedOrCancelled(entry.job) {
+                _ = job(for: url, lane: .prefetch)   // kept or under way: just marked used
+                continue
+            }
+            let others = entries.filter { $0.key != key }.values.reduce(0) { $0 + $1.job.byteCount }
+            guard others + estimatedBytes(url, identity?.size ?? 0) <= maxBytes else { continue }
+            _ = job(for: url, lane: .prefetch)
+        }
+        trim()
     }
 
     /// The decoded file for `url` if it is kept and finished.
@@ -199,6 +269,8 @@ final class RawDecodeCache {
     /// through its session. Memory pressure keeps an open's decode still
     /// under way (`keepingOpens`): a photo being opened is still wanted.
     func removeAll(keepingOpens: Bool = false) {
+        wantedKeys = []
+        if !keepingOpens { currentKey = nil }
         for (key, entry) in entries {
             if keepingOpens, entry.job.lane == .open, !entry.job.isFinished { continue }
             entry.job.cancel()
@@ -218,6 +290,7 @@ final class RawDecodeCache {
     /// Kept files, for tests.
     var count: Int { entries.count }
     var keptPaths: Set<String> { Set(entries.keys) }
+    var keptJobs: [RawDecodeJob] { entries.values.map(\.job) }
 
     private func job(for url: URL, lane: RawDecodeJob.Lane) -> RawDecodeJob {
         let key = Self.key(url)
@@ -235,23 +308,39 @@ final class RawDecodeCache {
             }
         }
         entries[key]?.job.cancel()
-        let job = RawDecodeJob(url: url, lane: lane)
+        // Once it has decoded, its real size is weighed (it may have been
+        // guessed low) and the cache trimmed again, on main.
+        let job = RawDecodeJob(url: url, lane: lane,
+                               estimatedBytes: estimatedBytes(url, identity?.size ?? 0),
+                               onFinish: { [weak self] in
+                                   Task { @MainActor in self?.decodeFinished() }
+                               })
         entries[key] = Entry(job: job, identity: identity, lastUse: clock)
         job.start()
-        if lane == .open { trim(protecting: [key]) }
+        if lane == .open { trim() }
         return job
     }
+
+    private func decodeFinished() { trim() }
 
     private static func failedOrCancelled(_ job: RawDecodeJob) -> Bool {
         job.isFinished && job.file == nil
     }
 
-    /// Drops the least recently used entries beyond the count and byte
-    /// budgets, never one in `protecting`.
-    private func trim(protecting: Set<String>) {
-        func total() -> Int { entries.values.reduce(0) { $0 + $1.job.byteCount } }
-        while entries.count > maxEntries || total() > maxBytes {
-            guard let victim = entries.filter({ !protecting.contains($0.key) })
+    /// Bytes kept and expected, for tests.
+    var totalBytes: Int { entries.values.reduce(0) { $0 + $1.job.byteCount } }
+
+    /// Drops entries until the count and byte budgets are met: neighbours
+    /// no longer wanted first, then the least recently used. Never the
+    /// current photo, nor an open still under way (cancelling one that
+    /// hasn't begun would fail its open).
+    private func trim() {
+        while entries.count > maxEntries || totalBytes > maxBytes {
+            let candidates = entries.filter { key, entry in
+                key != currentKey && !(entry.job.lane == .open && !entry.job.isFinished)
+            }
+            let unwanted = candidates.filter { !wantedKeys.contains($0.key) }
+            guard let victim = (unwanted.isEmpty ? candidates : unwanted)
                 .min(by: { $0.value.lastUse < $1.value.lastUse }) else { return }
             victim.value.job.cancel()
             entries[victim.key] = nil
