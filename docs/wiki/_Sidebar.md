@@ -19,8 +19,10 @@
 **Reference**
 
 - [Library](Library)
+- [Filter Bar](Filter-Bar)
 - [Collections and Keywords](Collections-and-Keywords)
 - [Develop](Develop)
+- [Tone Equalizer](Tone-Equalizer)
 - [Masking](Masking)
 - [Models](Models)
 - [Converting Models](Converting-Models)

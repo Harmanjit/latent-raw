@@ -53,14 +53,14 @@ Loupe and Develop show a filmstrip of the grid's photos along the bottom; the fi
 
 - **Stars**: press 0 to 5. **Flags**: P to pick, X to reject, U to clear. **Colour labels**: 6 red, 7 yellow, 8 green, 9 blue (purple is in **Photo › Label**).
 - In the grid these act on every selected photo; in Loupe, Compare and Develop on the photo shown; in Survey on the outlined pane. ⌘Z undoes them.
-- The **filter bar** above the grid narrows what you see: by stars, flags, colour label, keyword, camera, lens and more. ⇧⌘L clears it.
+- The **filter bar** above the grid narrows what you see: by stars, flags, colour label, keyword, camera, lens and more. ⇧⌘L clears it. See [Filter Bar](Filter-Bar).
 - **Keywords** go in the **Add keywords** field in the left panel, onto every selected photo. **Collections** in the sidebar gather photos without moving them. See [Collections and Keywords](Collections-and-Keywords).
 
 Everything you set is written to the photo's sidecar at once, so it survives a relaunch, a catalog rebuild, or moving the folder to another Mac.
 
 ### 2. Develop: edit
 
-Select a photo and press D (or Return). The adjustments are on the right, in the order they are applied.
+Select a photo and press D (or Return). The adjustments are on the right: global adjustments such as White Balance and Tone at the top, then cropping, masks and retouching tools such as Crop & Straighten and Local Adjustments, then presets and versions. See [Develop](Develop#modules) for the full order.
 
 - Drag a slider and the picture updates as you drag, at full quality. Double-click a slider to reset it, or click its number to type a value.
 - **Auto Adjust** (⌘U) is a good first step: it sets exposure, contrast and white balance from the photo, then the tone sliders and Vibrance.

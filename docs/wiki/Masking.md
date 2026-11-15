@@ -1,6 +1,6 @@
 # Masking
 
-Local adjustments change part of the picture: a mask says where, and the mask's sliders say what. They live in the **Local Adjustments** panel in Develop. Up to eight masks per photo; each applies in order, on top of the global edit.
+Local adjustments change part of the picture: a mask says where, and the mask's sliders say what. They live in the **Local Adjustments** panel in Develop. Up to eight masks per photo; each applies in order, on top of the global edit. For step-by-step examples, see [How to: blend and combine masks](#how-to-blend-and-combine-masks).
 
 ## Making a mask
 
@@ -103,7 +103,11 @@ Below the sliders, three more groups open once used:
 
 These three run in the same stage as Effects and Detail, after the global edit, so a mask's curve bends the picture as it finally looks.
 
+<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Tone Equalizer**: the [Tone Equalizer](Develop#tone-equalizer)'s nine bands in a compact strip, only inside the mask, so you can, say, pull down the bright parts of the sky alone. The bands read the global tone equalizer's mask, with its Masking settings, so each moves the same tones as the panel's band of that stop; the panel's own bands can stay at 0. It acts like the mask's Exposure, scaled by the mask and its Amount and joined by its Blend, and with no band moved the mask stores and renders nothing new. **Reset** puts every band back to 0. Copy, paste, Sync and mask presets carry it with the mask's other sliders.
+
+A mask can also have a [Tone Equalizer](Tone-Equalizer) of its own, so its nine brightness bands change only the part of the photo the mask covers.
+<!-- /RECONCILE -->
 
 ### Blend
 
@@ -131,6 +135,10 @@ The stroke stores only that Auto Mask was on, never the pixels. What it compares
 
 All of these are ordinary edits: ⌘Z undoes them, and they travel in copy, paste and presets with the Local Adjustments group.
 
+### Copy and paste a mask
+
+Right-click a mask in the list and choose **Copy Mask** to copy it, with its components, ranges and sliders. Then open another photo, right-click in its mask list and choose **Paste Mask**: the mask is added as a new mask, and the photo's own masks stay as they are. To give the mask to many photos at once, select them in the grid and choose **Paste Mask to Selection**. Model masks are made again from each photo they are pasted onto, as with mask presets.
+
 ### Mask presets
 
 **Presets ▸ Save Selected Mask as Preset…** keeps the selected mask under a name: its shape, components, ranges and every slider. Choose a preset from the same menu to add its mask to the open photo as a new mask (existing masks are never replaced); **Rename** and **Delete** are in the menu too. Brush strokes are kept as drawn, in proportion to the frame, and Subject, class and Click to Select masks are kept as their kind and clicks and are made again from each photo. A component that uses another mask of the photo (Using another mask, above) can't travel and is left out; the save sheet lists it. Mask presets are files in `~/Library/Application Support/latent/mask-presets`, beside the edit presets' folder.
@@ -149,3 +157,72 @@ Right-click a mask in the list (or use **Develop ▸ Masks**) for **Copy Mask**,
 - **White on Black**: the mask itself, the way to judge a soft edge.
 
 The overlay is a viewing aid only; exports never show it.
+
+## How to: blend and combine masks
+
+These walkthroughs use the controls described above. Open a photo in Develop and open **Local Adjustments** first. Every step is one edit, so ⌘Z takes it back.
+
+### Warm a sky without brightening it (Colour Only)
+
+1. Choose **Add › Select by Class › Sky**.
+2. Move **Temperature** to the right to warm the sky.
+3. Set **Blend**, beside the mask's name, to **Colour Only**. The sky keeps its brightness and only its colour changes.
+
+### Brighten a face without making it orange (Lightness Only)
+
+1. Choose **Add › Subject**.
+2. Raise **Exposure** a little.
+3. Set **Blend** to **Lightness Only**. The face gets brighter, but its colour and saturation stay as they were.
+
+### Darken the sky but not the tree in front of it (Subtract)
+
+1. Choose **Add › Select by Class › Sky** and lower **Exposure**.
+2. In the **−** menu beside **Components**, choose **Brush**.
+3. Click the new component's row, then paint over the tree. The brush is taken out of the sky mask.
+4. If your painting is loose, raise **Edge refine** on the brush component so its edge snaps to the tree's outline.
+
+### Treat only the subject's shadows (Intersect)
+
+1. Choose **Add › Subject**.
+2. In the **◎** menu beside **Components**, choose **Luminance Range**.
+3. Drag **Low** to 0, then drag **High** down until only the shadows on the subject are selected. Tick **Show mask** to check.
+4. Raise **Shadows** or **Exposure**. Only the dark parts of the subject change.
+
+### Build up two soft gradients (Sum) or skip their overlap (Exclusion)
+
+1. Choose **Add › Linear Gradient** and drag it in from the top of the photo.
+2. In the **+** menu, add a second **Linear Gradient** from the bottom.
+3. Click the mode menu at the start of the second row and choose **Sum**: where the two fades overlap, they add up instead of the stronger one winning.
+4. Choose **Exclusion** instead to leave the overlap untouched.
+
+### Change the order
+
+Masks apply one after another, and each component joins what is above it. Drag a mask or a component onto another to move it there, or right-click it and choose **Move Up** or **Move Down**.
+
+### Use one mask in several others (linked masks)
+
+1. Paint a careful sky with a **Brush** mask and name it "Sky".
+2. Make a second mask, such as **Subject**.
+3. In its **−** menu, choose **Use Mask › Sky**. The row shows a link icon.
+4. Now paint more of the "Sky" mask. Every mask that uses it updates too.
+
+### Soften skin or sky inside a mask (Smooth)
+
+1. Make a mask over the area, for example with **Add › Brush**.
+2. Raise **Smooth** in the mask's **Detail** sliders. It blurs fine texture but keeps edges sharp.
+
+### Select one colour channel (Channel Range)
+
+1. Choose **Add › Whole Image (range only)**.
+2. In the **◎** menu, choose **Channel Range** and pick a channel, such as Lab **b** to select by blue to yellow.
+3. Click **Pick Range**, then click a yellow flower. The band is set around its value.
+4. **Shift-click** another flower to add a second sample; the band grows to cover both. **Option-click** a sample to take it away.
+5. Click the half-filled circle on the row (**Show Channel**) to see what the range reads.
+
+### Save a mask to use again
+
+1. Select the mask.
+2. Choose **Presets › Save Selected Mask as Preset…** and give it a name.
+3. On another photo, choose the preset from the same **Presets** menu. It is added as a new mask.
+
+To move a mask straight from one photo to others instead, right-click it and use **Copy Mask** and **Paste Mask** or **Paste Mask to Selection** (see [Copy and paste a mask](#copy-and-paste-a-mask)).
