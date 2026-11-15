@@ -10,6 +10,7 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 <!-- RECONCILE: two branches edited this; merge into one text -->
 <!-- RECONCILE: two branches edited this; merge into one text -->
 <!-- RECONCILE: two branches edited this; merge into one text -->
+<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Faster large folders.** On a 10,000-photo folder, smart collections with date rules evaluate about thirty times faster, rating many photos while a collection is shown no longer stalls the window, the Collections section counts in the background, and search keystrokes, keyword completion and the smart collection sheet do far less work each time. The tone equalizer's mask summary is worked out off the main thread. Nothing looks or behaves differently. See [Thumbnails and performance](Library#thumbnails-and-performance).
 
 - **Edit Capture Time…** (Metadata menu) shifts the selection's capture times by days, hours, minutes and seconds, sets the first photo to an exact time and moves the rest with it, or changes time zone. The raw files are never rewritten; the corrected time is kept in the catalog and sidecar, sorting and date filters use it, and it can be undone. See [Capture time and geotagging](Library#capture-time-and-geotagging).
@@ -34,6 +35,10 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 
 - **Multi-sample Pick Range**: Shift-click adds samples to a Luminance or Channel Range (the band grows to cover them all) and Option-click removes the nearest; Option-click also removes a Colour Range sample. The samples are drawn on the image while the eyedropper is armed. See [Luminance and Channel Range](Masking#luminance-and-channel-range).
 - **Mask presets** save the selected mask (components and sliders) under a name and add it to any photo as a new mask, with Rename and Delete in the mask panel's Presets menu. See [Mask presets](Masking#mask-presets).
+<!-- /RECONCILE -->
+
+- **Scopes for one mask**: Selected Mask Only in the scope menu limits the histogram, waveform, parade and vectorscope to the selected local adjustment's mask, weighted by it. See [The viewport](Develop#the-viewport).
+- **Overlay Reference** draws the reference photo's histogram and vectorscope in amber with the active photo's, for matching colour between photos. See [The viewport](Develop#the-viewport).
 <!-- /RECONCILE -->
 
 ## Organising

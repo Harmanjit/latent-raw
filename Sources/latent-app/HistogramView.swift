@@ -19,6 +19,9 @@ struct HistogramView: View {
     let histogram: Histogram?
     /// The plot's height; less when it shares the panel with another scope.
     var height: CGFloat = 90
+    /// The reference photo's histogram, drawn faintly behind this one
+    /// (Overlay Reference); nil, none.
+    var reference: Histogram? = nil
 
     /// Tick positions along the tonal axis, as fractions of full scale.
     private let xTicks: [(position: Double, label: String)] = [
@@ -45,6 +48,9 @@ struct HistogramView: View {
             if let histogram, histogram.peak > 0 {
                 Canvas { context, size in
                     drawGrid(in: &context, size: size)
+                    if let reference {
+                        ReferenceHistogramDrawing.draw(reference, in: &context, size: size)
+                    }
                     draw(histogram: histogram, in: &context, size: size)
                 }
                 .padding(1)

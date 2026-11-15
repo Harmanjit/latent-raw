@@ -30,8 +30,17 @@ enum ScopeKind: String, CaseIterable, Identifiable {
 /// chosen scope beneath it.
 struct ScopePanel: View {
     @ObservedObject var model: EditorModel
+    @ObservedObject var settings = ScopeSettings.shared
+    @ObservedObject var develop = DevelopViewState.shared
+
+    /// The reference's scopes while Overlay Reference is on.
+    private var reference: ReferenceScopes? {
+        settings.overlaysReference ? develop.referenceScopes : nil
+    }
 
     var body: some View {
+        let referenceHistogram = reference?.histogram
+        let referenceVectorscope = reference?.vectorscope
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
                 Picker("Scope", selection: $model.scope) {
@@ -42,31 +51,37 @@ struct ScopePanel: View {
                 .controlSize(.small)
                 MoreScopesMenu(model: model)
             }
+            ScopeModeCaption(maskOnly: settings.selectedMaskOnly, maskSelected: model.scopeMaskIndex != nil,
+                             overlayingReference: reference != nil)
 
             switch model.scope {
             case .histogram:
-                HistogramView(histogram: model.histogram)
+                HistogramView(histogram: model.histogram, reference: referenceHistogram)
                     .overlay(HistogramAdjustOverlay(model: model))
                 ClippingReadout(histogram: model.histogram,
                                 showsAboveSDRWhite: model.rendersAboveSDRWhite)
             case .waveform:
                 WaveformView(waveform: model.waveform)
             case .vectorscope:
-                GuidedVectorscope(model: model, samples: model.colourSamples)
+                GuidedVectorscope(model: model, samples: model.colourSamples, reference: referenceVectorscope)
             case .parade:
                 ParadeView(waveform: model.waveform)
             case .waveformVectorscope:
                 WaveformView(waveform: model.waveform, height: 64)
-                GuidedVectorscope(model: model, samples: model.colourSamples)
+                GuidedVectorscope(model: model, samples: model.colourSamples, reference: referenceVectorscope)
                     .frame(height: 120)
             case .histogramVectorscope:
-                HistogramView(histogram: model.histogram, height: 56)
+                HistogramView(histogram: model.histogram, height: 56, reference: referenceHistogram)
                     .overlay(HistogramAdjustOverlay(model: model))
-                GuidedVectorscope(model: model, samples: model.colourSamples)
+                GuidedVectorscope(model: model, samples: model.colourSamples, reference: referenceVectorscope)
                     .frame(height: 120)
             }
             PixelReadoutBar(model: model)
             ColourSamplesPanel(model: model, samples: model.colourSamples)
+        }
+        // Another mask selected: the masked scopes follow it.
+        .onChange(of: model.selectedLocalIndex) {
+            if settings.selectedMaskOnly { model.updateScopes() }
         }
     }
 }
@@ -150,6 +165,9 @@ struct WaveformView: View {
 
 struct VectorscopeView: View {
     let vectorscope: Vectorscope?
+    /// The reference photo's vectorscope, drawn as an amber outline over
+    /// this one (Overlay Reference); nil, none.
+    var reference: Vectorscope? = nil
     /// Drawn over the plot in its square (guides, sample dots); nil, none.
     var overlay: ((inout GraphicsContext, CGRect) -> Void)? = nil
 
@@ -173,6 +191,9 @@ struct VectorscopeView: View {
                     context.stroke(lines, with: .color(Color(white: 0.22)), lineWidth: 0.5)
 
                     context.draw(Image(decorative: image, scale: 1), in: rect)
+                    if let reference, let outline = ReferenceScopeOutline.image(of: reference) {
+                        context.draw(Image(decorative: outline, scale: 1), in: rect)
+                    }
                     overlay?(&context, rect)
                 }
                 .padding(1)
@@ -283,6 +304,8 @@ struct GuidedVectorscope: View {
     @ObservedObject var model: EditorModel
     @ObservedObject var samples: ColourSamples
     @ObservedObject var settings = ScopeSettings.shared
+    /// The reference photo's vectorscope, outlined over this one.
+    var reference: Vectorscope? = nil
 
     var body: some View {
         let dots: [(id: Int, at: SIMD2<Float>)] = settings.plotsSamples
@@ -291,7 +314,7 @@ struct GuidedVectorscope: View {
             }
             : []
         let skin = settings.skinToneLine, harmony = settings.harmony, angle = settings.harmonyAngle
-        VectorscopeView(vectorscope: model.vectorscope) { context, rect in
+        VectorscopeView(vectorscope: model.vectorscope, reference: reference) { context, rect in
             VectorscopeGuideDrawing.draw(in: &context, rect: rect, skinToneLine: skin,
                                          harmony: harmony, angle: angle)
             for dot in dots {
@@ -328,6 +351,7 @@ struct GuidedVectorscope: View {
 /// two-up views. Choosing one leaves the segments unselected.
 struct MoreScopesMenu: View {
     @ObservedObject var model: EditorModel
+    @ObservedObject var settings = ScopeSettings.shared
 
     var body: some View {
         Menu {
@@ -335,6 +359,15 @@ struct MoreScopesMenu: View {
                 Toggle(kind.title, isOn: Binding(get: { model.scope == kind },
                                                  set: { if $0 { model.scope = kind } }))
             }
+            Divider()
+            Toggle("Selected Mask Only", isOn: Binding(get: { settings.selectedMaskOnly }, set: {
+                settings.selectedMaskOnly = $0
+                model.updateScopes()
+            }))
+            Toggle("Overlay Reference", isOn: Binding(get: { settings.overlaysReference }, set: {
+                settings.overlaysReference = $0
+                DevelopViewState.shared.refreshReferenceScopes()
+            }))
         } label: {
             Image(systemName: "rectangle.split.1x2")
         }
@@ -342,7 +375,34 @@ struct MoreScopesMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .controlSize(.small)
-        .help("More scopes: RGB parade, Waveform + Vectorscope, Histogram + Vectorscope")
+        .help("More scopes: RGB parade, Waveform + Vectorscope, Histogram + Vectorscope; limit the scopes to the selected mask; overlay the reference photo's histogram and vectorscope")
         .accessibilityLabel("More scopes")
+    }
+}
+
+/// One line under the scope picker while the scopes are limited to a mask
+/// or carry the reference's outline, so neither is mistaken for the whole
+/// picture or the active photo alone. Nothing otherwise.
+struct ScopeModeCaption: View {
+    let maskOnly: Bool
+    let maskSelected: Bool
+    let overlayingReference: Bool
+
+    var body: some View {
+        let parts = Self.parts(maskOnly: maskOnly, maskSelected: maskSelected, overlayingReference: overlayingReference)
+        if !parts.isEmpty {
+            Text(parts.joined(separator: " · "))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    static func parts(maskOnly: Bool, maskSelected: Bool, overlayingReference: Bool) -> [String] {
+        var parts: [String] = []
+        if maskOnly { parts.append(maskSelected ? "Selected mask only" : "Select a mask to limit the scopes") }
+        if overlayingReference { parts.append("Reference in amber") }
+        return parts
     }
 }

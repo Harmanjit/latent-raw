@@ -144,6 +144,8 @@ extension EditorModel {
     private func measureScopes() {
         guard let analysisTexture else { return }
         lastScopeMeasurement = .now
+        // Scope menu › Selected Mask Only (EditorModel+MaskedScopes.swift).
+        if measureMaskedScopes(from: analysisTexture) { return }
         switch scope {
         case .histogram:
             histogram = histogramCalculator?.compute(from: analysisTexture, inputIsLinear: true)
