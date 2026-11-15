@@ -29,7 +29,7 @@ extension EditorModel {
     /// made here be saved back.
     func open(url: URL, userRotation: Int = 0, catalogImageID: Int64? = nil,
               editStackJSON: String? = nil) {
-        guard let gpu = gpuContext else {
+        guard let gpu = gpuForOpeningNow() else {
             if setupError == nil {
                 // The caller reads this image's history next and finds no
                 // open image to give it to: it is parked and loaded after
@@ -99,7 +99,12 @@ extension EditorModel {
             }
             pendingSave?.cancel()   // the assignment below must not save
             pendingSave = nil
-            parameters = restored   // triggers rerender via didSet
+            // Its didSet keeps its other work (crop, masks, touch-up) but
+            // not its render: the one below renders once everything is in
+            // place (plan fix #8; it used to render twice).
+            applyingOpenedImage = true
+            parameters = restored
+            applyingOpenedImage = false
             pendingSave?.cancel()
             pendingSave = nil
             joinLinkedPane()   // after the crop is restored: it sets the canvas
@@ -128,6 +133,9 @@ extension EditorModel {
             stopAIDenoise()
             aiDenoiseReleasedUnderPressure = false
             dustImageDidOpen()
+            // Nothing is being dragged: the high-quality preview, if on,
+            // follows this render without the settle delay (plan fix #10).
+            highQualityPreviewFollowsOpen = true
             rerender()
             regenerateMissingAIMasks()
             regenerateTouchUpMasksIfNeeded()
@@ -143,6 +151,18 @@ extension EditorModel {
             status = "Could not open: \(error)"
         }
     }
+
+    /// The GPU context if it can be had now: the model's own, or the shared
+    /// one already built but not yet attached, because the launch task that
+    /// attaches it waits behind the first layout of the window (plan fix #9).
+    func gpuForOpeningNow() -> GPUContext? {
+        if gpuContext == nil, let built = Self.builtSharedGPU() { attachGPU(built) }
+        return gpuContext
+    }
+
+    /// The shared context if its build has ended; tests stand in a launch
+    /// whose build is still running.
+    static var builtSharedGPU: () -> Result<GPUContext, any Error>? = { GPUContext.sharedIfBuilt }
 
     /// What the tools hold about the photo being left: the selected patch,
     /// spot and local (an index into that photo's lists, which would pick

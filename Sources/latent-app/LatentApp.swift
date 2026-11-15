@@ -4,6 +4,7 @@ import Catalog
 import PixelEngine
 import MergeKit
 import MLKit
+import LensKit
 
 /// Latent's application target.
 ///
@@ -108,6 +109,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Window tabs would offer a second window by another route.
         NSWindow.allowsAutomaticWindowTabbing = false
+        // Before any window: the shaders and the Lensfun database load on
+        // background threads while SwiftUI lays out the first window, so a
+        // photo opened at launch finds both ready (plan fix #9).
+        GPUContext.warmUp()
+        LensfunDatabase.warmUp()
     }
 
     // MARK: - Opening files and folders from outside
