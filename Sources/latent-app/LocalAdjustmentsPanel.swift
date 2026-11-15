@@ -6,6 +6,10 @@ import MLKit
 /// one, its tool, its sliders and its range refinements.
 struct LocalAdjustmentsPanel: View {
     @ObservedObject var model: EditorModel
+    /// Paste Mask to Selection, from ContentView, which owns the Library;
+    /// nil when it can't run (nothing copied, no selection).
+    var pasteMaskToSelection: (() -> Void)? = nil
+    @ObservedObject private var maskClipboard = MaskClipboard.shared
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
@@ -136,6 +140,8 @@ struct LocalAdjustmentsPanel: View {
                     Divider()
                     MaskRowReorder.menuItems(model: model, index: index)
                     Divider()
+                    maskClipboardItems(index)
+                    Divider()
                     Button("Delete", role: .destructive) {
                         model.selectedLocalIndex = index
                         model.removeSelectedLocal()
@@ -150,6 +156,17 @@ struct LocalAdjustmentsPanel: View {
                 .modifier(MaskRowReorder(model: model, index: index, id: local.id))
             }
         }
+    }
+
+    /// Copy Mask, Paste Mask and Paste Mask to Selection on a row's menu
+    /// (MaskClipboardCommands.swift). Pasting always adds a new mask.
+    @ViewBuilder
+    private func maskClipboardItems(_ index: Int) -> some View {
+        Button(MaskClipboardCommand.copy.title) { model.copyMask(at: index) }
+        Button(MaskClipboardCommand.paste.title) { model.pasteMask() }
+            .disabled(maskClipboard.copied == nil || model.parameters.locals.count >= LocalAdjustment.maximumCount)
+        Button(MaskClipboardCommand.pasteToSelection.title) { pasteMaskToSelection?() }
+            .disabled(pasteMaskToSelection == nil)
     }
 
     private func icon(for shape: MaskShape) -> String {

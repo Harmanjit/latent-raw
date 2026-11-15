@@ -59,6 +59,7 @@ struct ContentView: View {
     @ObservedObject private var secondDisplay = SecondaryDisplay.shared
     /// Develop's Before/After and Reference views (DevelopViews.swift).
     @ObservedObject private var developViews = DevelopViewState.shared
+    @ObservedObject private var maskClipboard = MaskClipboard.shared
     /// The second display's Loupe waiting to load a grid selection.
     @State private var secondDisplayLoad: Task<Void, Never>?
     @State private var mode: AppMode = .library
@@ -1476,6 +1477,8 @@ struct ContentView: View {
             ViewingCommands.perform(command, editor: model, expandTone: { toneExpanded = true })
         case .metadata(let command):
             GeoTimePresenter.shared.perform(command, library: library)
+        case .mask(let command):
+            MaskClipboardCommands(library: library, model: model, report: { reportOutcome($0) }).perform(command)
         }
         return true
     }
@@ -1548,6 +1551,7 @@ struct ContentView: View {
         state.canAddMask = model.hasImage && model.parameters.locals.count < LocalAdjustment.maximumCount
         state.hasSelectedMask = model.selectedLocal != nil
         state.showMaskOverlay = model.showMaskOverlay
+        state.hasCopiedMask = maskClipboard.copied != nil
         state.clippingShown = !model.clipping.isDisjoint(with: .both)
         state.softProofing = model.proofEnabled
         state.whiteBalanceSelectorActive = model.toneTool == .whiteBalance
@@ -1992,7 +1996,8 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
-                    LocalAdjustmentsPanel(model: model)
+                    LocalAdjustmentsPanel(model: model, pasteMaskToSelection: commandState.isEnabled(.mask(.pasteToSelection))
+                                          ? { _ = perform(.mask(.pasteToSelection)) } : nil)
                         .padding(.top, 8)
                 } label: {
                     disclosureLabel("Local Adjustments")

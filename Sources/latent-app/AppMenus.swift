@@ -53,6 +53,8 @@ struct CommandState: Equatable {
     var canAddMask = false
     var hasSelectedMask = false
     var showMaskOverlay = false
+    /// Copy Mask has put a mask on the mask clipboard (MaskClipboardCommands.swift).
+    var hasCopiedMask = false
     /// The clipping overlay is on (J), and the White Balance Selector armed (W).
     var clippingShown = false
     /// Soft Proofing is on in Develop (S).
@@ -238,6 +240,7 @@ struct CommandState: Equatable {
         case .history(let command): isEnabled(command)
         case .viewing(let command): isEnabled(command)
         case .metadata(let command): isEnabled(command)
+        case .mask(let command): isEnabled(command)
         }
     }
 
@@ -515,6 +518,8 @@ struct LatentCommands: Commands {
                 Divider()
                 toolToggle("Show Mask Overlay", .toggleMaskOverlay, isOn: state.showMaskOverlay)
                 item("Show Mask Channel", .toggleMaskChannel)
+                Divider()
+                ForEach(MaskClipboardCommand.allCases, id: \.self) { item($0.title, .mask($0)) }
             }
             Divider()
             item("Smaller Brush", .toolSize(-1))

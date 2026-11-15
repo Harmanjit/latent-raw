@@ -36,6 +36,8 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 
 - **Multi-sample Pick Range**: Shift-click adds samples to a Luminance or Channel Range (the band grows to cover them all) and Option-click removes the nearest; Option-click also removes a Colour Range sample. The samples are drawn on the image while the eyedropper is armed. See [Luminance and Channel Range](Masking#luminance-and-channel-range).
 - **Mask presets** save the selected mask (components and sliders) under a name and add it to any photo as a new mask, with Rename and Delete in the mask panel's Presets menu. See [Mask presets](Masking#mask-presets).
+
+- **Copy Mask and Paste Mask.** Right-click a mask (or use Develop ▸ Masks) to copy it with its sliders and add it to the open photo or to every selected photo as a new mask; Subject and Click to Select parts are made again on each photo. See [Copying a mask to other photos](Masking#copying-a-mask-to-other-photos).
 <!-- /RECONCILE -->
 
 - **Scopes for one mask**: Selected Mask Only in the scope menu limits the histogram, waveform, parade and vectorscope to the selected local adjustment's mask, weighted by it. See [The viewport](Develop#the-viewport).
