@@ -219,6 +219,10 @@ final class ReconcileEdgeTests: XCTestCase {
         let thumbnail = await catalog.thumbnailURL(forRelPath: "A.NEF")
         try fm.createDirectory(at: thumbnail.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("thumb".utf8).write(to: thumbnail)
+        // A version 1 HEIC the pass hadn't replaced yet goes too, or a
+        // new photo at this path would be shown with it.
+        let legacy = Catalog.legacyThumbnailURL(for: thumbnail)
+        try Data("old".utf8).write(to: legacy)
 
         try fm.removeItem(at: url("A.NEF"))
         let report = try await catalog.reconcile()
@@ -229,8 +233,32 @@ final class ReconcileEdgeTests: XCTestCase {
         let count = try await queue.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM image_keywords") }
         XCTAssertEqual(count, 0)
         XCTAssertFalse(fm.fileExists(atPath: thumbnail.path))
+        XCTAssertFalse(fm.fileExists(atPath: legacy.path))
         let sidecar = await catalog.sidecarURL(forRelPath: "A.NEF")
         XCTAssertTrue(fm.fileExists(atPath: sidecar.path), "the sidecar is truth and stays")
+    }
+
+    /// A renamed photo's version 1 HEIC isn't left at the old name (where
+    /// it would stand in for the next photo there) nor taken to the new.
+    func testRenameRemovesVersion1HEIC() async throws {
+        try add("A.NEF")
+        let catalog = try Catalog.open(at: folder)
+        _ = try await catalog.reconcile()
+        let thumbnail = await catalog.thumbnailURL(forRelPath: "A.NEF")
+        try fm.createDirectory(at: thumbnail.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("thumb".utf8).write(to: thumbnail)
+        let legacy = Catalog.legacyThumbnailURL(for: thumbnail)
+        try Data("old".utf8).write(to: legacy)
+        let newThumbnail = await catalog.thumbnailURL(forRelPath: "B.NEF")
+        let staleAtNew = Catalog.legacyThumbnailURL(for: newThumbnail)
+        try Data("stale".utf8).write(to: staleAtNew)
+
+        try move("A.NEF", "B.NEF")
+        let report = try await catalog.reconcile()
+        XCTAssertEqual(report.renamed, 1, "\(report)")
+        XCTAssertEqual(try Data(contentsOf: newThumbnail), Data("thumb".utf8), "the JPEG moves")
+        XCTAssertFalse(fm.fileExists(atPath: legacy.path))
+        XCTAssertFalse(fm.fileExists(atPath: staleAtNew.path))
     }
 
     // MARK: - Finding 40: rename chains and swaps

@@ -205,6 +205,22 @@ public actor Catalog {
         thumbnailURL.deletingPathExtension().appendingPathExtension(legacyThumbnailFileExtension)
     }
 
+    /// Removes the thumbnail at `thumbnailURL` and any version 1 HEIC
+    /// beside it. The grid shows that HEIC whenever the JPEG is missing,
+    /// so one left behind would stand in for whatever photo next takes
+    /// the path (a reused camera name, say).
+    public nonisolated static func removeThumbnailFiles(at thumbnailURL: URL) {
+        let fm = FileManager.default
+        try? fm.removeItem(at: thumbnailURL)
+        try? fm.removeItem(at: legacyThumbnailURL(for: thumbnailURL))
+    }
+
+    /// Removes only the version 1 HEIC beside `thumbnailURL`, for a path
+    /// whose thumbnail moved or is about to be made afresh.
+    public nonisolated static func removeLegacyThumbnail(besides thumbnailURL: URL) {
+        try? FileManager.default.removeItem(at: legacyThumbnailURL(for: thumbnailURL))
+    }
+
     // MARK: - Queries
 
     /// Every image, newest capture first, then by path for stability.

@@ -217,7 +217,7 @@ public enum ImageTransfer {
                 if let openCatalog, isSameFolder(location.root, openCatalog.rootPath) {
                     try await openCatalog.forgetTrashedImage(relPath: relPath)
                 }
-                try? FileManager.default.removeItem(at: location.thumbnailURL(relPath))
+                Catalog.removeThumbnailFiles(at: location.thumbnailURL(relPath))
                 var done = copy
                 done.kind = .trash
                 report.completed.append(done)
@@ -579,9 +579,14 @@ public enum ImageTransfer {
                     }
                 }
                 if hasSidecar { try? fm.removeItem(at: sourceSidecar) }
-                try? fm.removeItem(at: sourceThumbnail)
+                Catalog.removeThumbnailFiles(at: sourceThumbnail)
             }
         }
+        // A version 1 HEIC is never carried along (its key is stale), and
+        // one at the new name was left by a photo no longer there: the grid
+        // would show either for this photo until its JPEG is made.
+        Catalog.removeLegacyThumbnail(besides: destinationThumbnail)
+        if isMove { Catalog.removeLegacyThumbnail(besides: sourceThumbnail) }
 
         return CompletedTransfer(kind: isMove ? .move : .copy, source: plan.source, destination: destinationURL,
                                  destinationIdentity: FileOperations.identity(destinationURL),

@@ -343,14 +343,14 @@ extension Catalog {
                              + inserts.map(\.relPath) + updates.map(\.relPath)
                              + moved.blockedPaths).map { $0.lowercased() })
         for record in removals where !livePaths.contains(record.relPath.lowercased()) {
-            try? FileManager.default.removeItem(at: thumbnailURL(forRelPath: record.relPath))
+            Self.removeThumbnailFiles(at: thumbnailURL(forRelPath: record.relPath))
         }
         // Their virtual copies went with them (the rows by cascade). Their
         // thumbnails go; their sidecars stay, like the masters', so a file
         // that comes back brings its copies back.
         let removedPaths = Set(removals.map(\.relPath))
         for copy in copies where VirtualCopy.parse(copy.relPath).map({ removedPaths.contains($0.masterRelPath) }) == true {
-            try? FileManager.default.removeItem(at: thumbnailURL(forRelPath: copy.relPath))
+            Self.removeThumbnailFiles(at: thumbnailURL(forRelPath: copy.relPath))
         }
 
         // A file renamed outside Latent keeps its place in the custom order.
@@ -603,6 +603,11 @@ extension Catalog {
                     }
                 }
             }
+            // A version 1 HEIC is not carried along: the row's v1 key is
+            // stale anyway, and one left at either name would be shown for
+            // whatever photo has that path without a JPEG.
+            Self.removeLegacyThumbnail(besides: thumbnailURL(forRelPath: rename.from.relPath))
+            Self.removeLegacyThumbnail(besides: thumbnailURL(forRelPath: rename.to.relPath))
             let hadThumbnail = rename.from.thumbKey != nil
             if hadThumbnail && !thumbnailMoved, let id = rename.from.id { result.thumbnailsLost.insert(id) }
         }

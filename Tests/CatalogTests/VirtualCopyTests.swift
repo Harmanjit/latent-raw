@@ -134,6 +134,24 @@ final class VirtualCopyTests: XCTestCase {
         XCTAssertEqual(thumbnail.deletingLastPathComponent().lastPathComponent, VirtualCopy.companionFolder)
     }
 
+    /// Removing a copy takes its version 1 HEIC as well as its JPEG, or a
+    /// later copy given the same key would be shown with it.
+    func testRemovingACopyRemovesItsVersion1HEIC() async throws {
+        let library = try await openLibrary()
+        let catalog = try XCTUnwrap(library.catalog)
+        let a = try XCTUnwrap(record(library, "A.NEF"))
+        let copyID = try await catalog.createVirtualCopy(of: a.id!).id
+        let all = try await catalog.allImages()
+        let copyPath = try XCTUnwrap(all.first { $0.id == copyID }?.relPath)
+        let thumbnail = await catalog.thumbnailURL(forRelPath: copyPath)
+        let legacy = Catalog.legacyThumbnailURL(for: thumbnail)
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: legacy)
+        try await catalog.removeVirtualCopy(id: copyID)
+        XCTAssertFalse(exists(legacy))
+        XCTAssertFalse(exists(thumbnail))
+    }
+
     // MARK: Following the master
 
     func testCopiesFollowARenameInFinderAndGoWithTheirMaster() async throws {
