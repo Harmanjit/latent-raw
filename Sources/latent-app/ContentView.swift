@@ -927,6 +927,12 @@ struct ContentView: View {
                                                  forImageID: imageID, in: catalog)
             }
         }
+        // Comes just before `onEditSettled`, whose save starts the thumbnail
+        // pass, so the pass finds the editor's render waiting.
+        model.onSettledThumbnail = { imageID, json, image in
+            guard let catalog = library.catalog else { return }
+            library.offerEditedThumbnail(image, forImageID: imageID, editStackJSON: json, in: catalog)
+        }
         model.onHistoryChanged = { imageID, steps in
             guard let catalog = library.catalog else { return }
             library.perform("Saving history") { try await library.setHistory(steps, forImageID: imageID, in: catalog) }

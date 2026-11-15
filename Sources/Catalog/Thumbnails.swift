@@ -112,6 +112,7 @@ extension Catalog {
         // plain values and never touch catalog state.
         struct Work: Sendable {
             let relPath: String
+            let imageID: Int64?
             let hash: Data
             let source: URL
             let destination: URL
@@ -123,6 +124,7 @@ extension Catalog {
         let jobs = needed.map { job in
             let destination = thumbnailURL(forRelPath: job.record.relPath)
             return Work(relPath: job.record.relPath,
+                        imageID: job.record.id,
                         hash: job.record.xxhash,
                         source: fileURL(forRelPath: job.record.relPath),
                         destination: destination,
@@ -151,8 +153,10 @@ extension Catalog {
                 group.addTask(priority: priority) {
                     do {
                         if let json = job.editStackJSON, let renderer = editedRenderer {
-                            let image = try renderer.renderThumbnail(rawFileAt: job.source,
-                                                                     editStackJSON: json)
+                            // The editor's own render of this very edit, made
+                            // from its open session as the edit settled (#28).
+                            let image = try job.imageID.flatMap { handoff.takeRendered(imageID: $0, key: job.key) }
+                                ?? renderer.renderThumbnail(rawFileAt: job.source, editStackJSON: json)
                             try Thumbnailer.write(image, to: job.destination, quality: quality)
                         } else if let preview = handoff.takePreview(relPath: job.relPath, hash: job.hash),
                                   (try? Thumbnailer.makeFromEmbeddedPreview(preview.jpeg, orientation: preview.orientation,

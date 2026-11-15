@@ -103,10 +103,53 @@ final class ThumbnailHandoffTests: XCTestCase {
         XCTAssertEqual(catalog.thumbnailHandoff.previewBytesHeld, 0)
     }
 
-    static func image() throws -> CGImage {
-        let ctx = try XCTUnwrap(CGContext(data: nil, width: 8, height: 4, bitsPerComponent: 8, bytesPerRow: 0,
+    /// A settled edit the editor rendered is written as it is; the
+    /// renderer, which would decode the raw again, isn't called for it.
+    func testPassWritesTheEditorsRenderInsteadOfRenderingAgain() async throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("latent-handoff-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try TestAssets.copyD750(to: folder.appendingPathComponent("A.NEF"))
+        let catalog = try Catalog.open(at: folder)
+        _ = try await catalog.reconcile()
+        let images = try await catalog.allImages()
+        let id = try XCTUnwrap(images.first?.id)
+        let json = "{\"exposure\":1}"
+        try await catalog.setEditStack(json, schemaVersion: 1, processVersion: "1", forImageID: id)
+
+        let rendered = try Self.image(width: 48, height: 32)
+        catalog.thumbnailHandoff.offerRendered(rendered, imageID: id, key: Thumbnailer.key(forEditStack: json))
+        let counter = HandoffCountingRenderer()
+        var report = try await catalog.generateMissingThumbnails(editedRenderer: counter)
+        XCTAssertEqual(report.generated, 1, "\(report.failures)")
+        XCTAssertEqual(counter.calls, 0)
+        let url = await catalog.thumbnailURL(forRelPath: "A.NEF")
+        XCTAssertEqual(Thumbnailer.load(from: url)?.width, 48)
+
+        // A render for an edit since replaced isn't used.
+        catalog.thumbnailHandoff.offerRendered(rendered, imageID: id, key: Thumbnailer.key(forEditStack: json))
+        try await catalog.setEditStack("{\"exposure\":2}", schemaVersion: 1, processVersion: "1", forImageID: id)
+        report = try await catalog.generateMissingThumbnails(editedRenderer: counter)
+        XCTAssertEqual(report.generated, 1)
+        XCTAssertEqual(counter.calls, 1)
+    }
+
+    static func image(width: Int = 8, height: Int = 4) throws -> CGImage {
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                           space: CGColorSpaceCreateDeviceRGB(),
                                           bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
         return try XCTUnwrap(ctx.makeImage())
+    }
+}
+
+private final class HandoffCountingRenderer: EditedThumbnailRenderer, @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var calls: Int { lock.withLock { count } }
+
+    func renderThumbnail(rawFileAt url: URL, editStackJSON: String) throws -> CGImage {
+        lock.withLock { count += 1 }
+        return try SolidRenderer().renderThumbnail(rawFileAt: url, editStackJSON: editStackJSON)
     }
 }
