@@ -224,7 +224,12 @@ public enum RawSourceKind: String, Sendable, Codable {
 /// away, so its own copy of the sensor data is freed before the image is
 /// ever shown. The plane lives in a `SensorPlane` that the GPU uses in
 /// place.
-public final class RawFile {
+///
+/// `@unchecked Sendable`: nothing changes after init (`dngOpcodes` is set
+/// only by the initializer, and by a test before any sharing), and the
+/// planes are themselves `Sendable`. The app decodes on a background
+/// thread and hands the file to the main actor (`RawDecodeJob`).
+public final class RawFile: @unchecked Sendable {
     public let summary: RawSummary
     /// True when opened with `metadataOnly`: no sensor plane is available.
     public let isMetadataOnly: Bool

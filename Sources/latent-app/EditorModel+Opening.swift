@@ -27,8 +27,17 @@ extension EditorModel {
     /// `userRotation` and `editStackJSON` are the catalog's stored state
     /// for this image, if it came from one; `catalogImageID` lets edits
     /// made here be saved back.
+    ///
+    /// Decodes on the calling (main) thread unless the file is already in
+    /// `decodeCache`; the catalog's opens use the asynchronous
+    /// `open(url:userRotation:catalogImageID:readEdit:isCurrent:)` below,
+    /// which never blocks main on the decode. Kept for Open File…, a file
+    /// opened from Finder, the Compare and Survey panes, and tests, which
+    /// expect the image open on return.
     func open(url: URL, userRotation: Int = 0, catalogImageID: Int64? = nil,
               editStackJSON: String? = nil) {
+        // Any open still decoding is older than this one.
+        openGeneration += 1
         guard let gpu = gpuForOpeningNow() else {
             if setupError == nil {
                 // The caller reads this image's history next and finds no
@@ -44,13 +53,130 @@ extension EditorModel {
             }
             return
         }
+        let file: RawFile
+        do {
+            file = try decodeCache.decodedFile(for: url) ?? Self.decodeForOpening(url)
+        } catch {
+            failOpen(url: url, error)
+            return
+        }
+        apply(file, url: url, userRotation: userRotation, catalogImageID: catalogImageID,
+              editStackJSON: editStackJSON, gpu: gpu)
+    }
+
+    /// How an asynchronous open ended.
+    enum OpenOutcome: Equatable {
+        /// The photo is open.
+        case opened
+        /// A newer open or a close came first, or the caller's photo is no
+        /// longer wanted (`isCurrent`): nothing changed.
+        case superseded
+        /// The decode or the GPU failed; the editor says so and has closed
+        /// the previous photo.
+        case failed
+        /// `readEdit` threw: nothing was opened, so that the next save
+        /// can't replace the edit that couldn't be read. The caller reports it.
+        case editUnreadable
+    }
+
+    /// Opens a catalog photo without blocking the main thread on its
+    /// decode (plan fixes #7, #9, #17). The decode starts at once on a
+    /// background thread, beside `readEdit` (the stored edit's read) and,
+    /// at launch, the GPU's start; the photo is laid in place on main once
+    /// all three are done. Until then the previous photo stays on screen
+    /// and in the editor.
+    ///
+    /// Latest wins: an open, a synchronous `open` or `closeImage` started
+    /// meanwhile makes this one return `.superseded` without touching
+    /// anything, as does `isCurrent` turning false (the selection moved on
+    /// or another catalog opened). Its decode, if it hasn't begun, is
+    /// dropped by the newer open.
+    func open(url: URL, userRotation: Int = 0, catalogImageID: Int64?,
+              readEdit: @MainActor () async throws -> String?,
+              isCurrent: @escaping @MainActor () -> Bool = { true }) async -> OpenOutcome {
+        openGeneration += 1
+        let generation = openGeneration
+        let stillWanted: @MainActor () -> Bool = { [weak self] in self?.openGeneration == generation && isCurrent() }
+        let statusBefore = status
+        status = "Opening \(url.lastPathComponent)…"
+        let job = decodeCache.jobForOpening(url)
+
+        let editStackJSON: String?
+        do {
+            editStackJSON = try await readEdit()
+        } catch {
+            if openGeneration == generation { status = statusBefore }
+            return .editUnreadable
+        }
+        guard stillWanted() else { return .superseded }
+
+        guard let gpu = await gpuForOpening() else { return stillWanted() ? .failed : .superseded }
+        guard stillWanted() else { return .superseded }
+        let file: RawFile
+        do {
+            file = try await job.value()
+        } catch {
+            guard stillWanted() else { return .superseded }
+            failOpen(url: url, error)
+            return .failed
+        }
+        guard stillWanted() else { return .superseded }
+        apply(file, url: url, userRotation: userRotation, catalogImageID: catalogImageID,
+              editStackJSON: editStackJSON, gpu: gpu)
+        return hasImage ? .opened : .failed
+    }
+
+    /// Decodes `urls` (the neighbours of the photo just opened) ahead of
+    /// time, so stepping to one needs no decode. Others kept are dropped
+    /// past the cache's budget.
+    func prefetch(_ urls: [URL]) {
+        decodeCache.prefetch(urls, keeping: sourceURL)
+    }
+
+    /// The GPU context if it can be had now: the model's own, or the shared
+    /// one already built but not yet attached, because the launch task that
+    /// attaches it waits behind the first layout of the window (plan fix #9).
+    func gpuForOpeningNow() -> GPUContext? {
+        if gpuContext == nil, let built = Self.builtSharedGPU() { attachGPU(built) }
+        return gpuContext
+    }
+
+    /// The shared context if its build has ended; tests stand in a launch
+    /// whose build is still running.
+    static var builtSharedGPU: () -> Result<GPUContext, any Error>? = { GPUContext.sharedIfBuilt }
+
+    /// The GPU context, waiting for its build if it is still running.
+    /// nil if it failed (`setupError`).
+    func gpuForOpening() async -> GPUContext? {
+        if let gpu = gpuForOpeningNow() { return gpu }
+        guard setupError == nil else { return nil }
+        do {
+            attachGPU(.success(try await GPUContext.shared()))
+        } catch {
+            attachGPU(.failure(error))
+        }
+        return gpuContext
+    }
+
+    /// The decode or session failed. Nothing of the previous photo may
+    /// outlive a failed open: with its id, history or denoise run still
+    /// here, Undo or a history load would write that photo's edit onto
+    /// this one.
+    private func failOpen(url: URL, _ error: any Error) {
+        closeImage()
+        status = "Could not open: \(error)"
+    }
+
+    /// Lays a decoded photo in place: its session, stored edit, history
+    /// and tools, then one render.
+    private func apply(_ file: RawFile, url: URL, userRotation: Int, catalogImageID: Int64?,
+                       editStackJSON: String?, gpu: GPUContext) {
         resetToolStateForNewImage()
         flushPendingSave()
         // The analysis and the tool belong to the image being left.
         dustImageWillChange()
         status = "Opening \(url.lastPathComponent)…"
         do {
-            let file = try RawFile(path: url.path)
             let newSession = try ImageSession(file: file, gpu: gpu)
             // Only once the image has opened: until then the parameters and
             // history on hand are the previous photo's.
@@ -137,32 +263,17 @@ extension EditorModel {
             // follows this render without the settle delay (plan fix #10).
             highQualityPreviewFollowsOpen = true
             rerender()
-            regenerateMissingAIMasks()
+                regenerateMissingAIMasks()
             regenerateTouchUpMasksIfNeeded()
             regenerateDepthMapIfNeeded()
             regenerateReflectionMapIfNeeded()
             regenerateAIDenoiseIfNeeded()
             ensureFlatFieldGainMap()
         } catch {
-            // Nothing of the previous photo may outlive a failed open: with
-            // its id, history or denoise run still here, Undo or a history
-            // load would write that photo's edit onto this one.
-            closeImage()
-            status = "Could not open: \(error)"
+            applyingOpenedImage = false
+            failOpen(url: url, error)
         }
     }
-
-    /// The GPU context if it can be had now: the model's own, or the shared
-    /// one already built but not yet attached, because the launch task that
-    /// attaches it waits behind the first layout of the window (plan fix #9).
-    func gpuForOpeningNow() -> GPUContext? {
-        if gpuContext == nil, let built = Self.builtSharedGPU() { attachGPU(built) }
-        return gpuContext
-    }
-
-    /// The shared context if its build has ended; tests stand in a launch
-    /// whose build is still running.
-    static var builtSharedGPU: () -> Result<GPUContext, any Error>? = { GPUContext.sharedIfBuilt }
 
     /// What the tools hold about the photo being left: the selected patch,
     /// spot and local (an index into that photo's lists, which would pick

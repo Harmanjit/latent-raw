@@ -31,6 +31,8 @@ extension EditorModel {
             touchUpMemoryDidRecover()
             return
         }
+        // Decodes kept for the photo's neighbours: decoded again when needed.
+        decodeCache.removeAll(keepingOpens: true)
         if isOffScreen {
             closeImage()
             return
@@ -73,6 +75,10 @@ extension EditorModel {
     /// Opening an image starts afresh. Also runs with no image but an id
     /// still set, so no id outlives the image it belonged to.
     func closeImage() {
+        // An open still decoding must not land after this; nor may decodes
+        // made for the catalog being left be reused.
+        openGeneration += 1
+        decodeCache.removeAll()
         guard hasImage || catalogImageID != nil else { return }
         flushPendingSave()
         disarmTools()

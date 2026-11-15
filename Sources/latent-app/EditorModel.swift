@@ -595,6 +595,13 @@ final class EditorModel: ObservableObject {
 
     /// An image asked for before the GPU was ready, opened when it is.
     var openWhenGPUReady: (() -> Void)?
+    /// Numbers the opens and closes. An open whose decode finishes after a
+    /// newer open or a close began finds the number moved on and drops its
+    /// result, so a stale photo never replaces a newer one
+    /// (EditorModel+Opening.swift).
+    var openGeneration = 0
+    /// The open photo's decode and its neighbours' (RawDecodeCache.swift).
+    let decodeCache = RawDecodeCache()
     /// Set while `open` lays the new photo's settings in place: their
     /// didSet must not render, because `open` renders once itself when
     /// everything is in place (plan fix #8).

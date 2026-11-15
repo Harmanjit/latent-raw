@@ -382,11 +382,13 @@ struct ContentView: View {
         case .folder(let url):
             openFolder(url)
         case .file(let url):
-            model.open(url: url)
             if mode != .develop {
                 keepOpenedFileOnModeChange = true
                 mode = .develop
             }
+            // Decoded off the main thread: at launch, beside the GPU's
+            // start and the window's first layout (plan fix #9).
+            Task { _ = await model.open(url: url, catalogImageID: nil, readEdit: { nil }) }
         }
     }
 
@@ -682,24 +684,41 @@ struct ContentView: View {
         let catalog = library.catalog
         library.selectedImageID = record.id
         Task {
-            let stack: String?
-            do {
-                stack = try await library.editStack(for: record)
-            } catch {
+            // The decode runs off the main thread, beside the edit's read;
+            // the previous photo stays on screen until both are done.
+            var editReadError: (any Error)?
+            let outcome = await model.open(
+                url: url, userRotation: record.userRotation, catalogImageID: record.id,
+                readEdit: {
+                    do {
+                        return try await library.editStack(for: record)
+                    } catch {
+                        editReadError = error
+                        throw error
+                    }
+                },
+                // Another folder may have opened meanwhile. The record and
+                // its id belong to the old catalog; opened now, its edits
+                // would be saved onto whatever photo has that id in the new
+                // one. And the selection may have moved on: a held arrow key
+                // starts a load per image passed; only the last one opens.
+                isCurrent: {
+                    Self.loadIsCurrent(recordID: record.id, selectedImageID: library.selectedImageID,
+                                       catalogUnchanged: library.catalog === catalog)
+                })
+            switch outcome {
+            case .opened:
+                break
+            case .editUnreadable:
                 // Don't open at defaults over an edit we couldn't read: the
                 // next save would replace it. Say so and stop.
-                model.reportFailure("Reading the edit for \(record.fileName)", error)
+                if let editReadError { model.reportFailure("Reading the edit for \(record.fileName)", editReadError) }
+                return
+            case .superseded, .failed:
                 return
             }
-            // Another folder may have opened meanwhile. The record and its
-            // id belong to the old catalog; opened now, its edits would be
-            // saved onto whatever photo has that id in the new one. And the
-            // selection may have moved on: a held arrow key starts a load
-            // per image passed, and each would decode its image in turn.
-            guard Self.loadIsCurrent(recordID: record.id, selectedImageID: library.selectedImageID,
-                                     catalogUnchanged: library.catalog === catalog) else { return }
-            model.open(url: url, userRotation: record.userRotation,
-                       catalogImageID: record.id, editStackJSON: stack)
+            // Stepping on to a neighbour then needs no decode.
+            model.prefetch(neighbourURLs(of: record))
             // History and snapshots follow, from the catalog.
             do {
                 let steps = try await library.history(for: record)
@@ -712,6 +731,14 @@ struct ContentView: View {
                 model.reportFailure("Reading history for \(record.fileName)", error)
             }
         }
+    }
+
+    /// The files beside `record` in the grid's order, the next first: the
+    /// photos an arrow key opens next.
+    private func neighbourURLs(of record: ImageRecord) -> [URL] {
+        let list = library.visibleImages
+        guard let index = list.firstIndex(where: { $0.id == record.id }) else { return [] }
+        return [index + 1, index - 1].filter(list.indices.contains).compactMap { library.fileURL(for: list[$0]) }
     }
 
     /// Whether a load whose edit read has just finished should still open
