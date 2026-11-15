@@ -149,12 +149,13 @@ extension Catalog {
             ($0, fileURL(forRelPath: $0.relPath), !claimableSizes.contains($0.size))
         }
         let width = ImportWorkers.width(forFolderAt: rootPath)
+        let handoff = thumbnailHandoff
         let passed = ImportWorkers.map(count: jobs.count, width: width) {
             index, buffer -> (hash: Result<Data, any Error>, record: Result<ImageRecord, any Error>?) in
             let job = jobs[index]
             let hash = Result { ImageRecord.hashData(try FileHash.xxh64(ofFileAt: job.url, uncached: false, buffer: buffer)) }
             guard job.wantsRecord, case .success(let value) = hash else { return (hash, nil) }
-            return (hash, Result { try Self.makeRecord(for: job.file, at: job.url, hash: value) })
+            return (hash, Result { try Self.makeRecord(for: job.file, at: job.url, hash: value, handoff: handoff) })
         }
         let hashes = passed.map(\.hash)
         var readRecords: [String: Result<ImageRecord, any Error>] = [:]
@@ -291,7 +292,7 @@ extension Catalog {
             .map { (file: $0.0, url: fileURL(forRelPath: $0.0.relPath), hash: $0.1) }
         let lateRecords = ImportWorkers.map(count: late.count, width: width) {
             index, _ -> Result<ImageRecord, any Error> in
-            Result { try Self.makeRecord(for: late[index].file, at: late[index].url, hash: late[index].hash) }
+            Result { try Self.makeRecord(for: late[index].file, at: late[index].url, hash: late[index].hash, handoff: handoff) }
         }
         for (job, result) in zip(late, lateRecords) { readRecords[job.file.relPath] = result }
 
@@ -556,13 +557,14 @@ extension Catalog {
     /// Reads what the catalog needs from a raw file without decoding it.
     /// Static and touching nothing of the catalog's, so import workers can
     /// run it off the actor.
-    static func makeRecord(for file: DiskFile, at url: URL, hash: Data) throws -> ImageRecord {
+    static func makeRecord(for file: DiskFile, at url: URL, hash: Data,
+                           handoff: ThumbnailHandoff? = nil) throws -> ImageRecord {
         let raw = try RawFile(path: url.path, metadataOnly: true)
         let s = raw.summary
         // The embedded JPEG came over XPC with the metadata; the thumbnail
         // pass takes it from here instead of fetching it again (plan #29).
-        if !RenderedImageFormat.handles(path: url.path), let preview = raw.embeddedJPEGPreview() {
-            thumbnailHandoff.offerPreview(preview, orientation: s.orientation, relPath: file.relPath, hash: hash)
+        if let handoff, !RenderedImageFormat.handles(path: url.path), let preview = raw.embeddedJPEGPreview() {
+            handoff.offerPreview(preview, orientation: s.orientation, relPath: file.relPath, hash: hash)
         }
         // TODO(Photo Merge): a merge result copied in from Finder arrives
         // without its sidecar, but the DNG carries the same latent:Merge
