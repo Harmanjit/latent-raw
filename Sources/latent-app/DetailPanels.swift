@@ -215,7 +215,7 @@ struct LensCorrectionsPanel: View {
     /// remembering the choice for every photo from this lens.
     @ViewBuilder private var profilePicker: some View {
         if model.hasImage, model.session?.lensCorrectionAlreadyApplied != true {
-            let choices = model.lensProfileChoices
+            let choices = model.lensProfileMenu
             HStack {
                 Menu {
                     Button("Automatic") { model.chooseLensProfile(nil) }
@@ -249,12 +249,12 @@ struct LensCorrectionsPanel: View {
         }
     }
 
-    /// One button per lens, grouped by maker.
-    @ViewBuilder private func lensMenu(_ lenses: [LensfunLens]) -> some View {
-        let makers = Array(Set(lenses.map(\.maker))).sorted { $0.lowercased() < $1.lowercased() }
-        ForEach(makers, id: \.self) { maker in
-            Menu(maker) {
-                ForEach(lenses.filter { $0.maker == maker }, id: \.model) { lens in
+    /// One button per lens, grouped by maker (grouped once per camera in
+    /// LensKit, not on every redraw).
+    @ViewBuilder private func lensMenu(_ groups: [LensProfileOverrides.MakerGroup]) -> some View {
+        ForEach(groups, id: \.maker) { group in
+            Menu(group.maker) {
+                ForEach(group.lenses, id: \.model) { lens in
                     Button(lens.model) { model.chooseLensProfile(lens.model) }
                 }
             }
