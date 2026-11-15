@@ -103,11 +103,7 @@ Below the sliders, three more groups open once used:
 
 These three run in the same stage as Effects and Detail, after the global edit, so a mask's curve bends the picture as it finally looks.
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
-- **Tone Equalizer**: the [Tone Equalizer](Develop#tone-equalizer)'s nine bands in a compact strip, only inside the mask, so you can, say, pull down the bright parts of the sky alone. The bands read the global tone equalizer's mask, with its Masking settings, so each moves the same tones as the panel's band of that stop; the panel's own bands can stay at 0. It acts like the mask's Exposure, scaled by the mask and its Amount and joined by its Blend, and with no band moved the mask stores and renders nothing new. **Reset** puts every band back to 0. Copy, paste, Sync and mask presets carry it with the mask's other sliders.
-
-A mask can also have a [Tone Equalizer](Tone-Equalizer) of its own, so its nine brightness bands change only the part of the photo the mask covers.
-<!-- /RECONCILE -->
+- **Tone Equalizer**: the [Tone Equalizer](Tone-Equalizer)'s nine bands in a compact strip, only inside the mask, so you can, say, pull down the bright parts of the sky alone. The bands read the global tone equalizer's mask, with its Masking settings, so each moves the same tones as the panel's band of that stop; the panel's own bands can stay at 0. It acts like the mask's Exposure, scaled by the mask and its Amount and joined by its Blend, and with no band moved the mask stores and renders nothing new. **Reset** puts every band back to 0. Copy, paste, Sync and mask presets carry it with the mask's other sliders.
 
 ### Blend
 
@@ -134,10 +130,6 @@ The stroke stores only that Auto Mask was on, never the pixels. What it compares
 - Right-click a mask in the list for the same commands.
 
 All of these are ordinary edits: ⌘Z undoes them, and they travel in copy, paste and presets with the Local Adjustments group.
-
-### Copy and paste a mask
-
-Right-click a mask in the list and choose **Copy Mask** to copy it, with its components, ranges and sliders. Then open another photo, right-click in its mask list and choose **Paste Mask**: the mask is added as a new mask, and the photo's own masks stay as they are. To give the mask to many photos at once, select them in the grid and choose **Paste Mask to Selection**. Model masks are made again from each photo they are pasted onto, as with mask presets.
 
 ### Mask presets
 
