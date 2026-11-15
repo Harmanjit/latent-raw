@@ -219,6 +219,15 @@ final class DevelopViewState: ObservableObject {
     /// The folder the reference belongs to: its id means nothing in another.
     private var referenceFolder: URL?
     private var observations: [AnyCancellable] = []
+    /// What a sideways swipe on Develop's image does (ContentView's step),
+    /// set when the image area appears.
+    var stepHandler: (Int) -> Void = { _ in }
+    /// The swipe action handed to the viewport: one closure for the life of
+    /// this state, so the viewport's inputs compare equal when ContentView
+    /// rebuilds the image area. A new closure on every rebuild had SwiftUI
+    /// evaluate the viewport a second time on every slider tick, after the
+    /// pass its own observation of the model already caused.
+    private(set) lazy var step: (Int) -> Void = { [weak self] in self?.stepHandler($0) }
     private var paneProblems: AnyCancellable?
     private var paneRenders: AnyCancellable?
     private var overlayForwarding: AnyCancellable?
@@ -694,8 +703,12 @@ let imageIDPasteboardType = NSPasteboard.PasteboardType("com.latent.image-id")
 /// or a reference photo beside it.
 struct DevelopImageArea: View {
     @ObservedObject var state: DevelopViewState
-    @ObservedObject var model: EditorModel
-    @ObservedObject var library: Library
+    /// Not observed here: ContentView observes the editor and the library
+    /// and rebuilds this view whenever either changes (its closures are new
+    /// each time). Observing them here too made SwiftUI evaluate this view
+    /// twice in the same update on every slider tick.
+    let model: EditorModel
+    let library: Library
     let onStep: (Int) -> Void
     let onSwapReference: () -> Void
 
@@ -703,7 +716,7 @@ struct DevelopImageArea: View {
         Group {
             switch state.kind {
             case .single:
-                ImageViewport(model: model, onStep: onStep, showsLoupeOverlay: true)
+                ImageViewport(model: model, onStep: state.step, showsLoupeOverlay: true)
             case .beforeAfter:
                 if let comparison = state.comparison {
                     VStack(spacing: 0) {
@@ -728,6 +741,7 @@ struct DevelopImageArea: View {
         }
         .onAppear {
             state.attach(main: model, library: library)
+            state.stepHandler = onStep
             state.show()
         }
         .onDisappear { state.hide() }
@@ -894,7 +908,7 @@ struct DevelopImageArea: View {
         stack(stacked: state.referenceLayout == .topBottom) {
             referencePane
                 .overlay(alignment: .topLeading) { PaneLabel(text: "Reference") }
-            ImageViewport(model: model, onStep: onStep, showsLoupeOverlay: true)
+            ImageViewport(model: model, onStep: state.step, showsLoupeOverlay: true)
                 .overlay(alignment: .topLeading) { PaneLabel(text: "Active") }
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Active pane")
