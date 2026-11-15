@@ -1318,7 +1318,7 @@ struct ContentView: View {
         case .exportWithPrevious:
             guard let gpu = model.gpu else { return false }
             model.flushPendingSave()
-            exportQueue.exportWithPrevious(records: library.selectedImages, library: library, gpu: gpu)
+            exportQueue.exportWithPrevious(records: library.selectedImages, library: library, gpu: gpu.background)
         case .exportOpenImage:
             LibraryPanel.exportOpenImage(model: model, library: library)
         case .print:

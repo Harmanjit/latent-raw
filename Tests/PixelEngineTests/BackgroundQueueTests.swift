@@ -49,13 +49,14 @@ final class BackgroundQueueTests: XCTestCase {
             return try TextureReadback.float16Pixels(of: try RenderPipeline(gpu: gpu).render(session, scale: .binned(quads: 2), parameters: p), gpu: gpu)
         }()
         let contexts = [gpu, gpu.background, gpu, gpu.background]
+        let parameters = p   // a let: the closure below runs concurrently
         let results = Mutex<[[Float16]]>([])
         DispatchQueue.concurrentPerform(iterations: contexts.count) { i in
             let context = contexts[i]
             guard let session = try? ImageSession(file: try RawFile(path: path), gpu: context) else { return }
             let pipeline = RenderPipeline(gpu: context)
             for _ in 0..<5 {
-                guard let t = try? pipeline.render(session, scale: .binned(quads: 2), parameters: p),
+                guard let t = try? pipeline.render(session, scale: .binned(quads: 2), parameters: parameters),
                       let px = try? TextureReadback.float16Pixels(of: t, gpu: context) else { return }
                 results.withLock { $0.append(px) }
             }
