@@ -251,10 +251,18 @@ struct KindFilterMenu: View {
                     choice(kind.title, on: filter.copyKind == kind) { filter.copyKind = kind }
                 }
             }
+            // What Library › Verify Files last found (FileIntegrity.State).
+            Section("File Integrity") {
+                choice("Any Integrity", on: filter.integrity == nil) { filter.integrity = nil }
+                ForEach(FileIntegrity.State.allCases, id: \.self) { state in
+                    choice(Self.integrityTitle(state), on: filter.integrity == state) { filter.integrity = state }
+                }
+            }
         } label: {
             Text(summary).lineLimit(1).frame(maxWidth: 140)
         }
-        .help("Show only raw files, other files or RAW+JPEG pairs; masters, virtual copies or masters with copies")
+        .help("Show only raw files, other files or RAW+JPEG pairs; masters, virtual copies or masters with copies; "
+              + "files Verify Files found damaged, found OK, or hasn't checked")
         .accessibilityLabel("Kind")
         .accessibilityValue(summary)
     }
@@ -267,8 +275,18 @@ struct KindFilterMenu: View {
 
     private var summary: String {
         let parts = [filter.fileKind == .any ? nil : filter.fileKind.title,
-                     filter.copyKind == .any ? nil : filter.copyKind.title].compactMap { $0 }
+                     filter.copyKind == .any ? nil : filter.copyKind.title,
+                     filter.integrity.map(Self.integrityTitle)].compactMap { $0 }
         return parts.isEmpty ? "Kind" : parts.joined(separator: ", ")
+    }
+
+    /// The menu's name for a File integrity choice.
+    static func integrityTitle(_ state: FileIntegrity.State) -> String {
+        switch state {
+        case .damaged: "Damaged Files"
+        case .ok: "Verified OK"
+        case .unchecked: "Not Verified"
+        }
     }
 }
 

@@ -37,6 +37,18 @@ public struct ExportPDFOptions: Sendable, Hashable, Codable {
     /// empty for none.
     public var captionTemplate = ""
     public var captionFontSize: Double = 10
+    /// Combine into one PDF: every photo of the export becomes a page (or a
+    /// cell of a page) of a single file, instead of one PDF per photo
+    /// (ExportPDF+Combined.swift). Off by default, and in older presets.
+    public var combine = false
+    /// How a combined PDF lays the photos out.
+    public var combinedLayout: CombinedPDFLayout = .onePerPage
+    /// Photos on each page of a contact-sheet layout
+    /// (`photosPerPageChoices`).
+    public var photosPerPage = 4
+    /// The combined file's name without extension; empty names it after
+    /// the catalog's folder.
+    public var combinedFileName = ""
 
     public init() {}
 
@@ -46,6 +58,10 @@ public struct ExportPDFOptions: Sendable, Hashable, Codable {
         marginMM = min(max((try? c.decodeIfPresent(Double.self, forKey: .marginMM)) ?? 10, 0), 100)
         captionTemplate = (try? c.decodeIfPresent(String.self, forKey: .captionTemplate)) ?? ""
         captionFontSize = min(max((try? c.decodeIfPresent(Double.self, forKey: .captionFontSize)) ?? 10, 4), 72)
+        combine = (try? c.decodeIfPresent(Bool.self, forKey: .combine)) ?? false
+        combinedLayout = (try? c.decodeIfPresent(CombinedPDFLayout.self, forKey: .combinedLayout)) ?? .onePerPage
+        photosPerPage = min(max((try? c.decodeIfPresent(Int.self, forKey: .photosPerPage)) ?? 4, 1), 100)
+        combinedFileName = (try? c.decodeIfPresent(String.self, forKey: .combinedFileName)) ?? ""
     }
 
     static let pointsPerMM = 72 / 25.4

@@ -14,8 +14,15 @@ extension Library {
     public func recordVerification(_ checks: [FileIntegrity.Check], in catalog: Catalog) async throws {
         try await catalog.recordVerification(checks)
         let damaged = try await catalog.damagedImageIDs()
+        let verified = try await catalog.verifiedImageIDs()
         guard catalog === self.catalog else { return }
         if damaged != damagedImageIDs { damagedImageIDs = damaged }
+        if verified != verifiedImageIDs { verifiedImageIDs = verified }
+    }
+
+    /// What the catalog knows about `record`'s file (FileIntegrity.State).
+    public func integrityState(of record: ImageRecord) -> FileIntegrity.State {
+        .of(record.id, damaged: damagedImageIDs, verified: verifiedImageIDs)
     }
 
     /// The open folder's duplicates: identical files, then the looser

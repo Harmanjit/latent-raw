@@ -10,7 +10,7 @@ extension LibraryFilter: Codable {
         case camera, lens, keyword, noKeywords, text, textScope, finderTag
         case labels, excludedLabels
         case isoRange, focalRange, apertureRange, shutterRange, captureDateRange
-        case fileKind, copyKind
+        case fileKind, copyKind, integrity
     }
 
     public init(from decoder: Decoder) throws {
@@ -39,6 +39,7 @@ extension LibraryFilter: Codable {
         captureDateRange = try c.decodeIfPresent(ClosedRange<Date>.self, forKey: .captureDateRange)
         fileKind = (try? c.decodeIfPresent(FileKindFilter.self, forKey: .fileKind)) ?? .any
         copyKind = (try? c.decodeIfPresent(CopyKindFilter.self, forKey: .copyKind)) ?? .any
+        integrity = (try? c.decodeIfPresent(FileIntegrity.State.self, forKey: .integrity)) ?? nil
     }
 
     /// Only what differs from the default is written, so a preset holds
@@ -67,6 +68,7 @@ extension LibraryFilter: Codable {
         try c.encodeIfPresent(captureDateRange, forKey: .captureDateRange)
         if fileKind != .any { try c.encode(fileKind, forKey: .fileKind) }
         if copyKind != .any { try c.encode(copyKind, forKey: .copyKind) }
+        try c.encodeIfPresent(integrity, forKey: .integrity)
     }
 }
 

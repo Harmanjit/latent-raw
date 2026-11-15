@@ -138,5 +138,45 @@ struct ExportPDFSection: View {
             .fixedSize()
             .accessibilityLabel("Insert a caption token")
         }
+        ExportCombinedPDFOptions(options: $preset.formats.pdf)
+    }
+}
+
+/// Combine into one PDF: the whole selection as the pages of one file,
+/// one photo per page or a contact sheet of several (ExportPDF+Combined).
+struct ExportCombinedPDFOptions: View {
+    @Binding var options: ExportPDFOptions
+
+    var body: some View {
+        Toggle("Combine into one PDF", isOn: $options.combine)
+            .help("Writes every exported photo into a single PDF instead of one PDF per photo.")
+        if options.combine {
+            HStack {
+                Picker("Layout", selection: $options.combinedLayout) {
+                    ForEach(CombinedPDFLayout.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .frame(width: 240)
+                .help("One photo per page uses the page settings above. A contact sheet puts several photos "
+                      + "on each page of the chosen paper (A4 for Fit to image), each with its file name, or "
+                      + "the caption when one is set.")
+                if options.combinedLayout == .contactSheet {
+                    Picker("Per page", selection: $options.photosPerPage) {
+                        ForEach(ExportPDFOptions.photosPerPageChoices, id: \.self) { Text("\($0)").tag($0) }
+                    }
+                    .frame(width: 130)
+                    .accessibilityLabel("Photos per page")
+                }
+                Spacer()
+            }
+            HStack {
+                Text("File name")
+                TextField("the folder’s name", text: $options.combinedFileName)
+                    .frame(width: 200)
+                    .accessibilityLabel("Combined PDF file name")
+                    .help("The PDF’s name, without .pdf. Leave empty to name it after the catalog’s folder.")
+                Text(".pdf").foregroundStyle(.secondary).accessibilityHidden(true)
+                Spacer()
+            }
+        }
     }
 }

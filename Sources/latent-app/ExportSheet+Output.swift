@@ -90,8 +90,8 @@ struct ExportKindNote: View {
             "The raw file itself, unchanged, with an .xmp sidecar beside it holding the rating, label, "
                 + "keywords and Latent's edit. Other apps read the rating, label and keywords."
         case .pdf:
-            "One PDF per photo: the edited photo on a page of its own, with the page size, margin and caption "
-                + "set below. Colour is sRGB, or Display P3 when it was chosen for image files."
+            "One PDF per photo (or, with Combine into one PDF, one for them all): the edited photo on a page "
+                + "of its own, with the page size, margin and caption set below. Colour is sRGB, or Display P3 when it was chosen for image files."
         }
     }
 }

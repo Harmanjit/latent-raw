@@ -333,12 +333,36 @@ final class ExportQueue: ObservableObject {
             var toCatalog: [Library.ExportedFile] = []
             var revealed: [URL] = []
             var opened: [(app: URL, files: [URL])] = []
+            // A combined PDF is one file holding many photos: the photos
+            // beyond the first, so the summary counts photos exported.
+            var combinedPagesBeyondFiles = 0
           batches: for batch in batches {
             let preset = batch.preset
             // Same folder as original plans under the catalog's folder,
             // which the images' paths are relative to.
             let destination = preset.location == .sameAsOriginal ? root : batch.destination
             var writtenInBatch: [URL] = []
+            if preset.combinesPDF {
+                // Combine into one PDF: every photo a page of one file
+                // (ExportQueue+CombinedPDF.swift), with the same progress,
+                // pause and cancel.
+                let result = await Self.runCombinedPDF(
+                    records: records, preset: preset, destination: destination, root: root, catalog: catalog,
+                    catalogName: catalogName, batchName: batches.count > 1 ? (batch.name ?? "batch") : nil,
+                    gpu: gpu, pauseGate: pauseGate) { [weak self] event in self?.applyCombinedPDFEvent(event) }
+                if let url = result.url {
+                    written.append(url)
+                    writtenInBatch.append(url)
+                    combinedPagesBeyondFiles += result.photos - 1
+                }
+                totalPixels += result.pixels
+                substituted += result.substituted
+                if result.skipped { skipped += 1 }
+                if Task.isCancelled { break batches }
+                if preset.revealWhenDone { revealed += writtenInBatch }
+                if let app = preset.openInAppURL, !writtenInBatch.isEmpty { opened.append((app, writtenInBatch)) }
+                continue batches
+            }
             // Every name settled before the first file is written, so two
             // images whose template gives the same name never overwrite each
             // other, whatever the collision policy.
@@ -469,7 +493,7 @@ final class ExportQueue: ObservableObject {
             if let app = preset.openInAppURL, !writtenInBatch.isEmpty { opened.append((app, writtenInBatch)) }
           }
             let elapsed = Date().timeIntervalSince(start)
-            let exported = written
+            let exportedCount = written.count + combinedPagesBeyondFiles
             let toReveal = revealed, toOpen = opened, added = toCatalog
             await MainActor.run {
                 guard let self else { return }
@@ -483,7 +507,7 @@ final class ExportQueue: ObservableObject {
                 let rendered = batches.contains { $0.preset.fileKind != .original }
                 let pixelsNote = rendered ? String(format: " · %.1f MP total", Double(totalPixels) / 1_000_000) : ""
                 self.summary = String(format: "%d of %d exported%@ in %.1fs%@%@%@",
-                                      exported.count, self.total, cancelled, elapsed,
+                                      exportedCount, self.total, cancelled, elapsed,
                                       pixelsNote, skippedNote,
                                       MaskSubstitutions.summarySuffix(count: substituted))
                 guard !self.stoppingForQuit else { return }
@@ -497,6 +521,17 @@ final class ExportQueue: ObservableObject {
     }
 
     func cancel() { task?.cancel() }
+
+    /// Progress from a combined-PDF batch (`runCombinedPDF`), applied as
+    /// the per-file loop applies its own.
+    func applyCombinedPDFEvent(_ event: CombinedPDFEvent) {
+        switch event {
+        case .current(let name): currentName = name
+        case .photoDone: done += 1
+        case .failure(let name, let reason): failures.append(Failure(name: name, reason: reason))
+        case .note(let note): notes.append(note)
+        }
+    }
 
     /// Holds the run before its next file; the one being written finishes.
     func pause() {

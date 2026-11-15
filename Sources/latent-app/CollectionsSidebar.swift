@@ -752,6 +752,13 @@ private struct SmartCriterionRow: View {
                 }
                 .labelsHidden()
                 .accessibilityLabel("Kind")
+            case .integrity:
+                Picker("File integrity", selection: $criterion.value) {
+                    ForEach(FileIntegrity.State.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
+                }
+                .labelsHidden()
+                .help("What Library › Verify Files last found: damaged, OK, or not checked since the file changed")
+                .accessibilityLabel("File integrity")
             case .module:
                 Picker("Edit group", selection: $criterion.value) {
                     if EditGroup(rawValue: criterion.value) == nil { Text("Choose…").tag(criterion.value) }

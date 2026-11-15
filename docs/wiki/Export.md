@@ -110,6 +110,8 @@ Every file name is planned before anything is written. A line shows the first fi
 
 **PDF** in the format menu writes one PDF per photo: the edited photo on a page of its own, drawn as Print and Contact Sheet draw theirs. **Page** is **Fit to image** (the photo's own size at the Resolution set for images, 300 ppi when none is) or **A4**, **US Letter** or **A3**, turned to match the photo, which is then rendered at no more pixels than the page holds at that resolution. A **margin** in millimetres goes round the photo, and an optional **caption** under it is made from the same tokens as the file name (`{name}`, `{date}`…). The colour is sRGB, or Display P3 when it was chosen for image files. PDFs aren't added to the catalog.
 
+**Combine into one PDF** writes the whole selection as one file instead. **One photo per page** gives each photo a page laid out exactly as above; **Contact sheet** puts 2 to 20 photos on each page of the chosen paper (A4 for Fit to image, turned landscape for a wide grid), each with its file name underneath, or the caption when one is set, and renders each photo only as large as its cell needs. The file is named after the catalog's folder unless you type a **File name**, goes in the destination (or its subfolder), and the collision setting decides what happens when the name is taken. Progress, Pause and Cancel work as for any export; a cancelled export leaves no file.
+
 ## DNG export (Render to DNG)
 
 Choosing **DNG** as the format writes a DNG of each photo. **DNG contents** says what goes in it:

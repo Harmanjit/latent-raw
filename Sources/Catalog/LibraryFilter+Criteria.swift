@@ -139,18 +139,31 @@ public struct LibraryFilterContext: Sendable {
     /// The search box's text trimmed, for the File Name, Title and Caption
     /// scope: trimmed once per pass rather than once per photo.
     public var needle: String?
+    /// For the File integrity choice: the images Verify Files last found
+    /// damaged, and intact, each unchanged since (`Library.damagedImageIDs`,
+    /// `Library.verifiedImageIDs`).
+    public var damagedIDs: Set<Int64> = []
+    public var verifiedIDs: Set<Int64> = []
 
-    public init(searchQuery: SearchQuery? = nil, mastersWithCopies: Set<String> = [], pairedIDs: Set<Int64> = []) {
+    public init(searchQuery: SearchQuery? = nil, mastersWithCopies: Set<String> = [], pairedIDs: Set<Int64> = [],
+                damagedIDs: Set<Int64> = [], verifiedIDs: Set<Int64> = []) {
         self.searchQuery = searchQuery
         self.mastersWithCopies = mastersWithCopies
         self.pairedIDs = pairedIDs
+        self.damagedIDs = damagedIDs
+        self.verifiedIDs = verifiedIDs
     }
 
     public static let empty = LibraryFilterContext()
 
     /// The context `filter` needs over `images`, given the RAW+JPEG pairs
     /// (raw id → its JPEGs). Only what the filter reads is worked out.
-    public init(filter: LibraryFilter, images: [ImageRecord], pairedCompanions: [Int64: [ImageRecord]]) {
+    public init(filter: LibraryFilter, images: [ImageRecord], pairedCompanions: [Int64: [ImageRecord]],
+                damagedIDs: Set<Int64> = [], verifiedIDs: Set<Int64> = []) {
+        if filter.integrity != nil {
+            self.damagedIDs = damagedIDs
+            self.verifiedIDs = verifiedIDs
+        }
         if filter.textScope == .everything {
             searchQuery = SearchQuery(filter.text)
         } else {
@@ -174,6 +187,7 @@ extension LibraryFilter {
             || !excludedLabels.isEmpty || uneditedOnly || noKeywords
             || isoRange != nil || focalRange != nil || apertureRange != nil || shutterRange != nil
             || captureDateRange != nil || fileKind != .any || copyKind != .any
+            || integrity != nil
     }
 
     /// Whether the rating range, read by its operator, hides anything.
@@ -252,6 +266,10 @@ extension LibraryFilter {
         case .hasVirtualCopies:
             if record.isVirtualCopy || !context.mastersWithCopies.contains(record.relPath) { return false }
         }
+        if let integrity,
+           FileIntegrity.State.of(record.id, damaged: context.damagedIDs, verified: context.verifiedIDs) != integrity {
+            return false
+        }
         return true
     }
 
@@ -266,6 +284,7 @@ extension LibraryFilter {
         if shutterRange != nil, old.shutter != new.shutter { return true }
         if captureDateRange != nil, old.captureTime != new.captureTime { return true }
         if fileKind != .any || copyKind != .any, old.relPath != new.relPath { return true }
+        if integrity != nil, old.size != new.size || old.mtime != new.mtime { return true }
         if textScope == .everything, !text.trimmingCharacters(in: .whitespaces).isEmpty,
            old.relPath != new.relPath || old.title != new.title || old.caption != new.caption
             || old.creator != new.creator || old.copyright != new.copyright

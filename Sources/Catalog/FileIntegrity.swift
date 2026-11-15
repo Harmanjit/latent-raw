@@ -26,6 +26,31 @@ public enum FileIntegrity {
         case verified, changed, damaged, missing, unreadable
     }
 
+    /// What the catalog knows about a photo's file now, for the filter
+    /// bar's File integrity choice and the smart collection rule of that
+    /// name: the last Verify Files result, while the file is unchanged
+    /// since. A file changed since its check, or never checked, is
+    /// unchecked.
+    public enum State: String, Sendable, Equatable, Codable, CaseIterable {
+        case damaged, ok, unchecked
+
+        public var title: String {
+            switch self {
+            case .damaged: "Damaged"
+            case .ok: "OK"
+            case .unchecked: "Unchecked"
+            }
+        }
+
+        /// The state of image `id` given the catalog's damaged and verified
+        /// sets (`Catalog.damagedImageIDs`, `Catalog.verifiedImageIDs`).
+        public static func of(_ id: Int64?, damaged: Set<Int64>, verified: Set<Int64>) -> State {
+            guard let id else { return .unchecked }
+            if damaged.contains(id) { return .damaged }
+            return verified.contains(id) ? .ok : .unchecked
+        }
+    }
+
     /// One image's result.
     public struct Check: Sendable, Equatable {
         public var imageID: Int64
@@ -297,6 +322,21 @@ extension Catalog {
             let masters = try Int64.fetchAll(db, sql: """
                 SELECT v.image_id FROM file_verification v JOIN images i ON i.id = v.image_id
                 WHERE v.status = 'damaged' AND v.size = i.size AND v.mtime = i.mtime
+                """)
+            guard !masters.isEmpty else { return [] }
+            let list = masters.map(String.init).joined(separator: ",")
+            let copies = try Int64.fetchAll(db, sql: "SELECT id FROM images WHERE master_id IN (\(list))")
+            return Set(masters).union(copies)
+        }
+    }
+
+    /// Images whose file was last verified intact and hasn't changed since,
+    /// with their virtual copies, which share the file.
+    public func verifiedImageIDs() throws -> Set<Int64> {
+        try dbQueue.read { db in
+            let masters = try Int64.fetchAll(db, sql: """
+                SELECT v.image_id FROM file_verification v JOIN images i ON i.id = v.image_id
+                WHERE v.status = 'verified' AND v.size = i.size AND v.mtime = i.mtime
                 """)
             guard !masters.isEmpty else { return [] }
             let list = masters.map(String.init).joined(separator: ",")
