@@ -31,6 +31,8 @@ struct ImageViewport: View {
     @ObservedObject private var overlay = LoupeOverlaySettings.shared
     /// Focus peaking, raw clipping, the clipping options and colour assessment.
     @ObservedObject private var viewing = ViewingSettings.shared
+    /// Screen pixels per point, which the drag preview is sized by.
+    @Environment(\.displayScale) private var displayScale
 
     /// A Develop tool owns clicks and drags on the image, so there's no
     /// swipe to another image and no magnifier while one is armed.
@@ -55,7 +57,7 @@ struct ImageViewport: View {
                                 frame: model.frame,
                                 presenter: presenter,
                                 device: device,
-                                onResize: { model.viewportDidResize(to: $0) },
+                                onResize: { model.viewBackingScale = displayScale; model.viewportDidResize(to: $0) },
                                 onHeadroomChange: { model.displayHeadroomDidChange(to: $0) },
                                 backgroundLevel: ColourAssessment.surroundLinear(viewing, prefs),
                                 onZoom: { factor, point in

@@ -68,8 +68,16 @@ enum SecondaryPreview {
     /// and the second display's fit zoom (nil for a view not laid out).
     /// Each view wants half a quad or less per screen pixel, as the editor
     /// always asked; the finer of the two wins, so neither is soft.
-    static func previewQuads(mainZoom: CGFloat?, secondaryZoom: CGFloat?) -> Int {
-        [mainZoom, secondaryZoom]
+    ///
+    /// `mainPixelsPerPreviewPixel` loosens the main view's ask: 1 is one
+    /// preview pixel per screen pixel; a drag on a retina screen passes
+    /// its backing scale, one preview pixel per point, a quarter of the
+    /// pixels (EditorModel+DragRender.swift). The second display keeps
+    /// its own full ask, since its scale isn't known here.
+    static func previewQuads(mainZoom: CGFloat?, secondaryZoom: CGFloat?,
+                             mainPixelsPerPreviewPixel: CGFloat = 1) -> Int {
+        let main = mainZoom.map { $0 / max(1, mainPixelsPerPreviewPixel) }
+        return [main, secondaryZoom]
             .compactMap { $0 }
             .filter { $0 > 0 && $0.isFinite }
             .map { max(1, Int((1 / $0) / 2)) }

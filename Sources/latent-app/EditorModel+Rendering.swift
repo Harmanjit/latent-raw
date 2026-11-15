@@ -11,12 +11,15 @@ extension EditorModel {
     /// Pixels trimmed from the tile's edge when drawing — the demosaic's
     /// neighbourhood reach, where clamped reads produce colour fringes.
     private static let tileInset: CGFloat = 8
+    /// The scopes' whole-image render bins at least this many quads: a few
+    /// hundred thousand pixels, plenty for statistics.
+    static let analysisQuads = 4
 
     /// How many quads to bin for the preview at the current zoom. Zoomed
     /// out, the preview is the only layer and should match the screen;
     /// zoomed in, it's the soft backdrop under the tile, and half-size is
     /// plenty.
-    private var wantedPreviewQuads: Int {
+    var wantedPreviewQuads: Int {
         // The Loupe on a second display draws the same preview.
         SecondaryPreview.previewQuads(mainZoom: drawableSize.width > 0 ? viewport.zoom : nil,
                                       secondaryZoom: secondaryFitZoom)
@@ -135,8 +138,8 @@ extension EditorModel {
         var didWork = false
         var what: [String] = []
         do {
-            if previewQuads != wantedPreviewQuads {
-                what.append(try renderPreview(session: session, pipeline: pipeline))
+            if previewQuads != wantedPreviewQuads || dragRender.previewIsDraft {
+                what.append(try renderPreview(session: session, pipeline: pipeline, draft: false))
                 didWork = true
             }
             if wantsTile {
@@ -150,7 +153,7 @@ extension EditorModel {
                     tile = nil
                 }
                 if !tileCoversView {
-                    what.append(try renderTile(session: session, pipeline: pipeline, region: region))
+                    what.append(try renderTile(session: session, pipeline: pipeline, region: region, draft: false))
                     didWork = true
                 }
             } else if tile != nil {
@@ -173,13 +176,20 @@ extension EditorModel {
     }
 
     /// Re-renders after an edit. Both layers show the edit, so both go.
+    /// During a drag they go as the cheaper draft, and the full-quality
+    /// render follows when the drag stops (EditorModel+DragRender.swift).
     func rerender() {
+        guard session != nil, pipeline != nil else { return }
+        rerender(asDragTick: beginEditRender())
+    }
+
+    func rerender(asDragTick draft: Bool) {
         guard let session, let pipeline else { return }
         pendingRender?.cancel()
         let start = Date()
         var what: [String] = []
         do {
-            what.append(try renderPreview(session: session, pipeline: pipeline))
+            what.append(try renderPreview(session: session, pipeline: pipeline, draft: draft))
             if wantsTile {
                 let region = wantedTileRegion()
                 let wantedSize = CGSize(width: region.width, height: region.height)
@@ -187,9 +197,10 @@ extension EditorModel {
                     session.releasePooledTextures()
                     tileSize = wantedSize
                 }
-                what.append(try renderTile(session: session, pipeline: pipeline, region: region))
+                what.append(try renderTile(session: session, pipeline: pipeline, region: region, draft: draft))
             } else {
                 tile = nil
+                dragRender.tileIsDraft = false
             }
         } catch {
             status = "Render failed: \(error)"
@@ -206,9 +217,12 @@ extension EditorModel {
     /// Soft proofing's unproofed Before shows the edit itself.
     var renderParameters: EditParameters { showingBefore && !showsUnproofedBefore ? beforeParameters : parameters }
 
+    /// `draft`: a drag tick, which renders the cheaper preview
+    /// (`draftPreviewQuads`).
     @discardableResult
-    private func renderPreview(session: ImageSession, pipeline: RenderPipeline) throws -> String {
-        let quads = wantedPreviewQuads
+    func renderPreview(session: ImageSession, pipeline: RenderPipeline, draft: Bool) throws -> String {
+        let wanted = wantedPreviewQuads
+        let quads = draft ? (wantsTile ? draftBackdropQuads : draftPreviewQuads) : wanted
         var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: false)
         let rendered = try pipeline.render(session, scale: .binned(quads: quads),
                                             parameters: renderParameters, output: displayOutput,
@@ -218,6 +232,7 @@ extension EditorModel {
         if displayOutput.rawClipMask { layer.rawClipMask = session.rawClipMask(preview: true) }
         preview = layer
         previewQuads = quads
+        dragRender.previewIsDraft = quads != wanted
 
         // Scopes always describe the whole image, whatever's on screen —
         // so they come from a small whole-image render, never from a
@@ -225,11 +240,19 @@ extension EditorModel {
         // and with the demosaic cached this costs well under a millisecond.
         // Bigger quads than the preview only when the preview is itself
         // large; a tiny preview is already an analysis-sized image.
-        let analysisQuads = max(quads, 4)
-        var analysisOutput = displayOutput
-        analysisOutput.rawClipMask = false
-        analysisTexture = try pipeline.render(session, scale: .binned(quads: analysisQuads),
-                                              parameters: renderParameters, output: analysisOutput)
+        let analysisQuads = max(quads, Self.analysisQuads)
+        if analysisQuads == quads {
+            // The preview is analysis-sized already (a small view, or the
+            // drag's backdrop at 100%): the same render would only write
+            // the same pixels into the same pooled texture again. The raw
+            // clipping mask, all that differs, is a separate texture.
+            analysisTexture = rendered
+        } else {
+            var analysisOutput = displayOutput
+            analysisOutput.rawClipMask = false
+            analysisTexture = try pipeline.render(session, scale: .binned(quads: analysisQuads),
+                                                  parameters: renderParameters, output: analysisOutput)
+        }
         updateScopes()
         toneEqualizerRenderDidFinish()
         return "preview \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
@@ -237,7 +260,7 @@ extension EditorModel {
 
     @discardableResult
     private func renderTile(session: ImageSession, pipeline: RenderPipeline,
-                            region: (x: Int, y: Int, width: Int, height: Int)) throws -> String {
+                            region: (x: Int, y: Int, width: Int, height: Int), draft: Bool) throws -> String {
         var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: true)
         let rendered = try pipeline.render(
             session,
@@ -247,6 +270,7 @@ extension EditorModel {
                                  headroom: displayOutput.headroom)
         if displayOutput.rawClipMask { layer.rawClipMask = session.rawClipMask(preview: false) }
         tile = layer
+        dragRender.tileIsDraft = false
         // Past the view region the tile can hold a patch that reads outside
         // it (it wasn't needed for the view), which a pan must not reveal.
         tileHealedCoverage = HealPatch.isSelfContained(info.sensorRect, patches: renderParameters.allHealPatches,
