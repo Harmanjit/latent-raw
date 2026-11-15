@@ -58,6 +58,9 @@ public struct LibraryFilter: Equatable, Sendable {
     public var fileKind: FileKindFilter = .any
     /// Masters, virtual copies, or masters that have copies.
     public var copyKind: CopyKindFilter = .any
+    /// Only photos whose file Verify Files found damaged, found intact, or
+    /// hasn't checked since it last changed (FileIntegrity.State); nil = any.
+    public var integrity: FileIntegrity.State?
 
     public init() {}
 

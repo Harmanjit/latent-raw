@@ -78,6 +78,8 @@ public struct SmartCollectionRules: Codable, Equatable, Sendable {
     public var readsStacks: Bool { criteria.contains { $0.field == .inStack } }
     public var readsVirtualCopyMasters: Bool { criteria.contains { $0.field == .kind } }
     public var readsEditDetails: Bool { criteria.contains { $0.field == .moduleUsed || $0.field == .modifiedDate } }
+    /// Whether the rules read the Verify Files results (`SmartScopeExtras`).
+    public var readsIntegrity: Bool { criteria.contains { $0.field == .fileIntegrity } }
 
     /// The filter bar's settings as rules, for Save Filter as Smart
     /// Collection. All its criteria must hold at once, as in the bar.
@@ -97,6 +99,9 @@ public struct SmartCollectionRules: Codable, Equatable, Sendable {
         if let tag = filter.finderTag { criteria.append(SmartCriterion(.finderTag, .is, tag)) }
         let text = filter.text.trimmingCharacters(in: .whitespaces)
         if !text.isEmpty { criteria.append(SmartCriterion(.fileName, .contains, text)) }
+        if let integrity = filter.integrity {
+            criteria.append(SmartCriterion(.fileIntegrity, .is, integrity.rawValue))
+        }
         self.init(match: .all, criteria: criteria)
     }
 
@@ -128,10 +133,13 @@ public struct SmartMatchContext: Sendable {
     /// (`edits.updated_at`); nil without one.
     public var editedAt: Int64?
     public var now: Date
+    /// What Verify Files last said about its file (FileIntegrity.State).
+    public var integrity: FileIntegrity.State
 
     public init(isEdited: Bool = false, keywords: Set<String> = [], isInStack: Bool = false,
                 hasVirtualCopies: Bool = false, editGroups: Set<String> = [], editedAt: Int64? = nil,
-                now: Date = Date()) {
+                now: Date = Date(), integrity: FileIntegrity.State = .unchecked) {
+        self.integrity = integrity
         self.isEdited = isEdited
         self.keywords = keywords
         self.isInStack = isInStack
@@ -154,6 +162,9 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
         /// From the EXIF extras (ExifExtras): compensation in stops,
         /// whether the flash fired, whether the file holds a position.
         case exposureBias, flashFired, hasGPS
+        /// What Library › Verify Files last found (FileIntegrity.State):
+        /// damaged, ok, or unchecked since the file last changed.
+        case fileIntegrity
 
         public var title: String {
             switch self {
@@ -186,6 +197,7 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             case .exposureBias: "Exposure bias"
             case .flashFired: "Flash fired"
             case .hasGPS: "Has GPS position"
+            case .fileIntegrity: "File integrity"
             }
         }
 
@@ -193,7 +205,8 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
         public var operators: [Operator] {
             switch self {
             case .rating, .iso, .focalLength, .aperture, .exposureTime, .exposureBias: [.atLeast, .atMost, .is, .isNot, .between]
-            case .flag, .edited, .inStack, .virtualCopy, .kind, .moduleUsed, .flashFired, .hasGPS: [.is, .isNot]
+            case .flag, .edited, .inStack, .virtualCopy, .kind, .moduleUsed, .flashFired, .hasGPS, .fileIntegrity:
+                [.is, .isNot]
             case .label: [.is, .isNot]
             case .keyword: [.is, .isNot, .contains, .doesNotContain, .hasAnyKeyword, .hasNoKeywords]
             case .camera, .lens, .fileName, .finderTag, .title, .caption, .creator, .copyright:
@@ -205,7 +218,7 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             }
         }
 
-        public enum ValueKind: Sendable { case number, text, flag, yesNo, date, days, shape, kind, module }
+        public enum ValueKind: Sendable { case number, text, flag, yesNo, date, days, shape, kind, module, integrity }
 
         public var valueKind: ValueKind {
             switch self {
@@ -218,6 +231,7 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             case .aspectRatio: .shape
             case .kind: .kind
             case .moduleUsed: .module
+            case .fileIntegrity: .integrity
             }
         }
 
@@ -246,6 +260,7 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             case .moduleUsed: "tone"
             case .exposureBias: "0"
             case .flashFired, .hasGPS: "true"
+            case .fileIntegrity: FileIntegrity.State.damaged.rawValue
             default: ""
             }
         }
@@ -274,6 +289,8 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             case .exposureBias: old.exposureBias != new.exposureBias
             case .flashFired: old.flashFired != new.flashFired
             case .hasGPS: old.hasGPS != new.hasGPS
+            // A changed file voids its last check.
+            case .fileIntegrity: old.size != new.size || old.mtime != new.mtime
             case .edited, .keyword, .modifiedDate, .inStack, .moduleUsed: false
             }
         }
@@ -463,6 +480,11 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             let wanted = value.trimmingCharacters(in: .whitespaces)
             guard !wanted.isEmpty else { return false }
             let hit = context.editGroups.contains(wanted)
+            return op == .isNot ? !hit : hit
+        case .fileIntegrity:
+            guard let wanted = FileIntegrity.State(rawValue: value.trimmingCharacters(in: .whitespaces).lowercased())
+            else { return false }
+            let hit = context.integrity == wanted
             return op == .isNot ? !hit : hit
         }
     }

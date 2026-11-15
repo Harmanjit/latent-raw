@@ -146,7 +146,14 @@ public final class Library: ObservableObject {
 
     /// Images whose file Verify Files last found damaged, unchanged since,
     /// so the grid can badge them (FileIntegrity).
-    @Published public internal(set) var damagedImageIDs: Set<Int64> = []
+    @Published public internal(set) var damagedImageIDs: Set<Int64> = [] {
+        didSet { if damagedImageIDs != oldValue { integrityDidChange() } }
+    }
+    /// Images whose file Verify Files last found intact, unchanged since
+    /// (FileIntegrity), for the File integrity filter and rule.
+    @Published public internal(set) var verifiedImageIDs: Set<Int64> = [] {
+        didSet { if verifiedImageIDs != oldValue { integrityDidChange() } }
+    }
 
     /// The primary selection: what the editor opens and the panel edits.
     @Published public var selectedImageID: Int64? {
@@ -283,6 +290,14 @@ public final class Library: ObservableObject {
 
     // MARK: - Filtering and sorting
 
+    /// The filter bar's File integrity choice or a smart collection shown
+    /// reads integrity: filter again, and recount the collections.
+    private func integrityDidChange() {
+        guard !isPatchingRecords else { return }
+        if filter.integrity != nil || collections.activeScope?.readsIntegrity == true { recomputeVisible() }
+        collections.contentDidChange()
+    }
+
     func recomputeVisible() {
         let edited = editedImageIDs
         let filter = filter
@@ -293,7 +308,8 @@ public final class Library: ObservableObject {
         let now = Date()
         // What the newer criteria read from outside each record, once.
         let context = filter.isActive
-            ? LibraryFilterContext(filter: filter, images: images, pairedCompanions: pairedCompanions) : .empty
+            ? LibraryFilterContext(filter: filter, images: images, pairedCompanions: pairedCompanions,
+                                   damagedIDs: damagedImageIDs, verifiedIDs: verifiedImageIDs) : .empty
         let passing = filter.isActive || scope != nil
             ? shown.filter { record in
                 let isEdited = record.id.map(edited.contains) ?? false
@@ -507,6 +523,7 @@ public final class Library: ObservableObject {
         var collections: CollectionsState
         var recentlyAdded: RecentlyAdded?
         var damagedImageIDs: Set<Int64> = []
+        var verifiedImageIDs: Set<Int64> = []
         var stacks: [ImageStack]
     }
 
@@ -524,6 +541,7 @@ public final class Library: ObservableObject {
                               collections: try await catalog.loadCollections(),
                               recentlyAdded: try await catalog.recentlyAdded(),
                               damagedImageIDs: try await catalog.damagedImageIDs(),
+                              verifiedImageIDs: try await catalog.verifiedImageIDs(),
                               stacks: try await catalog.allStacks())
         try await willPublishList?(catalog)
         return list
@@ -558,6 +576,7 @@ public final class Library: ObservableObject {
         images = list.images
         editedImageIDs = list.editedImageIDs
         damagedImageIDs = list.damagedImageIDs
+        verifiedImageIDs = list.verifiedImageIDs
         keywordIndex = list.keywordIndex
         customOrder = list.customOrder
         if isNewCatalog { editStats = [:] }

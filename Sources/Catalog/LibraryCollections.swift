@@ -32,6 +32,8 @@ public final class LibraryCollections: ObservableObject {
         library.$editedImageIDs.dropFirst().sink { [weak self] _ in self?.contentDidChange() }.store(in: &observations)
         // "In a stack" rules follow the stacks.
         library.$stacks.dropFirst().sink { [weak self] _ in self?.contentDidChange() }.store(in: &observations)
+        // "File integrity" rules follow Verify Files through
+        // `Library.integrityDidChange`, which calls `contentDidChange`.
     }
 
     /// Turns a stored edit (its JSON) into the edit groups it changes, by
@@ -50,14 +52,15 @@ public final class LibraryCollections: ObservableObject {
     var activeScope: CollectionScope? {
         guard var scope = activeID.flatMap(state.scope(for:)) else { return nil }
         scope.extras = extras(stacks: scope.readsStacks, copies: scope.readsVirtualCopyMasters,
-                              edits: scope.readsEditDetails)
+                              edits: scope.readsEditDetails, integrity: scope.readsIntegrity)
         return scope
     }
 
     /// Whether `rules` match `record`, with everything they read; for the
     /// smart collection sheet's running count.
     public func matchContexts(for rules: SmartCollectionRules) -> (ImageRecord) -> SmartMatchContext {
-        let extras = extras(stacks: rules.readsStacks, copies: rules.readsVirtualCopyMasters, edits: rules.readsEditDetails)
+        let extras = extras(stacks: rules.readsStacks, copies: rules.readsVirtualCopyMasters, edits: rules.readsEditDetails,
+                            integrity: rules.readsIntegrity)
         let edited = library?.editedImageIDs ?? []
         let keywords = library?.keywordIndex ?? [:]
         let now = Date()
@@ -70,9 +73,13 @@ public final class LibraryCollections: ObservableObject {
     /// The facts rules read beyond each row, only those asked for. Edit
     /// details not read yet are started reading; rules that need them
     /// match as for unedited photos until they land.
-    func extras(stacks: Bool, copies: Bool, edits: Bool) -> SmartScopeExtras {
+    func extras(stacks: Bool, copies: Bool, edits: Bool, integrity: Bool = false) -> SmartScopeExtras {
         guard let library else { return SmartScopeExtras() }
         var extras = SmartScopeExtras()
+        if integrity {
+            extras.damagedIDs = library.damagedImageIDs
+            extras.verifiedIDs = library.verifiedImageIDs
+        }
         if stacks { extras.stackedIDs = Set(library.stackMemberships.keys) }
         if copies { extras.mastersWithCopies = SmartScopeExtras.masters(withCopiesIn: library.images) }
         if edits {
@@ -179,7 +186,8 @@ public final class LibraryCollections: ObservableObject {
         let rules = state.collections.compactMap(\.rules)
         let extras = extras(stacks: rules.contains(where: \.readsStacks),
                             copies: rules.contains(where: \.readsVirtualCopyMasters),
-                            edits: rules.contains(where: \.readsEditDetails))
+                            edits: rules.contains(where: \.readsEditDetails),
+                            integrity: rules.contains(where: \.readsIntegrity))
         var result: [Int64: Int] = [:]
         for collection in state.collections {
             guard var scope = state.scope(for: collection.id) else { continue }

@@ -50,6 +50,7 @@ A smart collection has a name and a list of rules. Choose whether a photo must m
 | Capture date, Edit date | is in the last so many days, is, is before, is after, is between (both days included) |
 | Aspect ratio | is or is not landscape, portrait or square (within 1%), or at least, at most or between a width over height such as `1.5` or `3:2`; the camera's orientation and your quarter turns count, the crop doesn't |
 | Kind | is or is not a master, a virtual copy, or a photo that has virtual copies |
+| File integrity | is or is not damaged, OK or unchecked: what Photo › Verify Files last found, while the file is unchanged since (a file never checked, or changed since, is unchecked) |
 | Edit changes | is or is not a part of the edit (Tone, Crop & Straighten, Local Adjustments and so on) that the photo's edit changes from Latent's defaults |
 
 **Is between** takes two values, and either can be the lower. **Edit date** is when the photo's edit was last saved; a photo with no edit has none.

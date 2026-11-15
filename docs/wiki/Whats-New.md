@@ -2,6 +2,11 @@
 
 What has arrived since the 0.9.0 beta, by area. Each line says what the feature does and links to where it is described in full. For a guided tour of the most useful ones, try the tutorials: [Culling and Organising](Tutorial-Culling-and-Organising), [Editing](Tutorial-Editing) and [Printing and Sharing](Tutorial-Printing-and-Sharing).
 
+## Wave 4
+
+- **Combine into one PDF**: a PDF export can write the whole selection as one file, one photo per page or a contact sheet of several per page with file names. See [PDF export](Export#pdf-export).
+- **File integrity filter and smart collection rule**: show or collect the photos Verify Files found damaged, found OK, or hasn't checked; Save Filter as Smart Collection carries it. See [Verifying files](Library#verifying-files) and [Smart collections](Collections-and-Keywords#smart-collections).
+
 ## Organising
 
 - **Collections, smart collections and collection sets** gather photos without moving them; smart ones fill themselves from rules such as "rated 4 or more with the keyword Brittany". See [Collections](Collections-and-Keywords#collections).

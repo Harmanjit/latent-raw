@@ -149,6 +149,7 @@ public struct CollectionScope: Equatable, Sendable {
     public var readsStacks: Bool { rules.contains(where: \.readsStacks) }
     public var readsVirtualCopyMasters: Bool { rules.contains(where: \.readsVirtualCopyMasters) }
     public var readsEditDetails: Bool { rules.contains(where: \.readsEditDetails) }
+    public var readsIntegrity: Bool { rules.contains(where: \.readsIntegrity) }
 
     public func dependsOnChange(from old: ImageRecord, to new: ImageRecord) -> Bool {
         rules.contains { $0.dependsOnChange(from: old, to: new) }
@@ -169,9 +170,15 @@ public struct SmartScopeExtras: Equatable, Sendable {
     public var editGroups: [Int64: Set<String>] = [:]
     /// Image id → when its stored edit was saved, in milliseconds since 1970.
     public var editTimes: [Int64: Int64] = [:]
+    /// Images Verify Files last found damaged, and intact, unchanged since.
+    public var damagedIDs: Set<Int64> = []
+    public var verifiedIDs: Set<Int64> = []
 
     public init(stackedIDs: Set<Int64> = [], mastersWithCopies: Set<String> = [],
-                editGroups: [Int64: Set<String>] = [:], editTimes: [Int64: Int64] = [:]) {
+                editGroups: [Int64: Set<String>] = [:], editTimes: [Int64: Int64] = [:],
+                damagedIDs: Set<Int64> = [], verifiedIDs: Set<Int64> = []) {
+        self.damagedIDs = damagedIDs
+        self.verifiedIDs = verifiedIDs
         self.stackedIDs = stackedIDs
         self.mastersWithCopies = mastersWithCopies
         self.editGroups = editGroups
@@ -185,7 +192,8 @@ public struct SmartScopeExtras: Equatable, Sendable {
                                  hasVirtualCopies: !record.isVirtualCopy && mastersWithCopies.contains(record.relPath),
                                  editGroups: id.flatMap { editGroups[$0] } ?? [],
                                  editedAt: id.flatMap { editTimes[$0] },
-                                 now: now)
+                                 now: now,
+                                 integrity: .of(id, damaged: damagedIDs, verified: verifiedIDs))
     }
 
     /// The masters among `images` that have virtual copies.
