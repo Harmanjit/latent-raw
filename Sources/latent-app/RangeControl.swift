@@ -140,7 +140,7 @@ struct MaskRangeEditor: View {
                 HStack(spacing: 6) {
                     Button(model.maskTool == .lumaSample ? "Picking…" : "Pick Range") { model.maskTool = .lumaSample }
                         .disabled(model.maskTool == .lumaSample)
-                        .help("Click the image to centre the range on that spot, or drag a rectangle to span what is inside it")
+                        .help("Click the image to centre the range on that spot, or drag a rectangle to span what is inside it. Shift-click adds a sample (the range grows to cover them all); Option-click removes the nearest.")
                     Spacer()
                     Text(model.maskRangeProbe.map { String(format: "Under pointer: %.2f", $0) } ?? "Under pointer: –")
                         .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
@@ -148,6 +148,10 @@ struct MaskRangeEditor: View {
                                             ?? "No value under the pointer")
                 }
                 .controlSize(.small)
+                if model.maskTool == .lumaSample {
+                    Text("Shift-click to add samples, Option-click to remove the nearest.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
             }
             RangeControl(band: $band, colours: RangeControl.colours(for: channel),
                          probe: probes ? model.maskRangeProbe : nil,

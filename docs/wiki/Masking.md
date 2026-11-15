@@ -68,7 +68,7 @@ Brush masks and model masks (and brush or model components) also have **Edge ref
 
 ## Colour Range
 
-Add a Colour Range mask (or component) and the eyedropper is armed: click a colour on the image. Each click adds a colour, up to five; the swatches show what is picked and **Clear** starts over. **Refine** sets how far from the picked colours the selection reaches. Colours are judged as the mask sees them, before any mask changes the picture, by hue and saturation together, so pale and vivid versions of a colour are close but not the same, and greys can be picked too.
+Add a Colour Range mask (or component) and the eyedropper is armed: click a colour on the image. Each click adds a colour, up to five; the swatches show what is picked and **Clear** starts over. **Option-click** takes away the picked colour nearest the pointer, and the colours picked this session are drawn on the image while the eyedropper is armed. **Refine** sets how far from the picked colours the selection reaches. Colours are judged as the mask sees them, before any mask changes the picture, by hue and saturation together, so pale and vivid versions of a colour are close but not the same, and greys can be picked too.
 
 The older **Hue range** tickbox under the sliders still narrows any mask to a band of hues by centre and width.
 
@@ -77,7 +77,7 @@ The older **Hue range** tickbox under the sliders still narrows any mask to a ba
 A **Luminance Range** component selects pixels by how bright they look; a **Channel Range** component (in the **+**, **−** and **◎** menus) selects by one channel you choose: **Red**, **Green**, **Blue**, **Saturation**, Lab **Lightness**, Lab **a** (green to magenta), Lab **b** (blue to yellow) or Lab **Chroma**. Both read the picture as the mask sees it, before any mask changes it.
 
 - The **range control** shows the channel as a gradient with four handles: where the fade below the band starts, **Low**, **High**, and where the fade above it ends. Drag the outer handles to give the two sides different fades. The **Low**, **High** and **Feather** sliders below still work; Feather sets both fades at once.
-- **Pick Range** arms an eyedropper: click the image and the band is set 10% either side of the value there; drag a rectangle and it spans the darkest to the brightest (least to most) inside it. The eyedropper puts itself away after one pick.
+- **Pick Range** arms an eyedropper: click the image and the band is set 10% either side of the value there; drag a rectangle and it spans the darkest to the brightest (least to most) inside it. The eyedropper puts itself away after one pick. **Shift-click** (or Shift-drag) adds another sample and the band grows to cover them all; **Option-click** takes away the sample nearest the pointer and the band fits the ones left. Both keep the eyedropper armed, and the samples are drawn on the image, numbered, while it is. Shift-click on a band you set by hand grows that band. Only the band is saved in the edit, not the samples.
 - **Under pointer** reads the value under the pointer live, and a mark on the gradient shows where it falls.
 
 The **Luminance range** tickbox under a mask's sliders has the same range control, eyedropper and readout while no component is selected.
@@ -128,6 +128,10 @@ The stroke stores only that Auto Mask was on, never the pixels. What it compares
 - Right-click a mask in the list for the same commands.
 
 All of these are ordinary edits: ⌘Z undoes them, and they travel in copy, paste and presets with the Local Adjustments group.
+
+### Mask presets
+
+**Presets ▸ Save Selected Mask as Preset…** keeps the selected mask under a name: its shape, components, ranges and every slider. Choose a preset from the same menu to add its mask to the open photo as a new mask (existing masks are never replaced); **Rename** and **Delete** are in the menu too. Brush strokes are kept as drawn, in proportion to the frame, and Subject, class and Click to Select masks are kept as their kind and clicks and are made again from each photo. A component that uses another mask of the photo (Using another mask, above) can't travel and is left out; the save sheet lists it. Mask presets are files in `~/Library/Application Support/latent/mask-presets`, beside the edit presets' folder.
 
 ## Seeing the mask
 

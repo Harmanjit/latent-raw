@@ -35,6 +35,7 @@ struct LocalAdjustmentsPanel: View {
                 .fixedSize()
                 .disabled(!model.hasImage || model.parameters.locals.count >= LocalAdjustment.maximumCount)
                 masksMenu
+                MaskPresetsMenu(model: model)
                 Spacer()
                 MaskOverlayMenu(model: model)
                 Toggle("Show mask", isOn: $model.showMaskOverlay)

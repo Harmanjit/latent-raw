@@ -2,6 +2,11 @@
 
 What has arrived since the 0.9.0 beta, by area. Each line says what the feature does and links to where it is described in full. For a guided tour of the most useful ones, try the tutorials: [Culling and Organising](Tutorial-Culling-and-Organising), [Editing](Tutorial-Editing) and [Printing and Sharing](Tutorial-Printing-and-Sharing).
 
+## Wave 4
+
+- **Multi-sample Pick Range**: Shift-click adds samples to a Luminance or Channel Range (the band grows to cover them all) and Option-click removes the nearest; Option-click also removes a Colour Range sample. The samples are drawn on the image while the eyedropper is armed. See [Luminance and Channel Range](Masking#luminance-and-channel-range).
+- **Mask presets** save the selected mask (components and sliders) under a name and add it to any photo as a new mask, with Rename and Delete in the mask panel's Presets menu. See [Mask presets](Masking#mask-presets).
+
 ## Organising
 
 - **Collections, smart collections and collection sets** gather photos without moving them; smart ones fill themselves from rules such as "rated 4 or more with the keyword Brittany". See [Collections](Collections-and-Keywords#collections).
