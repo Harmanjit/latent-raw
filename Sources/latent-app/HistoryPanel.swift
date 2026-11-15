@@ -6,6 +6,10 @@ struct HistoryPanel: View {
     @ObservedObject var model: EditorModel
     @State private var snapshotName = ""
     @State private var showingSnapshotSheet = false
+    /// Compare…: the two sides picked in its sheet.
+    @State private var showingCompareSheet = false
+    @State private var compareLeft: ComparisonSource = .current
+    @State private var compareRight: ComparisonSource = .current
 
     private static let time: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
@@ -19,12 +23,41 @@ struct HistoryPanel: View {
         views.compareSnapshot(snapshot)
     }
 
+    /// Compare… opens with `left` (a snapshot's context menu), else the
+    /// newest snapshot, else the step before the current one, on the left,
+    /// and Current on the right.
+    private func openCompareSheet(left: ComparisonSource? = nil) {
+        let snapshots = model.snapshots
+        if let left {
+            compareLeft = left
+        } else if let last = snapshots.last {
+            compareLeft = .snapshot(last.id)
+        } else if model.history.cursor > 0 {
+            compareLeft = .historyStep(model.history.steps[model.history.cursor - 1].id)
+        } else {
+            compareLeft = .current
+        }
+        compareRight = .current
+        showingCompareSheet = true
+    }
+
+    /// The two sides show against each other in Develop's Before/After layout.
+    private func startComparison() {
+        let views = DevelopViewState.shared
+        views.attach(main: model, library: MainWindowModels.shared.library)
+        views.startComparison(left: compareLeft, right: compareRight)
+        showingCompareSheet = false
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Button("Undo") { model.undo() }.disabled(!model.canUndo)
                 Button("Redo") { model.redo() }.disabled(!model.canRedo)
                 Spacer()
+                Button("Compare…") { openCompareSheet() }
+                    .disabled(!model.hasImage)
+                    .help("Compare two snapshots, or a snapshot and a history step, side by side")
                 Button("Snapshot…") { showingSnapshotSheet = true }.disabled(!model.hasImage)
             }
             .controlSize(.small)
@@ -84,6 +117,7 @@ struct HistoryPanel: View {
                     .contextMenu {
                         Button("Restore Snapshot") { model.restoreSnapshot(snapshot) }
                         Button("Compare as Before") { compareAsBefore(snapshot) }
+                        Button("Compare…") { openCompareSheet(left: .snapshot(snapshot.id)) }
                         if model.hasCustomBefore {
                             Button("Clear Before") { model.resetBefore() }
                         }
@@ -109,6 +143,25 @@ struct HistoryPanel: View {
                 }
             }
             .padding(20).frame(width: 340)
+        }
+        .sheet(isPresented: $showingCompareSheet) {
+            let choices = model.comparisonChoices
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Compare").font(.headline)
+                ComparisonSourcePicker(title: "Left / top", choices: choices, selection: $compareLeft)
+                ComparisonSourcePicker(title: "Right / bottom", choices: choices, selection: $compareRight)
+                Text("Shown in the Before/After layout, each pane named. The edit itself doesn't change.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { showingCompareSheet = false }.keyboardShortcut(.cancelAction)
+                    Button("Compare") { startComparison() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(compareLeft == compareRight)
+                }
+            }
+            .padding(20).frame(width: 380)
         }
     }
 }

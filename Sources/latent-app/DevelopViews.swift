@@ -112,6 +112,10 @@ enum ViewCommand: Equatable {
     case lockReference
     /// The reference becomes the photo being edited, and that the reference.
     case swapReference
+    /// A snapshot comparison (SnapshotComparison): the right pane steps
+    /// through Current and the snapshots (⌃⌥→ / ⌃⌥←), the two sides
+    /// exchange, or the comparison ends and one image shows again.
+    case stepComparison(Int), swapComparison, endComparison
 }
 
 /// What the menus need of the view state.
@@ -126,6 +130,8 @@ struct ViewCommandState: Equatable {
     var hasReference = false
     var referenceLocked = false
     var hasCustomBefore = false
+    /// A snapshot comparison is showing.
+    var comparing = false
 }
 
 extension CommandState {
@@ -142,6 +148,7 @@ extension CommandState {
         case .setReference: return developing && hasSelection
         case .lockReference: return mode == .develop
         case .swapReference: return developing && views.developView == .reference && views.hasReference && hasSelection
+        case .stepComparison, .swapComparison, .endComparison: return developing && views.comparing
         }
     }
 }
@@ -187,6 +194,15 @@ final class DevelopViewState: ObservableObject {
         }
     }
     @Published private(set) var pane: EditorModel?
+    /// Two snapshots (or a snapshot and a history step, or Current) shown
+    /// against each other in the Before/After layouts, or nil. While set,
+    /// the Before pane draws its left side; see SnapshotComparison.
+    @Published private(set) var comparison: SnapshotComparison?
+    /// The comparison's right pane when that side isn't Current: a second
+    /// view-only model, made the first time it is needed, never writing.
+    @Published private(set) var comparePane: EditorModel?
+    /// The file the right pane holds.
+    private var loadedRight: URL?
 
     private let defaults: UserDefaults
     private weak var main: EditorModel?
@@ -221,7 +237,9 @@ final class DevelopViewState: ObservableObject {
         // Published before the change lands: act once it has.
         observations = [
             main.$parameters.map { _ in () }.merge(with: main.$beforeOverride.map { _ in () },
-                                                   main.$userRotation.map { _ in () })
+                                                   main.$userRotation.map { _ in () },
+                                                   // A compared snapshot deleted or replaced.
+                                                   main.$snapshots.map { _ in () })
                 .receive(on: RunLoop.main)
                 .sink { [weak self] in self?.syncBefore() },
             // Another image opened in the editor.
@@ -249,6 +267,7 @@ final class DevelopViewState: ObservableObject {
 
     func setKind(_ next: DevelopViewKind) {
         guard next != kind else { return }
+        if next != .beforeAfter { comparison = nil }
         if kind == .reference, !referenceLocked { clearReference() }
         kind = next
         if next == .reference, reference == nil { pickReference() }
@@ -264,8 +283,19 @@ final class DevelopViewState: ObservableObject {
     /// Links, loads or lets go of the pane for what now shows.
     private func update() {
         guard let main else { return }
+        // Another image ends a comparison: its snapshots aren't this one's.
+        if let comparison, comparison.url != main.sourceURL { self.comparison = nil }
         let showsPane = isShowing && kind != .single
+        let showsRight = showsPane && kind == .beforeAfter && comparison.map { $0.right != .current } == true
         pane?.isOffScreen = !showsPane
+        comparePane?.isOffScreen = !showsRight
+        if !showsRight {
+            comparePane?.linkedPane = nil
+            if let comparePane, comparePane.hasImage, !MemoryPolicy.current.keepsIdleImages {
+                comparePane.closeImage()
+                loadedRight = nil
+            }
+        }
         if let pane {
             if isShowing && kind == .beforeAfter {
                 main.linkedPane = pane
@@ -285,7 +315,9 @@ final class DevelopViewState: ObservableObject {
         }
         switch kind {
         case .single: break
-        case .beforeAfter: loadBefore()
+        case .beforeAfter:
+            loadBefore()
+            if showsRight { loadRight() }
         case .reference: if let reference { loadReference(reference) }
         }
     }
@@ -306,7 +338,7 @@ final class DevelopViewState: ObservableObject {
     /// The Before, with the After's crop and transform so the panes line up.
     func composedBefore() -> EditParameters? {
         guard let main, main.hasImage else { return nil }
-        var before = main.beforeParameters
+        var before = comparison.map { main.comparisonParameters($0.left) } ?? main.beforeParameters
         before.crop = main.parameters.crop
         before.perspective = main.parameters.perspective
         return before
@@ -333,6 +365,100 @@ final class DevelopViewState: ObservableObject {
               loadedBefore != nil, loadedBefore == main.sourceURL, let before = composedBefore() else { return }
         if pane.userRotation != main.userRotation { pane.setUserRotation(main.userRotation) }
         if pane.parameters != before { pane.parameters = before }
+        syncRight()
+    }
+
+    // MARK: Snapshot comparison
+
+    /// The comparison's right side, with the edit's crop and transform as
+    /// the Before has them, so every layout lines up; nil when the right
+    /// side is Current (the editor itself shows it) or nothing compares.
+    func composedRight() -> EditParameters? {
+        guard let main, main.hasImage, let comparison, comparison.right != .current else { return nil }
+        var right = main.comparisonParameters(comparison.right)
+        right.crop = main.parameters.crop
+        right.perspective = main.parameters.perspective
+        return right
+    }
+
+    private func makeComparePane() -> EditorModel {
+        if let comparePane { return comparePane }
+        let made = EditorModel()
+        made.measuresScopes = false
+        comparePane = made
+        return made
+    }
+
+    private func loadRight() {
+        guard let main, let url = main.sourceURL, let right = composedRight() else { return }
+        let compare = makeComparePane()
+        if loadedRight != url || !compare.hasImage {
+            loadedRight = url
+            let json = try? EditStack(parameters: right).encodeJSON()
+            compare.open(url: url, userRotation: main.userRotation, catalogImageID: nil, editStackJSON: json)
+        }
+        syncRight()
+        linkComparisonPanes()
+    }
+
+    /// The right pane follows the crop and rotation, and its source.
+    private func syncRight() {
+        guard let main, let compare = comparePane, compare.hasImage,
+              loadedRight != nil, loadedRight == main.sourceURL, let right = composedRight() else { return }
+        if compare.userRotation != main.userRotation { compare.setUserRotation(main.userRotation) }
+        if compare.parameters != right { compare.parameters = right }
+    }
+
+    /// With the editor off screen the two view-only panes zoom and pan
+    /// together; the editor still carries its own view (⌘+) to the left.
+    private func linkComparisonPanes() {
+        guard let pane, let comparePane else { return }
+        pane.linkedPane = comparePane
+        comparePane.linkedPane = pane
+    }
+
+    /// History & Snapshots › Compare…: the two sides show in the
+    /// Before/After layout last used. The edit itself is untouched.
+    func startComparison(left: ComparisonSource, right: ComparisonSource) {
+        guard let main, main.hasImage, let url = main.sourceURL else { return }
+        comparison = SnapshotComparison(url: url, left: left, right: right)
+        setKind(.beforeAfter)
+        refreshComparison()
+    }
+
+    /// A side picked again in the comparison's bar.
+    func setComparison(left: ComparisonSource? = nil, right: ComparisonSource? = nil) {
+        guard var next = comparison else { return }
+        if let left { next.left = left }
+        if let right { next.right = right }
+        comparison = next
+        refreshComparison()
+    }
+
+    func swapComparison() {
+        comparison?.swap()
+        refreshComparison()
+    }
+
+    /// The right pane steps through Current and the snapshots.
+    func stepComparison(by delta: Int) {
+        guard let main else { return }
+        comparison?.stepRight(by: delta, snapshotNames: main.snapshots.map(\.id))
+        refreshComparison()
+    }
+
+    /// Back to one image, as the Before/After bar's Done leaves it.
+    func endComparison() {
+        guard comparison != nil else { return }
+        comparison = nil
+        setKind(.single)
+    }
+
+    /// The panes follow a changed comparison: the right one loads or goes,
+    /// and the links between the panes are set again (update).
+    private func refreshComparison() {
+        update()
+        syncBefore()
     }
 
     // MARK: Reference
@@ -421,6 +547,10 @@ final class DevelopViewState: ObservableObject {
     /// A Before/After layout already showing stays.
     func compareSnapshot(_ snapshot: EditSnapshot) {
         guard let main, main.hasImage else { return }
+        if comparison != nil {
+            comparison = nil
+            update()
+        }
         main.compareSnapshotAsBefore(snapshot)
         if kind != .beforeAfter {
             beforeAfterLayout = .leftRightSplit
@@ -485,6 +615,12 @@ final class DevelopViewState: ObservableObject {
             main?.flushPendingSave()
             setReference(active)
             load(reference)
+        case .stepComparison(let delta):
+            stepComparison(by: delta)
+        case .swapComparison:
+            swapComparison()
+        case .endComparison:
+            endComparison()
         }
     }
 
@@ -501,6 +637,7 @@ final class DevelopViewState: ObservableObject {
         state.hasReference = reference != nil
         state.referenceLocked = referenceLocked
         state.hasCustomBefore = main.hasCustomBefore
+        state.comparing = kind == .beforeAfter && comparison != nil
         return state
     }
 
@@ -534,10 +671,18 @@ struct DevelopImageArea: View {
             case .single:
                 ImageViewport(model: model, onStep: onStep, showsLoupeOverlay: true)
             case .beforeAfter:
-                VStack(spacing: 0) {
-                    beforeAfter
-                    Divider()
-                    beforeAfterBar
+                if let comparison = state.comparison {
+                    VStack(spacing: 0) {
+                        comparisonView(comparison)
+                        Divider()
+                        comparisonBar(comparison)
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        beforeAfter
+                        Divider()
+                        beforeAfterBar
+                    }
                 }
             case .reference:
                 VStack(spacing: 0) {
@@ -611,6 +756,99 @@ struct DevelopImageArea: View {
             }
             Spacer()
             Button("Done") { state.perform(.beforeAfter(nil), load: { _ in }) }
+                .help("Back to one image")
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+    }
+
+    // MARK: Snapshot comparison
+
+    /// Two snapshots in the Before/After layout: the left (top) side in the
+    /// Before pane, the right (bottom) side in the editor when it is
+    /// Current, else in the second view-only pane. Each pane is labelled
+    /// with what it shows.
+    @ViewBuilder
+    private func comparisonView(_ comparison: SnapshotComparison) -> some View {
+        let layout = state.beforeAfterLayout
+        let leftLabel = model.comparisonLabel(comparison.left)
+        let rightLabel = model.comparisonLabel(comparison.right)
+        if let fraction = layout.afterFraction(split: state.splitFraction) {
+            ZStack {
+                comparisonLeftPane(comparison)
+                comparisonRightPane(comparison, visibleFraction: fraction)
+                SplitLine(stacked: layout.isStacked, fraction: $state.splitFraction)
+                PaneLabels(first: leftLabel, second: rightLabel, stacked: layout.isStacked,
+                           fraction: state.splitFraction)
+                    .allowsHitTesting(false)
+            }
+        } else {
+            stack(stacked: layout.isStacked) {
+                comparisonLeftPane(comparison)
+                    .overlay(alignment: .topLeading) { PaneLabel(text: leftLabel) }
+                comparisonRightPane(comparison, visibleFraction: nil)
+                    .overlay(alignment: .topLeading) { PaneLabel(text: rightLabel) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func comparisonLeftPane(_ comparison: SnapshotComparison) -> some View {
+        if let pane = state.pane {
+            ImageViewport(model: pane, mirror: comparison.right == .current ? model : state.comparePane,
+                          allowsTools: false)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Left comparison pane")
+        } else {
+            AppPreferences.shared.surroundColor
+        }
+    }
+
+    @ViewBuilder
+    private func comparisonRightPane(_ comparison: SnapshotComparison, visibleFraction: CGRect?) -> some View {
+        if comparison.right == .current {
+            ImageViewport(model: model, mirror: state.pane, showsLoupeOverlay: true, visibleFraction: visibleFraction)
+        } else if let compare = state.comparePane {
+            ImageViewport(model: compare, mirror: state.pane, allowsTools: false, visibleFraction: visibleFraction)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Right comparison pane")
+        } else {
+            AppPreferences.shared.surroundColor
+        }
+    }
+
+    private func comparisonBar(_ comparison: SnapshotComparison) -> some View {
+        let choices = model.comparisonChoices
+        return HStack(spacing: 10) {
+            Picker("Layout", selection: Binding(get: { state.beforeAfterLayout },
+                                                set: { state.perform(.beforeAfter($0), load: { _ in }) })) {
+                ForEach(BeforeAfterLayout.allCases) { Text($0.title).tag($0) }
+            }
+            .labelsHidden()
+            .frame(width: 150)
+            .help("How the two are laid out")
+            ComparisonSourcePicker(title: state.beforeAfterLayout.isStacked ? "Top" : "Left",
+                                   choices: choices,
+                                   selection: Binding(get: { comparison.left },
+                                                      set: { state.setComparison(left: $0) }))
+            Button {
+                state.perform(.swapComparison, load: { _ in })
+            } label: { Image(systemName: "arrow.left.arrow.right") }
+                .help("Swap the two sides")
+                .accessibilityLabel("Swap compared sides")
+            ComparisonSourcePicker(title: state.beforeAfterLayout.isStacked ? "Bottom" : "Right",
+                                   choices: choices,
+                                   selection: Binding(get: { comparison.right },
+                                                      set: { state.setComparison(right: $0) }))
+            Button { state.perform(.stepComparison(-1), load: { _ in }) } label: { Image(systemName: "chevron.left") }
+                .help("Previous snapshot in the right pane (⌃⌥←)")
+                .accessibilityLabel("Previous snapshot in the right pane")
+            Button { state.perform(.stepComparison(1), load: { _ in }) } label: { Image(systemName: "chevron.right") }
+                .help("Next snapshot in the right pane (⌃⌥→)")
+                .accessibilityLabel("Next snapshot in the right pane")
+            Spacer()
+            Button("Done") { state.perform(.endComparison, load: { _ in }) }
                 .help("Back to one image")
         }
         .controlSize(.small)
@@ -713,6 +951,24 @@ struct DevelopImageArea: View {
         } else {
             HStack(spacing: 1) { content() }
         }
+    }
+}
+
+/// A comparison side's picker: Current, the snapshots, the history.
+struct ComparisonSourcePicker: View {
+    let title: String
+    let choices: [ComparisonChoice]
+    @Binding var selection: ComparisonSource
+
+    var body: some View {
+        Picker(title, selection: $selection) {
+            ForEach(choices) { Text($0.title).tag($0.source) }
+            // A side whose snapshot has gone still has a row to show.
+            if !choices.contains(where: { $0.source == selection }) {
+                Text("Current").tag(selection)
+            }
+        }
+        .frame(maxWidth: 220)
     }
 }
 
@@ -839,6 +1095,11 @@ struct ViewModesMenus: View {
             item("Copy Before’s Settings to After", .view(.copyBeforeToAfter))
             item("Swap Before and After Settings", .view(.swapBeforeAfter))
             item("Reset Before to Unedited", .view(.resetBefore))
+            Divider()
+            item("Next Snapshot in Right Pane", .view(.stepComparison(1)))
+            item("Previous Snapshot in Right Pane", .view(.stepComparison(-1)))
+            item("Swap Compared Snapshots", .view(.swapComparison))
+            item("End Snapshot Comparison", .view(.endComparison))
         }
         Menu("Reference View") {
             toggle("Reference View", .view(.referenceView), state.developView == .reference)

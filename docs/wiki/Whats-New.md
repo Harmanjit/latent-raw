@@ -2,6 +2,10 @@
 
 What has arrived since the 0.9.0 beta, by area. Each line says what the feature does and links to where it is described in full. For a guided tour of the most useful ones, try the tutorials: [Culling and Organising](Tutorial-Culling-and-Organising), [Editing](Tutorial-Editing) and [Printing and Sharing](Tutorial-Printing-and-Sharing).
 
+## Wave 4
+
+- **Compare two snapshots** side by side: History & Snapshots › **Compare…** picks a left (top) and right (bottom) side, each a snapshot, a history step or Current, shown in the Before/After layouts with each pane named. **Swap** exchanges them, ⌃⌥← and ⌃⌥→ step the right pane through the snapshots, and **Done** goes back to one image. The edit itself never changes. See [History and snapshots](Develop#history-and-snapshots).
+
 ## Organising
 
 - **Collections, smart collections and collection sets** gather photos without moving them; smart ones fill themselves from rules such as "rated 4 or more with the keyword Brittany". See [Collections](Collections-and-Keywords#collections).
