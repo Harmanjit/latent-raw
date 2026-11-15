@@ -79,6 +79,7 @@ extension EditorModel {
         // made for the catalog being left be reused.
         openGeneration += 1
         decodeCache.removeAll()
+        openingPlaceholder = nil
         guard hasImage || catalogImageID != nil else { return }
         flushPendingSave()
         disarmTools()

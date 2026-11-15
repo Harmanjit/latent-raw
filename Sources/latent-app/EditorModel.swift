@@ -611,6 +611,9 @@ final class EditorModel: ObservableObject {
     /// high-quality preview need not wait for things to settle (plan
     /// fix #10, EditorModel+HighQualityPreview.swift).
     var highQualityPreviewFollowsOpen = false
+    /// The camera's embedded JPEG of a photo being opened, shown in Loupe
+    /// until the decode and the first render are done (plan fix #18).
+    @Published var openingPlaceholder: OpeningPlaceholder?
     /// The catalog id that deferred open is for, and that image's stored
     /// history and snapshots if their read arrived before the GPU did:
     /// they are loaded once the open has happened

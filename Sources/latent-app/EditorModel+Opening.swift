@@ -38,6 +38,7 @@ extension EditorModel {
               editStackJSON: String? = nil) {
         // Any open still decoding is older than this one.
         openGeneration += 1
+        openingPlaceholder = nil
         guard let gpu = gpuForOpeningNow() else {
             if setupError == nil {
                 // The caller reads this image's history next and finds no
@@ -84,7 +85,8 @@ extension EditorModel {
     /// background thread, beside `readEdit` (the stored edit's read) and,
     /// at launch, the GPU's start; the photo is laid in place on main once
     /// all three are done. Until then the previous photo stays on screen
-    /// and in the editor.
+    /// and in the editor, with, if `placeholder` is set (Loupe), the
+    /// camera's embedded JPEG over it (#18).
     ///
     /// Latest wins: an open, a synchronous `open` or `closeImage` started
     /// meanwhile makes this one return `.superseded` without touching
@@ -92,14 +94,22 @@ extension EditorModel {
     /// or another catalog opened). Its decode, if it hasn't begun, is
     /// dropped by the newer open.
     func open(url: URL, userRotation: Int = 0, catalogImageID: Int64?,
+              placeholder: Bool = false,
               readEdit: @MainActor () async throws -> String?,
               isCurrent: @escaping @MainActor () -> Bool = { true }) async -> OpenOutcome {
         openGeneration += 1
         let generation = openGeneration
         let stillWanted: @MainActor () -> Bool = { [weak self] in self?.openGeneration == generation && isCurrent() }
+        openingPlaceholder = nil
         let statusBefore = status
         status = "Opening \(url.lastPathComponent)…"
         let job = decodeCache.jobForOpening(url)
+        // Not for a photo already decoded (a neighbour kept): it opens at once.
+        let placeholderImage = placeholder && !job.isFinished
+            ? Self.startPlaceholder(url: url, userRotation: userRotation) : nil
+        // Set once the photo is in place: a placeholder decoded later than
+        // the raw must not cover the render.
+        let applied = OpenProgress()
 
         let editStackJSON: String?
         do {
@@ -109,6 +119,16 @@ extension EditorModel {
             return .editUnreadable
         }
         guard stillWanted() else { return .superseded }
+
+        // The camera's JPEG matches the render's framing only without a
+        // crop or perspective change; with one it would jump, so the
+        // previous photo stays until the render instead.
+        if let placeholderImage, Self.placeholderMatchesFraming(editStackJSON) {
+            Task { [weak self] in
+                guard let image = await placeholderImage.value, let self, stillWanted(), !applied.done else { return }
+                self.openingPlaceholder = image
+            }
+        }
 
         guard let gpu = await gpuForOpening() else { return stillWanted() ? .failed : .superseded }
         guard stillWanted() else { return .superseded }
@@ -121,6 +141,7 @@ extension EditorModel {
             return .failed
         }
         guard stillWanted() else { return .superseded }
+        applied.done = true
         apply(file, url: url, userRotation: userRotation, catalogImageID: catalogImageID,
               editStackJSON: editStackJSON, gpu: gpu)
         return hasImage ? .opened : .failed
@@ -263,7 +284,8 @@ extension EditorModel {
             // follows this render without the settle delay (plan fix #10).
             highQualityPreviewFollowsOpen = true
             rerender()
-                regenerateMissingAIMasks()
+            openingPlaceholder = nil
+            regenerateMissingAIMasks()
             regenerateTouchUpMasksIfNeeded()
             regenerateDepthMapIfNeeded()
             regenerateReflectionMapIfNeeded()
@@ -296,4 +318,10 @@ extension EditorModel {
         paintingHealStroke = []
         straightenBase = nil
     }
+}
+
+/// Whether an asynchronous open has laid its photo in place.
+@MainActor
+private final class OpenProgress {
+    var done = false
 }

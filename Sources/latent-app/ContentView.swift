@@ -169,7 +169,8 @@ struct ContentView: View {
                                   caption: ImageCaption(record: library.selectedImage)) {
                         ImageViewport(model: model, allowsTools: false, onStep: { _ = perform(.step($0)) },
                                       followsMirrorImageMode: true,
-                                      showsLoupeOverlay: true)
+                                      showsLoupeOverlay: true,
+                                      showsOpeningPlaceholder: true)
                             .overlay(alignment: .bottomTrailing) {
                                 if !fullScreen.isActive { FloatingNavigator(model: model) }
                             }
@@ -685,10 +686,12 @@ struct ContentView: View {
         library.selectedImageID = record.id
         Task {
             // The decode runs off the main thread, beside the edit's read;
-            // the previous photo stays on screen until both are done.
+            // the previous photo stays on screen (in Loupe, the camera's
+            // JPEG over it) until both are done.
             var editReadError: (any Error)?
             let outcome = await model.open(
                 url: url, userRotation: record.userRotation, catalogImageID: record.id,
+                placeholder: mode == .loupe,
                 readEdit: {
                     do {
                         return try await library.editStack(for: record)

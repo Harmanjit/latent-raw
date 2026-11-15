@@ -25,6 +25,9 @@ struct ImageViewport: View {
     /// View › Loupe Overlay draws over this viewport (Loupe and Develop's
     /// editor; not Compare's or a second Develop pane).
     var showsLoupeOverlay: Bool = false
+    /// Loupe: the camera's JPEG of a photo still being opened is drawn
+    /// over the previous one (`EditorModel.openingPlaceholder`).
+    var showsOpeningPlaceholder: Bool = false
     /// A Before/After split: the part of the view this pane shows, as
     /// fractions of it, the pane under it showing through the rest.
     var visibleFraction: CGRect? = nil
@@ -139,6 +142,11 @@ struct ImageViewport: View {
             .modifier(ColourAssessmentInset(settings: viewing, imageRect: { inner in
                 ColourAssessment.imageRect(model: model, innerSize: inner)
             }))
+            if showsOpeningPlaceholder, let placeholder = model.openingPlaceholder {
+                OpeningPlaceholderView(placeholder: placeholder,
+                                       background: ColourAssessment.surroundColor(viewing, prefs),
+                                       mirrored: followsMirrorImageMode && mirrorImageMode.isOn)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
