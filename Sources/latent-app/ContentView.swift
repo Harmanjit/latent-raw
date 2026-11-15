@@ -174,13 +174,8 @@ struct ContentView: View {
                 // goes, so nothing hidden reports a size to the editor.
                 if keepsDevelopPanel {
                     HStack(spacing: 0) {
-                        // Drawn after the panel, so its AppKit view coming
-                        // and going leaves the panel's controls where they
-                        // are in the window (SwiftUI keeps the views in
-                        // drawing order, and re-adds every one after an
-                        // insertion).
                         if mode == .develop {
-                            imageArea.zIndex(1)
+                            imageArea
                         } else {
                             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
