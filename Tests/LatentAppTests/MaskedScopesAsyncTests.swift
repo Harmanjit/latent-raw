@@ -34,6 +34,10 @@ final class MaskedScopesAsyncTests: XCTestCase {
         model.parameters = p
         model.selectedLocalIndex = 0
         model.rerender()
+        // The edits above came as a drag: settle it now, so no settle
+        // render (and its scope measurement) lands mid-test.
+        model.settleDragRender()
+        await model.renderSettled()
         return model
     }
 
@@ -106,6 +110,8 @@ final class MaskedScopesAsyncTests: XCTestCase {
         ScopeSettings.shared.selectedMaskOnly = true
         model.showMaskOverlay = true
         model.rerender()
+        model.settleDragRender()
+        await model.renderSettled()
         XCTAssertNotNil(model.displayOutput.maskOverlay, "the analysis render carries the tint")
         model.scope = .waveformVectorscope
         let expected = try reference(model, wanted: [.waveform, .vectorscope])

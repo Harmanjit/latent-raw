@@ -202,9 +202,11 @@ final class ViewingFeaturesTests: XCTestCase {
         XCTAssertTrue(ViewingSettings.shared.rawClipping)
         XCTAssertTrue(model.displayOutput.rawClipMask)
         XCTAssertFalse(other.displayOutput.rawClipMask, "Survey's panes don't pay for it")
+        await model.renderSettled()
         let mask = try XCTUnwrap(model.preview?.rawClipMask, "the toggle re-renders with the mask")
         XCTAssertEqual(mask.width, model.preview?.texture.width)
         ViewingCommands.perform(.toggleRawClipping, editor: model, expandTone: {})
+        await model.renderSettled()
         XCTAssertNil(model.preview?.rawClipMask)
     }
 
@@ -230,8 +232,12 @@ final class ViewingFeaturesTests: XCTestCase {
         settings.setPrimaryEditor(model)
         XCTAssertTrue(model.fitMode)
         XCTAssertTrue(model.wantsHighQualityPreview)
+        // The resize's own render first: the preview at the size shown.
+        model.rerenderForViewport()
+        await model.renderSettled()
         let binned = try XCTUnwrap(model.preview)
         model.renderHighQualityPreview()
+        await model.renderSettled()   // shown once the GPU has finished it
         let high = try XCTUnwrap(model.preview)
         XCTAssertNotEqual(high.generation, binned.generation)
         XCTAssertEqual(high.coverage.width, binned.coverage.width, accuracy: 8, "the same sensor area")

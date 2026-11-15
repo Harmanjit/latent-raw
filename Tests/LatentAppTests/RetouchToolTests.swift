@@ -59,6 +59,7 @@ final class RetouchToolTests: XCTestCase {
         let side = CGFloat(longEdge) / CGFloat(2 * detectionQuads + 1)
         model.viewportDidResize(to: CGSize(width: side, height: side))
         model.rerenderForViewport()
+        await model.renderSettled()
         XCTAssertEqual(model.previewQuads, detectionQuads, "the case where the pools would collide")
         let preview = try XCTUnwrap(model.preview)
         func pixels() throws -> Data? {

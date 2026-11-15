@@ -208,6 +208,11 @@ public final class ImageSession {
         /// One-off renders read back for analysis (red-eye detection, model
         /// input), which must leave the textures on screen alone.
         case analysis
+        /// View › High Quality Preview's full-resolution render, kept
+        /// between renders while the photo is open and the view is fitted
+        /// (HighQualityPreview.swift); the analysis pool is released after
+        /// every one-off render, which would throw it away.
+        case highQuality
     }
 
     private struct TextureKey: Hashable {
@@ -253,6 +258,28 @@ public final class ImageSession {
     /// handler, or while false (export, High Quality Preview, tests),
     /// every mask is brought up to date inside the render as before.
     public var defersBrushRedraws = false
+
+    /// While true (the editor's own renders), each render commits its
+    /// command buffer without waiting; `takeDeferredSubmission()` then
+    /// hands the editor what was committed to await. See the ownership
+    /// rule in DeferredSubmission.swift.
+    public var defersGPUCompletion = false
+    /// Committed since `defersGPUCompletion` was set, not yet taken.
+    var gatheringSubmission: GPUSubmission?
+    /// Taken by the editor and possibly still running on the GPU.
+    var inFlightSubmission: GPUSubmission?
+    /// High Quality Preview's resample buffers, kept between renders with
+    /// its full-resolution pool (`TexturePool.highQuality`) and dropped
+    /// with it (HighQualityPreview.swift).
+    var highQualityScratch: HighQualityPreview.Scratch?
+
+    /// A deferred render failed: the demosaic and heal caches may name
+    /// textures it never finished writing.
+    func dropCachesAfterFailedRender() {
+        stageCache.removeAll()
+        healCache.removeAll()
+        healOrder.removeAll()
+    }
     public var onBrushRasterReady: (@Sendable (BrushRasterResult) -> Void)?
 
     /// Takes a redraw `onBrushRasterReady` delivered. True when the
@@ -677,6 +704,7 @@ public final class ImageSession {
     public func releasePooledTextures() {
         rawClipMasks.removeAll()
         texturePool.removeAll()
+        highQualityScratch = nil
         stageCache.removeAll()
         healCache.removeAll()
         hotPixels.withLock { $0 = nil }
@@ -694,6 +722,7 @@ public final class ImageSession {
     /// Drops one pool's textures, and any demosaic cached in them, leaving
     /// the other pools as they are.
     public func releasePooledTextures(in pool: TexturePool) {
+        if pool == .highQuality { highQualityScratch = nil }
         let released = texturePool.filter { $0.key.pool == pool }.map(\.value)
         guard !released.isEmpty else { return }
         texturePool = texturePool.filter { $0.key.pool != pool }

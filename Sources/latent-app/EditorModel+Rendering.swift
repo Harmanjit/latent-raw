@@ -131,15 +131,23 @@ extension EditorModel {
 
     /// Re-renders after a zoom or pan. Cheap when nothing changed: the
     /// preview only re-renders if its bin factor changed, and the tile
-    /// only if the view has moved outside it or the zoom changed.
+    /// only if the view has moved outside it or the zoom changed. Encoded
+    /// at once unless a render is on the GPU, then right after it
+    /// (EditorModel+RenderQueue.swift).
     func rerenderForViewport() {
+        guard session != nil, pipeline != nil else { return }
+        requestRender { $0.viewport = true }
+    }
+
+    /// The viewport pass, encoded without waiting for the GPU.
+    func encodeViewportPass(into outcome: inout EditorRenderQueue.Outcome) {
         guard let session, let pipeline else { return }
-        let start = Date()
+        outcome.checkedViewport = true
         var didWork = false
-        var what: [String] = []
         do {
             if previewQuads != wantedPreviewQuads || dragRender.previewIsDraft {
-                what.append(try renderPreview(session: session, pipeline: pipeline, draft: false))
+                outcome.what.append(try renderPreview(session: session, pipeline: pipeline, draft: false))
+                outcome.previewRendered = true
                 didWork = true
             }
             if wantsTile {
@@ -153,7 +161,7 @@ extension EditorModel {
                     tile = nil
                 }
                 if !tileCoversView {
-                    what.append(try renderTile(session: session, pipeline: pipeline, region: region, draft: false))
+                    outcome.what.append(try renderTile(session: session, pipeline: pipeline, region: region, draft: false))
                     didWork = true
                 }
             } else if tile != nil {
@@ -162,41 +170,53 @@ extension EditorModel {
                 tileSize = .zero
             }
         } catch {
-            status = "Render failed: \(error)"
+            outcome.failure = "Render failed: \(error)"
         }
-        if didWork {
-            lastRenderMs = Date().timeIntervalSince(start) * 1000
-            renderReport = what.joined(separator: " + ") + String(format: " · %.1f ms", lastRenderMs)
-        } else {
-            renderReport = "view moved · no render"
-        }
+        if didWork { outcome.didWork = true }
         // A new binned preview, or the tile let go at fit: the high-quality
         // one follows once the view settles.
-        if didWork || !wantsTile { scheduleHighQualityPreview() }
+        if didWork || !wantsTile { outcome.schedulesHighQuality = true }
     }
 
     /// Re-renders after an edit. Both layers show the edit, so both go.
     /// During a drag they go as the cheaper draft, and the full-quality
     /// render follows when the drag stops (EditorModel+DragRender.swift).
+    /// An edit arriving while the last one is still on the GPU waits for
+    /// it, merged with any others that arrive meanwhile: only the newest
+    /// values are rendered (EditorModel+RenderQueue.swift).
     func rerender() {
         guard session != nil, pipeline != nil else { return }
         let isDragTick = beginEditRender()
-        rerender(asDragTick: isDragTick)
-        endEditRender(wasDragTick: isDragTick)
+        requestEditRender(draft: isDragTick, countsAsEdit: true)
     }
 
     func rerender(asDragTick draft: Bool) {
-        guard let session, let pipeline else { return }
+        guard session != nil, pipeline != nil else { return }
+        requestEditRender(draft: draft, countsAsEdit: false)
+    }
+
+    private func requestEditRender(draft: Bool, countsAsEdit: Bool) {
+        // The edit's render covers a pan waiting to render, and shows any
+        // brush redraw that has landed.
         pendingRender?.cancel()
         brushRedrawRender?.cancel()
-        let start = Date()
-        var what: [String] = []
+        requestRender { work in
+            work.edit = draft
+            if countsAsEdit { work.countsAsEdit = true }
+            work.settle = false
+        }
+    }
+
+    /// The edit pass, encoded without waiting for the GPU.
+    func encodeEditPass(draft: Bool, into outcome: inout EditorRenderQueue.Outcome) {
+        guard let session, let pipeline else { return }
         // Brush masks that must be redrawn whole are redrawn off the main
         // thread for these renders (ImageSession.defersBrushRedraws).
         deferBrushRedraws(in: session)
         defer { session.defersBrushRedraws = false }
         do {
-            what.append(try renderPreview(session: session, pipeline: pipeline, draft: draft))
+            outcome.what.append(try renderPreview(session: session, pipeline: pipeline, draft: draft))
+            outcome.previewRendered = true
             if wantsTile {
                 let region = wantedTileRegion()
                 let wantedSize = CGSize(width: region.width, height: region.height)
@@ -204,18 +224,17 @@ extension EditorModel {
                     session.releasePooledTextures()
                     tileSize = wantedSize
                 }
-                what.append(try renderTile(session: session, pipeline: pipeline, region: region, draft: draft))
+                outcome.what.append(try renderTile(session: session, pipeline: pipeline, region: region, draft: draft))
             } else {
                 tile = nil
                 dragRender.tileIsDraft = false
             }
         } catch {
-            status = "Render failed: \(error)"
+            outcome.failure = "Render failed: \(error)"
         }
-        lastRenderMs = Date().timeIntervalSince(start) * 1000
-        renderReport = what.joined(separator: " + ") + String(format: " · %.1f ms", lastRenderMs)
-        refreshMagnifier()
-        scheduleHighQualityPreview()
+        outcome.didWork = true
+        outcome.refreshesMagnifier = true
+        outcome.schedulesHighQuality = true
     }
 
     /// Lets `session` redraw whole brush masks off the main thread during
@@ -289,8 +308,8 @@ extension EditorModel {
             analysisTexture = try pipeline.render(session, scale: .binned(quads: analysisQuads),
                                                   parameters: renderParameters, output: analysisOutput)
         }
-        updateScopes()
-        toneEqualizerRenderDidFinish()
+        // The scopes and the tone equalizer's statistics follow once the
+        // GPU has finished (EditorRenderQueue's completion).
         return "preview \(rendered.width)×\(rendered.height)" + (info.demosaicWasCached ? " (cached)" : "")
     }
 

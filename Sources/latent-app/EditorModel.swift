@@ -582,6 +582,8 @@ final class EditorModel: ObservableObject {
     var fitMode = true
 
     var pendingRender: Task<Void, Never>?
+    /// The renders on the GPU and waiting for it (EditorModel+RenderQueue.swift).
+    let renderQueue = EditorRenderQueue()
     /// The render that shows a brush mask redrawn off the main thread,
     /// unless an edit renders first (EditorModel+Rendering.swift).
     var brushRedrawRender: Task<Void, Never>?

@@ -33,6 +33,7 @@ final class OpenRenderTests: XCTestCase {
         XCTAssertEqual(renders, 1, "the parameters' didSet no longer renders during an open")
         XCTAssertEqual(model.parameters.exposureEV, 1.3, accuracy: 1e-6)
         // An edit afterwards still renders from the didSet.
+        await model.renderSettled()
         model.parameters.exposureEV = 0.2
         XCTAssertEqual(renders, 2)
     }
