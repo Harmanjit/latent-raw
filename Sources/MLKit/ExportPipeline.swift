@@ -68,13 +68,6 @@ public enum ExportPipeline {
             }
         }
 
-        func commitReady() async {
-            while let output = ready.removeValue(forKey: nextToCommit) {
-                nextToCommit += 1
-                await commit(output)
-            }
-        }
-
         while true {
             // Hand out photos while a worker is free and not too many
             // finished ones wait for an earlier photo. A held run (paused)
@@ -90,7 +83,12 @@ public enum ExportPipeline {
                     start(job, as: sequence)
                 case .done(let output):
                     ready[sequence] = output
-                    await commitReady()
+                    // Commit every result that is next in order (inline, not a nested
+                    // async function: Swift 6.1 refuses one that captures these vars).
+                    while let output = ready.removeValue(forKey: nextToCommit) {
+                        nextToCommit += 1
+                        await commit(output)
+                    }
                 }
             }
             guard running > 0 else { break }
@@ -104,9 +102,19 @@ public enum ExportPipeline {
             case nil:
                 ready[sequence] = output
             }
-            await commitReady()
+            // Commit every result that is next in order (inline, not a nested
+            // async function: Swift 6.1 refuses one that captures these vars).
+            while let output = ready.removeValue(forKey: nextToCommit) {
+                nextToCommit += 1
+                await commit(output)
+            }
         }
-        await commitReady()
+        // Commit every result that is next in order (inline, not a nested
+        // async function: Swift 6.1 refuses one that captures these vars).
+        while let output = ready.removeValue(forKey: nextToCommit) {
+            nextToCommit += 1
+            await commit(output)
+        }
     }
 }
 
