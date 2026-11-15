@@ -168,9 +168,9 @@ struct ContentView: View {
                     Divider()
                 }
                 ZStack {
-                // Develop's side stays built, hidden, while the grid shows
-                // (plan fix #32): switching back then doesn't rebuild the
-                // panel's hundreds of controls. The image area itself goes,
+                // Develop's side stays built, under the grid, while the grid
+                // shows (plan fix #32): switching back then doesn't rebuild
+                // the panel's hundreds of controls. The image area itself goes,
                 // so nothing hidden draws or reports a size to the editor.
                 if keepsDevelopPanel {
                     HStack(spacing: 0) {
@@ -194,6 +194,8 @@ struct ContentView: View {
                         Divider()
                         ThumbnailGridView(library: library, onOpen: openInEditor, actions: gridActions)
                     }
+                    // Opaque, over Develop's hidden panel.
+                    .background(Color(nsColor: .windowBackgroundColor))
                     .onDisappear { model.flushPendingSave() }
                 case .loupe:
                     CaptionedPane(showsCaption: !fullScreen.isActive,
@@ -2678,14 +2680,16 @@ private struct CommandContextModifier: ViewModifier {
     }
 }
 
-/// Develop's side while it is kept built but hidden (plan fix #32): not
-/// seen, not clickable, not in the key-view loop, not read by VoiceOver.
+/// Develop's side while it is kept built but hidden (plan fix #32): under
+/// the grid, which is opaque, and not clickable, in the key-view loop or
+/// read by VoiceOver. Not made transparent: SwiftUI takes a transparent
+/// view's AppKit controls out of the window and puts them back when it
+/// shows again, which is most of what rebuilding it cost.
 private struct KeptAlivePane: ViewModifier {
     let hidden: Bool
 
     func body(content: Content) -> some View {
         content
-            .opacity(hidden ? 0 : 1)
             .allowsHitTesting(!hidden)
             .accessibilityHidden(hidden)
             .disabled(hidden)
