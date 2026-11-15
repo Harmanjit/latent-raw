@@ -97,6 +97,9 @@ extension EditorModel {
               placeholder: Bool = false,
               readEdit: @MainActor () async throws -> String?,
               isCurrent: @escaping @MainActor () -> Bool = { true }) async -> OpenOutcome {
+        // Already passed by (a held arrow key): don't disturb the newer
+        // open's decode.
+        guard isCurrent() else { return .superseded }
         openGeneration += 1
         let generation = openGeneration
         let stillWanted: @MainActor () -> Bool = { [weak self] in self?.openGeneration == generation && isCurrent() }
@@ -145,6 +148,14 @@ extension EditorModel {
         apply(file, url: url, userRotation: userRotation, catalogImageID: catalogImageID,
               editStackJSON: editStackJSON, gpu: gpu)
         return hasImage ? .opened : .failed
+    }
+
+    /// Starts decoding `url` for an open about to be asked for from a new
+    /// task. A task begins only once the main thread is free, which at
+    /// launch is after the window's first layout (about 400 ms); the
+    /// decode needn't wait for that. The open picks up the same decode.
+    func startDecoding(_ url: URL) {
+        _ = decodeCache.jobForOpening(url)
     }
 
     /// Decodes `urls` (the neighbours of the photo just opened) ahead of

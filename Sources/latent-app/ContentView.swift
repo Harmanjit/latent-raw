@@ -388,7 +388,9 @@ struct ContentView: View {
                 mode = .develop
             }
             // Decoded off the main thread: at launch, beside the GPU's
-            // start and the window's first layout (plan fix #9).
+            // start and the window's first layout (plan fix #9), so the
+            // decode starts now rather than when the task first runs.
+            model.startDecoding(url)
             Task { _ = await model.open(url: url, catalogImageID: nil, readEdit: { nil }) }
         }
     }
@@ -684,6 +686,7 @@ struct ContentView: View {
         guard let url = library.fileURL(for: record) else { return }
         let catalog = library.catalog
         library.selectedImageID = record.id
+        model.startDecoding(url)
         Task {
             // The decode runs off the main thread, beside the edit's read;
             // the previous photo stays on screen (in Loupe, the camera's
