@@ -78,6 +78,12 @@ extension EditorModel {
             return
         }
         let start = Date()
+        // An editor render like any other: a whole brush redraw the drag
+        // started is still running off the main thread, and redrawing it
+        // here instead would stall the main thread just as the drag ends
+        // (and its landing would then render once more for nothing).
+        deferBrushRedraws(in: session)
+        defer { session.defersBrushRedraws = false }
         do {
             let what = try renderPreview(session: session, pipeline: pipeline, draft: false)
             lastRenderMs = Date().timeIntervalSince(start) * 1000

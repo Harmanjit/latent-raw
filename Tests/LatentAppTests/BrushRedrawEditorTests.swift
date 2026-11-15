@@ -101,12 +101,20 @@ final class BrushRedrawEditorTests: XCTestCase {
         let session = try XCTUnwrap(model.session), gpu = try XCTUnwrap(model.gpuContext)
         var p = model.parameters
         p.locals = [LocalAdjustment(name: "brush", shape: .brush(strokes: strokes(feather: 0.3)), exposureEV: 1)]
+        // Renders that are not drag ticks: two edit renders this close
+        // together are a drag, rendered as the draft, and the settle
+        // render `dragSettleDelay` later replaces it at full quality. A
+        // redraw slower than that (a slow CI runner) then lands on a
+        // preview of another size than the one measured here, and the
+        // settle render, which does not defer, would show the mask
+        // without the render under test.
         model.parameters = p
-        model.rerender()
+        model.rerenderAtFullQuality()
         let before = try bytes(try XCTUnwrap(model.preview?.texture), queue: gpu.commandQueue)
 
         model.parameters.locals[0].shape = .brush(strokes: strokes(feather: 0.8))
-        model.rerender()
+        model.rerenderAtFullQuality()
+        XCTAssertNil(model.dragRender.settleTask, "no settle render to show the mask instead")
         XCTAssertTrue(session.hasPendingBrushRedraws)
         // Synchronous on the main actor, so the redraw cannot land first.
         let current = try onTheSpot(model)

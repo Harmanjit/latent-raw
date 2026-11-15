@@ -224,7 +224,7 @@ extension EditorModel {
     /// next edit's, during a drag, or else one `brushRedrawDelay` later.
     /// Rendering again at once would cost a drag two renders per step,
     /// more than the redraw saved.
-    private func deferBrushRedraws(in session: ImageSession) {
+    func deferBrushRedraws(in session: ImageSession) {
         if session.onBrushRasterReady == nil {
             // A result for another session (the photo changed) matches
             // none of the current session's masks and is dropped there.
