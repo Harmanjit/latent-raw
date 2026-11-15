@@ -95,6 +95,7 @@ struct ContentView: View {
     @State private var healExpanded = false
     @State private var dustExpanded = false
     @State private var touchUpExpanded = false
+    @State private var localAdjustmentsExpanded = false
     @State private var compareRecord: ImageRecord?
     /// The photo selected before this one, for Previous.
     @State private var previousPhoto = PreviousPhoto()
@@ -1924,6 +1925,7 @@ struct ContentView: View {
                 ToneEqualizerDisclosure(model: model) {
                     disclosureLabel("Tone Equalizer")
                 }
+                .id(Self.toneEqualizerGroup)
 
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 8) {
@@ -1995,13 +1997,14 @@ struct ContentView: View {
                     }
                 }
 
-                DisclosureGroup {
+                DisclosureGroup(isExpanded: $localAdjustmentsExpanded) {
                     LocalAdjustmentsPanel(model: model, pasteMaskToSelection: commandState.isEnabled(.mask(.pasteToSelection))
                                           ? { _ = perform(.mask(.pasteToSelection)) } : nil)
                         .padding(.top, 8)
                 } label: {
                     disclosureLabel("Local Adjustments")
                 }
+                .id(Self.localAdjustmentsGroup)
 
                 DisclosureGroup(isExpanded: $healExpanded) {
                     healSection.padding(.top, 8)
@@ -2084,7 +2087,21 @@ struct ContentView: View {
             // The snapshot harness pictures the dust and touch-up groups,
             // which sit too far from the panel's end to reach by scrolling
             // there as the other tool steps do.
-            .onAppear { SnapshotHarness.scrollAdjustments = { id in proxy.scrollTo(id, anchor: .top) } }
+            .onAppear {
+                SnapshotHarness.scrollAdjustments = { id in proxy.scrollTo(id, anchor: .top) }
+                // The groups whose open state the panel keeps, by title.
+                SnapshotHarness.expandAdjustments = { groups, open in
+                    for group in groups {
+                        switch group {
+                        case "White Balance": whiteBalanceExpanded = open
+                        case "Tone": toneExpanded = open
+                        case "Presence": presenceExpanded = open
+                        case "Local Adjustments": localAdjustmentsExpanded = open
+                        default: break
+                        }
+                    }
+                }
+            }
             #endif
             }
         }
@@ -2096,6 +2113,9 @@ struct ContentView: View {
     /// Scroll targets in the adjustments panel.
     static let sensorDustGroup = "sensor-dust-group"
     static let touchUpGroup = "touch-up-group"
+    static let toneEqualizerGroup = "tone-equalizer-group"
+    static let localAdjustmentsGroup = "local-adjustments-group"
+    static let maskToneEqualizerGroup = "mask-tone-equalizer-group"
 
     /// Temperature gets its own row because the slider travels in mired
     /// while reading out in Kelvin, and its range is centred on this
@@ -2399,6 +2419,7 @@ struct ContentView: View {
 
             Button("Open File…") { openFileOnItsOwn() }
                 .controlSize(.small)
+                .fixedSize()
                 .disabled(!model.isReady)
 
             HStack(spacing: 4) {
@@ -2408,12 +2429,14 @@ struct ContentView: View {
                     .accessibilityLabel("Rotate right")
             }
             .controlSize(.small)
+            .fixedSize()
             .disabled(library.selectedImage == nil)
             .help("Rotate the selected image (⌘[ and ⌘]). Remembered in the catalog.")
 
             Toggle(isOn: $filmstripVisible) { Image(systemName: "film") }
                 .toggleStyle(.button)
                 .controlSize(.small)
+                .fixedSize()
                 .disabled(mode != .loupe && mode != .develop)
                 .help(filmstripVisible ? "Hide the filmstrip in Loupe and Develop" : "Show the filmstrip in Loupe and Develop")
                 .accessibilityLabel("Filmstrip")
@@ -2477,6 +2500,9 @@ struct ContentView: View {
                 ZoomLevelMenu(model: viewedModel, mirror: mirrorModel)
             }
             .controlSize(.small)
+            // In a narrow window the status text gives way, not the
+            // buttons, which would otherwise lose their labels.
+            .fixedSize()
             .disabled(!viewedModel.hasImage || !mode.showsImage)
 
             if !model.renderReport.isEmpty && mode == .develop && prefs.showRenderTimings {

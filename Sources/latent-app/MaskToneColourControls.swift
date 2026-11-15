@@ -12,9 +12,15 @@ struct MaskToneColourControls: View {
     @State private var grainOpen = false
     @State private var selectedSwatch: Int?
 
-    private var local: Binding<LocalAdjustment> { $model.parameters.locals[index] }
+    private var local: Binding<LocalAdjustment> { model.localBinding(index) }
 
     var body: some View {
+        // Undoing the mask's addition can redraw this before the panel
+        // that holds it lets it go.
+        if model.parameters.locals.indices.contains(index) { groups }
+    }
+
+    private var groups: some View {
         VStack(alignment: .leading, spacing: 8) {
             DisclosureGroup(isExpanded: Binding(get: { curveOpen || curveUsed }, set: { curveOpen = $0 })) {
                 ToneCurvePanel(master: masterCurve, channels: channelCurves)

@@ -336,7 +336,10 @@ struct GeotagSheet: View {
             trackSummary
             HStack {
                 Text("Camera clock offset:")
-                Slider(value: $model.offsetMinutes, in: -720...720, step: 1)
+                // Whole minutes, rounded here rather than with `step:`, which
+                // would draw 1,441 tick marks as one black bar.
+                Slider(value: Binding(get: { model.offsetMinutes }, set: { model.offsetMinutes = $0.rounded() }),
+                       in: -720...720)
                     .accessibilityLabel("Camera clock offset in minutes")
                     .accessibilityValue(model.offsetDescription)
                 Stepper("Seconds", value: $model.offsetSeconds, in: -59...59).labelsHidden()

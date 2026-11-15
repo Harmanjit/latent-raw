@@ -91,6 +91,9 @@ struct MaskPresetsMenu: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help("Save the selected mask as a preset, or add a saved mask to this photo")
+        #if DEBUG
+        .snapshotHook(.maskPresetSave, $saving)
+        #endif
         .sheet(isPresented: $saving) {
             if let local = model.selectedLocal {
                 MaskPresetSaveSheet(local: local, library: library) { saving = false }

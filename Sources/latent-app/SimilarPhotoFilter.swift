@@ -25,6 +25,9 @@ struct SimilarFilterChip: View {
             .popover(isPresented: $showing, arrowEdge: .bottom) {
                 SimilarFilterPopover(library: library, criteria: criteria)
             }
+            #if DEBUG
+            .snapshotHook(.similarPopover, $showing)
+            #endif
             Button {
                 library.endSimilar()
             } label: {

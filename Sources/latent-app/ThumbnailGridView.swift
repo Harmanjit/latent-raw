@@ -36,6 +36,7 @@ struct ThumbnailGridView: NSViewRepresentable {
         collection.allowsEmptySelection = true
         collection.allowsMultipleSelection = true
         collection.backgroundColors = [AppPreferences.shared.surroundNSColor]
+        collection.appearance = Self.appearance(on: AppPreferences.shared.surroundNSColor)
         collection.register(ThumbnailItem.self, forItemWithIdentifier: ThumbnailItem.identifier)
         collection.dataSource = coordinator
         collection.delegate = coordinator
@@ -62,8 +63,20 @@ struct ThumbnailGridView: NSViewRepresentable {
         context.coordinator.setMarksMode(gridMarks.mode)
         if let collection = scrollView.documentView as? NSCollectionView {
             let colour = prefs.surroundNSColor
-            if collection.backgroundColors.first != colour { collection.backgroundColors = [colour] }
+            if collection.backgroundColors.first != colour {
+                collection.backgroundColors = [colour]
+                collection.appearance = Self.appearance(on: colour)
+            }
         }
+    }
+
+    /// The cells' names and marks are drawn in label colours, which must
+    /// suit the grid's surround rather than the app's appearance: the
+    /// default dark surround in light mode would otherwise carry dark
+    /// grey names on dark grey.
+    static func appearance(on surround: NSColor) -> NSAppearance? {
+        let level = surround.usingColorSpace(.genericGray)?.whiteComponent ?? 0
+        return NSAppearance(named: level < 0.5 ? .darkAqua : .aqua)
     }
 
     @MainActor

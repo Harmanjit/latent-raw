@@ -37,7 +37,18 @@ import Catalog
 ///                                               unless LATENT_SNAPSHOT_FULLSCREEN=system); and
 ///                                               `second-display`, the Loupe on a second
 ///                                               display (a window of the size below when
-///                                               there is one display). Each writes NN-step.png
+///                                               there is one display). Wave 4's new UI:
+///                                               `toneeq`, `toneeq-advanced`, `toneeq-masking`;
+///                                               `masks`, `mask-toneeq`, `mask-preset-save` (a
+///                                               radial mask added, then undone); `capturetime`;
+///                                               `geotag` (needs LATENT_SNAPSHOT_GPX); `export-pdf`;
+///                                               `filter-ranges`, `filter-integrity`, `similar`;
+///                                               `navigator-loupe`, `-compare`, `-survey`;
+///                                               `scope-mask`, `scope-reference`;
+///                                               `snapshot-compare-sheet`, `snapshot-compare` (two
+///                                               snapshots made, then deleted); `panel-order`,
+///                                               `panel-order-end`. Each writes NN-step.png
+///     LATENT_SNAPSHOT_GPX=~/walk.gpx            the track the `geotag` step reads
 ///     LATENT_SNAPSHOT_SIZE=1400x900             window content size in points (default
 ///                                               1400x900, not the size it was last left at)
 ///     LATENT_SNAPSHOT_SETTLE=1                  seconds to wait after a step's work is done
@@ -61,7 +72,9 @@ import Catalog
 ///
 /// The steps only look: they switch modes, arm tools and open sheets, but
 /// never change an edit, a rating or a file (`dust` runs Find Spots to have
-/// rings to show, and undoes it before the step ends). The catalog in the
+/// rings to show, and undoes it before the step ends; the mask and snapshot
+/// steps likewise add a mask or snapshots and take them back, and steps
+/// that switch a remembered setting on put it back). The catalog in the
 /// opened folder is still created or updated as opening any folder does,
 /// so point it at a copy when that matters.
 ///
@@ -89,6 +102,10 @@ enum SnapshotHarness {
     /// headers SwiftUI draws have no views or accessibility elements an
     /// AppKit walk can find.
     static var scrollAdjustments: ((String) -> Void)?
+    /// Opens or closes the adjustment panel's groups named by title
+    /// ("White Balance", "Tone", "Presence", "Local Adjustments"). Set by
+    /// the panel, which owns their open state.
+    static var expandAdjustments: (([String], Bool) -> Void)?
 
     /// Called by ContentView when it appears. Returns true when a snapshot
     /// run has started, in which case ContentView must not open a folder
@@ -199,7 +216,25 @@ enum SnapshotHarness {
         if let sheet = window.attachedSheet, sheet.isVisible {
             drawSheet(sheet, over: window, in: context)
         }
+        // A popover is a window of its own too, drawn where it sits.
+        for popover in popoverWindows(over: window) {
+            guard let popoverRoot = popover.contentView?.superview ?? popover.contentView else { continue }
+            popoverRoot.layoutSubtreeIfNeeded()
+            popoverRoot.displayIfNeeded()
+            context.saveGState()
+            context.translateBy(x: popover.frame.minX - window.frame.minX, y: popover.frame.minY - window.frame.minY)
+            render(popover, root: popoverRoot, in: context, fillsBackground: false)
+            context.restoreGState()
+        }
         return context.makeImage()
+    }
+
+    /// The popovers showing over `window`.
+    static func popoverWindows(over window: NSWindow) -> [NSWindow] {
+        NSApp.windows.filter { other in
+            other !== window && other.isVisible && other.alphaValue > 0
+                && NSStringFromClass(type(of: other)).contains("Popover") && other.frame.intersects(window.frame)
+        }
     }
 
     /// Renders the frame view's layer tree, which draws the layer contents
@@ -424,7 +459,8 @@ enum SnapshotHarness {
                     // Find Spots arms the tool itself, with rings to show
                     // where it found any; `leave` takes the spots back.
                     let model = model
-                    dustStepsBefore = model.history.steps.count
+                    model.flushPendingSave()
+                    dustStepsBefore = model.history.cursor
                     model.findDustSpots()
                     _ = await wait("Find Spots", upTo: 60) { !model.findingDust }
                     if !model.dustToolActive { _ = perform(.dust) }
@@ -557,6 +593,11 @@ enum SnapshotHarness {
                 if case .failed(let reason) = QualityCompareWindow.currentModel?.phase { fail("quality: \(reason)") }
                 guard ready else { return nil }
                 return NSApp.windows.first { $0.identifier?.rawValue == "QualityCompare" && $0.isVisible }
+            case .toneEq, .toneEqAdvanced, .toneEqMasking, .masks, .maskToneEq, .maskPresetSave, .captureTime,
+                 .geotag, .exportPDF, .filterRanges, .filterIntegrity, .similar, .navigatorLoupe, .navigatorCompare,
+                 .navigatorSurvey, .scopeMask, .scopeReference, .snapshotCompareSheet, .snapshotCompare,
+                 .panelOrder, .panelOrderEnd:
+                return await enterNewUI(step, window: window)
             case .slideshow:
                 guard !library.visibleImages.isEmpty else { fail("slideshow: no images"); return nil }
                 SlideshowController.debugCaption = .exposure
@@ -626,6 +667,10 @@ enum SnapshotHarness {
         /// Undoes what a step put over the window, so the next step
         /// pictures the main window again.
         func leave(_ step: SnapshotPlan.Step, window: NSWindow) {
+            if let undo = stepUndo {
+                stepUndo = nil
+                undo(window)
+            }
             switch step {
             case .export: exportSheet.wrappedValue = false
             case .rename: if let sheet = window.attachedSheet { window.endSheet(sheet) }
@@ -640,17 +685,15 @@ enum SnapshotHarness {
                 _ = perform(.disarmTools)
                 // The spots Find Spots added are the step's only edit; the
                 // stored edit ends as it began.
-                if step == .dust, let before = dustStepsBefore {
-                    while model.history.steps.count > before, model.canUndo { model.undo() }
-                    model.flushPendingSave()
-                }
+                if step == .dust, let before = dustStepsBefore { undoEdits(back: before) }
                 scrollAdjustments(toEnd: false)
             default: break
             }
         }
 
-        /// How many history steps the image had before the dust step's
-        /// Find Spots, so `leave` can undo exactly that.
+        /// The history cursor before the dust step's Find Spots, so `leave`
+        /// can undo exactly that (counting steps would not do: undoing keeps
+        /// them, for redo).
         var dustStepsBefore: Int?
 
         /// Selects the Settings tab labelled `name`. SwiftUI's TabView in
@@ -713,8 +756,308 @@ enum SnapshotHarness {
             return true
         }
 
+        // MARK: Wave 4's new UI
+
+        /// What the step changed, taken back by `leave` before anything else.
+        var stepUndo: ((NSWindow) -> Void)?
+
+        /// Undoes the edits made since the history cursor was at `cursor`,
+        /// the pending one included, and saves the edit as it was.
+        func undoEdits(back cursor: Int) {
+            model.flushPendingSave()
+            while model.history.cursor > cursor, model.canUndo { model.undo() }
+            model.flushPendingSave()
+        }
+
+        /// Develop on the selection, its image rendered. False when there
+        /// is nothing to develop.
+        func enterDevelop(_ step: SnapshotPlan.Step) async -> Bool {
+            guard library.selectedImage != nil else { fail("\(step.rawValue): no image selected"); return false }
+            _ = perform(.develop)
+            await waitForImage(views: 1)
+            return true
+        }
+
+        /// Adds a radial mask (selected, as a new mask is), with Local
+        /// Adjustments open; `stepUndo` takes both back.
+        func addHarnessMask(then extra: ((NSWindow) -> Void)? = nil) {
+            model.flushPendingSave()
+            let cursor = model.history.cursor
+            SnapshotHarness.expandAdjustments?(["Local Adjustments"], true)
+            model.addLocal(.radial)
+            let model = model
+            stepUndo = { [weak self] window in
+                extra?(window)
+                self?.undoEdits(back: cursor)
+                model.updateScopes()
+                SnapshotHarness.expandAdjustments?(["Local Adjustments"], false)
+                self?.scrollAdjustments(toEnd: false)
+            }
+        }
+
+        func scrollPanel(to id: String, _ step: SnapshotPlan.Step) async -> Bool {
+            await pause(0.3)
+            guard let scroll = SnapshotHarness.scrollAdjustments else { fail("\(step.rawValue): no panel to scroll"); return false }
+            scroll(id)
+            await pause(0.2)
+            return true
+        }
+
+        /// Ends a sheet the step opened, should SwiftUI not have.
+        func endSheet(of window: NSWindow) {
+            if let sheet = window.attachedSheet { window.endSheet(sheet) }
+        }
+
+        func waitForSheet(_ window: NSWindow, _ what: String) async {
+            _ = await wait(what, upTo: 10) { window.attachedSheet?.isVisible == true }
+            await pause(0.3)
+        }
+
+        func waitForPopover(_ window: NSWindow, _ what: String) async {
+            _ = await wait(what, upTo: 10) { !SnapshotHarness.popoverWindows(over: window).isEmpty }
+            await pause(0.4)
+        }
+
+        func enterNewUI(_ step: SnapshotPlan.Step, window: NSWindow) async -> NSWindow? {
+            let model = model, library = library
+            switch step {
+            case .toneEq, .toneEqAdvanced, .toneEqMasking:
+                guard await enterDevelop(step) else { return nil }
+                let state = model.toneEqualizerState
+                let tab = state.tab, open = state.expanded
+                state.tab = step == .toneEq ? .simple : step == .toneEqAdvanced ? .advanced : .masking
+                model.setToneEqualizerExpanded(true)
+                stepUndo = { [weak self] _ in
+                    state.tab = tab
+                    model.setToneEqualizerExpanded(open)
+                    self?.scrollAdjustments(toEnd: false)
+                }
+                // The band shares and the mask's histogram arrive with the
+                // first render with the group open.
+                await pause(1.5)
+                guard await scrollPanel(to: ContentView.toneEqualizerGroup, step) else { return nil }
+
+            case .masks, .maskToneEq, .maskPresetSave:
+                guard await enterDevelop(step) else { return nil }
+                addHarnessMask(then: step == .maskPresetSave ? { [weak self] window in
+                    SnapshotHook.maskPresetSave.set(false)
+                    self?.endSheet(of: window)
+                } : nil)
+                if step == .maskToneEq, let i = model.selectedLocalIndex, model.parameters.locals.indices.contains(i) {
+                    model.parameters.locals[i].setToneEqualizerBand(2, to: 1)
+                    model.parameters.locals[i].setToneEqualizerBand(3, to: 0.5)
+                }
+                await pause(0.5)
+                guard await scrollPanel(to: step == .maskToneEq ? ContentView.maskToneEqualizerGroup
+                                        : ContentView.localAdjustmentsGroup, step) else { return nil }
+                if step == .maskPresetSave {
+                    SnapshotHook.maskPresetSave.set(true)
+                    await waitForSheet(window, "the mask preset sheet")
+                }
+
+            case .captureTime:
+                _ = perform(.library)
+                let records = library.batchTargets(onlyPrimary: false)
+                guard !records.isEmpty else { fail("capturetime: no image selected"); return nil }
+                let sheet = CaptureTimeSheetModel(records: records)
+                sheet.hours = 1
+                sheet.minutes = 30
+                sheet.shiftsTimeZone = true
+                GeoTimePresenter.shared.captureTimeSheet = sheet
+                stepUndo = { [weak self] window in
+                    GeoTimePresenter.shared.captureTimeSheet = nil
+                    self?.endSheet(of: window)
+                }
+                await waitForSheet(window, "the Edit Capture Time sheet")
+
+            case .geotag:
+                _ = perform(.library)
+                guard let gpx = plan.gpx else { fail("geotag: set LATENT_SNAPSHOT_GPX to a .gpx file"); return nil }
+                let track: GPXTrack
+                do { track = try GPXTrack.read(from: gpx) } catch { fail("geotag: \(error)"); return nil }
+                let primary = library.selectedImageID, selection = library.selectedImageIDs
+                library.selectAllVisible()
+                let records = library.batchTargets(onlyPrimary: false)
+                GeoTimePresenter.shared.geotagSheet = GeotagSheetModel(records: records, track: track,
+                                                                       trackName: gpx.lastPathComponent)
+                stepUndo = { [weak self] window in
+                    GeoTimePresenter.shared.geotagSheet = nil
+                    self?.endSheet(of: window)
+                    library.setSelection(selection, primary: primary)
+                }
+                await waitForSheet(window, "the Geotag sheet")
+
+            case .exportPDF:
+                guard !library.selectedImageIDs.isEmpty else { fail("export-pdf: no image selected"); return nil }
+                let defaults = UserDefaults.standard
+                let saved = defaults.data(forKey: ExportPreset.defaultsKey)
+                var preset = ExportPreset.load()
+                preset.fileKind = .pdf
+                preset.formats.pdf.combine = true
+                preset.formats.pdf.combinedLayout = .contactSheet
+                preset.save()
+                exportSheet.wrappedValue = true
+                stepUndo = { [weak self] _ in
+                    self?.exportSheet.wrappedValue = false
+                    if let saved { defaults.set(saved, forKey: ExportPreset.defaultsKey) } else {
+                        defaults.removeObject(forKey: ExportPreset.defaultsKey)
+                    }
+                }
+                await waitForSheet(window, "the export sheet")
+
+            case .filterRanges:
+                _ = perform(.library)
+                await pause(0.3)
+                SnapshotHook.rangesPopover.set(true)
+                stepUndo = { _ in SnapshotHook.rangesPopover.set(false) }
+                await waitForPopover(window, "the Ranges popover")
+
+            case .filterIntegrity:
+                _ = perform(.library)
+                let filter = library.filter
+                library.filter.integrity = .unchecked
+                stepUndo = { _ in library.filter = filter }
+
+            case .similar:
+                _ = perform(.library)
+                guard library.selectedImage != nil else { fail("similar: no image selected"); return nil }
+                let filter = library.filter
+                SimilarPhotoCommand.run(library)
+                stepUndo = { _ in
+                    SnapshotHook.similarPopover.set(false)
+                    library.endSimilar()
+                    library.filter = filter
+                }
+                await pause(0.5)
+                SnapshotHook.similarPopover.set(true)
+                await waitForPopover(window, "the Similar popover")
+
+            case .navigatorLoupe, .navigatorCompare, .navigatorSurvey:
+                let settings = NavigatorSettings.shared
+                let shown = settings.isShown
+                settings.isShown = true
+                stepUndo = { _ in
+                    settings.isShown = shown
+                    model.setZoomLevel(.fit)
+                }
+                let inner: SnapshotPlan.Step = step == .navigatorLoupe ? .loupe : step == .navigatorCompare ? .compare : .survey
+                guard await enter(inner) != nil else { return nil }
+                if step == .navigatorLoupe {
+                    model.setZoomLevel(.percent(100))
+                    await pause(1)
+                }
+
+            case .scopeMask:
+                guard await enterDevelop(step) else { return nil }
+                let settings = ScopeSettings.shared
+                let maskOnly = settings.selectedMaskOnly
+                settings.selectedMaskOnly = true
+                addHarnessMask(then: { _ in settings.selectedMaskOnly = maskOnly })
+                model.updateScopes()
+                await pause(1)
+                scrollAdjustments(toEnd: false)
+
+            case .scopeReference:
+                guard await enterDevelop(step) else { return nil }
+                guard let selected = library.selectedImage,
+                      let other = library.visibleImages.first(where: { $0.id != selected.id && $0.id != nil })
+                else { fail("scope-reference: the folder has one image"); return nil }
+                let settings = ScopeSettings.shared
+                let overlays = settings.overlaysReference
+                let scope = model.scope
+                let views = DevelopViewState.shared
+                settings.overlaysReference = true
+                model.scope = .histogram
+                views.attach(main: model, library: library)
+                views.setReference(other)
+                stepUndo = { [weak self] _ in
+                    settings.overlaysReference = overlays
+                    model.scope = scope
+                    if views.kind == .reference { _ = self?.perform(.view(.referenceView)) }
+                    views.clearReference()
+                }
+                _ = await wait("the reference's scopes", upTo: 60) {
+                    views.refreshReferenceScopes()
+                    return views.referenceScopes != nil
+                }
+                await pause(0.5)
+                scrollAdjustments(toEnd: false)
+
+            case .snapshotCompareSheet, .snapshotCompare:
+                guard await enterDevelop(step) else { return nil }
+                model.flushPendingSave()
+                let cursor = model.history.cursor
+                let names = ["Harness A", "Harness B"]
+                model.saveSnapshot(named: names[0])
+                model.parameters.exposureEV += 1.5
+                model.flushPendingSave()
+                model.saveSnapshot(named: names[1])
+                let views = DevelopViewState.shared
+                stepUndo = { [weak self] window in
+                    if step == .snapshotCompareSheet {
+                        SnapshotHook.snapshotCompare.set(false)
+                        self?.endSheet(of: window)
+                    } else {
+                        views.endComparison()
+                    }
+                    for snapshot in model.snapshots where names.contains(snapshot.name) { model.deleteSnapshot(snapshot) }
+                    self?.undoEdits(back: cursor)
+                }
+                if step == .snapshotCompareSheet {
+                    SnapshotHook.historySection.set(true)
+                    await pause(0.5)
+                    SnapshotHook.snapshotCompare.set(true)
+                    await waitForSheet(window, "the Compare sheet")
+                } else {
+                    views.attach(main: model, library: library)
+                    views.startComparison(left: .snapshot(names[0]), right: .snapshot(names[1]))
+                    await waitForImage(views: 2)
+                    await pause(1)
+                }
+
+            case .panelOrder, .panelOrderEnd:
+                guard await enterDevelop(step) else { return nil }
+                let groups = ["White Balance", "Tone", "Presence"]
+                SnapshotHarness.expandAdjustments?(groups, false)
+                stepUndo = { [weak self] _ in
+                    SnapshotHarness.expandAdjustments?(groups, true)
+                    self?.scrollAdjustments(toEnd: false)
+                }
+                await pause(0.4)
+                scrollAdjustments(toEnd: step == .panelOrderEnd)
+
+            default:
+                return nil
+            }
+            return window
+        }
+
         func pause(_ seconds: Double) async {
             try? await Task.sleep(for: .seconds(seconds))
+        }
+    }
+}
+
+/// A view's own presentation state the harness switches: popovers and
+/// sheets kept in a view's @State, which nothing outside can reach. The
+/// view adds `.snapshotHook(_:_:)` for its binding; the harness posts.
+enum SnapshotHook: String {
+    case rangesPopover, similarPopover, maskPresetSave, snapshotCompare, historySection
+
+    static let notification = Notification.Name("LatentSnapshotHook")
+
+    @MainActor func set(_ on: Bool) {
+        NotificationCenter.default.post(name: Self.notification, object: "\(rawValue):\(on)")
+    }
+}
+
+extension View {
+    /// Lets the snapshot harness set `binding` (see SnapshotHook).
+    func snapshotHook(_ hook: SnapshotHook, _ binding: Binding<Bool>) -> some View {
+        onReceive(NotificationCenter.default.publisher(for: SnapshotHook.notification)) { note in
+            guard let text = note.object as? String else { return }
+            if text == "\(hook.rawValue):true" { binding.wrappedValue = true }
+            if text == "\(hook.rawValue):false" { binding.wrappedValue = false }
         }
     }
 }

@@ -106,7 +106,12 @@ struct MaskComponentList: View {
     let index: Int
 
     var body: some View {
-        let local = model.parameters.locals[index]
+        // Undoing the mask's addition can redraw this before the panel
+        // that holds it lets it go.
+        if model.parameters.locals.indices.contains(index) { list(model.parameters.locals[index]) }
+    }
+
+    private func list(_ local: LocalAdjustment) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Text("Components").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -334,4 +339,22 @@ struct MaskOverlayMenu: View {
         .help("How the selected mask is shown on the image")
         .accessibilityLabel("Mask overlay style")
     }
+}
+
+extension EditorModel {
+    /// Mask `index` for the mask panel's controls. SwiftUI can read a
+    /// control's binding once more after Undo (or Reset All) has taken
+    /// the mask away and before the panel drops the control; then it reads
+    /// a stand-in and writes nowhere, rather than past the end of the list.
+    func localBinding(_ index: Int) -> Binding<LocalAdjustment> {
+        Binding(get: { [weak self] in
+            guard let locals = self?.parameters.locals, locals.indices.contains(index) else { return Self.goneLocal }
+            return locals[index]
+        }, set: { [weak self] value in
+            guard let self, parameters.locals.indices.contains(index) else { return }
+            parameters.locals[index] = value
+        })
+    }
+
+    private static let goneLocal = LocalAdjustment(name: "", shape: .whole)
 }

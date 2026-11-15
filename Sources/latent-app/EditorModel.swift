@@ -37,6 +37,10 @@ final class EditorModel: ObservableObject {
     @Published var parameters = EditParameters() {
         didSet {
             if parameters != oldValue {
+                // Undo, Reset All or a paste can take the selected mask
+                // away; a selection past the end would have the mask
+                // panel's parts read a mask that isn't there.
+                if let i = selectedLocalIndex, i >= parameters.locals.count { selectedLocalIndex = nil }
                 if parameters.crop != oldValue.crop { canvasDidChange() }
                 rerender()
                 scheduleSave()

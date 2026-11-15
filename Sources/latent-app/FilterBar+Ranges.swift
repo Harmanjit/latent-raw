@@ -72,6 +72,9 @@ struct RangesFilterButton: View {
         .popover(isPresented: $showing, arrowEdge: .bottom) {
             RangesFilterPopover(library: library)
         }
+        #if DEBUG
+        .snapshotHook(.rangesPopover, $showing)
+        #endif
     }
 }
 
@@ -168,6 +171,8 @@ struct RangeHistogramSlider: View {
     @State private var clickAnchor: Int?
 
     private static let thumb: CGFloat = 10
+    /// The buckets `RangeHistogram` makes when the values differ.
+    private static let fullBucketCount = 24
     /// How far the pointer may move on a bar before a press counts as a drag.
     private static let clickSlop: CGFloat = 3
 
@@ -178,6 +183,9 @@ struct RangeHistogramSlider: View {
             let barArea = geometry.size.height - Self.thumb - 2
             let peak = Double(max(histogram.counts.max() ?? 1, 1))
             let step = width / CGFloat(n)
+            // No wider than one of a full histogram's bars, so a single
+            // bucket (every photo the same value) is a bar, not a slab.
+            let barWidth = min(max(1, step - 1), max(1, width / CGFloat(Self.fullBucketCount) - 1))
             ZStack(alignment: .topLeading) {
                 ForEach(Array(histogram.counts.enumerated()), id: \.offset) { index, count in
                     let inside = buckets.contains(index)
@@ -185,8 +193,8 @@ struct RangeHistogramSlider: View {
                     let height = count == 0 ? 0 : max(1.5, barArea * CGFloat((Double(count) / peak).squareRoot()))
                     Rectangle()
                         .fill(inside ? Color.accentColor : Color.secondary.opacity(0.35))
-                        .frame(width: max(1, step - 1), height: height)
-                        .offset(x: CGFloat(index) * step, y: barArea - height)
+                        .frame(width: barWidth, height: height)
+                        .offset(x: CGFloat(index) * step + (step - barWidth) / 2, y: barArea - height)
                 }
                 Rectangle()
                     .fill(Color.secondary.opacity(0.3))

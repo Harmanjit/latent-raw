@@ -126,6 +126,9 @@ struct LibraryPanel: View {
             } label: {
                 sectionLabel("History & Snapshots")
             }
+            #if DEBUG
+            .snapshotHook(.historySection, $historyExpanded)
+            #endif
 
             // Above the section, not inside it: a job the user started must
             // always show how far it has got and offer its Cancel, and what

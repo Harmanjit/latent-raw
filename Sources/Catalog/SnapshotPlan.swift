@@ -80,6 +80,57 @@ public struct SnapshotPlan: Equatable, Sendable {
         /// it opens as a window of LATENT_SNAPSHOT_SIZE on it.
         case secondDisplay = "second-display"
 
+        // Wave 4's new UI, none in the default steps. The ones that need an
+        // edit to show (a mask, a snapshot) make it and take it back before
+        // the step ends, as `dust` does; settings they switch on are put
+        // back too.
+
+        /// Develop's Tone Equalizer group open on its Simple tab.
+        case toneEq = "toneeq"
+        /// The Tone Equalizer on its Advanced tab.
+        case toneEqAdvanced = "toneeq-advanced"
+        /// The Tone Equalizer on its Masking tab.
+        case toneEqMasking = "toneeq-masking"
+        /// Local Adjustments open with a radial mask added: the header's
+        /// Add, Masks and Presets menus and the mask list.
+        case masks
+        /// The added mask's Tone Equalizer strip, opened by a moved band.
+        case maskToneEq = "mask-toneeq"
+        /// The Save Selected Mask as Preset sheet for the added mask.
+        case maskPresetSave = "mask-preset-save"
+        /// The Edit Capture Time sheet, its time-zone pickers showing.
+        case captureTime = "capturetime"
+        /// The Geotag sheet for every photo, from the track in
+        /// LATENT_SNAPSHOT_GPX.
+        case geotag
+        /// The export sheet set to PDF, Combine into one PDF on, as a
+        /// contact sheet (the saved export settings are put back).
+        case exportPDF = "export-pdf"
+        /// The filter bar's Ranges popover.
+        case filterRanges = "filter-ranges"
+        /// The filter bar with a File Integrity choice in the Kind menu.
+        case filterIntegrity = "filter-integrity"
+        /// Similar to This Photo, the chip's popover open.
+        case similar
+        /// The floating Navigator in Loupe at 100%.
+        case navigatorLoupe = "navigator-loupe"
+        /// The floating Navigator in Compare.
+        case navigatorCompare = "navigator-compare"
+        /// The floating Navigator in Survey.
+        case navigatorSurvey = "navigator-survey"
+        /// Scopes limited to the selected mask, a mask added and selected.
+        case scopeMask = "scope-mask"
+        /// Reference view with Overlay Reference on, the histogram showing.
+        case scopeReference = "scope-reference"
+        /// The History panel's Compare… sheet, two snapshots made for it.
+        case snapshotCompareSheet = "snapshot-compare-sheet"
+        /// Two snapshots compared in Develop, with the comparison bar.
+        case snapshotCompare = "snapshot-compare"
+        /// Develop's adjustment panel with its open groups closed, from the top.
+        case panelOrder = "panel-order"
+        /// The same, scrolled to the end.
+        case panelOrderEnd = "panel-order-end"
+
         /// The steps that picture full-screen image mode.
         public var isFullScreen: Bool {
             [.fullscreen, .fullscreenLeft, .fullscreenRight, .fullscreenBottom].contains(self)
@@ -128,6 +179,8 @@ public struct SnapshotPlan: Equatable, Sendable {
     /// for a moment, so it is asked for: LATENT_SNAPSHOT_FULLSCREEN=system
     /// (the default is `layout`).
     public var systemFullScreen = false
+    /// A GPX track for the `geotag` step (LATENT_SNAPSHOT_GPX).
+    public var gpx: URL?
 
     /// The app's own default window size (LatentApp's `defaultSize`).
     public static let defaultWindowSize = CGSize(width: 1400, height: 900)
@@ -158,6 +211,9 @@ public struct SnapshotPlan: Equatable, Sendable {
                 throw Problem.malformed(variable: "LATENT_SNAPSHOT_APPEARANCE", value: text)
             }
             appearance = text.lowercased()
+        }
+        if let path = environment["LATENT_SNAPSHOT_GPX"], !path.isEmpty {
+            gpx = Self.fileURL(path, isDirectory: false)
         }
         if let text = environment["LATENT_SNAPSHOT_FULLSCREEN"], !text.isEmpty {
             guard ["system", "layout"].contains(text.lowercased()) else {

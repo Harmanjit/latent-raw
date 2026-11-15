@@ -854,7 +854,7 @@ struct DevelopImageArea: View {
 
     private func comparisonBar(_ comparison: SnapshotComparison) -> some View {
         let choices = model.comparisonChoices
-        return HStack(spacing: 10) {
+        return CompactingBar {
             Picker("Layout", selection: Binding(get: { state.beforeAfterLayout },
                                                 set: { state.perform(.beforeAfter($0), load: { _ in }) })) {
                 ForEach(BeforeAfterLayout.allCases) { Text($0.title).tag($0) }
@@ -862,6 +862,7 @@ struct DevelopImageArea: View {
             .labelsHidden()
             .frame(width: 150)
             .help("How the two are laid out")
+        } middle: {
             ComparisonSourcePicker(title: state.beforeAfterLayout.isStacked ? "Top" : "Left",
                                    choices: choices,
                                    selection: Binding(get: { comparison.left },
@@ -881,13 +882,10 @@ struct DevelopImageArea: View {
             Button { state.perform(.stepComparison(1), load: { _ in }) } label: { Image(systemName: "chevron.right") }
                 .help("Next snapshot in the right pane (⌃⌥→)")
                 .accessibilityLabel("Next snapshot in the right pane")
-            Spacer()
+        } trailing: {
             Button("Done") { state.perform(.endComparison, load: { _ in }) }
                 .help("Back to one image")
         }
-        .controlSize(.small)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
     }
 
     // MARK: Reference
@@ -945,12 +943,13 @@ struct DevelopImageArea: View {
     }
 
     private var referenceBar: some View {
-        HStack(spacing: 10) {
+        CompactingBar {
             Picker("Layout", selection: Binding(get: { state.referenceLayout },
                                                 set: { state.perform(.referenceLayout($0), load: { _ in }) })) {
                 ForEach(ReferenceLayout.allCases) { Text($0.title).tag($0) }
             }
             .frame(width: 180)
+        } middle: {
             Toggle("Lock", isOn: $state.referenceLocked)
                 .toggleStyle(.checkbox)
                 .help("Keep the reference when Reference view closes, and next time")
@@ -967,13 +966,10 @@ struct DevelopImageArea: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            Spacer()
+        } trailing: {
             Button("Done") { state.perform(.referenceView, load: { _ in }) }
                 .help("Back to one image (⇧R)")
         }
-        .controlSize(.small)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
     }
 
     // MARK: Parts
@@ -985,6 +981,49 @@ struct DevelopImageArea: View {
         } else {
             HStack(spacing: 1) { content() }
         }
+    }
+}
+
+/// The bar under Before/After's snapshot comparison and Reference view:
+/// one row where the image area is wide enough; otherwise the leading and
+/// trailing controls on a row of their own and the middle ones on a second
+/// row that scrolls sideways, rather than squeezing every label until it
+/// breaks a letter to a line.
+struct CompactingBar<Leading: View, Middle: View, Trailing: View>: View {
+    let leading: Leading
+    let middle: Middle
+    let trailing: Trailing
+
+    init(@ViewBuilder leading: () -> Leading, @ViewBuilder middle: () -> Middle,
+         @ViewBuilder trailing: () -> Trailing) {
+        self.leading = leading()
+        self.middle = middle()
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                leading
+                middle.fixedSize()
+                Spacer(minLength: 0)
+                trailing
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    leading
+                    Spacer(minLength: 0)
+                    trailing
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) { middle.fixedSize() }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
     }
 }
 

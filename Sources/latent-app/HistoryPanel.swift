@@ -144,6 +144,10 @@ struct HistoryPanel: View {
             }
             .padding(20).frame(width: 340)
         }
+        #if DEBUG
+        .snapshotHook(.snapshotCompare, Binding(get: { showingCompareSheet },
+                                                set: { if $0 { openCompareSheet() } else { showingCompareSheet = false } }))
+        #endif
         .sheet(isPresented: $showingCompareSheet) {
             let choices = model.comparisonChoices
             VStack(alignment: .leading, spacing: 12) {

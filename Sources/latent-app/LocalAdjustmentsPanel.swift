@@ -14,38 +14,19 @@ struct LocalAdjustmentsPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Menu("Add") {
-                    Button("Linear Gradient") { model.addLocal(.linear) }
-                    Button("Radial") { model.addLocal(.radial) }
-                    Button("Brush") { model.addLocal(.brush) }
-                    Button("Whole Image (range only)") { model.addLocal(.none) }
-                    Divider()
-                    modelMenu("Subject", kind: .subjectSegmentation) { model.addAIMask(model: $0) }
-                    modelMenu("Click to Select", kind: .promptedSegmentation) { model.addPromptedMask(model: $0) }
-                        .disabled(!model.promptedModelAvailable)
-                    modelMenu("Select Objects (Box)", kind: .promptedSegmentation) { model.addObjectsMask(model: $0) }
-                        .disabled(!model.promptedModelAvailable)
-                    Menu("Select by Class") {
-                        ForEach(AIMaskKind.allCases.filter { $0 != .subject }, id: \.self) { kind in
-                            Button(kind.displayName) { model.addAIMask(kind) }
-                        }
-                    }
-                    Divider()
-                    Button("Colour Range") { model.addColourRangeMask() }
-                    Button("Luminance Range") { model.addLuminanceRangeMask() }
+            // One row where the panel is wide enough, else the overlay
+            // controls go under the menus rather than squeezing the
+            // Show mask label to nothing.
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    maskMenus
+                    Spacer()
+                    overlayControls
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .disabled(!model.hasImage || model.parameters.locals.count >= LocalAdjustment.maximumCount)
-                masksMenu
-                MaskPresetsMenu(model: model)
-                Spacer()
-                MaskOverlayMenu(model: model)
-                Toggle("Show mask", isOn: $model.showMaskOverlay)
-                    .toggleStyle(.checkbox)
-                    .disabled(model.selectedLocal == nil)
-                    .help("Show the selected mask on the image")
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack { maskMenus; Spacer() }
+                    HStack { overlayControls; Spacer() }
+                }
             }
             .controlSize(.small)
 
@@ -61,6 +42,47 @@ struct LocalAdjustmentsPanel: View {
                 selectedControls(i)
             }
         }
+    }
+
+    /// Add, Masks and Presets.
+    @ViewBuilder
+    private var maskMenus: some View {
+        Menu("Add") {
+            Button("Linear Gradient") { model.addLocal(.linear) }
+            Button("Radial") { model.addLocal(.radial) }
+            Button("Brush") { model.addLocal(.brush) }
+            Button("Whole Image (range only)") { model.addLocal(.none) }
+            Divider()
+            modelMenu("Subject", kind: .subjectSegmentation) { model.addAIMask(model: $0) }
+            modelMenu("Click to Select", kind: .promptedSegmentation) { model.addPromptedMask(model: $0) }
+                .disabled(!model.promptedModelAvailable)
+            modelMenu("Select Objects (Box)", kind: .promptedSegmentation) { model.addObjectsMask(model: $0) }
+                .disabled(!model.promptedModelAvailable)
+            Menu("Select by Class") {
+                ForEach(AIMaskKind.allCases.filter { $0 != .subject }, id: \.self) { kind in
+                    Button(kind.displayName) { model.addAIMask(kind) }
+                }
+            }
+            Divider()
+            Button("Colour Range") { model.addColourRangeMask() }
+            Button("Luminance Range") { model.addLuminanceRangeMask() }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(!model.hasImage || model.parameters.locals.count >= LocalAdjustment.maximumCount)
+        masksMenu
+        MaskPresetsMenu(model: model)
+    }
+
+    /// How the selected mask shows on the image.
+    @ViewBuilder
+    private var overlayControls: some View {
+        MaskOverlayMenu(model: model)
+        Toggle("Show mask", isOn: $model.showMaskOverlay)
+            .toggleStyle(.checkbox)
+            .fixedSize()
+            .disabled(model.selectedLocal == nil)
+            .help("Show the selected mask on the image")
     }
 
     /// The installed models of a kind, the default first and ticked, then
@@ -182,7 +204,7 @@ struct LocalAdjustmentsPanel: View {
 
     @ViewBuilder
     private func selectedControls(_ i: Int) -> some View {
-        let binding = $model.parameters.locals[i]
+        let binding = model.localBinding(i)
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 TextField("Name", text: binding.name)
@@ -205,6 +227,7 @@ struct LocalAdjustmentsPanel: View {
             LocalSliderGroups(local: binding)
             MaskToneColourControls(model: model, index: i)
             MaskToneEqualizerControls(local: binding)
+                .id(ContentView.maskToneEqualizerGroup)
 
             HStack {
                 // With components, Invert turns the whole combination
