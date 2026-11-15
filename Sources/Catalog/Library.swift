@@ -53,8 +53,33 @@ public final class Library: ObservableObject {
     /// visible list needs recomputing.
     private var isPatchingRecords = false
     @Published public var filter = LibraryFilter() {
-        didSet { if filter != oldValue { recomputeVisible() } }
+        didSet {
+            guard filter != oldValue else { return }
+            recomputeVisible()
+            filterDidChangeForSourceMemory()
+            dropSimilarCriteriaIfStale()
+        }
     }
+    /// Opt-in "Remember Filter per Source": each folder, and each
+    /// collection in it, keeps its own filter (Library+FilterMemory.swift).
+    /// Off by default, so the filter stays as it is across sources.
+    @Published public var remembersFilterPerSource = false {
+        didSet {
+            guard remembersFilterPerSource != oldValue else { return }
+            if remembersFilterPerSource { rememberFilterForCurrentSource() }
+            filterMemoryDidChange?(remembersFilterPerSource, filterSourceMemory)
+        }
+    }
+    /// The filters remembered per source, while the option is on.
+    public var filterSourceMemory = FilterSourceMemory()
+    /// Called after the option or the remembered filters change; the app
+    /// keeps both in UserDefaults (FilterSourceDefaults).
+    public var filterMemoryDidChange: (@MainActor (Bool, FilterSourceMemory) -> Void)?
+    /// The photo the filter is "Similar to" and which of its parts are on,
+    /// while the filter still holds them (Library+FilterMemory.swift).
+    @Published public internal(set) var similarPhotoCriteria: SimilarPhotoCriteria?
+    /// Set while the Similar criteria themselves write the filter.
+    var isApplyingSimilarCriteria = false
     @Published public var sort = LibrarySort.default {
         didSet {
             guard sort != oldValue else { return }
@@ -534,6 +559,7 @@ public final class Library: ObservableObject {
     /// belong together, whatever runs between two awaits elsewhere.
     private func publish(_ list: LoadedList, of catalog: Catalog, isNewCatalog: Bool) {
         if isNewCatalog {
+            filterSourceWillChange()
             willReplaceCatalog?()
             if let old = self.catalog, old !== catalog { dropUndo(for: old) }
             thumbnailTask?.cancel()
@@ -564,6 +590,7 @@ public final class Library: ObservableObject {
         stacks = list.stacks
         isPatchingRecords = false
         collections.catalogDidLoad(list.collections, isNewCatalog: isNewCatalog)
+        if isNewCatalog { filterSourceDidChange() }
         followRecentlyAdded(list.recentlyAdded)
         recomputeVisible()
         refreshEditStatsIfSorted()

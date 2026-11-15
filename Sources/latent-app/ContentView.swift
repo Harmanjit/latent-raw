@@ -1575,6 +1575,8 @@ struct ContentView: View {
             library.chooseSortKey(key)
         case .reverseSortOrder:
             library.sort.ascending.toggle()
+        case .similarToPhoto:
+            SimilarPhotoCommand.run(library)
         }
     }
 

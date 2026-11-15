@@ -2,6 +2,12 @@
 
 What has arrived since the 0.9.0 beta, by area. Each line says what the feature does and links to where it is described in full. For a guided tour of the most useful ones, try the tutorials: [Culling and Organising](Tutorial-Culling-and-Organising), [Editing](Tutorial-Editing) and [Printing and Sharing](Tutorial-Printing-and-Sharing).
 
+## Wave 4
+
+- **Remember Filter per Source**, in the filter bar's presets menu, gives each folder and collection its own filter, back when you return. See [The grid](Library#the-grid).
+- **Click the Ranges histograms**: a click on a bar shows that bar's photos, Shift-click extends, double-click clears. See [The grid](Library#the-grid).
+- **Similar to This Photo** filters to the same camera, lens and day as the selected photo, each part switchable in the bar's Similar chip. See [The grid](Library#the-grid).
+
 ## Organising
 
 - **Collections, smart collections and collection sets** gather photos without moving them; smart ones fill themselves from rules such as "rated 4 or more with the keyword Brittany". See [Collections](Collections-and-Keywords#collections).

@@ -131,7 +131,11 @@ public final class LibraryCollections: ObservableObject {
     public func show(_ id: Int64?) {
         let next = id.flatMap { state.collection($0) == nil ? nil : $0 }
         guard next != activeID else { return }
+        // "Remember Filter per Source": the outgoing source's filter is
+        // kept and the incoming one's comes back (no-op while it is off).
+        library?.filterSourceWillChange()
         activeID = next
+        library?.filterSourceDidChange()
         library?.recomputeVisible()
     }
 

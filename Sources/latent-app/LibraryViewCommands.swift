@@ -13,6 +13,9 @@ enum LibraryViewCommand: Equatable {
     case toggleMirrorImageMode
     case sort(LibrarySortKey)
     case reverseSortOrder
+    /// The filter set to photos like the selected one: same camera body,
+    /// same lens, captured within a day (`Library.showSimilar(to:)`).
+    case similarToPhoto
 }
 
 extension CommandState {
@@ -22,6 +25,7 @@ extension CommandState {
         // image they show (Develop through the editor, so its history has it).
         case .flip: mode == .develop ? hasImage : mode == .library ? selectionCount > 0 : hasSelection
         case .toggleMirrorImageMode, .sort, .reverseSortOrder: true
+        case .similarToPhoto: hasSelection
         }
     }
 }
@@ -92,7 +96,7 @@ enum LibraryFlip {
     }
 }
 
-/// View › Sort and Mirror Image Mode, and Photo's flips, as menu items.
+/// View › Sort, Mirror Image Mode and Similar to This Photo, as menu items.
 struct LibraryViewMenuItems: View {
     let state: CommandState
     let item: (String, KeyCommand) -> AnyView
@@ -107,6 +111,7 @@ struct LibraryViewMenuItems: View {
             item("Reverse Sort Order", .libraryView(.reverseSortOrder))
         }
         toggle("Mirror Image Mode", .libraryView(.toggleMirrorImageMode), state.mirrorImageMode)
+        item("Similar to This Photo", .libraryView(.similarToPhoto))
     }
 }
 

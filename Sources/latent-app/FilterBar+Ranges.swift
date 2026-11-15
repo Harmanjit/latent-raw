@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Catalog
 
 /// The shooting values the Ranges popover filters on.
@@ -156,13 +157,19 @@ struct RangesFilterPopover: View {
 
 /// Bars for the bucket counts and two thumbs under them. Dragging moves
 /// whichever thumb is nearer where the drag starts; the bars between the
-/// thumbs are drawn in the accent colour.
+/// thumbs are drawn in the accent colour. A click on a bar (no drag) sets
+/// the range to that bar's bucket, Shift-click stretches it to the bar,
+/// and a double-click clears it (`RangeBarClick`).
 struct RangeHistogramSlider: View {
     let histogram: RangeHistogram
     @Binding var buckets: ClosedRange<Int>
     @State private var draggingUpper: Bool?
+    /// The bar clicked last, which a Shift-click stretches from.
+    @State private var clickAnchor: Int?
 
     private static let thumb: CGFloat = 10
+    /// How far the pointer may move on a bar before a press counts as a drag.
+    private static let clickSlop: CGFloat = 3
 
     var body: some View {
         GeometryReader { geometry in
@@ -190,6 +197,12 @@ struct RangeHistogramSlider: View {
             }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                // A press on the bars may be a click: it becomes a drag
+                // only once the pointer has moved. On the thumbs' strip
+                // dragging starts at once, as it always has.
+                let onBars = drag.startLocation.y < barArea
+                let moved = max(abs(drag.translation.width), abs(drag.translation.height))
+                if onBars, draggingUpper == nil, moved < Self.clickSlop { return }
                 let position = Int((drag.location.x / max(step, 1)).rounded())
                 if draggingUpper == nil {
                     let start = drag.startLocation.x / max(step, 1)
@@ -204,8 +217,20 @@ struct RangeHistogramSlider: View {
                     let lower = min(max(position, 0), buckets.upperBound)
                     if lower != buckets.lowerBound { buckets = lower...buckets.upperBound }
                 }
-            }.onEnded { _ in draggingUpper = nil })
+            }.onEnded { drag in
+                defer { draggingUpper = nil }
+                // Never turned into a drag, and started on the bars: a click.
+                guard draggingUpper == nil, drag.startLocation.y < barArea else { return }
+                let event = NSApp.currentEvent
+                let result = RangeBarClick.apply(index: Int(drag.startLocation.x / max(step, 1)),
+                                                 clickCount: event?.clickCount ?? 1,
+                                                 extending: event?.modifierFlags.contains(.shift) ?? false,
+                                                 current: buckets, anchor: clickAnchor, bucketCount: n)
+                clickAnchor = result.anchor
+                if result.buckets != buckets { buckets = result.buckets }
+            })
         }
+        .help("Click a bar to show just its photos, Shift-click to extend, double-click to clear; drag to set a range")
         .accessibilityElement(children: .ignore)
         .accessibilityAdjustableAction { direction in
             // VoiceOver narrows or widens from the top, one bucket at a time.

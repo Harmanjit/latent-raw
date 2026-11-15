@@ -97,12 +97,17 @@ struct FilterPresetsMenu: View {
                     }
                 }
             }
+            Divider()
+            // Off by default: the filter then carries over between folders
+            // and collections, as it always has (Library+FilterMemory.swift).
+            Toggle("Remember Filter per Source", isOn: $library.remembersFilterPerSource)
+                .help("Each folder and collection keeps its own filter, which comes back when you return to it")
         } label: {
             Image(systemName: "line.3.horizontal.decrease.circle")
         }
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Filter presets: save the filter bar's settings under a name and apply them again")
+        .help("Filter presets: save the filter bar's settings under a name and apply them again, or remember a filter per folder and collection")
         .accessibilityLabel("Filter presets")
     }
 

@@ -114,3 +114,39 @@ public enum CaptureDateQuickRange: String, CaseIterable, Sendable {
         return next.addingTimeInterval(-0.001)
     }
 }
+
+/// What a click on one bar of a Ranges histogram does to the selected
+/// buckets: a plain click selects just that bar's bucket, a Shift-click
+/// stretches the selection to it (from the bar clicked last, as Shift
+/// extends a list selection), and a double-click clears the range.
+/// Dragging the thumbs is unchanged; this is only for clicks on the bars.
+public enum RangeBarClick {
+    /// The buckets after the click, and the bucket a later Shift-click
+    /// stretches from (nil once the range is cleared).
+    ///
+    /// - Parameters:
+    ///   - index: the bucket clicked (clamped into the histogram).
+    ///   - clickCount: 2 or more for a double-click.
+    ///   - extending: Shift was held.
+    ///   - current: the buckets selected now; every bucket when unconstrained.
+    ///   - anchor: the bucket clicked last, if any. Ignored when it is no
+    ///     longer inside `current` (the range was changed some other way).
+    public static func apply(index: Int, clickCount: Int, extending: Bool, current: ClosedRange<Int>,
+                             anchor: Int?, bucketCount: Int) -> (buckets: ClosedRange<Int>, anchor: Int?) {
+        guard bucketCount > 0 else { return (0...0, nil) }
+        let all = 0...(bucketCount - 1)
+        if clickCount >= 2 { return (all, nil) }
+        let index = min(max(index, 0), bucketCount - 1)
+        let constrained = current != all
+        if extending, constrained {
+            if let anchor, current.contains(anchor) {
+                return (min(anchor, index)...max(anchor, index), anchor)
+            }
+            // No bar clicked yet: stretch whichever end is nearer, keep the other.
+            let lower = min(current.lowerBound, index), upper = max(current.upperBound, index)
+            let kept = index < current.lowerBound ? current.upperBound : current.lowerBound
+            return (lower...upper, kept)
+        }
+        return (index...index, index)
+    }
+}
