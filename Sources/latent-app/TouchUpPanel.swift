@@ -8,7 +8,7 @@ import PixelEngine
 struct TouchUpSection: View {
     @Bindable var model: EditorModel
 
-    private var faces: [TouchUpFace] { model.parameters.touchUp.faces }
+    private var faces: [TouchUpFace] { model.parameter(\.touchUp.faces) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -66,7 +66,7 @@ struct TouchUpSection: View {
                         Text("Find Blemishes")
                     }
                 }
-                .disabled(model.findingBlemishes || model.findingFaces || model.parameters.touchUp.enabledFaceIDs.isEmpty)
+                .disabled(model.findingBlemishes || model.findingFaces || model.parameter(\.touchUp.enabledFaceIDs.isEmpty))
                 .help("Look for spots on the enabled faces' skin on this Mac and heal each one; replaces the blemishes found last time; needs an enabled face")
                 .accessibilityLabel("Find blemishes")
                 .accessibilityValue(model.findingBlemishes ? "Looking for blemishes" : "")
@@ -75,7 +75,7 @@ struct TouchUpSection: View {
             .controlSize(.small)
 
             HStack {
-                let n = model.parameters.touchUp.blemishes.count
+                let n = model.parameter(\.touchUp.blemishes.count)
                 Text(n == 0 ? "No blemishes. Find Blemishes looks for spots on the skin." : SpokenText.blemishCount(n))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -89,7 +89,7 @@ struct TouchUpSection: View {
             }
 
             Toggle("Show Skin Mask", isOn: $model.showSkinMask)
-                .disabled(!model.parameters.touchUp.wantsMasks)
+                .disabled(!model.parameter(\.touchUp.wantsMasks))
                 .help("Tint the skin the sliders work on; needs an enabled face and a slider above 0")
                 .accessibilityHint("Tints the skin the sliders work on")
                 .controlSize(.small)
@@ -120,7 +120,7 @@ struct TouchUpSection: View {
             .clipShape(RoundedRectangle(cornerRadius: 4))
             .accessibilityHidden(true)
             Toggle("Face \(index + 1)", isOn: Binding(
-                get: { model.parameters.touchUp.faces.first { $0.id == face.id }?.enabled ?? false },
+                get: { model.parameter(\.touchUp.faces).first { $0.id == face.id }?.enabled ?? false },
                 set: { on in
                     if let i = model.parameters.touchUp.faces.firstIndex(where: { $0.id == face.id }) {
                         model.parameters.touchUp.faces[i].enabled = on

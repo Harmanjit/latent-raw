@@ -16,7 +16,7 @@ struct DistractionRemovalSection: View {
         self.state = model.reflectionState
     }
 
-    private var removal: ReflectionRemoval { model.parameters.reflections }
+    private var removal: ReflectionRemoval { model.parameter(\.reflections) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

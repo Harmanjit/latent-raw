@@ -1655,7 +1655,7 @@ struct ContentView: View {
         state.touchUpToolActive = model.touchUpToolActive
         state.hasSelectedBlemish = model.hasSelectedBlemish
         state.toolSizeAdjustable = model.toolSizeAdjustable
-        state.canAddMask = model.hasImage && model.parameters.locals.count < LocalAdjustment.maximumCount
+        state.canAddMask = model.hasImage && model.parameter(\.locals.count) < LocalAdjustment.maximumCount
         state.hasSelectedMask = model.selectedLocal != nil
         state.showMaskOverlay = model.showMaskOverlay
         state.hasCopiedMask = maskClipboard.copied != nil
@@ -2247,7 +2247,7 @@ struct ContentView: View {
             ResettableSlider(value: model.temperatureSliderBinding,
                              in: model.temperatureSliderRange, label: "Temperature",
                              accessibilityValue: String(format: "%.0f kelvin",
-                                                        model.parameters.whiteBalance.temperature)) {
+                                                        model.parameter(\.whiteBalance.temperature))) {
                 model.resetWhiteBalance()
             }
             .help("Double-click for the camera's white balance")

@@ -102,24 +102,24 @@ struct DetailPanel: View {
                             format: "%.0f", scale: 100, defaultValue: 0.5,
                             help: "Higher keeps more fine detail from the luminance smoothing, at the cost of some noise.",
                             label: "Luminance noise detail")
-                .disabled(model.parameters.denoiseLuminance == 0)
+                .disabled(model.parameter(\.denoiseLuminance) == 0)
             DetailSliderRow(title: "Contrast", value: model.parameterBinding(\.noiseDetail.luminanceContrast), range: 0...1,
                             format: "%.0f", scale: 100,
                             help: "Puts back texture and local contrast the luminance smoothing flattened, without the noise.",
                             label: "Luminance noise contrast")
-                .disabled(model.parameters.denoiseLuminance == 0)
+                .disabled(model.parameter(\.denoiseLuminance) == 0)
             DetailSliderRow(title: "Colour", value: model.parameterBinding(\.denoiseColor), range: 0...1,
                             help: "Removes coloured speckles. 0 is off.")
             DetailSliderRow(title: "Detail", value: model.parameterBinding(\.noiseDetail.colourDetail), range: 0...1,
                             format: "%.0f", scale: 100, defaultValue: 0.5,
                             help: "Higher keeps thin coloured edges crisp; lower cleans colour noise harder.",
                             label: "Colour noise detail")
-                .disabled(model.parameters.denoiseColor == 0)
+                .disabled(model.parameter(\.denoiseColor) == 0)
             DetailSliderRow(title: "Smoothness", value: model.parameterBinding(\.noiseDetail.colourSmoothness), range: 0...1,
                             format: "%.0f", scale: 100,
                             help: "Evens out larger blotches of colour (mottling) that the colour slider is too fine to reach.",
                             label: "Colour noise smoothness")
-                .disabled(model.parameters.denoiseColor == 0)
+                .disabled(model.parameter(\.denoiseColor) == 0)
             Text("Judge both at 100% zoom; the fit-to-window preview is scaled to match but hides fine grain.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -154,7 +154,7 @@ struct LensCorrectionsPanel: View {
                 EmbeddedDNGCorrectionsToggle(model: model)
             }
             Toggle("Remove chromatic aberration (automatic)", isOn: Binding(
-                get: { model.parameters.autoCA != nil },
+                get: { model.parameter(\.autoCA) != nil },
                 set: { model.setRemoveChromaticAberration($0) }))
                 .help("Measures the colour fringes on this photo and lines up red and blue with green, without a profile. Replaces the profile's correction while on.")
                 .disabled(model.measuringChromaticAberration)
@@ -173,7 +173,7 @@ struct LensCorrectionsPanel: View {
             DetailSliderRow(title: "Midpoint", value: model.parameterBinding(\.manualVignettingMidpoint), range: 0...1,
                             format: "%.0f", scale: 100, defaultValue: ManualVignettingShape.neutralMidpoint,
                             help: "How far in from the corners manual vignetting reaches: lower spreads it towards the centre.")
-                .disabled(model.parameters.manualVignetting == 0)
+                .disabled(model.parameter(\.manualVignetting) == 0)
 
             DetailSubheading(title: "Defringe")
             DetailSliderRow(title: "Purple", value: model.parameterBinding(\.defringePurple), range: 0...1,
@@ -184,7 +184,7 @@ struct LensCorrectionsPanel: View {
                             model.parameters.defringeHues.purpleLow = DefringeHueRanges.standard.purpleLow
                             model.parameters.defringeHues.purpleHigh = DefringeHueRanges.standard.purpleHigh
                         })
-                .disabled(model.parameters.defringePurple == 0)
+                .disabled(model.parameter(\.defringePurple) == 0)
             DetailSliderRow(title: "Green", value: model.parameterBinding(\.defringeGreen), range: 0...1,
                             help: "Removes green and cyan fringes along high-contrast edges.")
             HueRangeRow(title: "Green hue", low: model.parameterBinding(\.defringeHues.greenLow),
@@ -193,7 +193,7 @@ struct LensCorrectionsPanel: View {
                             model.parameters.defringeHues.greenLow = DefringeHueRanges.standard.greenLow
                             model.parameters.defringeHues.greenHigh = DefringeHueRanges.standard.greenHigh
                         })
-                .disabled(model.parameters.defringeGreen == 0)
+                .disabled(model.parameter(\.defringeGreen) == 0)
             Button {
                 if model.defringePickerActive { model.defringePickerActive = false } else { model.armDefringePicker() }
             } label: {
@@ -226,23 +226,23 @@ struct LensCorrectionsPanel: View {
                         Section(choices.fitting.isEmpty ? "All lenses" : "Other mounts") { lensMenu(choices.others) }
                     }
                 } label: {
-                    Text(model.parameters.lensProfile ?? "Automatic profile")
+                    Text(model.parameter(\.lensProfile) ?? "Automatic profile")
                         .lineLimit(1).truncationMode(.middle)
                 }
                 .menuStyle(.borderlessButton)
                 .help("Pick the lens profile by hand when the automatic match is wrong or missing")
                 .accessibilityLabel("Lens profile")
-                .accessibilityValue(model.parameters.lensProfile ?? "Automatic")
+                .accessibilityValue(model.parameter(\.lensProfile) ?? "Automatic")
             }
             let remembered = model.rememberedLensProfile
-            if model.parameters.lensProfile != nil || remembered != nil {
-                Button(model.parameters.lensProfile == nil ? "Forget Profile for This Lens"
+            if model.parameter(\.lensProfile) != nil || remembered != nil {
+                Button(model.parameter(\.lensProfile) == nil ? "Forget Profile for This Lens"
                                                            : "Use for All Photos From This Lens") {
                     model.rememberLensProfileForThisLens()
                 }
                 .controlSize(.small)
-                .disabled(model.parameters.lensProfile == remembered && model.parameters.lensProfile != nil)
-                .help(model.parameters.lensProfile == nil
+                .disabled(model.parameter(\.lensProfile) == remembered && model.parameter(\.lensProfile) != nil)
+                .help(model.parameter(\.lensProfile) == nil
                       ? "Go back to the automatic match for every photo from this camera and lens (\(remembered ?? ""))"
                       : "Remember this profile in the catalog for every photo from this camera and lens")
             }
@@ -348,9 +348,9 @@ struct EffectsPanel: View {
                 DetailSliderRow(title: "Highlights", value: model.parameterBinding(\.postCropVignette.highlights), range: 0...1,
                                 format: "%.0f", scale: 100,
                                 help: "When darkening, how much bright areas such as lights and sky keep their brightness.")
-                    .disabled(model.parameters.postCropVignette.amount >= 0)
+                    .disabled(model.parameter(\.postCropVignette.amount) >= 0)
             }
-            .disabled(!model.parameters.postCropVignette.isActive)
+            .disabled(!model.parameter(\.postCropVignette.isActive))
 
             DetailSubheading(title: "Grain")
             DetailSliderRow(title: "Amount", value: model.parameterBinding(\.grain.amount), range: 0...1,
@@ -364,7 +364,7 @@ struct EffectsPanel: View {
                                 format: "%.0f", scale: 100, defaultValue: 0.5,
                                 help: "Low gives smooth, even grain; high gives clumpier, irregular grain.")
             }
-            .disabled(!model.parameters.grain.isActive)
+            .disabled(!model.parameter(\.grain.isActive))
             Text("Judge grain at 100% zoom; zoomed out, the preview shows it softened as a smaller print would.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)

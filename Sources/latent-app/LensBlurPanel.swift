@@ -16,7 +16,7 @@ struct LensBlurSection: View {
         self.state = model.lensBlurState
     }
 
-    private var blur: LensBlur { model.parameters.lensBlur }
+    private var blur: LensBlur { model.parameter(\.lensBlur) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -96,7 +96,7 @@ struct LensBlurSection: View {
             }
             FocusRangeBar(range: Binding(get: { SIMD2(blur.focusFar, blur.focusNear) },
                                          set: { range in
-                                             var b = model.parameters.lensBlur
+                                             var b = model.parameter(\.lensBlur)
                                              b.focusFar = range.x
                                              b.focusNear = range.y
                                              model.parameters.lensBlur = b

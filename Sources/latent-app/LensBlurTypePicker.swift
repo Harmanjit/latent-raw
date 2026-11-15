@@ -9,7 +9,7 @@ import PixelEngine
 struct LensBlurTypePicker: View {
     @Bindable var model: EditorModel
 
-    private var blur: LensBlur { model.parameters.lensBlur }
+    private var blur: LensBlur { model.parameter(\.lensBlur) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

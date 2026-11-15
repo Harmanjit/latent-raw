@@ -160,7 +160,7 @@ struct ToneCurveControls: View {
             case .point:
                 presetRow
                 ToneCurvePanel(master: model.parameterBinding(\.toneCurve), channels: model.parameterBinding(\.channelCurves))
-                if !model.parameters.parametricCurve.isNeutral {
+                if !model.parameter(\.parametricCurve.isNeutral) {
                     Text("The region curve is also on; it applies before these points.")
                         .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -179,12 +179,12 @@ struct ToneCurveControls: View {
             Text("Point Curve").font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
             Spacer()
             Picker("Point curve preset", selection: Binding(
-                get: { ToneCurve.Preset.matching(model.parameters.toneCurve)?.rawValue ?? "custom" },
+                get: { ToneCurve.Preset.matching(model.parameter(\.toneCurve))?.rawValue ?? "custom" },
                 set: { raw in
                     if let preset = ToneCurve.Preset(rawValue: raw) { model.parameters.toneCurve = preset.curve }
                 })) {
                 ForEach(ToneCurve.Preset.allCases) { Text($0.title).tag($0.rawValue) }
-                if ToneCurve.Preset.matching(model.parameters.toneCurve) == nil {
+                if ToneCurve.Preset.matching(model.parameter(\.toneCurve)) == nil {
                     Divider()
                     Text("Custom").tag("custom")
                 }

@@ -88,7 +88,7 @@ struct RedEyeSection: View {
                 .disabled(model.selectedRedEye == nil)
 
             HStack {
-                let n = model.parameters.redEyes.count
+                let n = model.parameter(\.redEyes.count)
                 Text(n == 0 ? "No red-eye spots. Click a red pupil, or Auto; for a pet, choose Pet Eye and circle its pupil."
                      : "\(n) red-eye spot\(n == 1 ? "" : "s")")
                     .font(.caption2)

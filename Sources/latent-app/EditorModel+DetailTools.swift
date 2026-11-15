@@ -14,7 +14,7 @@ extension EditorModel {
     /// The Lensfun model this photo's corrections come from, if any.
     var activeLensProfileName: String? {
         _ = outsideStateRevision
-        return session?.lensCorrection(for: parameters)?.profileName
+        return session?.lensCorrection(for: parameters(observing: \.lensProfile, \.embeddedDNGCorrections))?.profileName
     }
 
     /// The profile remembered for every photo from this camera and lens, if

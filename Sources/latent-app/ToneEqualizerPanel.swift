@@ -16,7 +16,7 @@ struct ToneEqualizerSection: View {
         self.state = model.toneEqualizerState
     }
 
-    private var equalizer: ToneEqualizer { model.parameters.toneEqualizer.sanitized }
+    private var equalizer: ToneEqualizer { model.parameter(\.toneEqualizer.sanitized) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

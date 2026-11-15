@@ -16,12 +16,12 @@ struct HotPixelsSection: View {
         VStack(alignment: .leading, spacing: 8) {
             DetailSubheading(title: "Hot Pixels")
             Toggle("Remove hot pixels", isOn: Binding(
-                get: { model.parameters.hotPixels != nil },
+                get: { model.parameter(\.hotPixels) != nil },
                 set: { model.parameters.hotPixels = $0 ? (model.parameters.hotPixels ?? HotPixelRemoval()) : nil }))
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .help("Replaces stuck and hot photosites, the single bright red, green or blue dots of long exposures, with the median of their neighbours, before demosaicing")
-            if let removal = model.parameters.hotPixels {
+            if let removal = model.parameter(\.hotPixels) {
                 Picker("Hot pixel mode", selection: Binding(
                     get: { removal.mode },
                     set: { model.parameters.hotPixels?.mode = $0 })) {

@@ -830,6 +830,14 @@ final class EditorModel {
         return _parameters[keyPath: path]
     }
 
+    /// All the parameters, for a value derived from a few of them: observed
+    /// through `parameter(_:)` on each of `paths`, which must name every
+    /// parameter the value depends on, rather than as a whole.
+    func parameters<each Value: Equatable>(observing path: repeat KeyPath<EditParameters, each Value>) -> EditParameters {
+        _ = (repeat parameter(each path))
+        return _parameters
+    }
+
     /// A binding to one parameter that reads it with `parameter(_:)`, for
     /// a slider or field that should redraw only when its own value moves.
     /// Writing goes through `parameters`, as `model.parameterBinding(\.x)` does.

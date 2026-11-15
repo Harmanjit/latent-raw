@@ -30,7 +30,7 @@ struct LocalAdjustmentsPanel: View {
             }
             .controlSize(.small)
 
-            if model.parameters.locals.isEmpty {
+            if model.parameter(\.locals.isEmpty) {
                 Text("Add a mask, then drag on the image to place it. Adjustments apply where the mask is red.")
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -38,7 +38,7 @@ struct LocalAdjustmentsPanel: View {
                 localList
             }
 
-            if let i = model.selectedLocalIndex, i < model.parameters.locals.count {
+            if let i = model.selectedLocalIndex, i < model.parameter(\.locals.count) {
                 selectedControls(i)
             }
         }
@@ -69,7 +69,7 @@ struct LocalAdjustmentsPanel: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .disabled(!model.hasImage || model.parameters.locals.count >= LocalAdjustment.maximumCount)
+        .disabled(!model.hasImage || model.parameter(\.locals.count) >= LocalAdjustment.maximumCount)
         masksMenu
         MaskPresetsMenu(model: model)
     }
@@ -109,9 +109,9 @@ struct LocalAdjustmentsPanel: View {
     private var masksMenu: some View {
         Menu("Masks") {
             Button("Duplicate") { if let i = model.selectedLocalIndex { model.duplicateLocal(at: i) } }
-                .disabled(model.selectedLocal == nil || model.parameters.locals.count >= LocalAdjustment.maximumCount)
+                .disabled(model.selectedLocal == nil || model.parameter(\.locals.count) >= LocalAdjustment.maximumCount)
             Button("Duplicate and Invert") { if let i = model.selectedLocalIndex { model.duplicateLocal(at: i, invert: true) } }
-                .disabled(model.selectedLocal == nil || model.parameters.locals.count >= LocalAdjustment.maximumCount)
+                .disabled(model.selectedLocal == nil || model.parameter(\.locals.count) >= LocalAdjustment.maximumCount)
             Button(model.selectedLocal?.hidden == true ? "Show Mask" : "Hide Mask") {
                 if let i = model.selectedLocalIndex { model.toggleHidden(at: i) }
             }
@@ -122,7 +122,7 @@ struct LocalAdjustmentsPanel: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .disabled(model.parameters.locals.isEmpty)
+        .disabled(model.parameter(\.locals.isEmpty))
         .help("Duplicate, invert, hide or tidy masks")
     }
 
@@ -186,7 +186,7 @@ struct LocalAdjustmentsPanel: View {
     private func maskClipboardItems(_ index: Int) -> some View {
         Button(MaskClipboardCommand.copy.title) { model.copyMask(at: index) }
         Button(MaskClipboardCommand.paste.title) { model.pasteMask() }
-            .disabled(maskClipboard.copied == nil || model.parameters.locals.count >= LocalAdjustment.maximumCount)
+            .disabled(maskClipboard.copied == nil || model.parameter(\.locals.count) >= LocalAdjustment.maximumCount)
         Button(MaskClipboardCommand.pasteToSelection.title) { pasteMaskToSelection?() }
             .disabled(pasteMaskToSelection == nil)
     }

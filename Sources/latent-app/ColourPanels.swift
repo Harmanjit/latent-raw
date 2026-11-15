@@ -62,7 +62,7 @@ struct ColourSections: View {
         } label: {
             HStack {
                 ColourSectionLabel(title: "Channel Mixer")
-                if !model.parameters.colour.channelMixer.isNeutral { badge("MIX") }
+                if !model.parameter(\.colour.channelMixer.isNeutral) { badge("MIX") }
             }
         }
     }
@@ -171,7 +171,7 @@ struct BlackAndWhitePanel: View {
                     Spacer()
                     Button("Reset") { model.parameters.colour.blackAndWhite.mix = BlackAndWhite.neutralMix }
                         .controlSize(.mini)
-                        .disabled(model.parameters.colour.blackAndWhite.mixIsNeutral)
+                        .disabled(model.parameter(\.colour.blackAndWhite.mixIsNeutral))
                         .help("Every colour back to its plain luminance")
                 }
             } else {
@@ -191,7 +191,7 @@ struct BlackAndWhitePanel: View {
 struct PointColourPanel: View {
     @Bindable var model: EditorModel
 
-    private var swatches: [PointColour] { model.parameters.colour.pointColours }
+    private var swatches: [PointColour] { model.parameter(\.colour.pointColours) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

@@ -177,7 +177,7 @@ struct HealPinList: View {
     @Bindable var model: EditorModel
 
     var body: some View {
-        let heals = model.parameters.heals
+        let heals = model.parameter(\.heals)
         let selected = model.selectedHealIndices
         VStack(alignment: .leading, spacing: 4) {
             if !heals.isEmpty {
