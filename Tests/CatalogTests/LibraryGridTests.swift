@@ -117,6 +117,26 @@ final class LibraryGridTests: XCTestCase {
         XCTAssertEqual(library.selectedImageID, b, "select all keeps the lead")
     }
 
+    /// Urgent thumbnails (after Paste Settings) go in the grid's order,
+    /// as the user sorted it, not the catalog's load order; photos the
+    /// grid doesn't show follow.
+    func testUrgentThumbnailsFollowTheSortedGrid() async throws {
+        let library = Library()
+        try await library.open(folder: folder)
+        library.cancelThumbnailGeneration()
+        library.sort = LibrarySort(key: .fileName, ascending: false)
+        XCTAssertEqual(library.visibleImages.map(\.fileName), ["C.NEF", "B.NEF", "A.NEF"])
+
+        library.startThumbnailGeneration(urgent: ["A.NEF", "C.NEF", "B.NEF"])
+        XCTAssertEqual(library.urgentThumbnailRelPaths, ["C.NEF", "B.NEF", "A.NEF"])
+        library.cancelThumbnailGeneration()
+
+        XCTAssertEqual(Library.urgentOrder(["A.NEF", "C.NEF", "Hidden.NEF"],
+                                           visible: ["C.NEF", "B.NEF", "A.NEF"],
+                                           all: ["A.NEF", "B.NEF", "Hidden.NEF", "C.NEF"]),
+                       ["C.NEF", "A.NEF", "Hidden.NEF"], "visible first, the rest in catalog order")
+    }
+
     /// A rating under the default sort patches the record in place; the
     /// visible list only rebuilds when the filter or sort depends on it.
     func testRatingRebuildsTheListOnlyWhenTheViewDependsOnIt() async throws {

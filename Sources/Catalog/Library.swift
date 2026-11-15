@@ -259,7 +259,7 @@ public final class Library: ObservableObject {
     /// them first and run urgently (`ThumbnailGenerationSettings.urgent`)
     /// until one has gone through them; a pass cancelled by a newer one
     /// hands them on.
-    private var urgentThumbnailRelPaths: [String] = []
+    private(set) var urgentThumbnailRelPaths: [String] = []
     /// How often a pass's progress reaches the status bar, at most.
     static let thumbnailProgressInterval: TimeInterval = 0.1
 
@@ -712,16 +712,33 @@ public final class Library: ObservableObject {
         thumbnailTask?.cancel()
     }
 
+    /// `changed` in grid order (`visible`, as sorted and filtered), so the
+    /// cells on screen near the selection come before those far down; then
+    /// any not in the grid (filtered out, or hidden in a stack), in
+    /// catalog order.
+    nonisolated static func urgentOrder<Visible: Sequence<String>, All: Sequence<String>>(
+        _ changed: Set<String>, visible: Visible, all: All
+    ) -> [String] {
+        var seen = Set<String>()
+        var order: [String] = []
+        for relPath in visible where changed.contains(relPath) && seen.insert(relPath).inserted {
+            order.append(relPath)
+        }
+        for relPath in all where changed.contains(relPath) && seen.insert(relPath).inserted {
+            order.append(relPath)
+        }
+        return order
+    }
+
     /// Starts a pass over every stale thumbnail. `urgent` names photos the
     /// user is waiting to see (their edits just changed in bulk): they go
     /// first, and the pass runs at High priority (plan #13).
     func startThumbnailGeneration(urgent: [String] = []) {
         guard let catalog else { return }
         if !urgent.isEmpty {
-            let changed = Set(urgent).subtracting(urgentThumbnailRelPaths)
-            // Grid order, so the cells on screen near the selection come
-            // before those far down the list.
-            urgentThumbnailRelPaths += images.lazy.map(\.relPath).filter { changed.contains($0) }
+            urgentThumbnailRelPaths += Self.urgentOrder(Set(urgent).subtracting(urgentThumbnailRelPaths),
+                                                        visible: visibleImages.lazy.map(\.relPath),
+                                                        all: images.lazy.map(\.relPath))
         }
         let urgentRelPaths = urgentThumbnailRelPaths
         thumbnailTask?.cancel()
