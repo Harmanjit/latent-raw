@@ -180,7 +180,9 @@ extension EditorModel {
     /// render follows when the drag stops (EditorModel+DragRender.swift).
     func rerender() {
         guard session != nil, pipeline != nil else { return }
-        rerender(asDragTick: beginEditRender())
+        let isDragTick = beginEditRender()
+        rerender(asDragTick: isDragTick)
+        endEditRender(wasDragTick: isDragTick)
     }
 
     func rerender(asDragTick draft: Bool) {

@@ -13,7 +13,7 @@ import PixelEngine
 /// full-quality render replaces the draft. Export, thumbnails and the
 /// high-quality preview never see any of this.
 struct DragRenderState {
-    /// When the last edit render ran, nil once a drag has settled.
+    /// When the last edit render finished, nil once a drag has settled.
     var lastEditRender: ContinuousClock.Instant?
     /// The preview on screen is the drag draft: coarser than the view
     /// wants, or with coarse blurs.
@@ -35,21 +35,33 @@ extension EditorModel {
     static let dragSettleDelay: Duration = .milliseconds(150)
 
     /// Notes an edit render about to run and says whether it is a drag
-    /// tick, queueing the full-quality render for when the drag stops.
-    func beginEditRender() -> Bool {
-        let now = ContinuousClock.now
+    /// tick: the previous edit render *finished* less than
+    /// `dragTickWindow` ago. Any settle render still waiting is called
+    /// off; `endEditRender(wasDragTick:)` queues the next one.
+    ///
+    /// Both timers run from when a render ends, not when it starts, so a
+    /// slow render (a big file at 100% with many heal spots, a slower Mac)
+    /// doesn't eat the window: the settle sleep never ends during the
+    /// render and wins the main actor ahead of the next slider event.
+    func beginEditRender(now: ContinuousClock.Instant = .now) -> Bool {
         let isDragTick = dragRender.lastEditRender.map { now - $0 < Self.dragTickWindow } ?? false
+        dragRender.settleTask?.cancel()
+        dragRender.settleTask = nil
+        return isDragTick
+    }
+
+    /// Notes that an edit render just finished: the drag window and, after
+    /// a drag tick, the settle delay both start now.
+    func endEditRender(wasDragTick: Bool, now: ContinuousClock.Instant = .now) {
         dragRender.lastEditRender = now
         dragRender.settleTask?.cancel()
         dragRender.settleTask = nil
-        if isDragTick {
-            dragRender.settleTask = Task { [weak self] in
-                try? await Task.sleep(for: Self.dragSettleDelay)
-                guard !Task.isCancelled, let self else { return }
-                self.settleDragRender()
-            }
+        guard wasDragTick else { return }
+        dragRender.settleTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.dragSettleDelay)
+            guard !Task.isCancelled, let self else { return }
+            self.settleDragRender()
         }
-        return isDragTick
     }
 
     /// The drag stopped: replace whatever was drawn as a draft with the

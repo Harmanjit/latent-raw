@@ -44,6 +44,35 @@ final class DragRenderTests: XCTestCase {
                        "a nonsense scale counts as 1")
     }
 
+    // MARK: - Timing
+
+    /// A slow render (longer than the settle delay, even longer than the
+    /// tick window) must not end the drag: both timers start when the
+    /// render finishes, so the next slider event is still a draft tick and
+    /// no settle render is queued while the render runs.
+    func testSlowRendersStayInTheDrag() async throws {
+        let model = try await openModel()
+        let t0 = ContinuousClock.now
+        XCTAssertFalse(model.beginEditRender(now: t0), "the first edit of a burst")
+        model.endEditRender(wasDragTick: false, now: t0 + .milliseconds(400))
+        XCTAssertNil(model.dragRender.settleTask, "no settle after a full-quality render")
+
+        // The next event comes 420 ms after the first render began, but
+        // only 20 ms after it ended.
+        XCTAssertTrue(model.beginEditRender(now: t0 + .milliseconds(420)))
+        XCTAssertNil(model.dragRender.settleTask, "nothing can settle while the render runs")
+        model.endEditRender(wasDragTick: true, now: t0 + .milliseconds(820))
+        XCTAssertNotNil(model.dragRender.settleTask, "the settle render waits from the render's end")
+
+        XCTAssertTrue(model.beginEditRender(now: t0 + .milliseconds(1000)), "still the same drag")
+        XCTAssertNil(model.dragRender.settleTask, "the next tick calls the settle off")
+        model.endEditRender(wasDragTick: true, now: t0 + .milliseconds(1400))
+
+        // A real pause after the render ended is a new burst.
+        XCTAssertFalse(model.beginEditRender(now: t0 + .milliseconds(1400) + EditorModel.dragTickWindow))
+        model.resetDragRender()
+    }
+
     // MARK: - Fit (fix 4)
 
     func testDragAtFitRendersTheDraftAndSettlesToFullSize() async throws {
