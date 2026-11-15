@@ -81,8 +81,11 @@ extension Catalog {
     /// efficiency cores, unless the user asked for otherwise).
     /// While `pause` is paused no new file is started; the files under way
     /// finish, and the pass carries on from the next one on Resume.
+    /// `first` names images to make before the rest, in that order (the
+    /// photos a paste just changed, as the grid shows them).
     public func generateMissingThumbnails(
         concurrency: Int = 4,
+        first: [String] = [],
         quality: Double = Thumbnailer.defaultQuality,
         priority: TaskPriority = .utility,
         editedRenderer: (any EditedThumbnailRenderer)? = nil,
@@ -94,28 +97,45 @@ extension Catalog {
         let start = Date()
         var report = ThumbnailReport()
         guard !Task.isCancelled else { return report }
-        let needed = try thumbnailJobs().filter { $0.editStackJSON == nil || editedRenderer != nil }
-        guard !needed.isEmpty else { return report }
+        let stale = try thumbnailJobs()
+        let allStale = stale.map(\.record.relPath)
+        var needed = stale.filter { $0.editStackJSON == nil || editedRenderer != nil }
+        guard !needed.isEmpty else {
+            thumbnailHandoff.discardPreviews(forRelPaths: allStale)
+            return report
+        }
+        if !first.isEmpty {
+            needed = Self.ordered(needed, first: first)
+        }
 
         // Absolute paths resolved here, on the actor; the workers get
         // plain values and never touch catalog state.
         struct Work: Sendable {
             let relPath: String
+            let imageID: Int64?
+            let hash: Data
             let source: URL
             let destination: URL
             let editStackJSON: String?
             let key: Data
             let replaces: Bool
         }
+        let fm = FileManager.default
         let jobs = needed.map { job in
-            Work(relPath: job.record.relPath,
-                 source: fileURL(forRelPath: job.record.relPath),
-                 destination: thumbnailURL(forRelPath: job.record.relPath),
-                 editStackJSON: job.editStackJSON,
-                 key: job.expectedKey,
-                 replaces: FileManager.default.fileExists(atPath: thumbnailURL(forRelPath: job.record.relPath).path))
+            let destination = thumbnailURL(forRelPath: job.record.relPath)
+            return Work(relPath: job.record.relPath,
+                        imageID: job.record.id,
+                        hash: job.record.xxhash,
+                        source: fileURL(forRelPath: job.record.relPath),
+                        destination: destination,
+                        editStackJSON: job.editStackJSON,
+                        key: job.expectedKey,
+                        // A version 1 HEIC the grid may have shown counts.
+                        replaces: fm.fileExists(atPath: destination.path)
+                            || fm.fileExists(atPath: Catalog.legacyThumbnailURL(for: destination).path))
         }
         let byPath = Dictionary(jobs.map { ($0.relPath, $0) }, uniquingKeysWith: { first, _ in first })
+        let handoff = thumbnailHandoff
         let total = jobs.count
         // Keys go to the database this many files at a time.
         let batchSize = 16
@@ -133,13 +153,20 @@ extension Catalog {
                 group.addTask(priority: priority) {
                     do {
                         if let json = job.editStackJSON, let renderer = editedRenderer {
-                            let image = try renderer.renderThumbnail(rawFileAt: job.source,
-                                                                     editStackJSON: json)
+                            // The editor's own render of this very edit, made
+                            // from its open session as the edit settled (#28).
+                            let image = try job.imageID.flatMap { handoff.takeRendered(imageID: $0, key: job.key) }
+                                ?? renderer.renderThumbnail(rawFileAt: job.source, editStackJSON: json)
                             try Thumbnailer.write(image, to: job.destination, quality: quality)
+                        } else if let preview = handoff.takePreview(relPath: job.relPath, hash: job.hash),
+                                  (try? Thumbnailer.makeFromEmbeddedPreview(preview.jpeg, orientation: preview.orientation,
+                                                                            to: job.destination, quality: quality)) != nil {
+                            // Made from the preview the reconcile read.
                         } else {
                             try Thumbnailer.makeFromEmbeddedPreview(rawFileAt: job.source,
                                                                     to: job.destination, quality: quality)
                         }
+                        if job.replaces { Thumbnailer.removeLegacyFile(replacedBy: job.destination) }
                         return (job.relPath, nil)
                     } catch {
                         return (job.relPath, "\(error)")
@@ -177,8 +204,22 @@ extension Catalog {
                 try recordThumbnailKeys(unrecorded.map { ($0.relPath, $0.key) })
             }
         }
+        // Gone through every file: what's left for them is no use (their
+        // image has an edit, or the file failed). Previews a reconcile
+        // handed over meanwhile, for files this pass didn't list, stay.
+        if !Task.isCancelled { handoff.discardPreviews(forRelPaths: allStale) }
         report.duration = Date().timeIntervalSince(start)
         return report
+    }
+
+    /// `jobs` with those named in `first` moved to the front, in `first`'s
+    /// order; the others keep theirs.
+    static func ordered(_ jobs: [ThumbnailJob], first: [String]) -> [ThumbnailJob] {
+        var rank: [String: Int] = [:]
+        for (i, relPath) in first.enumerated() where rank[relPath] == nil { rank[relPath] = i }
+        let front = jobs.filter { rank[$0.record.relPath] != nil }
+            .sorted { rank[$0.record.relPath]! < rank[$1.record.relPath]! }
+        return front + jobs.filter { rank[$0.record.relPath] == nil }
     }
 
     /// Synchronous on purpose: GRDB's async write gives up when the task is

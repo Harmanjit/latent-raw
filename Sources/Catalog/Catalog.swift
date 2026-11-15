@@ -25,6 +25,9 @@ public actor Catalog {
     /// memo the running scan is building.
     var scanTagMemo: [String: (changed: timespec, tags: String?)] = [:]
     var nextScanTagMemo: [String: (changed: timespec, tags: String?)] = [:]
+    /// Pictures handed to the thumbnail pass: previews a reconcile already
+    /// read, edits rendered by the open editor (plan #28, #29).
+    public nonisolated let thumbnailHandoff = ThumbnailHandoff()
 
     public static let containerName = "_latent"
     /// The container name before the app was renamed (September 2026).
@@ -191,9 +194,36 @@ public actor Catalog {
     public nonisolated static func thumbnailURL(forRelPath relPath: String, in thumbnailDirectory: URL) -> URL {
         if let copy = VirtualCopy.parse(relPath) {
             return thumbnailDirectory.appendingPathComponent(VirtualCopy.companionFolder, isDirectory: true)
-                .appendingPathComponent(copy.key.stem + ".heic")
+                .appendingPathComponent(copy.key.stem + "." + thumbnailFileExtension)
         }
-        return thumbnailDirectory.appendingPathComponent(relPath + ".heic")
+        return thumbnailDirectory.appendingPathComponent(relPath + "." + thumbnailFileExtension)
+    }
+
+    /// Thumbnail files are `<image name>.jpg` (`Thumbnailer.cacheVersion` 2).
+    public nonisolated static let thumbnailFileExtension = "jpg"
+    /// Version 1 thumbnails were `<image name>.heic`. Until the pass
+    /// replaces one, the grid shows it rather than an empty cell.
+    public nonisolated static let legacyThumbnailFileExtension = "heic"
+
+    /// Where the version 1 thumbnail of the file `thumbnailURL` names was.
+    public nonisolated static func legacyThumbnailURL(for thumbnailURL: URL) -> URL {
+        thumbnailURL.deletingPathExtension().appendingPathExtension(legacyThumbnailFileExtension)
+    }
+
+    /// Removes the thumbnail at `thumbnailURL` and any version 1 HEIC
+    /// beside it. The grid shows that HEIC whenever the JPEG is missing,
+    /// so one left behind would stand in for whatever photo next takes
+    /// the path (a reused camera name, say).
+    public nonisolated static func removeThumbnailFiles(at thumbnailURL: URL) {
+        let fm = FileManager.default
+        try? fm.removeItem(at: thumbnailURL)
+        try? fm.removeItem(at: legacyThumbnailURL(for: thumbnailURL))
+    }
+
+    /// Removes only the version 1 HEIC beside `thumbnailURL`, for a path
+    /// whose thumbnail moved or is about to be made afresh.
+    public nonisolated static func removeLegacyThumbnail(besides thumbnailURL: URL) {
+        try? FileManager.default.removeItem(at: legacyThumbnailURL(for: thumbnailURL))
     }
 
     // MARK: - Queries

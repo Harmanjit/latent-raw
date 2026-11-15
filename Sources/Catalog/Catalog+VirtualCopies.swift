@@ -226,7 +226,8 @@ extension Catalog {
 
     /// Deletes a copy's sidecar and thumbnail, if they are there.
     func removeCompanions(ofCopyAt relPath: String) {
-        for url in [sidecarURL(forRelPath: relPath), thumbnailURL(forRelPath: relPath)]
+        let thumbnail = thumbnailURL(forRelPath: relPath)
+        for url in [sidecarURL(forRelPath: relPath), thumbnail, Self.legacyThumbnailURL(for: thumbnail)]
             where FileManager.default.fileExists(atPath: url.path) {
             try? FileManager.default.removeItem(at: url)
         }

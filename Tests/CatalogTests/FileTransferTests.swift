@@ -35,7 +35,7 @@ final class FileTransferTests: XCTestCase {
 
     private func exists(_ url: URL) -> Bool { fm.fileExists(atPath: url.path) }
     private func sidecar(_ relPath: String) -> URL { root.appendingPathComponent("_latent/xmp/\(relPath).xmp") }
-    private func thumbnail(_ relPath: String) -> URL { root.appendingPathComponent("_latent/thumbnails/\(relPath).heic") }
+    private func thumbnail(_ relPath: String) -> URL { root.appendingPathComponent("_latent/thumbnails/\(relPath).jpg") }
 
     /// The catalog with "Day 2" included, A rated, keyworded and edited, and
     /// thumbnails made.
@@ -86,6 +86,25 @@ final class FileTransferTests: XCTestCase {
         // Nothing for reconcile to hash or mend.
         let reconcile = try await catalog.reconcile()
         XCTAssertEqual(reconcile.renamed + reconcile.added + reconcile.removed + reconcile.sidecarsRead, 0, "\(reconcile)")
+    }
+
+    /// Version 1 HEICs never travel: the moved photo's is removed at its
+    /// old name, and a stale one at the new name goes too, or the grid
+    /// would show it for whatever photo next has either path.
+    func testMoveRemovesVersion1HEICsAtBothNames() async throws {
+        let catalog = try await preparedCatalog()
+        let day2 = root.appendingPathComponent("Day 2")
+        let oldHEIC = Catalog.legacyThumbnailURL(for: thumbnail("A.NEF"))
+        let staleHEIC = Catalog.legacyThumbnailURL(for: thumbnail("Day 2/A.NEF"))
+        try FileManager.default.createDirectory(at: staleHEIC.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: oldHEIC)
+        try Data("stale".utf8).write(to: staleHEIC)
+
+        let report = await ImageTransfer.run([request("A.NEF", to: day2)], mode: .move, openCatalog: catalog)
+        XCTAssertEqual(report.completed.count, 1, report.failureDescription)
+        XCTAssertTrue(exists(thumbnail("Day 2/A.NEF")))
+        XCTAssertFalse(exists(oldHEIC))
+        XCTAssertFalse(exists(staleHEIC))
     }
 
     func testMovingIntoItsOwnFolderIsSkipped() async throws {
@@ -199,7 +218,7 @@ final class FileTransferTests: XCTestCase {
         let gone = try await catalog.image(forRelPath: "A.NEF")
         XCTAssertNil(gone)
         XCTAssertTrue(exists(other.appendingPathComponent("_latent/xmp/A.NEF.xmp")))
-        XCTAssertTrue(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.heic")))
+        XCTAssertTrue(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.jpg")))
 
         let archive = try Catalog.open(at: other)
         let reconcile = try await archive.reconcile()
@@ -234,7 +253,7 @@ final class FileTransferTests: XCTestCase {
         XCTAssertTrue(exists(other.appendingPathComponent("_latent/catalog.sqlite")))
         XCTAssertTrue(exists(other.appendingPathComponent("_latent/xmp/A.NEF.xmp")))
         XCTAssertTrue(exists(other.appendingPathComponent("_latent/xmp/B.NEF.xmp")))
-        XCTAssertTrue(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.heic")))
+        XCTAssertTrue(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.jpg")))
 
         let archive = try Catalog.open(at: other)
         _ = try await archive.reconcile()
@@ -458,7 +477,7 @@ final class FileTransferTests: XCTestCase {
         XCTAssertTrue(exists(root.appendingPathComponent("A.NEF")))
         XCTAssertFalse(exists(other.appendingPathComponent("A.NEF")))
         XCTAssertFalse(exists(other.appendingPathComponent("_latent/xmp/A.NEF.xmp")))
-        XCTAssertFalse(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.heic")))
+        XCTAssertFalse(exists(other.appendingPathComponent("_latent/thumbnails/A.NEF.jpg")))
         XCTAssertTrue(exists(sidecar("A.NEF")))
         let row = try await catalog.image(forRelPath: "A.NEF")
         XCTAssertEqual(row?.rating, 4)

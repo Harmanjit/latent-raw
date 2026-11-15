@@ -4,7 +4,7 @@ import Catalog
 @testable import RawCore
 
 /// The app's edited-thumbnail path, end to end on the GPU: pipeline at
-/// thumbnail resolution, CGImage out, HEIC in. Mirrors
+/// thumbnail resolution, CGImage out, JPEG in. Mirrors
 /// PipelineThumbnailRenderer in the app target.
 final class EditedThumbnailRenderTests: XCTestCase {
     func testPipelineThumbnailHasTargetSizeAndReflectsTheEdit() throws {
@@ -48,9 +48,9 @@ final class EditedThumbnailRenderTests: XCTestCase {
         XCTAssertGreaterThan(mean(brightImage), mean(darkImage) + 30,
                              "the edit must show in the thumbnail")
 
-        // And it round-trips through the HEIC writer.
+        // And it round-trips through the thumbnail writer.
         let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("latent-\(UUID().uuidString).heic")
+            .appendingPathComponent("latent-\(UUID().uuidString).jpg")
         defer { try? FileManager.default.removeItem(at: tmp) }
         try Thumbnailer.write(brightImage, to: tmp)
         XCTAssertEqual(Thumbnailer.load(from: tmp)?.width, brightImage.width)

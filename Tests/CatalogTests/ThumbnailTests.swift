@@ -19,7 +19,7 @@ final class ThumbnailTests: XCTestCase {
         if let folder { try? FileManager.default.removeItem(at: folder) }
     }
 
-    func testGeneratesHEICAtTargetSizeOnce() async throws {
+    func testGeneratesJPEGAtTargetSizeOnce() async throws {
         let catalog = try Catalog.open(at: folder)
         try await catalog.setDefaultSubfolderMode(.included)
         _ = try await catalog.reconcile()
@@ -31,7 +31,7 @@ final class ThumbnailTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
 
         let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
-        XCTAssertEqual(CGImageSourceGetType(source) as String?, "public.heic")
+        XCTAssertEqual(CGImageSourceGetType(source) as String?, "public.jpeg")
         let props = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
         let w = props[kCGImagePropertyPixelWidth] as? Int ?? 0
         let h = props[kCGImagePropertyPixelHeight] as? Int ?? 0
@@ -48,6 +48,49 @@ final class ThumbnailTests: XCTestCase {
         try FileManager.default.removeItem(at: url)
         report = try await catalog.generateMissingThumbnails()
         XCTAssertEqual(report.generated, 1)
+    }
+
+    func testKeysCarryTheCacheVersion() {
+        XCTAssertEqual(Thumbnailer.embeddedPreviewKey, Data("embedded:v2".utf8))
+        let key = Thumbnailer.key(forEditStack: "{}")
+        XCTAssertTrue(key.starts(with: Data("edit:v2:".utf8)))
+    }
+
+    /// A catalog from before cache version 2 has HEIC files and v1 keys:
+    /// the grid shows the HEIC until the pass makes the JPEG, which then
+    /// replaces it.
+    func testVersion1HEICIsShownUntilReplaced() async throws {
+        let catalog = try Catalog.open(at: folder)
+        try await catalog.setDefaultSubfolderMode(.included)
+        _ = try await catalog.reconcile()
+        _ = try await catalog.generateMissingThumbnails()
+        let jpeg = await catalog.thumbnailURL(forRelPath: "sub/A.NEF")
+        XCTAssertEqual(jpeg.pathExtension, "jpg")
+        let heic = Catalog.legacyThumbnailURL(for: jpeg)
+        XCTAssertEqual(heic.lastPathComponent, "A.NEF.heic")
+
+        // Turn it into what version 1 left behind.
+        let image = try XCTUnwrap(Thumbnailer.load(from: jpeg))
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(heic as CFURL, "public.heic" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        try FileManager.default.removeItem(at: jpeg)
+        try await catalog.dbQueue.write { db in
+            try db.execute(sql: "UPDATE images SET thumb_key = ?", arguments: [Data("embedded:v1".utf8)])
+        }
+
+        // Shown meanwhile, and not counted as an orphan.
+        XCTAssertNotNil(ThumbnailLoader.decodeFile(jpeg, 256))
+        let usage = try await catalog.thumbnailCacheUsage()
+        XCTAssertEqual(usage.orphanFiles, 0)
+
+        let report = try await catalog.generateMissingThumbnails()
+        XCTAssertEqual(report.generated, 1)
+        XCTAssertEqual(report.replacedRelPaths, ["sub/A.NEF"], "the shown HEIC is replaced, so caches drop it")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: jpeg.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: heic.path))
+        let images = try await catalog.allImages()
+        XCTAssertEqual(images[0].thumbKey, Thumbnailer.embeddedPreviewKey)
     }
 
     func testRotationSwapsDimensions() throws {

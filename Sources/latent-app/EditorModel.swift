@@ -322,6 +322,10 @@ final class EditorModel: ObservableObject {
     /// Called with the edit to persist, or nil when the image is back to
     /// defaults. The library owns the actual write. Set by ContentView.
     var onEditSettled: ((_ imageID: Int64, _ editStackJSON: String?) -> Void)?
+    /// Called, just before `onEditSettled`, with the thumbnail of a settled
+    /// edit rendered from the open session (`offerSettledThumbnail`). Set by
+    /// ContentView.
+    var onSettledThumbnail: ((_ imageID: Int64, _ editStackJSON: String, _ image: CGImage) -> Void)?
 
     // MARK: - Rendered result and status
 

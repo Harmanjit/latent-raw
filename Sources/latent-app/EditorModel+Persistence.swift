@@ -13,13 +13,16 @@ extension EditorModel {
         pendingSave = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
-            self?.flushPendingSave()
+            self?.flushPendingSave(renderingThumbnail: true)
         }
     }
 
     /// Saves now if anything is pending. Called before switching images
     /// so an edit made a moment before pressing → isn't lost.
-    func flushPendingSave() {
+    /// `renderingThumbnail`: also render the edit's thumbnail from the open
+    /// session for the thumbnail pass. Only the debounced save asks for it,
+    /// when the user has paused; switching photos doesn't wait for it.
+    func flushPendingSave(renderingThumbnail: Bool = false) {
         guard let pendingSave else { return }
         pendingSave.cancel()
         self.pendingSave = nil
@@ -31,7 +34,9 @@ extension EditorModel {
             } else {
                 let stack = stackWithProvenance()
                 do {
-                    onEditSettled?(id, try stack.encodeJSON())
+                    let json = try stack.encodeJSON()
+                    if renderingThumbnail { offerSettledThumbnail(imageID: id, editStackJSON: json) }
+                    onEditSettled?(id, json)
                 } catch {
                     reportFailure("Encoding the edit", error)
                 }

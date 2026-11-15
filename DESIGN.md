@@ -645,7 +645,7 @@ Coverage of the current lenses in the Lensfun database, checked in September 202
 
 ## 10. Thumbnails
 
-**Size and format.** Each image has one thumbnail, about 512 px on the long edge, encoded as HEIC with the hardware HEVC encoder.
+**Size and format.** Each image has one thumbnail, about 512 px on the long edge, encoded as JPEG (HEIC until thumbnail cache version 2: at 512 px its encode cost 17-27 ms against under 1 ms for a JPEG of equal or better quality, and it loaded back 10x slower).
 
 **Unedited images.** The thumbnail is the camera's embedded JPEG preview, downscaled. No raw decoding is involved.
 
@@ -657,7 +657,7 @@ Coverage of the current lenses in the Lensfun database, checked in September 202
 
 **Larger previews.** Previews bigger than a thumbnail come from the embedded JPEG when needed and are never stored.
 
-**Display** (`ThumbnailLoader`, used by the grid and the filmstrip). The HEIC files in `_latent/thumbnails/` are the disk tier; in front of them sits a byte-capped least-recently-used memory cache of 256 MB, less on Macs with under 8 GB (physical memory / 32, at least 64 MB). Requests run newest first, so the row the user stopped scrolling on decodes before the rows that flew past, and a request cancelled before its decode starts (the cell scrolled away) costs nothing. Decodes use all but two cores at `.userInitiated`. Cells that need 256 pixels or fewer ask for a 256 px decode of the one 512 px file, a quarter of the memory; a cached larger decode also serves a smaller request. Each thumbnail is drawn off the main thread, turned by the user's rotation, straight into the display's colour space and pixel format, so Core Animation has nothing to convert on the main thread. Under memory pressure the cache halves (warning) or empties (critical). The grid redraws only cells whose image or badges changed.
+**Display** (`ThumbnailLoader`, used by the grid and the filmstrip). The JPEG files in `_latent/thumbnails/` are the disk tier (a version 1 `.heic` stands in until the pass replaces it); in front of them sits a byte-capped least-recently-used memory cache of 256 MB, less on Macs with under 8 GB (physical memory / 32, at least 64 MB). Requests run newest first, so the row the user stopped scrolling on decodes before the rows that flew past, and a request cancelled before its decode starts (the cell scrolled away) costs nothing. Decodes use all but two cores at `.userInitiated`. Cells that need 256 pixels or fewer ask for a 256 px decode of the one 512 px file, a quarter of the memory; a cached larger decode also serves a smaller request. Each thumbnail is drawn off the main thread, turned by the user's rotation, straight into the display's colour space and pixel format, so Core Animation has nothing to convert on the main thread. Under memory pressure the cache halves (warning) or empties (critical). The grid redraws only cells whose image or badges changed.
 
 ---
 

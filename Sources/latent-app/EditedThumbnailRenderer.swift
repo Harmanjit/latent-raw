@@ -18,8 +18,16 @@ struct PipelineThumbnailRenderer: EditedThumbnailRenderer {
     func renderThumbnail(rawFileAt url: URL, editStackJSON: String) throws -> CGImage {
         let file = try RawFile(path: url.path)
         let session = try ImageSession(file: file, gpu: gpu)
-        let pipeline = RenderPipeline(gpu: gpu)
+        return try Self.render(session, pipeline: RenderPipeline(gpu: gpu), gpu: gpu, editStackJSON: editStackJSON)
+    }
 
+    /// The thumbnail of `session`'s image with the edit `editStackJSON`.
+    /// Also run on the editor's own session when an edit settles
+    /// (`EditorModel.offerSettledThumbnail`), so both make the same
+    /// pixels from the same stored edit.
+    static func render(_ session: ImageSession, pipeline: RenderPipeline, gpu: GPUContext,
+                       editStackJSON: String) throws -> CGImage {
+        let file = session.file
         var defaults = EditParameters()
         defaults.whiteBalance = session.asShotWhiteBalance
         // An unreadable edit is a failed thumbnail (reported in the status

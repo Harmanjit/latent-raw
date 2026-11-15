@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Library › Rebuild Thumbnails and Settings › Performance's thumbnail
 /// cache: what the open catalog's thumbnails take on disk, and remaking or
@@ -15,6 +16,17 @@ extension Library {
             guard let self, catalog === self.catalog else { return }
             self.startThumbnailGeneration()
         }
+    }
+
+    /// Hands the thumbnail pass an edited image's thumbnail that the editor
+    /// rendered from its open session as the edit `editStackJSON` settled,
+    /// so the pass needn't decode the raw again (plan #28). Call before
+    /// saving the edit, which starts the pass. `target` as for
+    /// `saveEditStack`: the catalog the id belongs to.
+    public func offerEditedThumbnail(_ image: CGImage, forImageID id: Int64, editStackJSON: String,
+                                     in target: Catalog? = nil) {
+        guard let catalog = target ?? catalog else { return }
+        catalog.thumbnailHandoff.offerRendered(image, imageID: id, key: Thumbnailer.key(forEditStack: editStackJSON))
     }
 
     /// What the open catalog's thumbnail folder holds; nil with no folder open.

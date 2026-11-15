@@ -2,11 +2,13 @@ import Foundation
 import GRDB
 
 /// How thumbnails are made, from Settings › Performance. The defaults are
-/// what Latent always did: HEIC at 0.8, four files at a time at utility
-/// priority (the efficiency cores, DESIGN.md §11).
+/// JPEG at 0.8, four files at a time at utility priority (the efficiency
+/// cores, DESIGN.md §11).
 public struct ThumbnailGenerationSettings: Equatable, Sendable {
-    /// The HEIC quality thumbnails are written at. Applies to thumbnails
-    /// made from now on; Rebuild Thumbnails remakes existing ones.
+    /// The JPEG quality thumbnails are written at. Applies to thumbnails
+    /// made from now on; Rebuild Thumbnails remakes existing ones. Each
+    /// level looks at least as good as the HEIC level it replaced (HEIC
+    /// 0.6, 0.8 and 0.92; `Thumbnailer.cacheVersion`).
     public enum Quality: String, CaseIterable, Sendable, Identifiable {
         case low, standard, high
 
@@ -18,9 +20,9 @@ public struct ThumbnailGenerationSettings: Equatable, Sendable {
             case .high: "High"
             }
         }
-        public var heicQuality: Double {
+        public var jpegQuality: Double {
             switch self {
-            case .low: 0.6
+            case .low: 0.7
             case .standard: Thumbnailer.defaultQuality
             case .high: 0.92
             }
@@ -60,10 +62,35 @@ public struct ThumbnailGenerationSettings: Equatable, Sendable {
 
     public var quality: Quality = .standard
     public var priority: Priority = .normal
+    /// Files at once in an urgent pass, at most, unless the setting already
+    /// asks for more: an edited thumbnail decodes a whole raw, and eight of
+    /// those at once is plenty for a 16 GB Mac.
+    public static let urgentConcurrencyCap = 8
+    /// Set by `urgent()`.
+    public private(set) var isUrgent = false
 
     public init(quality: Quality = .standard, priority: Priority = .normal) {
         self.quality = quality
         self.priority = priority
+    }
+
+    /// These settings for a pass someone is waiting on (Paste Settings to a
+    /// hundred photos): High priority, whatever the setting, so it isn't
+    /// left to the efficiency cores four files at a time.
+    /// Already at High, it stays as set.
+    public func urgent() -> ThumbnailGenerationSettings {
+        guard priority != .high else { return self }
+        var copy = self
+        copy.isUrgent = true
+        copy.priority = .high
+        return copy
+    }
+
+    /// Files a pass makes at once.
+    public func concurrency(activeProcessors: Int = ProcessInfo.processInfo.activeProcessorCount) -> Int {
+        let base = priority.concurrency(activeProcessors: activeProcessors)
+        guard isUrgent else { return base }
+        return min(base, max(Priority.normal.concurrency(activeProcessors: activeProcessors), Self.urgentConcurrencyCap))
     }
 }
 
@@ -142,8 +169,18 @@ extension Catalog {
             usage.bytes += bytes
             guard !expected.contains(url.standardizedFileURL.path) else { continue }
             // A pass writes beside the real name, then renames
-            // (`Thumbnailer.writeHEIC`): that file is in use, not orphaned.
+            // (`Thumbnailer.writeJPEG`): that file is in use, not orphaned.
+            // A version 1 HEIC still standing in for its JPEG (shown until
+            // the pass gets to it) is in use as well; the pass removes it.
             if thumbnailPassRunning, url.pathExtension == "tmp", url.lastPathComponent.hasPrefix(".") { continue }
+            if url.pathExtension == Catalog.legacyThumbnailFileExtension {
+                // From the standardized URL: standardizing drops a /private
+                // prefix only from a path that exists, which this may not.
+                let current = url.standardizedFileURL.deletingPathExtension()
+                    .appendingPathExtension(Catalog.thumbnailFileExtension)
+                if expected.contains(current.path),
+                   !FileManager.default.fileExists(atPath: current.path) { continue }
+            }
             usage.orphanFiles += 1
             usage.orphanBytes += bytes
             if removingOrphans { try? FileManager.default.removeItem(at: url) }
