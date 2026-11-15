@@ -875,6 +875,7 @@ public final class RenderPipeline {
         // camera space (ToneEqualizerStage.swift). Its mask view, if asked
         // for, replaces the picture at the end.
         var toneEqualizerMaskView: MTLTexture?
+        var localToneEqualizerGains: (MTLTexture, MTLTexture)?
         if let toneEqualizer {
             let applied = try applyToneEqualizer(session: session, cmdBuffer: cmdBuffer, input: colourInput,
                                                  request: toneEqualizer, parameters: parameters,
@@ -883,6 +884,7 @@ public final class RenderPipeline {
                                                  preview: displayRole != .display)
             colourInput = applied.image
             toneEqualizerMaskView = applied.maskView
+            localToneEqualizerGains = applied.localGains
         }
 
         // Stages 8 to 15, in one kernel (Shaders/ColorPipeline.metal).
@@ -894,7 +896,7 @@ public final class RenderPipeline {
                                           parameters: parameters,
                                           output: output,
                                           renderInfo: renderInfo, binSpan: binSpan,
-                                          profile: profile)
+                                          profile: profile, localToneEqualizerGains: localToneEqualizerGains)
 
         // Stage 15a: reflection removal, the graded image times the gain
         // map a user-imported model made (ReflectionRemoval.swift). Only
@@ -1634,7 +1636,8 @@ public final class RenderPipeline {
                                     parameters: EditParameters,
                                     output: RenderOutput,
                                     renderInfo: RenderInfo, binSpan: Float,
-                                    profile: ProfileRenderState? = nil) throws -> MTLTexture {
+                                    profile: ProfileRenderState? = nil,
+                                    localToneEqualizerGains: (MTLTexture, MTLTexture)? = nil) throws -> MTLTexture {
         let outputTexture = try session.texture(width: input.width, height: input.height,
                                                  pixelFormat: .rgba16Float, role: outputRole)
         // Brush masks are rasterized (if needed) before encoding begins.
@@ -1711,7 +1714,8 @@ public final class RenderPipeline {
 
         // Local adjustments (RenderPipeline+Locals in LocalDetailStage.swift).
         try encodeLocals(encoder, session: session, locals: locals, slices: slices,
-                         width: input.width, height: input.height, output: output)
+                         width: input.width, height: input.height, output: output,
+                         toneEqualizerGains: localToneEqualizerGains)
         var sensorSize = SIMD2<Float>(Float(session.file.summary.rawWidth),
                                       Float(session.file.summary.rawHeight))
         var tileOrigin = SIMD2<Float>(Float(renderInfo.sensorRect.origin.x),

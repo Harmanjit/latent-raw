@@ -88,6 +88,13 @@ public struct LocalAdjustment: Equatable, Sendable, Codable, Identifiable {
     /// with a guided filter (MaskRefine.swift). Components carry their own.
     public var edgeRefine: Float = 0
 
+    /// The tone equalizer's nine band gains (EV, −3…3, the −8 EV band
+    /// first) inside this mask (LocalToneEqualizer.swift). Read from the
+    /// global tone equalizer's mask, so they move the same tones its bands
+    /// do, but only where this mask is. nil while every band is 0, and
+    /// then not written to the edit.
+    public var toneEqualizerBands: [Float]?
+
     public init(id: UUID = UUID(), name: String, shape: MaskShape, invert: Bool = false,
                 exposureEV: Float = 0, contrast: Float = 0, saturation: Float = 0, warmth: Float = 0,
                 luminanceRange: LuminanceRange? = nil, hueRange: HueRange? = nil) {
@@ -100,7 +107,7 @@ public struct LocalAdjustment: Equatable, Sendable, Codable, Identifiable {
     /// True when the adjustment changes nothing (all sliders at zero).
     public var isNeutral: Bool {
         exposureEV == 0 && contrast == 0 && saturation == 0 && warmth == 0
-            && pointSlidersNeutral && !wantsDetailStage
+            && pointSlidersNeutral && !wantsDetailStage && !hasToneEqualizerBands
     }
 
     /// The sliders the colour kernel applies beyond the original four.

@@ -165,10 +165,13 @@ extension RenderPipeline {
     /// packed locals (16, 17), their components (27), the overlay style
     /// (28, 29) and the detail-stage masks it writes (30; textures 4, 5).
     /// With no mask wanting the detail stage nothing is written, and 1×1
-    /// stand-ins fill the texture slots Metal requires bound.
+    /// stand-ins fill the texture slots Metal requires bound. The masks'
+    /// tone equalizer gains (textures 7, 8), when given, are flagged in the
+    /// overlay buffer's last word (LocalToneEqualizer.swift).
     func encodeLocals(_ encoder: MTLComputeCommandEncoder, session: ImageSession,
                       locals: [LocalAdjustment], slices: [UUID: Int32],
-                      width: Int, height: Int, output: RenderOutput) throws {
+                      width: Int, height: Int, output: RenderOutput,
+                      toneEqualizerGains: (MTLTexture, MTLTexture)? = nil) throws {
         let plan = LocalsGPUPlan(locals: locals, slices: slices)
         var packed = plan.locals
         if packed.isEmpty { packed = [LocalAdjustGPU(LocalAdjustment(name: "", shape: .whole), brushSlice: 0)] }
@@ -182,7 +185,8 @@ extension RenderPipeline {
         let write: UInt32 = plan.detailSlots.isEmpty ? 0 : 1
         var overlay = MaskOverlayParamsGPU(style: SIMD4<Float>(style.colour, min(max(style.opacity, 0), 1)),
                                            flags: SIMD4<UInt32>(UInt32(style.mode.rawValue), write,
-                                                                plan.channelViewFlag(output), 0))
+                                                                plan.channelViewFlag(output),
+                                                                toneEqualizerGains == nil ? 0 : 1))
         encoder.setBytes(&overlay, length: MemoryLayout<MaskOverlayParamsGPU>.stride, index: 28)
 
         let size = write == 0 ? (1, 1) : (width, height)
@@ -190,6 +194,11 @@ extension RenderPipeline {
         let maskB = try session.texture(width: size.0, height: size.1, pixelFormat: .rgba16Float, role: .localMaskB)
         encoder.setTexture(maskA, index: 4)
         encoder.setTexture(maskB, index: 5)
+        // 1×1 stand-ins for the gains, never read while the flag is 0.
+        encoder.setTexture(try toneEqualizerGains?.0 ?? session.texture(
+            width: 1, height: 1, pixelFormat: .rgba16Float, role: .toneEqualizerLocalA), index: 7)
+        encoder.setTexture(try toneEqualizerGains?.1 ?? session.texture(
+            width: 1, height: 1, pixelFormat: .rgba16Float, role: .toneEqualizerLocalB), index: 8)
     }
 
     /// Whether the local detail stage has anything to do.

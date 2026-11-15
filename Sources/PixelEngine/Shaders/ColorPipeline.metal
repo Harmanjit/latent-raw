@@ -457,7 +457,7 @@ struct LocalAdjust {
 // run out of argument slots (MaskOverlayParamsGPU in LocalDetailStage.swift).
 struct MaskOverlayParams {
     float4 style;      // colour (linear), opacity
-    uint4  flags;      // MaskOverlayMode, writeLocalMasks, channel view (1 + component index, 0 off), unused
+    uint4  flags;      // MaskOverlayMode, writeLocalMasks, channel view (1 + component index, 0 off), local tone equalizer gains bound (textures 7, 8)
 };
 
 // One component of a mask after its first shape (MaskComponents.swift).
@@ -863,6 +863,8 @@ kernel void colorAndTone(
     texture3d<float, access::sample> proofLUT    [[texture(3)]],
     texture2d<float, access::write> localMaskA   [[texture(4)]],  // detail slots 0-3
     texture2d<float, access::write> localMaskB   [[texture(5)]],  // detail slots 4-7
+    texture2d<float, access::read>  localToneEqA [[texture(7)]],  // masks 0-3: tone equalizer gain, EV
+    texture2d<float, access::read>  localToneEqB [[texture(8)]],  // masks 4-7 (LocalToneEqualizer.swift)
     texture3d<float, access::sample> profileHueSat [[texture(14)]],
     texture3d<float, access::sample> profileLookTable [[texture(15)]],
     texture1d<float, access::sample> profileTone [[texture(16)]],
@@ -925,6 +927,14 @@ kernel void colorAndTone(
         float3 baseDisplay = toneMapSigmoid(working, contrast, greyPoint, 1.0);
         float displayLuma = pow(max(dot(baseDisplay, float3(0.2627, 0.6780, 0.0593)), 0.0), 1.0 / 2.2);
         float3 perceptual = pow(max(baseDisplay, 0.0), 1.0 / 2.2);
+        // The tone equalizer inside masks: each mask's gain at this pixel,
+        // only when some mask has bands (flag w, LocalToneEqualizer.swift).
+        float localToneEq[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+        if (maskOverlay.flags.w != 0) {
+            float4 ga = localToneEqA.read(gid), gb = localToneEqB.read(gid);
+            localToneEq[0] = ga.x; localToneEq[1] = ga.y; localToneEq[2] = ga.z; localToneEq[3] = ga.w;
+            localToneEq[4] = gb.x; localToneEq[5] = gb.y; localToneEq[6] = gb.z; localToneEq[7] = gb.w;
+        }
         for (int i = 0; i < localCount && i < kMaxLocals; i++) {
             float m = combinedLocalMask(locals[i], maskComponents, pNorm, sensorSize, brushMasks,
                                         displayLuma, perceptual);
@@ -937,6 +947,8 @@ kernel void colorAndTone(
             // Mask Amount scales the whole effect; a hidden mask has none.
             if (locals[i].adjust3.x != 1.0) m *= max(locals[i].adjust3.x, 0.0);
             float3 beforeLocal = working;
+            // A colour-neutral exposure gain, like the mask's Exposure.
+            if (localToneEq[i] != 0.0 && m > 0.0) working *= exp2(localToneEq[i] * m);
             working = applyLocal(working, locals[i], m, greyPoint);
             working = applyLocalMore(working, locals[i], m, contrast, greyPoint);
             if (locals[i].info.w != 0 && m > 0.0) working = localBlend(beforeLocal, working, locals[i].info.w);

@@ -17,6 +17,7 @@ extension LocalAdjustment {
         case texture, clarity, dehaze, sharpness, noise, defringe
         case curve, channelCurves, pointColours, grain
         case blendMode, smooth, edgeRefine
+        case toneEqualizer
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,6 +58,8 @@ extension LocalAdjustment {
         blendMode = (try c.decodeIfPresent(String.self, forKey: .blendMode)).flatMap(LocalBlendMode.init) ?? .normal
         smooth = try slider(.smooth)
         edgeRefine = try slider(.edgeRefine)
+        toneEqualizerBands = LocalAdjustment.sanitizedToneEqualizerBands(
+            try c.decodeIfPresent([Float].self, forKey: .toneEqualizer))
     }
 
     /// Points stored as [x, y] pairs, as the global curve is; fewer than
@@ -106,5 +109,8 @@ extension LocalAdjustment {
         if blendMode != .normal { try c.encode(blendMode.rawValue, forKey: .blendMode) }
         if smooth != 0 { try c.encode(smooth, forKey: .smooth) }
         if edgeRefine != 0 { try c.encode(edgeRefine, forKey: .edgeRefine) }
+        if let bands = toneEqualizerBands, bands.contains(where: { $0 != 0 }) {
+            try c.encode(bands, forKey: .toneEqualizer)
+        }
     }
 }

@@ -153,6 +153,7 @@ public final class GPUContext: @unchecked Sendable {
         case flatFieldApply
         // The tone equalizer (ToneEqualizer.metal, ToneEqualizerStage.swift).
         case toneEqPrepare, toneEqCoefficients, toneEqGridMask, toneEqApply, toneEqMaskView
+        case toneEqLocalGains   // inside masks (LocalToneEqualizer.swift)
         // Highlight Reconstruction › Inpaint Opposed (HighlightInpaint.metal, HighlightInpaint.swift).
         case highlightInpaintOpposed
         // The LMMSE demosaic (LMMSE.metal, RenderPipeline+LMMSE.swift).

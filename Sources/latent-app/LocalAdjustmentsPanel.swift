@@ -187,6 +187,7 @@ struct LocalAdjustmentsPanel: View {
 
             LocalSliderGroups(local: binding)
             MaskToneColourControls(model: model, index: i)
+            MaskToneEqualizerControls(local: binding)
 
             HStack {
                 // With components, Invert turns the whole combination

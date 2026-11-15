@@ -32,15 +32,22 @@ enum ToneEqualizerStage {
         let applies: Bool
         /// Show Mask is on.
         let wantsMaskView: Bool
+        /// Some mask has bands of its own (LocalToneEqualizer.swift): the
+        /// mask is made even with the panel's bands at 0.
+        let wantsLocals: Bool
 
         init?(parameters: EditParameters, output: RenderOutput, cameraRGBOnly: Bool) {
             guard !cameraRGBOnly else { return nil }
             let equalizer = parameters.toneEqualizer
             let applies = equalizer.isActive
-            guard applies || output.toneEqualizerAnalysis || output.toneEqualizerMaskView else { return nil }
+            let wantsLocals = LocalToneEqualizerStage.wanted(parameters)
+            guard applies || wantsLocals || output.toneEqualizerAnalysis || output.toneEqualizerMaskView else {
+                return nil
+            }
             self.equalizer = equalizer
             self.applies = applies
             self.wantsMaskView = output.toneEqualizerMaskView
+            self.wantsLocals = wantsLocals
         }
     }
 
@@ -343,12 +350,14 @@ extension RenderPipeline {
     /// Stage 7b. Makes the mask from `input` when this render covers the
     /// whole image and the session has none for these settings, then
     /// applies the gain (when a band is moved) and writes the mask view
-    /// (when Show Mask is on).
+    /// (when Show Mask is on). With masks carrying bands of their own it
+    /// also returns their gains, for the colour kernel (LocalToneEqualizer.swift).
     func applyToneEqualizer(session: ImageSession, cmdBuffer: MTLCommandBuffer, input: MTLTexture,
                             request: ToneEqualizerStage.Request, parameters: EditParameters,
                             cameraToWorking: simd_float3x3, multipliers: SIMD4<Float>,
                             profile: ProfileRenderState?, renderInfo: RenderInfo, binSpan: Float,
-                            preview: Bool) throws -> (image: MTLTexture, maskView: MTLTexture?) {
+                            preview: Bool) throws -> (image: MTLTexture, maskView: MTLTexture?,
+                                                      localGains: (MTLTexture, MTLTexture)?) {
         let summary = session.file.summary
         let sensorSize = SIMD2<Float>(Float(summary.rawWidth), Float(summary.rawHeight))
         let key = ToneEqualizerStage.MaskKey(session: session, parameters: parameters,
@@ -365,8 +374,20 @@ extension RenderPipeline {
         }
         let exposureEV = parameters.exposureEV + (profile?.exposureOffset ?? 0)
         store.exposureEV = exposureEV
+        let placement = ToneEqualizerStage.Placement(
+            tileOrigin: SIMD2(Float(renderInfo.sensorRect.origin.x), Float(renderInfo.sensorRect.origin.y)),
+            binSpan: binSpan, sensorSize: sensorSize)
+        // The masks' own bands, read from the same input as the global gain.
+        var localGains: (MTLTexture, MTLTexture)?
+        if request.wantsLocals, let coefficients = store.coefficients,
+           let packed = LocalToneEqualizerStage.tables(locals: parameters.locals, global: request.equalizer) {
+            localGains = try LocalToneEqualizerStage.encode(
+                input: input, coefficients: coefficients, active: packed.active, tables: packed.tables,
+                global: request.equalizer, yRow: key.yRow, exposureEV: exposureEV, placement: placement,
+                session: session, gpu: gpu, commandBuffer: cmdBuffer)
+        }
         guard request.applies || request.wantsMaskView, let coefficients = store.coefficients else {
-            return (input, nil)
+            return (input, nil, localGains)
         }
         let output = try session.texture(width: input.width, height: input.height, pixelFormat: .rgba16Float,
                                          role: preview ? .toneEqualizedPreview : .toneEqualized)
@@ -386,6 +407,6 @@ extension RenderPipeline {
             clipLevel: session.highlightClipLevel(multipliers: multipliers),
             highlightThreshold: parameters.highlightThreshold, highlightStrength: parameters.highlightRecovery,
             gpu: gpu, commandBuffer: cmdBuffer)
-        return (request.applies ? output : input, request.wantsMaskView ? mask : nil)
+        return (request.applies ? output : input, request.wantsMaskView ? mask : nil, localGains)
     }
 }

@@ -144,6 +144,49 @@ kernel void toneEqApply(
     output.write(float4(result, px.a), gid);
 }
 
+// The tone equalizer inside masks (LocalToneEqualizer.swift): per pixel,
+// each mask's gain in EV at the pixel's smoothed brightness, the mask read
+// exactly as toneEqApply reads it, into two textures (masks 0-3, 4-7). The
+// colour kernel applies them, scaled by each mask, in its local loop.
+struct ToneEqLocalParams {
+    float4 yRow;          // xyz: luminance row; w: log2 of the exposure
+    float4 placement;     // xy: tile origin (sensor px), z: bin span
+    float4 sensorSize;    // xy: sensor size; z: exposure compensation, w: contrast factor
+    float4 table;         // y: table low EV, z: table high EV, w: entries per mask
+    uint4 active;         // x: bit k set when mask k has a table
+};
+
+kernel void toneEqLocalGains(
+    texture2d<float, access::read>  input   [[texture(0)]],
+    texture2d<float, access::read>  coeffs  [[texture(1)]],
+    texture2d<float, access::write> gainsA  [[texture(2)]],
+    texture2d<float, access::write> gainsB  [[texture(3)]],
+    constant ToneEqLocalParams &p           [[buffer(0)]],
+    constant float *tables                  [[buffer(1)]],
+    uint2 gid                               [[thread_position_in_grid]])
+{
+    if (gid.x >= input.get_width() || gid.y >= input.get_height()) return;
+    float3 rgb = input.read(gid).rgb;
+    float i = log2(max(dot(p.yRow.xyz, rgb), 1.0 / 65536.0));
+    float2 sensor = p.placement.xy + (float2(gid) + 0.5) * p.placement.z;
+    float2 ab = toneEqSampleCoefficients(coeffs, sensor / p.sensorSize.xy);
+    float m = ab.x * i + ab.y + p.yRow.w;
+    m = (m + p.sensorSize.z + 4.0) * p.sensorSize.w - 4.0;
+
+    int entries = int(p.table.w);
+    float pos = clamp((m - p.table.y) / (p.table.z - p.table.y), 0.0, 1.0) * float(entries - 1);
+    int k0 = min(int(pos), entries - 1), k1 = min(k0 + 1, entries - 1);
+    float t = pos - float(k0);
+    float g[8];
+    for (int k = 0; k < 8; k++) {
+        if ((p.active.x & (1u << uint(k))) == 0) { g[k] = 0.0; continue; }
+        constant float *table = tables + k * entries;
+        g[k] = mix(table[k0], table[k1], t);
+    }
+    gainsA.write(float4(g[0], g[1], g[2], g[3]), gid);
+    gainsB.write(float4(g[4], g[5], g[6], g[7]), gid);
+}
+
 // Show Mask: the mask in grey, −8 EV black to 0 EV white, evenly spaced to
 // the eye, in place of the picture (viewport only).
 kernel void toneEqMaskView(

@@ -189,6 +189,7 @@ public final class ImageSession {
         case reflections, reflectionsPreview // output of the reflection removal stage
         case toneEqualized, toneEqualizedPreview // camera RGB after the tone equalizer
         case toneEqualizerMask, toneEqualizerView, toneEqualizerViewPreview // its mask, and Show Mask
+        case toneEqualizerLocalA, toneEqualizerLocalB // its gains inside masks (LocalToneEqualizer.swift)
         case highlightInpaint, highlightInpaintPreview // camera RGB after Inpaint Opposed
         case lmmseDiff      // LMMSE: horizontal and vertical colour differences
         case lmmseSmooth    // LMMSE: the same, low-passed

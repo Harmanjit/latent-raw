@@ -103,6 +103,8 @@ Below the sliders, three more groups open once used:
 
 These three run in the same stage as Effects and Detail, after the global edit, so a mask's curve bends the picture as it finally looks.
 
+- **Tone Equalizer**: the [Tone Equalizer](Develop#tone-equalizer)'s nine bands in a compact strip, only inside the mask, so you can, say, pull down the bright parts of the sky alone. The bands read the global tone equalizer's mask, with its Masking settings, so each moves the same tones as the panel's band of that stop; the panel's own bands can stay at 0. It acts like the mask's Exposure, scaled by the mask and its Amount and joined by its Blend, and with no band moved the mask stores and renders nothing new. **Reset** puts every band back to 0. Copy, paste, Sync and mask presets carry it with the mask's other sliders.
+
 ### Blend
 
 The **Blend** menu beside the mask's name sets how its result joins the photo:

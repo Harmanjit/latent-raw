@@ -35,6 +35,7 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 <!-- /RECONCILE -->
 
 - **Multi-sample Pick Range**: Shift-click adds samples to a Luminance or Channel Range (the band grows to cover them all) and Option-click removes the nearest; Option-click also removes a Colour Range sample. The samples are drawn on the image while the eyedropper is armed. See [Luminance and Channel Range](Masking#luminance-and-channel-range).
+- **Tone Equalizer inside a mask**: a mask's new Tone Equalizer group holds nine bands of its own, read from the global tone equalizer's mask but applied only inside that mask, with a Reset; copy, paste, Sync and mask presets carry them. See [The sliders](Masking#the-sliders).
 - **Mask presets** save the selected mask (components and sliders) under a name and add it to any photo as a new mask, with Rename and Delete in the mask panel's Presets menu. See [Mask presets](Masking#mask-presets).
 <!-- /RECONCILE -->
 

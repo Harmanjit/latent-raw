@@ -184,8 +184,10 @@ struct ToneEqualizerBandSlider: View {
     @Binding var value: Float
     let zone: Float
 
+    /// The slider's track height; the mask strip passes a shorter one.
+    var height: CGFloat = 120
+
     private static let range = ToneEqualizer.gainRange
-    private static let height: CGFloat = 120
 
     var body: some View {
         VStack(spacing: 3) {
@@ -214,7 +216,7 @@ struct ToneEqualizerBandSlider: View {
                 })
                 .simultaneousGesture(TapGesture(count: 2).onEnded { value = 0 })
             }
-            .frame(height: Self.height)
+            .frame(height: height)
             Text(zone == 0 ? "0" : String(format: "%.0f", zone).replacingOccurrences(of: "-", with: "\u{2212}"))
                 .font(.system(size: 9).monospacedDigit())
                 .foregroundStyle(.secondary)
