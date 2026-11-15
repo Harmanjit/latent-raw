@@ -6,7 +6,7 @@ Nothing here changes your raw file, and ⌘Z steps back through every change, so
 
 ## A basic edit
 
-The order below follows the panel on the right, top to bottom, which is roughly the order that works best.
+The order below follows the panel on the right, top to bottom: global adjustments first, then Crop & Straighten, which sits lower down with the other tools. It is roughly the order that works best.
 
 **1. Choose a starting look.** At the top of the adjustments, click the **Profile** name (Latent Standard to begin with). **Latent Neutral** or **Latent Flat** give a quieter start with more room to edit; **Vivid**, **Portrait** and **Landscape** are stronger looks with an **Amount** slider. If you have imported your camera maker's profiles, they are listed under your camera. See [Develop](Develop#modules).
 
@@ -20,17 +20,19 @@ The order below follows the panel on the right, top to bottom, which is roughly 
 - **Highlights** down to bring back a bright sky; **Shadows** up to open dark areas.
 - **Whites** and **Blacks** set the brightest and darkest points.
 
+For a scene with a very bright part and a very dark part, such as a window in a dark room, the **Tone Equalizer** below the Tone Curve can bring them closer together; see [Tone Equalizer](Tone-Equalizer).
+
 Press **J** (**View › Show Clipping**) to see clipped highlights in red and crushed shadows in blue, and adjust until only the parts you accept are marked. You can also drag sideways on the histogram at the top: it moves whichever slider drives that part of it.
 
 **5. Add presence.** **Texture** brings out fine detail such as skin or bark (or softens it, below zero), **Clarity** adds mid-scale contrast, **Dehaze** cuts through haze, and **Vibrance** adds colour while sparing skin and already strong colours.
 
-**6. Crop and straighten.** Press **R** (**Develop › Crop & Straighten**). Pick an **Aspect**, drag the corners, and drag inside to move the crop. **Auto** levels the horizon from the lines in the photo; or hold ⌘ and drag along something that should be level. **O** cycles the composition guides (thirds, golden ratio and more). Press R or Esc to leave the tool.
+**6. Sharpen and clean up noise.** Zoom to 100% (⌘1) first. In **Detail**, raise sharpening **Amount**, and hold **⌥** while dragging **Masking** to see where it sharpens: white is sharpened, black is left alone. For a high-ISO photo, raise noise reduction **Luminance**, or click **Denoise** in **AI Noise Reduction**, wait for it to finish (about 11 seconds for 24 MP), and blend it in.
 
-**7. Fix converging lines.** For buildings shot looking up, open **Transform** under the crop, and set **Upright** to **Auto** or **Vertical**. Keep **Constrain Crop** on so no empty corners show. See [Transform and Upright](Develop#transform-and-upright).
+**7. Check the lens corrections.** **Lens Corrections** finds a profile for most lenses by itself and corrects distortion, vignetting and colour fringes. If it found none, pick the lens from the profile menu, or switch on **Remove chromatic aberration (automatic)**.
 
-**8. Check the lens corrections.** **Lens Corrections** finds a profile for most lenses by itself and corrects distortion, vignetting and colour fringes. If it found none, pick the lens from the profile menu, or switch on **Remove chromatic aberration (automatic)**.
+**8. Crop and straighten.** Press **R** (**Develop › Crop & Straighten**). Pick an **Aspect**, drag the corners, and drag inside to move the crop. **Auto** levels the horizon from the lines in the photo; or hold ⌘ and drag along something that should be level. **O** cycles the composition guides (thirds, golden ratio and more). Press R or Esc to leave the tool.
 
-**9. Sharpen and clean up noise.** Zoom to 100% (⌘1) first. In **Detail**, raise sharpening **Amount**, and hold **⌥** while dragging **Masking** to see where it sharpens: white is sharpened, black is left alone. For a high-ISO photo, raise noise reduction **Luminance**, or click **Denoise** in **AI Noise Reduction**, wait for it to finish (about 11 seconds for 24 MP), and blend it in.
+**9. Fix converging lines.** For buildings shot looking up, open **Transform** under the crop, and set **Upright** to **Auto** or **Vertical**. Keep **Constrain Crop** on so no empty corners show. See [Transform and Upright](Develop#transform-and-upright).
 
 **10. Keep versions and reuse the edit.** In the left panel's history, save a **snapshot** of an edit you like before trying something else. To give other photos the same look, press **⇧⌘C** to copy the settings, select the other photos in the grid and press **⇧⌘V**. In **Presets & Clipboard** you can save the edit as a preset for next time and choose which groups copy and paste carry.
 

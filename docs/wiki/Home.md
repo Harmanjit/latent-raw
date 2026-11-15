@@ -33,9 +33,11 @@ These pages are also in the app: **Help > Latent Help** (⌘?) shows them with s
 | [Motivation](Motivation) | Why another RAW editor, and why only for this hardware |
 | [Installation](Installation) | Downloading, building from source, the Gatekeeper dialog |
 | [Library](Library) | The sidebar, the catalog, folder watching and Auto Import, the grid, sorting and filtering, colour labels, titles and copyright, Finder tags, virtual copies, Loupe, Compare and Survey, full screen, moving and renaming, undo, the slideshow |
+| [Filter Bar](Filter-Bar) | Finding photos: search syntax, rating ranges, the range histograms, dates, kinds, filter presets, Similar to This Photo, saving a filter as a smart collection |
 | [Collections and Keywords](Collections-and-Keywords) | Collections, smart collections, collection sets and hierarchical keywords |
 | [Develop](Develop) | Every editing module, profiles, typed values, masks, spot removal and Remove, red-eye, sensor dust, touch-up, Lens Blur, Upright, soft proofing, presets, history |
-| [Masking](Masking) | Local adjustments: making masks, components, Feather and Edge, the mask sliders |
+| [Tone Equalizer](Tone-Equalizer) | Brightening or darkening one brightness band at a time: bands, Auto Align, the on-image tool, presets |
+| [Masking](Masking) | Local adjustments: making masks, components, blend modes, linked masks, ranges, Feather and Edge, the mask sliders, mask presets, with how-to examples |
 | [Models](Models) | The models behind the masks: what is bundled, choosing one per mask, adding a converted model from disk, what happens when one is missing |
 | [Converting Models](Converting-Models) | Fetching a model from its source, converting it to Core ML and checking it, so Add Model… will take it |
 | [Export](Export) | Formats, colour spaces, sizing, output sharpening, DNG, HDR gain maps, watermark, naming templates, metadata, batch export, printing, contact sheets, external editors |

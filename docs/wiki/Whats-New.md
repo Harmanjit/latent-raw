@@ -4,46 +4,23 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 
 ## Wave 4
 
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
-<!-- RECONCILE: two branches edited this; merge into one text -->
 - **Faster large folders.** On a 10,000-photo folder, smart collections with date rules evaluate about thirty times faster, rating many photos while a collection is shown no longer stalls the window, the Collections section counts in the background, and search keystrokes, keyword completion and the smart collection sheet do far less work each time. The tone equalizer's mask summary is worked out off the main thread. Nothing looks or behaves differently. See [Thumbnails and performance](Library#thumbnails-and-performance).
-
 - **Edit Capture Time…** (Metadata menu) shifts the selection's capture times by days, hours, minutes and seconds, sets the first photo to an exact time and moves the rest with it, or changes time zone. The raw files are never rewritten; the corrected time is kept in the catalog and sidecar, sorting and date filters use it, and it can be undone. See [Capture time and geotagging](Library#capture-time-and-geotagging).
 - **Geotag from GPX Track…** (Metadata menu) places the selection on a GPX track you choose, interpolating between track points, with a camera clock offset, a largest gap to bridge, and a count of matches before anything is written. Photos that already have a position keep it unless you tick Replace existing positions. See [Capture time and geotagging](Library#capture-time-and-geotagging).
-<!-- /RECONCILE -->
-
-- **Combine into one PDF**: a PDF export can write the whole selection as one file, one photo per page or a contact sheet of several per page with file names. See [PDF export](Export#pdf-export).
 - **File integrity filter and smart collection rule**: show or collect the photos Verify Files found damaged, found OK, or hasn't checked; Save Filter as Smart Collection carries it. See [Verifying files](Library#verifying-files) and [Smart collections](Collections-and-Keywords#smart-collections).
-<!-- /RECONCILE -->
-
+- **Remember Filter per Source**, in the filter bar's presets menu, gives each folder and collection its own filter, back when you return. See [Filter Bar](Filter-Bar#remember-filter-per-source).
+- **Click the Ranges histograms**: a click on a bar shows that bar's photos, Shift-click extends, double-click clears. See [Filter Bar](Filter-Bar#the-ranges-histograms).
+- **Similar to This Photo** filters to the same camera and lens, within a day of the selected photo, each part switchable in the bar's Similar chip. See [Filter Bar](Filter-Bar#similar-to-this-photo).
 - **Navigator in Loupe, Compare and Survey**: View › Show Navigator floats the Navigator in the image's lower right corner, with Fit, Fill, 50%, 100% and 200% presets; in Compare it follows the pane you last clicked, in Survey the focused pane, and Sync carries its moves to the other panes. Develop's Navigator gains the same presets. See [Loupe, Compare and Survey](Library#loupe-compare-and-survey).
-<!-- /RECONCILE -->
-
-- **Tone Equalizer Auto Align** sets the mask's exposure and contrast compensation so the nine bands span the photo's tonal range, darkest tones on the −8 EV band, brightest on 0 EV. See [Tone Equalizer](Develop#tone-equalizer).
-- **Live band histogram**: grey bars behind the tone equalizer's Simple sliders show how much of the photo each band moves, and the Advanced tab's histogram now follows Mask Exposure and Mask Contrast while you drag, worked out in the background. See [Tone Equalizer](Develop#tone-equalizer).
-<!-- /RECONCILE -->
-
-- **Remember Filter per Source**, in the filter bar's presets menu, gives each folder and collection its own filter, back when you return. See [The grid](Library#the-grid).
-- **Click the Ranges histograms**: a click on a bar shows that bar's photos, Shift-click extends, double-click clears. See [The grid](Library#the-grid).
-- **Similar to This Photo** filters to the same camera, lens and day as the selected photo, each part switchable in the bar's Similar chip. See [The grid](Library#the-grid).
-<!-- /RECONCILE -->
-
+- **Combine into one PDF**: a PDF export can write the whole selection as one file, one photo per page or a contact sheet of several per page with file names. See [PDF export](Export#pdf-export).
+- **Tone Equalizer Auto Align** sets the mask's exposure and contrast compensation so the nine bands span the photo's tonal range, darkest tones on the −8 EV band, brightest on 0 EV. See [Tone Equalizer](Tone-Equalizer).
+- **Live band histogram**: grey bars behind the tone equalizer's Simple sliders show how much of the photo each band moves, and the Advanced tab's histogram now follows Mask Exposure and Mask Contrast while you drag, worked out in the background. See [Tone Equalizer](Tone-Equalizer).
 - **Multi-sample Pick Range**: Shift-click adds samples to a Luminance or Channel Range (the band grows to cover them all) and Option-click removes the nearest; Option-click also removes a Colour Range sample. The samples are drawn on the image while the eyedropper is armed. See [Luminance and Channel Range](Masking#luminance-and-channel-range).
 - **Mask presets** save the selected mask (components and sliders) under a name and add it to any photo as a new mask, with Rename and Delete in the mask panel's Presets menu. See [Mask presets](Masking#mask-presets).
-<!-- /RECONCILE -->
-
 - **Scopes for one mask**: Selected Mask Only in the scope menu limits the histogram, waveform, parade and vectorscope to the selected local adjustment's mask, weighted by it. See [The viewport](Develop#the-viewport).
 - **Overlay Reference** draws the reference photo's histogram and vectorscope in amber with the active photo's, for matching colour between photos. See [The viewport](Develop#the-viewport).
-<!-- /RECONCILE -->
-
 - **Compare two snapshots** side by side: History & Snapshots › **Compare…** picks a left (top) and right (bottom) side, each a snapshot, a history step or Current, shown in the Before/After layouts with each pane named. **Swap** exchanges them, ⌃⌥← and ⌃⌥→ step the right pane through the snapshots, and **Done** goes back to one image. The edit itself never changes. See [History and snapshots](Develop#history-and-snapshots).
-<!-- /RECONCILE -->
+- **New help pages with step-by-step examples**: [Tone Equalizer](Tone-Equalizer), [Filter Bar](Filter-Bar), and how-to walkthroughs for blending and combining masks on [Masking](Masking#how-to-blend-and-combine-masks). [Develop](Develop#modules) now lists the right panel in its new order, global adjustments first, then the crop, masks and retouching tools, then presets, versions and soft proof.
 
 ## Organising
 
