@@ -104,7 +104,8 @@ extension Catalog {
     static let exifExtrasBackfillLimit = 400
 
     /// Reads the extras for rows that have never had them (made before
-    /// they existed, or by an older `ExifExtras.version`). A virtual copy
+    /// they existed, or by an older `ExifExtras.version`). A position the
+    /// user geotagged (`gps_tagged`) is kept over the file's. A virtual copy
     /// reads its master's file. Files left in iCloud are skipped, since
     /// reading them would download them. Returns how many rows changed.
     @discardableResult
@@ -128,7 +129,10 @@ extension Catalog {
         try dbQueue.write { db in
             for (id, extras) in read {
                 try db.execute(sql: """
-                    UPDATE images SET gps_latitude = ?, gps_longitude = ?, gps_altitude = ?, flash_fired = ?,
+                    UPDATE images SET
+                      gps_latitude = CASE WHEN gps_tagged = 1 THEN gps_latitude ELSE ? END,
+                      gps_longitude = CASE WHEN gps_tagged = 1 THEN gps_longitude ELSE ? END,
+                      gps_altitude = CASE WHEN gps_tagged = 1 THEN gps_altitude ELSE ? END, flash_fired = ?,
                       exposure_bias = ?, metering_mode = ?, white_balance_mode = ?, exif_extras_version = ?
                     WHERE id = ?
                     """, arguments: [extras.gpsLatitude, extras.gpsLongitude, extras.gpsAltitude, extras.flashFired,

@@ -49,6 +49,18 @@ public enum XMPSidecar {
         /// ones left out; written under the photoshop and Iptc4xmpCore names
         /// only when there is one, so other sidecars stay byte for byte.
         public var more: [DescriptiveField: String] = [:]
+        /// Edit Capture Time's correction in seconds (latent:CaptureTimeOffset),
+        /// nil for none. The truth for the catalog's corrected time.
+        public var captureTimeOffset: Int64? = nil
+        /// The corrected capture time in seconds since 1970, written beside
+        /// the offset as exif:DateTimeOriginal for other applications.
+        /// Written only with an offset; never read back (the offset is).
+        public var correctedCaptureTime: Int64? = nil
+        /// A position from Geotag from GPX Track (exif:GPSLatitude,
+        /// GPSLongitude, GPSAltitude), nil when the photo has none of its own
+        /// making. Like the other optional parts, absent leaves the sidecar
+        /// byte for byte as before.
+        public var geotag: GeoPosition? = nil
 
         public init(rating: Int = 0, label: String? = nil, flag: Int = 0, rotation: Int = 0,
                     keywords: [String] = [],
@@ -101,7 +113,7 @@ public enum XMPSidecar {
         let hierarchyItems = f.keywords.map { "      <rdf:li>\(escape($0))</rdf:li>" }.joined(separator: "\n")
         let hierarchyBlock = hierarchical ? "   <lr:hierarchicalSubject><rdf:Bag>\n\(hierarchyItems)\n   </rdf:Bag></lr:hierarchicalSubject>\n" : ""
         let lightroomNamespace = (hierarchical ? "\n    xmlns:lr=\"http://ns.adobe.com/lightroom/1.0/\"" : "")
-            + moreNamespaces(f)
+            + moreNamespaces(f) + geoTimeNamespace(f)
         let labelAttr = f.label.map { " xmp:Label=\"\(escape($0))\"" } ?? ""
         let preservedAttr = f.preservedFileName.map {
             " xmpMM:PreservedFileName=\"\(escape($0))\""
@@ -124,7 +136,7 @@ public enum XMPSidecar {
             latent:Rotation="\(f.rotation)">
            <dc:subject><rdf:Bag>
         \(keywordItems)
-           </rdf:Bag></dc:subject>\(descriptiveElements(f))\(moreElements(f))
+           </rdf:Bag></dc:subject>\(descriptiveElements(f))\(moreElements(f))\(geoTimeElements(f))
         \(hierarchyBlock)   <latent:EditStack>\(cdata(f.editStackJSON))</latent:EditStack>
         \(f.snapshotsJSON.isEmpty ? "" : "   <latent:Snapshots>\(cdata(f.snapshotsJSON))</latent:Snapshots>")
         \(f.historyJSON.isEmpty ? "" : "   <latent:History>\(cdata(f.historyJSON))</latent:History>")
@@ -364,6 +376,13 @@ public enum XMPSidecar {
         fields.creator = creators.isEmpty
             ? DescriptiveField.normalized(childText("creator")) : creators.joined(separator: "; ")
         fields.more = moreFields(in: description)
+        fields.captureTimeOffset = property("latent:CaptureTimeOffset", local: "CaptureTimeOffset")
+            .flatMap { Int64($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .flatMap { $0 == 0 ? nil : $0 }
+        fields.geotag = GeoPosition(xmpLatitude: property("exif:GPSLatitude", local: "GPSLatitude"),
+                                    longitude: property("exif:GPSLongitude", local: "GPSLongitude"),
+                                    altitude: property("exif:GPSAltitude", local: "GPSAltitude"),
+                                    altitudeRef: property("exif:GPSAltitudeRef", local: "GPSAltitudeRef"))
         return fields
     }
 

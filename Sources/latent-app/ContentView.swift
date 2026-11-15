@@ -277,6 +277,7 @@ struct ContentView: View {
                 .motionFollowsAccessibility()
         }
         .histogramMatchSheet(queue: selectionJobs, model: model, library: library, canMatch: !exportQueue.isGPUBusy)
+        .geoTimeSheets(library: library)
         .sheet(item: $templateRenaming) { request in
             TemplateRenameSheet(request: request,
                                 plan: { library.renamePlan(for: request.records, template: $0, customText: $1, start: $2) },
@@ -1458,6 +1459,8 @@ struct ContentView: View {
             historyCommands.perform(command)
         case .viewing(let command):
             ViewingCommands.perform(command, editor: model, expandTone: { toneExpanded = true })
+        case .metadata(let command):
+            GeoTimePresenter.shared.perform(command, library: library)
         }
         return true
     }

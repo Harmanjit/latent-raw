@@ -434,6 +434,8 @@ extension Keymap {
             c("newCollectionSet", .newCollectionSet, "New Collection Set…", rating),
             c("saveFilterAsSmartCollection", .saveFilterAsSmartCollection, "Save Filter as Smart Collection…", rating),
             c("removeFromCollection", .removeFromCollection, "Remove from Collection", rating),
+            c("editCaptureTime", .metadata(.editCaptureTime), MetadataCommand.editCaptureTime.title, rating),
+            c("geotagFromGPX", .metadata(.geotagFromGPX), MetadataCommand.geotagFromGPX.title, rating),
             c("autoStraighten", .geometry(.autoStraighten), "Auto Straighten", develop, in: .develop),
             c("flipHorizontal", .geometry(.flipHorizontal), "Flip Horizontal", develop, in: .develop),
             c("flipVertical", .geometry(.flipVertical), "Flip Vertical", develop, in: .develop),
