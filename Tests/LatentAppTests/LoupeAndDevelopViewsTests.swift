@@ -240,4 +240,18 @@ final class LoupeAndDevelopViewsTests: XCTestCase {
         XCTAssertEqual(before.crop, crop)
         XCTAssertEqual(before.exposureEV, model.defaultParameters.exposureEV)
     }
+
+    func testTheViewportsStepActionIsOneClosureThatFollowsTheHandler() {
+        let state = DevelopViewState(defaults: defaults)
+        // Handed out once and kept by the viewport across rebuilds, so it must
+        // reach whatever handler is set later, not the one set when made.
+        let step = state.step
+        var got: [String] = []
+        state.stepHandler = { got.append("first \($0)") }
+        step(1)
+        state.stepHandler = { got.append("second \($0)") }
+        step(-1)
+        state.step(2)
+        XCTAssertEqual(got, ["first 1", "second -1", "second 2"])
+    }
 }
