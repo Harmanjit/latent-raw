@@ -40,7 +40,13 @@ public enum GPUContextError: Error, CustomStringConvertible {
 /// state outside a lock, this conformance has to go.
 public final class GPUContext: @unchecked Sendable {
     public let device: MTLDevice
+    /// The queue this context's work is submitted to. The app's shared
+    /// context submits the editor's work here (Develop's renders, the
+    /// presenter, scopes); `background` is the same context on a queue of
+    /// its own, for exports and thumbnails.
     public let commandQueue: MTLCommandQueue
+    /// True for a context made by `background`.
+    public let isBackground: Bool
     let library: MTLLibrary
     /// Whether the shaders came precompiled or were compiled at launch.
     public let shaderLibrarySource: ShaderLibrarySource
@@ -163,13 +169,44 @@ public final class GPUContext: @unchecked Sendable {
     /// Built pipelines, by kernel. A Mutex because renders run on several
     /// threads (the viewport, exports, thumbnails) and two could ask for the
     /// same pipeline at once.
-    private let lazyPipelines = Mutex<[LazyKernel: MTLComputePipelineState]>([:])
+    /// Boxed so a context and its `background` twin share one set.
+    private let lazyPipelines: LazyPipelineStore
+
+    /// This context's twin on its own command queue, made on first use and
+    /// kept: the same device, library and pipelines, so it costs one
+    /// queue. Exports and thumbnails render through it, so their command
+    /// buffers no longer queue in front of the editor's on one shared
+    /// queue (docs/Performance-Plan.md fix 24); the GPU interleaves the two.
+    ///
+    /// Synchronisation: Metal orders command buffers within a queue, not
+    /// across queues, so nothing written by one queue may be read or
+    /// written by the other while that queue's buffer can still be
+    /// running. Work through `background` keeps to its own ImageSession,
+    /// pooled textures and outputs, and every render waits for its buffer
+    /// before handing the result on; what the two share is read-only after
+    /// creation (pipelines, the shader library, CPU-filled shared textures
+    /// such as `FlatFieldCache`). The editor's own session must never be
+    /// rendered through `background`: the presenter draws its textures
+    /// without waiting, which only the shared queue keeps in order.
+    /// The background context's own `background` is itself.
+    public var background: GPUContext {
+        if isBackground { return self }
+        return backgroundTwin.withLock { twin in
+            if let twin { return twin }
+            // A queue can't fail to be made on a working device; if it
+            // ever does, the shared queue still works, just without the split.
+            let made = GPUContext(sharing: self, queue: device.makeCommandQueue() ?? commandQueue)
+            twin = made
+            return made
+        }
+    }
+    private let backgroundTwin = Mutex<GPUContext?>(nil)
 
     /// The pipeline for `kernel`, built on first use and kept for the life
     /// of the context. Building happens inside the lock, so a second caller
     /// waits for the first rather than compiling the same kernel twice.
     func lazyPipeline(_ kernel: LazyKernel) throws -> MTLComputePipelineState {
-        try lazyPipelines.withLock { built in
+        try lazyPipelines.built.withLock { built in
             if let existing = built[kernel] { return existing }
             guard let function = library.makeFunction(name: kernel.rawValue) else {
                 throw GPUContextError.missingShaderFunction(kernel.rawValue)
@@ -237,6 +274,8 @@ public final class GPUContext: @unchecked Sendable {
 
         self.device = device
         self.commandQueue = queue
+        self.isBackground = false
+        self.lazyPipelines = LazyPipelineStore()
         self.library = library
         self.shaderLibrarySource = librarySource
         self.whiteBalanceBlackLevelPSO = whiteBalancePSO
@@ -276,6 +315,53 @@ public final class GPUContext: @unchecked Sendable {
         self.rcdDirectionsPQPSO = pqPipeline
         self.rcdRedBlueAtOppositePSO = oppositePipeline
         self.rcdRedBlueAtGreenPSO = atGreenPipeline
+    }
+
+    /// The background twin: everything shared with `other` but the queue.
+    private init(sharing other: GPUContext, queue: MTLCommandQueue) {
+        self.device = other.device
+        self.commandQueue = queue
+        self.isBackground = true
+        self.lazyPipelines = other.lazyPipelines
+        self.library = other.library
+        self.shaderLibrarySource = other.shaderLibrarySource
+        self.whiteBalanceBlackLevelPSO = other.whiteBalanceBlackLevelPSO
+        self.demosaicBilinearPSO = other.demosaicBilinearPSO
+        self.demosaicBinnedPSO = other.demosaicBinnedPSO
+        self.colorAndTonePSO = other.colorAndTonePSO
+        self.presentPSO = other.presentPSO
+        self.histogramPSO = other.histogramPSO
+        self.waveformPSO = other.waveformPSO
+        self.vectorscopePSO = other.vectorscopePSO
+        self.denoisePSO = other.denoisePSO
+        self.sharpenBlurHPSO = other.sharpenBlurHPSO
+        self.sharpenBlurVPSO = other.sharpenBlurVPSO
+        self.sharpenApplyPSO = other.sharpenApplyPSO
+        self.lensCorrectPSO = other.lensCorrectPSO
+        self.packForExportPSO = other.packForExportPSO
+        self.healGatherPSO = other.healGatherPSO
+        self.healBlurPSO = other.healBlurPSO
+        self.exportSampleLinearPSO = other.exportSampleLinearPSO
+        self.exportResampleRowsPSO = other.exportResampleRowsPSO
+        self.exportResampleColumnsPSO = other.exportResampleColumnsPSO
+        self.exportGainMapPSO = other.exportGainMapPSO
+        self.healApplyPSO = other.healApplyPSO
+        self.healPastePSO = other.healPastePSO
+        self.redEyeApplyPSO = other.redEyeApplyPSO
+        self.redEyePastePSO = other.redEyePastePSO
+        self.lcPreparePSO = other.lcPreparePSO
+        self.lcDownsamplePSO = other.lcDownsamplePSO
+        self.lcBlurHPSO = other.lcBlurHPSO
+        self.lcBlurVPSO = other.lcBlurVPSO
+        self.lcApplyPSO = other.lcApplyPSO
+        self.aiDenoiseBlendPSO = other.aiDenoiseBlendPSO
+        self.rcdDirectionsVHPSO = other.rcdDirectionsVHPSO
+        self.rcdLowPassPSO = other.rcdLowPassPSO
+        self.rcdGreenPSO = other.rcdGreenPSO
+        self.rcdDiagonalStatsPSO = other.rcdDiagonalStatsPSO
+        self.rcdDirectionsPQPSO = other.rcdDirectionsPQPSO
+        self.rcdRedBlueAtOppositePSO = other.rcdRedBlueAtOppositePSO
+        self.rcdRedBlueAtGreenPSO = other.rcdRedBlueAtGreenPSO
     }
 
     /// Loads the shader library, preferring the precompiled
@@ -381,6 +467,12 @@ public final class GPUContext: @unchecked Sendable {
         descriptor.usage = [.shaderRead, .shaderWrite]
         return device.makeTexture(descriptor: descriptor)
     }
+}
+
+/// The lazily built pipelines, by kernel, in a box a context and its
+/// background twin share.
+private final class LazyPipelineStore: Sendable {
+    let built = Mutex<[GPUContext.LazyKernel: MTLComputePipelineState]>([:])
 }
 
 /// Where a context's shader library came from.
