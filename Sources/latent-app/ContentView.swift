@@ -328,6 +328,9 @@ struct ContentView: View {
             }
             .motionFollowsAccessibility()
         }
+        // The window closed (Settings can stay open): what Finder asks to
+        // open waits for it, and asks for it to open again.
+        .onDisappear { ExternalOpenRequests.shared.detach() }
         .onAppear {
             LensfunDatabase.warmUp()
             wireEditSaving()
@@ -343,6 +346,10 @@ struct ContentView: View {
             if let gpu = model.gpu {
                 library.thumbnailRenderer = PipelineThumbnailRenderer(gpu: gpu)
             }
+            // Files and folders from Finder, the Dock or `open` while the
+            // window shows; one that came while it was closed opens now.
+            // Last, so the launch below takes its own item first.
+            defer { ExternalOpenRequests.shared.attach { openExternal($0) } }
             // Once per launch: the window closed and opened again still has
             // its folder and image, and reopening them would close the image.
             guard !MainWindowModels.shared.openedAtLaunch else { return }
@@ -350,23 +357,35 @@ struct ContentView: View {
             #if DEBUG
             if SnapshotHarness.start(model: model, library: library, perform: perform, exportSheet: $showingExportSheet) { return }
             #endif
-            // Developer convenience: `swift run latent-app <folder-or-file>`
-            // opens it straight away, skipping the dialogs. Defaults
-            // overrides such as `-AppleLanguages (en)` are skipped.
-            if let path = LaunchArguments.paths(from: Array(CommandLine.arguments.dropFirst())).first {
-                var isDir: ObjCBool = false
-                FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
-                if isDir.boolValue {
-                    openFolder(URL(fileURLWithPath: path, isDirectory: true))
-                } else {
-                    model.open(url: URL(fileURLWithPath: path))
-                    mode = .develop
-                }
+            // `swift run latent-app <folder-or-file>`, `Latent file.NEF`,
+            // Finder's Open With or a drop on the Dock icon: opened straight
+            // away, skipping the dialogs. Defaults overrides such as
+            // `-AppleLanguages (en)` are skipped.
+            if let target = ExternalOpenRequests.shared.takeLaunchTarget(
+                arguments: Array(CommandLine.arguments.dropFirst())) {
+                openExternal(target)
             } else {
                 // Off the main thread: resolving the bookmark and looking
                 // for its volume ask the file system there, and a share that
                 // has stopped answering would hold the window until it times out.
                 Task { await reopenLastFolder() }
+            }
+        }
+    }
+
+    /// A folder or file Latent was asked to open from outside: a folder
+    /// becomes the catalog, a file opens in Develop on its own, as Open
+    /// File… opens one (the switch keeps it rather than loading the grid
+    /// selection over it).
+    private func openExternal(_ target: LaunchArguments.Target) {
+        switch target {
+        case .folder(let url):
+            openFolder(url)
+        case .file(let url):
+            model.open(url: url)
+            if mode != .develop {
+                keepOpenedFileOnModeChange = true
+                mode = .develop
             }
         }
     }

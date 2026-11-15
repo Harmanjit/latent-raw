@@ -110,6 +110,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWindow.allowsAutomaticWindowTabbing = false
     }
 
+    // MARK: - Opening files and folders from outside
+
+    /// Finder's Open With, a drop on the Dock icon, `open -a Latent` and a
+    /// path on the command line (`Latent file.NEF`: AppKit turns that into
+    /// the same open request), at launch or while running. SwiftUI's own
+    /// application delegate passes this one on (it keeps `open urls` for
+    /// routing URLs to scenes, which the main `Window` doesn't take).
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        ExternalOpenRequests.shared.receive(filenames.map { URL(fileURLWithPath: $0) })
+        sender.reply(toOpenOrPrint: .success)
+    }
+
+    /// The same request, should AppKit deliver it as URLs.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        ExternalOpenRequests.shared.receive(urls)
+    }
+
+    /// Opens the main window for an item that arrived with none showing.
+    /// Once the window has appeared, its own `openWindow` does it. Before,
+    /// at a launch with a file: AppKit then skips the untitled window it
+    /// opens at a plain launch, which for SwiftUI is the main `Window`, so
+    /// nothing at all appeared. Asking SwiftUI's application delegate for
+    /// that untitled window opens it as a plain launch would.
+    static func openMainWindowForExternalItem() {
+        if let showMainWindow {
+            showMainWindow()
+        } else if launchFinished, !NSApp.windows.contains(where: \.isVisible) {
+            _ = NSApp.delegate?.applicationOpenUntitledFile?(NSApp)
+        }
+        // Before launch finishes, `applicationDidFinishLaunching` does it.
+    }
+
+    /// Set at the end of launch, for the above.
+    private static var launchFinished = false
+
     /// Clicking the Dock icon brings the window forward, or back if it was
     /// closed while Settings stayed open (closing it alone quits). Opening
     /// a Window scene that is already open only brings it to the front.
@@ -122,6 +157,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Run with `swift run`, without a .app bundle, the process launches
         // as a background accessory and the window never comes forward.
         // Promoting it to a regular app fixes that; harmless when bundled.
+        // A launch with a file (Open With, a Dock drop, `Latent file.NEF`)
+        // opens no window by itself; see `openMainWindowForExternalItem`.
+        Self.launchFinished = true
+        if ExternalOpenRequests.shared.pending != nil { Self.openMainWindowForExternalItem() }
         NSApp.setActivationPolicy(.regular)
         // Nor has it the bundle's icon, so the Dock would show a generic
         // one: use the icon in the source tree. The bundled app's comes

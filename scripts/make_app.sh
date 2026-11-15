@@ -150,11 +150,11 @@ cat > "$XPC/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# No CFBundleDocumentTypes: declaring raw images and folders would put
-# Latent in Finder's Open With menu and let them be dropped on its Dock
-# icon, but the app handles no open-documents event, so the chosen item
-# was silently ignored. Add the declaration back together with that
-# handling (application(_:open:) in AppDelegate), not before.
+# CFBundleDocumentTypes puts Latent in Finder's Open With menu for raw
+# images, other images and folders, and lets them be dropped on its Dock
+# icon. AppDelegate.application(_:openFiles:) handles the request
+# (ExternalOpenRequests): a file opens in Develop, a folder as the catalog,
+# at launch or while running.
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -170,6 +170,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key>        <string>APPL</string>
   <key>LSMinimumSystemVersion</key>     <string>15.0</string>
   <key>NSHighResolutionCapable</key>    <true/>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>         <string>Image</string>
+      <key>CFBundleTypeRole</key>         <string>Viewer</string>
+      <key>LSHandlerRank</key>            <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array><string>public.camera-raw-image</string><string>public.image</string><string>public.folder</string></array>
+    </dict>
+  </array>
   <key>NSHumanReadableCopyright</key>   <string>GPLv3. Third-party licences: Help › Latent Help › Licences</string>
 </dict>
 </plist>
