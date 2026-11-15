@@ -573,6 +573,9 @@ final class EditorModel: ObservableObject {
     var fitMode = true
 
     var pendingRender: Task<Void, Never>?
+    /// The render that shows a brush mask redrawn off the main thread,
+    /// unless an edit renders first (EditorModel+Rendering.swift).
+    var brushRedrawRender: Task<Void, Never>?
 
     /// What the last renders used, so a viewport change can decide whether
     /// anything actually needs re-rendering.

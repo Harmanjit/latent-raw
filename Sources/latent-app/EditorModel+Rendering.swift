@@ -176,6 +176,7 @@ extension EditorModel {
     func rerender() {
         guard let session, let pipeline else { return }
         pendingRender?.cancel()
+        brushRedrawRender?.cancel()
         let start = Date()
         var what: [String] = []
         // Brush masks that must be redrawn whole are redrawn off the main
@@ -206,7 +207,10 @@ extension EditorModel {
 
     /// Lets `session` redraw whole brush masks off the main thread during
     /// the editor's own renders; each finished redraw comes back here and,
-    /// unless later edits overtook it, renders again to show it.
+    /// unless later edits overtook it, is shown by the next render: the
+    /// next edit's, during a drag, or else one `brushRedrawDelay` later.
+    /// Rendering again at once would cost a drag two renders per step,
+    /// more than the redraw saved.
     private func deferBrushRedraws(in session: ImageSession) {
         if session.onBrushRasterReady == nil {
             // A result for another session (the photo changed) matches
@@ -214,12 +218,20 @@ extension EditorModel {
             session.onBrushRasterReady = { [weak self] result in
                 Task { @MainActor [weak self] in
                     guard let self, self.session?.applyBrushRaster(result) == true else { return }
-                    self.rerender()
+                    self.brushRedrawRender?.cancel()
+                    self.brushRedrawRender = Task { [weak self] in
+                        try? await Task.sleep(for: Self.brushRedrawDelay)
+                        guard !Task.isCancelled else { return }
+                        self?.rerender()
+                    }
                 }
             }
         }
         session.defersBrushRedraws = true
     }
+
+    /// About one display frame: a drag's next step usually comes first.
+    static let brushRedrawDelay: Duration = .milliseconds(12)
 
     /// Returns a short description of what ran, for the status bar.
     /// What actually renders: the edit, or the Before (the defaults,

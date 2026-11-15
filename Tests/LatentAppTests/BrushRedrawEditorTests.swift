@@ -36,7 +36,8 @@ final class BrushRedrawEditorTests: XCTestCase {
         for _ in 0..<200 where session.hasPendingBrushRedraws {
             try await Task.sleep(for: .milliseconds(10))
         }
-        XCTAssertFalse(session.hasPendingBrushRedraws, "the redraw landed and was shown")
+        XCTAssertFalse(session.hasPendingBrushRedraws, "the redraw landed")
+        await model.brushRedrawRender?.value   // and the render that shows it
     }
 
     /// The preview as a render on the spot (nothing deferred) makes it.
