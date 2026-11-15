@@ -114,7 +114,7 @@ struct KeywordingField: View {
         let token = KeywordPath.lastToken(text)
         let already = Set(KeywordPath.parse(text).dropLast())
         // The folder's keywords and the app-wide dictionary's.
-        let available = Array(Set(library.availableKeywords).union(KeywordDictionaryStore.shared.completionPaths)).sorted()
+        let available = KeywordDictionaryStore.shared.completionCandidates(folderKeywords: library.availableKeywords)
         suggestions = KeywordPath.suggestions(for: token, in: available, limit: 6)
             .filter { !already.contains($0) && KeywordPath.normalized(token) != $0 }
         highlighted = 0

@@ -33,6 +33,18 @@ final class ToneEqualizerState: ObservableObject {
     /// spread readout; nil until a render made the mask.
     @Published var spread: (low: Float, high: Float)?
 
+    /// The mask and equalizer the histogram shown was worked out from.
+    /// Renders follow every slider step while the panel is open; with the
+    /// same mask and equalizer the histogram is not worked out again.
+    var histogramSource: (mask: ToneEqualizerMaskSnapshot, equalizer: ToneEqualizer)?
+    /// The mask's 5th and 95th percentiles before exposure, with the mask
+    /// values they were read from. Sorting the 512-cell-wide mask took the
+    /// main thread twice per render; now it happens once per new mask, on
+    /// a background task (`percentileTask`), and the spread readout follows
+    /// when it lands.
+    var maskPercentiles: (values: [Float], low: Float?, high: Float?)?
+    var percentileTask: Task<Void, Never>?
+
     /// The Advanced tab's horizontal axis, in EV.
     static let histogramRange: ClosedRange<Float> = -9.5...0.5
     static let histogramBins = 100
@@ -90,11 +102,11 @@ extension EditorModel {
     /// photo's mask over the bands.
     func fitToneEqualizerMask() {
         guard let snapshot = session?.toneEqualizerMask,
-              let low = snapshot.percentile(0.05), let high = snapshot.percentile(0.95) else {
+              let percentiles = toneEqualizerMaskPercentiles(snapshot) else {
             status = "The mask isn't ready yet; try again in a moment"
             return
         }
-        let fit = ToneEqualizer.fittedCompensation(low: low, high: high)
+        let fit = ToneEqualizer.fittedCompensation(low: percentiles.low, high: percentiles.high)
         var eq = parameters.toneEqualizer
         eq.maskExposure = abs(fit.exposure) < 0.005 ? nil : fit.exposure
         eq.maskContrast = abs(fit.contrast) < 0.005 ? nil : fit.contrast
@@ -110,14 +122,54 @@ extension EditorModel {
             return
         }
         let eq = parameters.toneEqualizer
-        let values = snapshot.compensatedValues(eq)
-        let histogram = HistogramCalculator.normalizedHistogram(of: values, range: ToneEqualizerState.histogramRange,
-                                                                bins: ToneEqualizerState.histogramBins)
-        if state.histogram != histogram { state.histogram = histogram }
-        if let low = snapshot.percentile(0.05), let high = snapshot.percentile(0.95) {
-            let spread = (eq.compensated(low), eq.compensated(high))
-            if state.spread?.low != spread.0 || state.spread?.high != spread.1 { state.spread = spread }
+        if state.histogram.isEmpty || state.histogramSource?.mask != snapshot || state.histogramSource?.equalizer != eq {
+            let values = snapshot.compensatedValues(eq)
+            let histogram = HistogramCalculator.normalizedHistogram(of: values, range: ToneEqualizerState.histogramRange,
+                                                                    bins: ToneEqualizerState.histogramBins)
+            if state.histogram != histogram { state.histogram = histogram }
+            state.histogramSource = (snapshot, eq)
         }
+        if let kept = state.maskPercentiles, kept.values == snapshot.values {
+            showToneEqualizerSpread(low: kept.low, high: kept.high)
+            return
+        }
+        // A new mask: its percentiles are worked out away from the main
+        // thread, and shown if the mask is still the same when they land.
+        state.percentileTask?.cancel()
+        let values = snapshot.values
+        state.percentileTask = Task { [weak self] in
+            let percentiles = await Task.detached(priority: .userInitiated) {
+                snapshot.valuePercentiles([0.05, 0.95])
+            }.value
+            guard !Task.isCancelled, let self, self.session?.toneEqualizerMask?.values == values else { return }
+            let state = self.toneEqualizerState
+            state.maskPercentiles = (values, percentiles[0], percentiles[1])
+            state.percentileTask = nil
+            self.showToneEqualizerSpread(low: percentiles[0], high: percentiles[1])
+        }
+    }
+
+    /// The mask's 5th and 95th percentiles with exposure applied (Fit
+    /// Mask's input): the kept ones when the mask is the one they were
+    /// read from, else worked out now.
+    private func toneEqualizerMaskPercentiles(_ snapshot: ToneEqualizerMaskSnapshot) -> (low: Float, high: Float)? {
+        if let kept = toneEqualizerState.maskPercentiles, kept.values == snapshot.values {
+            guard let low = kept.low, let high = kept.high else { return nil }
+            return (low + snapshot.exposureEV, high + snapshot.exposureEV)
+        }
+        let percentiles = snapshot.percentiles([0.05, 0.95])
+        guard let low = percentiles[0], let high = percentiles[1] else { return nil }
+        return (low, high)
+    }
+
+    /// The spread readout from the mask's percentiles before exposure:
+    /// the current render's exposure and compensation applied.
+    private func showToneEqualizerSpread(low: Float?, high: Float?) {
+        let state = toneEqualizerState
+        guard let low, let high, let snapshot = session?.toneEqualizerMask else { return }
+        let eq = parameters.toneEqualizer
+        let spread = (eq.compensated(low + snapshot.exposureEV), eq.compensated(high + snapshot.exposureEV))
+        if state.spread?.low != spread.0 || state.spread?.high != spread.1 { state.spread = spread }
     }
 
     /// The mask under a screen point, compensation applied; nil off the

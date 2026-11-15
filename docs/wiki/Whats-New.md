@@ -2,6 +2,10 @@
 
 What has arrived since the 0.9.0 beta, by area. Each line says what the feature does and links to where it is described in full. For a guided tour of the most useful ones, try the tutorials: [Culling and Organising](Tutorial-Culling-and-Organising), [Editing](Tutorial-Editing) and [Printing and Sharing](Tutorial-Printing-and-Sharing).
 
+## Wave 4
+
+- **Faster large folders.** On a 10,000-photo folder, smart collections with date rules evaluate about thirty times faster, rating many photos while a collection is shown no longer stalls the window, the Collections section counts in the background, and search keystrokes, keyword completion and the smart collection sheet do far less work each time. The tone equalizer's mask summary is worked out off the main thread. Nothing looks or behaves differently. See [Thumbnails and performance](Library#thumbnails-and-performance).
+
 ## Organising
 
 - **Collections, smart collections and collection sets** gather photos without moving them; smart ones fill themselves from rules such as "rated 4 or more with the keyword Brittany". See [Collections](Collections-and-Keywords#collections).

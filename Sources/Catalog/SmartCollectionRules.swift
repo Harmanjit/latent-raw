@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The rules of a smart collection: criteria combined with all or any, as
 /// in Lightroom's Smart Collection dialog. Stored as JSON in the
@@ -413,9 +414,10 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
             case .hasNoKeywords: return keywords.isEmpty
             case .hasAnyKeyword: return !keywords.isEmpty
             case .contains, .doesNotContain:
+                // Trimmed once, not once per level of every keyword.
+                let needle = value.trimmingCharacters(in: .whitespaces)
                 let hit = !wanted.isEmpty && keywords.contains { KeywordPath.components($0).contains { level in
-                    level.range(of: value.trimmingCharacters(in: .whitespaces),
-                                options: [.caseInsensitive, .diacriticInsensitive]) != nil } }
+                    level.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive]) != nil } }
                 return op == .contains ? hit : !hit
             default:
                 let hit = !wanted.isEmpty && keywords.contains { KeywordPath.path($0, isWithin: wanted) }
@@ -600,39 +602,27 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
     private func compareDate(_ captureTime: Int64?, now: Date) -> Bool {
         guard let captureTime else { return false }
         let date = Date(timeIntervalSince1970: TimeInterval(captureTime))
-        let calendar = Calendar.current
-        if op == .inLastDays {
-            guard let days = Int(value.trimmingCharacters(in: .whitespaces)), days > 0,
-                  let start = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: now))
-            else { return false }
-            return date >= start
-        }
-        if op == .between {
-            // Both days included, whichever way round they were entered.
-            guard let first = Self.parseDay(value), let second = Self.parseDay(value2 ?? ""),
-                  let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: max(first, second)))
-            else { return false }
-            return date >= calendar.startOfDay(for: min(first, second)) && date < end
-        }
-        guard let day = Self.parseDay(value) else { return false }
-        let start = calendar.startOfDay(for: day)
-        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return false }
-        switch op {
-        case .is: return date >= start && date < end
-        case .before: return date < start
-        case .after: return date >= end
-        default: return false
-        }
+        // The day boundaries depend only on the line and the moment, so
+        // they are worked out once (`SmartDateBounds`), not for every photo:
+        // a date line made a new DateFormatter for every photo it tested.
+        guard let bounds = SmartDateBounds.bounds(op: op, value: value, value2: value2, now: now,
+                                                  calendar: Calendar.current) else { return false }
+        if let start = bounds.start, date < start { return false }
+        if let end = bounds.end, date >= end { return false }
+        return true
     }
 
     /// "2026-05-01" in the Mac's time zone.
     public static func parseDay(_ text: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: text.trimmingCharacters(in: .whitespaces))
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        return SmartDateBounds.parsedDay(trimmed, timeZone: .current) {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.timeZone = .current
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.date(from: trimmed)
+        }
     }
 
     public static func dayString(_ date: Date) -> String {
@@ -642,5 +632,93 @@ public struct SmartCriterion: Codable, Equatable, Sendable {
         formatter.timeZone = .current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
+    }
+}
+
+/// The day boundaries a smart collection's date line compares against:
+/// a photo matches when its date is at or after `start` (if any) and
+/// before `end` (if any). Nil bounds match nothing (a line whose value
+/// isn't a day, say). Worked out from the line, the moment and the
+/// calendar, and kept, so evaluating a rule over a whole folder works
+/// them out once rather than once per photo. Exactly the comparisons the
+/// date line always made: in the last N days, between two days (both
+/// included, either order), on, before or after a day.
+enum SmartDateBounds {
+    struct Bounds: Equatable, Sendable {
+        var start: Date?
+        var end: Date?
+    }
+
+    private struct Key: Hashable, Sendable {
+        var op: SmartCriterion.Operator
+        var value: String
+        var value2: String?
+        /// Only "in the last" reads the moment.
+        var now: Date?
+        var calendar: Calendar.Identifier
+        var timeZone: String
+    }
+
+    /// Kept bounds and parsed days. Cleared when it grows past `limit`, so
+    /// moments that never come back (every call with a new `Date()`) can't
+    /// make it grow without end.
+    private struct Store: Sendable {
+        var bounds: [Key: Bounds?] = [:]
+        var days: [String: Date?] = [:]
+    }
+
+    private static let store = OSAllocatedUnfairLock(initialState: Store())
+    private static let limit = 512
+
+    static func bounds(op: SmartCriterion.Operator, value: String, value2: String?, now: Date,
+                       calendar: Calendar) -> Bounds? {
+        let key = Key(op: op, value: value, value2: op == .between ? value2 : nil,
+                      now: op == .inLastDays ? now : nil, calendar: calendar.identifier,
+                      timeZone: calendar.timeZone.identifier)
+        if let kept = store.withLock({ $0.bounds[key] }) { return kept }
+        let worked = compute(op: op, value: value, value2: value2, now: now, calendar: calendar)
+        store.withLock { store in
+            if store.bounds.count >= limit { store.bounds.removeAll(keepingCapacity: true) }
+            store.bounds[key] = .some(worked)
+        }
+        return worked
+    }
+
+    /// A day parsed as `SmartCriterion.parseDay` parses it, kept per time zone.
+    static func parsedDay(_ trimmed: String, timeZone: TimeZone, parse: () -> Date?) -> Date? {
+        let key = timeZone.identifier + "|" + trimmed
+        if let kept = store.withLock({ $0.days[key] }) { return kept }
+        let day = parse()
+        store.withLock { store in
+            if store.days.count >= limit { store.days.removeAll(keepingCapacity: true) }
+            store.days[key] = .some(day)
+        }
+        return day
+    }
+
+    private static func compute(op: SmartCriterion.Operator, value: String, value2: String?, now: Date,
+                                calendar: Calendar) -> Bounds? {
+        if op == .inLastDays {
+            guard let days = Int(value.trimmingCharacters(in: .whitespaces)), days > 0,
+                  let start = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: now))
+            else { return nil }
+            return Bounds(start: start, end: nil)
+        }
+        if op == .between {
+            // Both days included, whichever way round they were entered.
+            guard let first = SmartCriterion.parseDay(value), let second = SmartCriterion.parseDay(value2 ?? ""),
+                  let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: max(first, second)))
+            else { return nil }
+            return Bounds(start: calendar.startOfDay(for: min(first, second)), end: end)
+        }
+        guard let day = SmartCriterion.parseDay(value) else { return nil }
+        let start = calendar.startOfDay(for: day)
+        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return nil }
+        switch op {
+        case .is: return Bounds(start: start, end: end)
+        case .before: return Bounds(start: nil, end: start)
+        case .after: return Bounds(start: end, end: nil)
+        default: return nil
+        }
     }
 }

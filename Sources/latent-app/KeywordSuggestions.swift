@@ -49,10 +49,35 @@ final class KeywordDictionaryStore: ObservableObject {
     }
 
     /// Paths for autocompletion: every dictionary keyword and level.
-    var completionPaths: Set<String> { dictionary.allPaths }
+    var completionPaths: Set<String> {
+        if let kept = completionPathsCache, kept.version == dictionaryVersion { return kept.paths }
+        let paths = dictionary.allPaths
+        completionPathsCache = (dictionaryVersion, paths)
+        return paths
+    }
+
+    /// The keywording field's completion candidates: `folderKeywords` (the
+    /// Library's sorted list) and every dictionary path, each once, sorted.
+    /// Kept until either changes: the field asks at every keystroke, and
+    /// merging and sorting a few thousand paths each time showed as typing
+    /// lag in a big folder.
+    func completionCandidates(folderKeywords: [String]) -> [String] {
+        if let kept = completionCache, kept.version == dictionaryVersion, kept.folder == folderKeywords {
+            return kept.list
+        }
+        let list = Array(Set(folderKeywords).union(completionPaths)).sorted()
+        completionCache = (folderKeywords, dictionaryVersion, list)
+        return list
+    }
+
+    /// Bumped by every change of `dictionary`, for the kept lists above.
+    private var dictionaryVersion = 0
+    private var completionPathsCache: (version: Int, paths: Set<String>)?
+    private var completionCache: (folder: [String], version: Int, list: [String])?
 
     private func commit(_ next: KeywordDictionary) {
         dictionary = next
+        dictionaryVersion += 1
         do {
             try next.save(to: url)
         } catch {

@@ -6,7 +6,8 @@ extension Library {
     /// (`showsPairedCompanions`). Refreshes `pairedCompanions` on the way,
     /// so the info panel and file operations see the pairing the grid does.
     func imagesShownInGrid() -> [ImageRecord] {
-        let pairs = RawJPEGPairs.companionsByRaw(in: images)
+        // Worked out once per image list, not at every filter change.
+        let pairs = derived.value(\.pairs, version: imagesVersion) { RawJPEGPairs.companionsByRaw(in: images) }
         if pairs != pairedCompanions { pairedCompanions = pairs }
         guard !showsPairedCompanions, !pairs.isEmpty else { return images }
         let hidden = Set(pairs.values.joined().compactMap(\.id))

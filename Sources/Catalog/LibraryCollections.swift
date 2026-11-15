@@ -90,7 +90,11 @@ public final class LibraryCollections: ObservableObject {
     /// sorted, for the smart collection sheet's value menu.
     public func existingValues(for field: SmartCriterion.Field) -> [String] {
         guard let library else { return [] }
-        return SmartCriterion.existingValues(for: field, in: library.images, keywords: library.keywordIndex)
+        // Kept until the photos or keywords change: the sheet asks for every
+        // row's values each time it redraws, at every keystroke in a rule.
+        return library.derived.existingValues(for: field, version: library.imagesVersion, library.keywordsVersion) {
+            SmartCriterion.existingValues(for: field, in: library.images, keywords: library.keywordIndex)
+        }
     }
 
     private var anyRulesReadEditDetails: Bool {
@@ -156,37 +160,78 @@ public final class LibraryCollections: ObservableObject {
     }
 
     /// Photos, keywords or edits changed: counts, and smart collections,
-    /// may have too.
+    /// may have too. The counts are worked out off the main thread: every
+    /// smart collection over every photo took a large folder's window
+    /// away for a moment after each rating.
     func contentDidChange() {
         countTask?.cancel()
         countTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled else { return }
-            self?.recount()
+            guard !Task.isCancelled, let self else { return }
+            await self.recountInBackground()
             // An edit saved may change what "Edit changes" and "Edit
             // date" rules say; read the edits again only if one asks.
-            if let self, self.anyRulesReadEditDetails { self.reloadEditDetails() }
+            if !Task.isCancelled, self.anyRulesReadEditDetails { self.reloadEditDetails() }
         }
     }
 
+    /// Bumped by every count started, so an older one finishing late never
+    /// puts its numbers over a newer one's.
+    private var countGeneration = 0
+
     /// Counts worked out now, for tests and for the first draw.
     func recount() {
-        guard let library else { return }
-        let edited = library.editedImageIDs
-        let keywords = library.keywordIndex
-        let images = library.images
-        let now = Date()
+        guard let input = countInput() else { return }
+        countGeneration += 1
+        let result = Self.counts(input)
+        if result != counts { counts = result }
+    }
+
+    /// The same counts, worked out on a background task from a snapshot of
+    /// what they read, and shown if nothing newer was counted meanwhile.
+    private func recountInBackground() async {
+        guard let input = countInput() else { return }
+        countGeneration += 1
+        let generation = countGeneration
+        let result = await Task.detached(priority: .userInitiated) { Self.counts(input) }.value
+        guard generation == countGeneration, result != counts else { return }
+        counts = result
+    }
+
+    /// Everything the counts read, copied (cheaply: copy-on-write) so they
+    /// can be worked out away from the main actor.
+    struct CountInput: Sendable {
+        var state: CollectionsState
+        var images: [ImageRecord]
+        var edited: Set<Int64>
+        var keywords: [Int64: Set<String>]
+        var extras: SmartScopeExtras
+        var now: Date
+    }
+
+    private func countInput() -> CountInput? {
+        guard let library else { return nil }
         let rules = state.collections.compactMap(\.rules)
         let extras = extras(stacks: rules.contains(where: \.readsStacks),
                             copies: rules.contains(where: \.readsVirtualCopyMasters),
                             edits: rules.contains(where: \.readsEditDetails))
+        return CountInput(state: state, images: library.images, edited: library.editedImageIDs,
+                          keywords: library.keywordIndex, extras: extras, now: Date())
+    }
+
+    /// Photos in each collection: a regular one's members still in the
+    /// folder, a smart one's matches, a set's everything inside it.
+    nonisolated static func counts(_ input: CountInput) -> [Int64: Int] {
+        let images = input.images, edited = input.edited, keywords = input.keywords, now = input.now
+        // Once for every regular collection, not once for each.
+        var present: Set<Int64>?
         var result: [Int64: Int] = [:]
-        for collection in state.collections {
-            guard var scope = state.scope(for: collection.id) else { continue }
-            scope.extras = extras
+        for collection in input.state.collections {
+            guard var scope = input.state.scope(for: collection.id) else { continue }
+            scope.extras = input.extras
             if scope.rules.isEmpty {
-                let present = Set(images.lazy.compactMap(\.id))
-                result[collection.id] = scope.ids.intersection(present).count
+                if present == nil { present = Set(images.lazy.compactMap(\.id)) }
+                result[collection.id] = scope.ids.intersection(present ?? []).count
             } else {
                 result[collection.id] = images.lazy.filter { record in
                     scope.includes(record, isEdited: record.id.map(edited.contains) ?? false,
@@ -194,7 +239,7 @@ public final class LibraryCollections: ObservableObject {
                 }.count
             }
         }
-        if result != counts { counts = result }
+        return result
     }
 
     // MARK: Changes

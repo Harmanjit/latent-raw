@@ -207,10 +207,25 @@ public struct ToneEqualizerMaskSnapshot: Sendable, Equatable {
     /// The `fraction` percentile of the mask with exposure applied but no
     /// compensation (Fit Mask's input).
     public func percentile(_ fraction: Float) -> Float? {
-        guard !values.isEmpty else { return nil }
+        percentiles([fraction])[0]
+    }
+
+    /// Several percentiles from one sort of the mask (`percentile` sorts
+    /// the whole grid each time it is asked).
+    public func percentiles(_ fractions: [Float]) -> [Float?] {
+        valuePercentiles(fractions).map { $0.map { $0 + exposureEV } }
+    }
+
+    /// The same percentiles of `values` themselves, before exposure: they
+    /// stay right while only the exposure changes, so they can be kept
+    /// for as long as the mask's values are the same.
+    public func valuePercentiles(_ fractions: [Float]) -> [Float?] {
+        guard !values.isEmpty else { return fractions.map { _ in nil } }
         let sorted = values.sorted()
-        let i = min(max(Int(Float(sorted.count - 1) * fraction), 0), sorted.count - 1)
-        return sorted[i] + exposureEV
+        return fractions.map { fraction in
+            let i = min(max(Int(Float(sorted.count - 1) * fraction), 0), sorted.count - 1)
+            return sorted[i]
+        }
     }
 }
 

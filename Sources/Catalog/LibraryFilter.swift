@@ -98,7 +98,7 @@ public struct LibraryFilter: Equatable, Sendable {
         if textScope == .everything {
             return passesSearch(record, keywords: keywords, context: context)
         }
-        let needle = text.isEmpty ? "" : text.trimmingCharacters(in: .whitespaces)
+        let needle = context.needle ?? (text.isEmpty ? "" : text.trimmingCharacters(in: .whitespaces))
         // The name, or the title or caption the photographer gave it.
         // Tested one at a time, without building an array per record: this
         // runs over the whole folder at every keystroke in the search field.

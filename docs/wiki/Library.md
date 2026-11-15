@@ -61,6 +61,8 @@ Thumbnails are made in the background as soon as a folder opens: from the camera
 
 Thumbnail progress reaches the status bar at most ten times a second, so a big folder filling in doesn't slow the window down.
 
+Folders of ten thousand photos and more stay responsive while you search and filter: the folder is sorted once and each keystroke in the search field only filters it, every photo's searchable text is gathered once rather than at each keystroke, smart collections work out their day boundaries once per rule, and the Collections section counts its photos in the background.
+
 To have a large folder's thumbnails ready before you open it, run `latent-cli thumbs <folder>` in Terminal: it reads the folder as opening it would and makes every missing or out-of-date thumbnail, edited photos from their edits (see [From the command line](Export#from-the-command-line)).
 
 ## Supported files

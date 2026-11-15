@@ -153,6 +153,10 @@ final class TagDotsView: NSView {
 final class KeywordBadgeView: NSView {
     /// The keywords as shown, sorted; the badge hides with none.
     private(set) var keywords: [String] = []
+    /// The stored paths `keywords` was made from. The grid sets them on
+    /// every visible cell at every refresh; the same set again costs a
+    /// comparison, not a sort of display names.
+    private var stored: Set<String> = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -167,6 +171,8 @@ final class KeywordBadgeView: NSView {
     /// Sets the keywords (stored paths); true when they changed.
     @discardableResult
     func setKeywords(_ stored: Set<String>) -> Bool {
+        guard stored != self.stored else { return false }
+        self.stored = stored
         let shown = stored.map(KeywordPath.display).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         guard shown != keywords else { return false }
         keywords = shown
@@ -180,13 +186,23 @@ final class KeywordBadgeView: NSView {
         keywords.isEmpty ? nil : "Keywords: " + keywords.joined(separator: ", ")
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        let colour = Contrast.isIncreased ? NSColor.labelColor : NSColor.secondaryLabelColor
+    /// The configured tag symbol, made once for each contrast setting
+    /// rather than at every draw of every badge scrolled past.
+    private static var symbols: [Bool: NSImage] = [:]
+
+    private static func symbol(increasedContrast: Bool) -> NSImage? {
+        if let symbol = symbols[increasedContrast] { return symbol }
+        let colour = increasedContrast ? NSColor.labelColor : NSColor.secondaryLabelColor
         let configuration = NSImage.SymbolConfiguration(pointSize: 7, weight: .regular)
             .applying(NSImage.SymbolConfiguration(paletteColors: [colour]))
-        guard !keywords.isEmpty,
-              let symbol = NSImage(systemSymbolName: "tag.fill", accessibilityDescription: nil)?
-                .withSymbolConfiguration(configuration) else { return }
+        let symbol = NSImage(systemSymbolName: "tag.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration)
+        symbols[increasedContrast] = symbol
+        return symbol
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard !keywords.isEmpty, let symbol = Self.symbol(increasedContrast: Contrast.isIncreased) else { return }
         let size = symbol.size
         let rect = CGRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
                           width: size.width, height: size.height)

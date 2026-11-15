@@ -132,6 +132,13 @@ public struct LibraryFilterContext: Sendable {
     public var mastersWithCopies: Set<String> = []
     /// Ids of the raws of RAW+JPEG pairs and of their JPEGs.
     public var pairedIDs: Set<Int64> = []
+    /// Every photo's search text by id (`LibraryFilter.searchHaystack`),
+    /// when the caller keeps them (`Library.searchHaystacks`); a photo not
+    /// in it has its text worked out as before.
+    public var haystacks: [Int64: String]?
+    /// The search box's text trimmed, for the File Name, Title and Caption
+    /// scope: trimmed once per pass rather than once per photo.
+    public var needle: String?
 
     public init(searchQuery: SearchQuery? = nil, mastersWithCopies: Set<String> = [], pairedIDs: Set<Int64> = []) {
         self.searchQuery = searchQuery
@@ -144,7 +151,11 @@ public struct LibraryFilterContext: Sendable {
     /// The context `filter` needs over `images`, given the RAW+JPEG pairs
     /// (raw id → its JPEGs). Only what the filter reads is worked out.
     public init(filter: LibraryFilter, images: [ImageRecord], pairedCompanions: [Int64: [ImageRecord]]) {
-        if filter.textScope == .everything { searchQuery = SearchQuery(filter.text) }
+        if filter.textScope == .everything {
+            searchQuery = SearchQuery(filter.text)
+        } else {
+            needle = filter.text.isEmpty ? "" : filter.text.trimmingCharacters(in: .whitespaces)
+        }
         if filter.copyKind == .hasVirtualCopies {
             mastersWithCopies = Set(images.lazy.compactMap { VirtualCopy.parse($0.relPath)?.masterRelPath })
         }
@@ -211,6 +222,7 @@ extension LibraryFilter {
     func passesSearch(_ record: ImageRecord, keywords: Set<String>, context: LibraryFilterContext) -> Bool {
         let query = context.searchQuery ?? SearchQuery(text)
         guard !query.isEmpty else { return true }
+        if let id = record.id, let haystack = context.haystacks?[id] { return query.matches(haystack) }
         return query.matches(Self.searchHaystack(record, keywords: keywords))
     }
 

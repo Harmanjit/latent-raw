@@ -67,7 +67,12 @@ public struct KeywordDictionary: Codable, Equatable, Sendable {
     /// One path per line, levels joined by "|", sorted. Only the innermost
     /// paths are written: their ancestors come back with them.
     public var text: String {
-        let leaves = paths.filter { path in !paths.contains { $0 != path && KeywordPath.path($0, isWithin: path) } }
+        // A path with another path inside it is one of that path's
+        // ancestors. Gathering every ancestor once is linear; testing each
+        // path against every other took seconds for a few thousand.
+        var inner = Set<String>()
+        for path in paths { inner.formUnion(KeywordPath.ancestors(path)) }
+        let leaves = paths.filter { !inner.contains($0) }
         return leaves.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.joined(separator: "\n")
             + (leaves.isEmpty ? "" : "\n")
     }

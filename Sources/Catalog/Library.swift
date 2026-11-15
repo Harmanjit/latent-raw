@@ -23,9 +23,21 @@ public final class Library: ObservableObject {
         didSet {
             // Records patched in place keep their positions (`applyChangedRecords`).
             if !keepsImagePositions { imageIndexByIDStorage = nil }
+            imagesVersion &+= 1
             if !isPatchingRecords { recomputeVisible() }
         }
     }
+    /// Bumped by every change of `images` (a new list or records patched in
+    /// place), and `keywordsVersion` by every change of `keywordIndex`: what
+    /// the lists worked out from them once and kept (`LibraryDerivedCache`)
+    /// check to know they are still current.
+    private(set) var imagesVersion = 0
+    private(set) var keywordsVersion = 0
+    /// What is worked out from the image list and the keywords and read
+    /// again and again: the RAW+JPEG pairs at every filter change, the
+    /// search text of every photo at every keystroke, the folder's keyword
+    /// list at every keystroke in the keywording field.
+    var derived = LibraryDerivedCache()
     /// Image id → position in `images`, built on first use after the list
     /// changes. `selectedImage` and `selectedImages` are read many times in
     /// each redraw of the main window (the menu state alone reads both), and
@@ -67,7 +79,12 @@ public final class Library: ObservableObject {
     public var sortMemory = LibrarySortMemory()
     /// What the Edit time and Edit count sorts read, kept only while one
     /// of them is chosen (Library+EditStats.swift).
-    public internal(set) var editStats: [Int64: LibraryEditStat] = [:]
+    public internal(set) var editStats: [Int64: LibraryEditStat] = [:] {
+        didSet { sortInputsVersion &+= 1 }
+    }
+    /// Bumped when the Custom arrangement or the edit stats change: what
+    /// the sort reads besides the records and `sort` itself.
+    private(set) var sortInputsVersion = 0
     var editStatsGeneration = 0
     /// Called after every change of `sort`, with the directions to keep.
     /// The app saves both here so the choice outlives the launch; tests and
@@ -78,6 +95,7 @@ public final class Library: ObservableObject {
     public internal(set) var customOrder: [String] = [] {
         didSet {
             customPositions = CustomOrder.positions(customOrder)
+            sortInputsVersion &+= 1
             if sort.key == .custom, !isPatchingRecords { recomputeVisible() }
         }
     }
@@ -94,6 +112,7 @@ public final class Library: ObservableObject {
     /// and whenever keywords are edited.
     var keywordIndex: [Int64: Set<String>] = [:] {
         didSet {
+            keywordsVersion &+= 1
             if filter.readsKeywords || collections.activeScope?.readsKeywords == true, !isPatchingRecords {
                 recomputeVisible()
             }
@@ -281,6 +300,12 @@ public final class Library: ObservableObject {
         images = records
     }
 
+    /// Tests only: patches re-read records in as a rating or flag change
+    /// does once the catalog has written them (`applyChangedRecords`).
+    func patchRecordsForTesting(_ fresh: [Int64: ImageRecord]) {
+        applyChangedRecords(fresh)
+    }
+
     // MARK: - Filtering and sorting
 
     func recomputeVisible() {
@@ -292,18 +317,30 @@ public final class Library: ObservableObject {
         let scope = collections.activeScope
         let now = Date()
         // What the newer criteria read from outside each record, once.
-        let context = filter.isActive
+        var context = filter.isActive
             ? LibraryFilterContext(filter: filter, images: images, pairedCompanions: pairedCompanions) : .empty
+        if filter.isActive, filter.textScope == .everything, context.searchQuery?.isEmpty == false {
+            context.haystacks = searchHaystacks()
+        }
+        // The folder sorted once and kept until the photos or the sort
+        // change; each filter change (every keystroke in the search field)
+        // only filters it. Every sort is a total order (the path breaks
+        // ties), so filtering the sorted list gives exactly what sorting the
+        // filtered one did.
+        let sorted = derived.value(\.sortedShown, version: imagesVersion, showsPairedCompanions ? 1 : 0,
+                                   sortInputsVersion, LibrarySortKey.allCases.firstIndex(of: sort.key) ?? -1,
+                                   sort.ascending ? 1 : 0) {
+            shown.sorted(by: sort, customPositions: customPositions, editStats: editStats)
+        }
         let passing = filter.isActive || scope != nil
-            ? shown.filter { record in
+            ? sorted.filter { record in
                 let isEdited = record.id.map(edited.contains) ?? false
                 let keywords = record.id.flatMap { index[$0] } ?? []
                 return (scope?.includes(record, isEdited: isEdited, keywords: keywords, now: now) ?? true)
                     && (!filter.isActive || filter.matches(record, isEdited: isEdited, keywords: keywords, context: context))
             }
-            : shown
-        let next = StackLayout.arrange(passing.sorted(by: sort, customPositions: customPositions, editStats: editStats),
-                                       memberships: stackMemberships)
+            : sorted
+        let next = StackLayout.arrange(passing, memberships: stackMemberships)
         if next != visibleImages {
             if !next.elementsEqual(visibleImages, by: { $0.id == $1.id }) {
                 visibleListVersion += 1
@@ -332,11 +369,15 @@ public final class Library: ObservableObject {
         var updated = images
         var changed = false
         var reorder = false
+        // Once, not per record: the scope gathers facts from the whole
+        // folder (its members, the photos with virtual copies), and asking
+        // for it per changed record made rating many photos O(n²).
+        let scope = collections.activeScope
         for index in updated.indices {
             guard let id = updated[index].id, let record = fresh[id], record != updated[index] else { continue }
             if filter.dependsOnChange(from: updated[index], to: record)
                 || sort.dependsOnChange(from: updated[index], to: record)
-                || collections.activeScope?.dependsOnChange(from: updated[index], to: record) == true {
+                || scope?.dependsOnChange(from: updated[index], to: record) == true {
                 reorder = true
             }
             updated[index] = record
@@ -368,7 +409,25 @@ public final class Library: ObservableObject {
         Array(Set(images.compactMap(\.lens))).sorted()
     }
     public var availableKeywords: [String] {
-        Array(keywordIndex.values.reduce(into: Set<String>()) { $0.formUnion($1) }).sorted()
+        derived.value(\.availableKeywords, version: keywordsVersion) {
+            Array(keywordIndex.values.reduce(into: Set<String>()) { $0.formUnion($1) }).sorted()
+        }
+    }
+
+    /// Every photo's search text (`LibraryFilter.searchHaystack`) by id,
+    /// built once per change of the images or keywords rather than for
+    /// every photo at every keystroke in the search field.
+    func searchHaystacks() -> [Int64: String] {
+        derived.value(\.searchHaystacks, version: imagesVersion, keywordsVersion) {
+            let index = keywordIndex
+            var result: [Int64: String] = [:]
+            result.reserveCapacity(images.count)
+            for record in images {
+                guard let id = record.id else { continue }
+                result[id] = LibraryFilter.searchHaystack(record, keywords: index[id] ?? [])
+            }
+            return result
+        }
     }
     /// Every Finder tag in the folder, by name, each in the colour its
     /// first file shows it in.
