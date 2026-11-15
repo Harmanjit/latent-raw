@@ -96,6 +96,9 @@ struct ContentView: View {
     @State private var dustExpanded = false
     @State private var touchUpExpanded = false
     @State private var localAdjustmentsExpanded = false
+    /// Develop was the last image mode, so its panel stays built in
+    /// Library (`keepsDevelopPanel`).
+    @State private var developPanelKept = false
     @State private var compareRecord: ImageRecord?
     /// The photo selected before this one, for Previous.
     @State private var previousPhoto = PreviousPhoto()
@@ -145,6 +148,14 @@ struct ContentView: View {
                 set: { if !fullScreen.isActive { sidebarVisible = $0 != .detailOnly } })
     }
 
+    /// Develop's image area and panel are in the window: in Develop, and
+    /// hidden in Library after Develop (unless the second display's Loupe
+    /// shows, when the editor follows the grid and the hidden panel would
+    /// redraw for every photo).
+    private var keepsDevelopPanel: Bool {
+        mode == .develop || (mode == .library && developPanelKept && !secondDisplay.isShowing)
+    }
+
     private var showsFilmstrip: Bool {
         filmstripVisible && (mode == .loupe || mode == .develop) && library.folderURL != nil && !fullScreen.isActive
     }
@@ -155,6 +166,26 @@ struct ContentView: View {
                 if !fullScreen.isActive {
                     libraryPanel
                     Divider()
+                }
+                ZStack {
+                // Develop's side stays built, hidden, while the grid shows
+                // (plan fix #32): switching back then doesn't rebuild the
+                // panel's hundreds of controls. The image area itself goes,
+                // so nothing hidden draws or reports a size to the editor.
+                if keepsDevelopPanel {
+                    HStack(spacing: 0) {
+                        if mode == .develop {
+                            imageArea
+                        } else {
+                            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        if !fullScreen.isActive {
+                            Divider()
+                            adjustmentPanel
+                                .frame(width: 280)
+                        }
+                    }
+                    .modifier(KeptAlivePane(hidden: mode != .develop))
                 }
                 switch mode {
                 case .library:
@@ -183,12 +214,8 @@ struct ContentView: View {
                     SurveyView(survey: survey, library: library,
                                onRemove: surveyRemove, onSelectionChange: surveyFollowSelection)
                 case .develop:
-                    imageArea
-                    if !fullScreen.isActive {
-                        Divider()
-                        adjustmentPanel
-                            .frame(width: 280)
-                    }
+                    EmptyView()
+                }
                 }
             }
             if showsFilmstrip {
@@ -799,6 +826,17 @@ struct ContentView: View {
         keepOpenedFileOnModeChange = false
         updateCompareLink()
         if fullScreen.isActive, !FullScreenImagePolicy.keepsFullScreen(in: mode) { fullScreen.leave() }
+        if mode == .develop {
+            developPanelKept = true
+        } else if mode != .library {
+            developPanelKept = false
+        }
+        if old == .develop, mode == .library,
+           let window = NSApp.keyWindow, let editor = window.firstResponder as? NSTextView, editor.isFieldEditor {
+            // A value being typed in the panel, which now stays built
+            // while hidden: done with, as when the panel went away.
+            window.makeFirstResponder(nil)
+        }
         if old == .develop {
             model.flushPendingSave()
             // Loupe and Compare share the viewport; a click there must
@@ -1952,7 +1990,8 @@ struct ContentView: View {
         ScrollView {
             ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 20) {
-                NavigatorSection(model: model)
+                // Not while the panel is hidden in Library: it draws.
+                if mode == .develop { NavigatorSection(model: model) }
                 ScopePanel(model: model)
 
                 if let title = model.imageTitle {
@@ -2636,5 +2675,19 @@ private struct CommandContextModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content.focusedSceneValue(\.commandContext, context())
+    }
+}
+
+/// Develop's side while it is kept built but hidden (plan fix #32): not
+/// seen, not clickable, not in the key-view loop, not read by VoiceOver.
+private struct KeptAlivePane: ViewModifier {
+    let hidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(hidden ? 0 : 1)
+            .allowsHitTesting(!hidden)
+            .accessibilityHidden(hidden)
+            .disabled(hidden)
     }
 }
