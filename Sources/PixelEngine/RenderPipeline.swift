@@ -774,6 +774,10 @@ public final class RenderPipeline {
         if let cachedHealed {
             colourInput = cachedHealed
         } else {
+            // Every texture stages 3 to 5 write in this render: an entry
+            // still pointing at one of them would hand out these pixels
+            // under its own, older key.
+            var written: [MTLTexture] = []
             // Stage 3: neural denoise. Blend the session's cached full-frame
             // result in, re-binned and re-white-balanced to match this render.
             // Never for a linear source (`ImageSession.supportsAIDenoise`): an
@@ -783,6 +787,7 @@ public final class RenderPipeline {
                                                  denoised: denoised, strength: parameters.aiDenoise,
                                                  multipliers: multipliers, renderInfo: sourceInfo,
                                                  outputRole: displayRole == .display ? .aiDenoised : .aiDenoisedPreview)
+                written.append(colourInput)
             }
 
             // Stage 4: noise reduction, in camera space, before the matrix.
@@ -790,7 +795,7 @@ public final class RenderPipeline {
                 // colourInput, not cameraRGB: it may already carry the AI denoise blend.
                 colourInput = try applyDenoise(session: session, cmdBuffer: cmdBuffer,
                                                input: colourInput, parameters: parameters,
-                                               binSpan: binSpan)
+                                               binSpan: binSpan, written: &written)
             }
 
             // Stage 5: spot removal, in camera space, before the lens stage
@@ -807,12 +812,16 @@ public final class RenderPipeline {
                 colourInput = try applyHeal(session: session, cmdBuffer: cmdBuffer, input: colourInput,
                                             patches: activeHeals, redEyes: activeRedEyes, cameraToWorking: cameraToWorking,
                                             renderInfo: sourceInfo, binSpan: binSpan, preview: displayRole != .display)
-                // Only a texture the heal stage wrote is worth keeping: it
-                // has its own role, so nothing but a later heal render
-                // overwrites it, and `storeHealed` evicts that entry then.
-                // A denoised-only result lives in a role other renders
-                // reuse, and the demosaic alone is the stage cache's job.
-                session.storeHealed(colourInput, for: healKey)
+                written.append(colourInput)
+            }
+            // Kept whenever a stage ran, noise reduction alone included,
+            // so an exposure tick with noise reduction on skips it
+            // (docs/Performance-Plan.md fix 5). The demosaic alone is the
+            // stage cache's job. A pooled texture is only trustworthy
+            // until the next render writes it, so the store first evicts
+            // every entry pointing at a texture this render wrote.
+            if colourInput !== cameraRGB {
+                session.storeHealed(colourInput, for: healKey, overwriting: written)
             }
         }
         renderInfo = renderInfo.markingHealCached(cachedHealed != nil)
@@ -1483,11 +1492,13 @@ public final class RenderPipeline {
 
     // MARK: - Detail stages
 
+    /// `written` gains every texture the stage writes, for the heal cache.
     private func applyDenoise(session: ImageSession, cmdBuffer: MTLCommandBuffer,
                               input: MTLTexture, parameters: EditParameters,
-                              binSpan: Float) throws -> MTLTexture {
+                              binSpan: Float, written: inout [MTLTexture]) throws -> MTLTexture {
         let output = try session.texture(width: input.width, height: input.height,
                                          pixelFormat: .rgba16Float, role: .denoised)
+        written.append(output)
         guard let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             throw RenderError.commandBufferFailed
         }
@@ -1509,8 +1520,10 @@ public final class RenderPipeline {
         encoder.endEncoding()
         // Contrast and Smoothness, a second pass only when either is on.
         if parameters.noiseDetail.wantsRefinePass {
-            return try refineDenoise(session: session, cmdBuffer: cmdBuffer, original: input, denoised: output,
-                                     parameters: parameters, binSpan: binSpan)
+            let refined = try refineDenoise(session: session, cmdBuffer: cmdBuffer, original: input, denoised: output,
+                                            parameters: parameters, binSpan: binSpan)
+            written.append(refined)
+            return refined
         }
         return output
     }

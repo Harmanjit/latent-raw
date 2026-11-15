@@ -208,17 +208,69 @@ final class HealCacheTests: XCTestCase {
         XCTAssertTrue(again.texture === second.texture, "one pooled texture for the role")
     }
 
-    /// Only a render that ran the heal stage stores anything: noise
-    /// reduction alone leaves a texture in a role other stages reuse, and
-    /// the demosaic alone is the stage cache's.
-    func testOnlyAHealedRenderIsStored() throws {
-        let (_, session, pipeline) = try openFixture()
+    /// Noise reduction alone is stored too (docs/Performance-Plan.md fix
+    /// 5), so an exposure tick with it on skips the pass; the demosaic
+    /// alone is the stage cache's, and the hit gives the same pixels.
+    func testNoiseReductionAloneIsStored() throws {
+        let (gpu, session, pipeline) = try openFixture()
+        XCTAssertFalse(try render(EditParameters(), session: session, pipeline: pipeline).cached)
+        XCTAssertFalse(try render(EditParameters(), session: session, pipeline: pipeline).cached, "nothing to serve")
+
         var denoised = EditParameters()
         denoised.denoiseLuminance = 0.5
-        for p in [EditParameters(), denoised] {
-            XCTAssertFalse(try render(p, session: session, pipeline: pipeline).cached)
-            XCTAssertFalse(try render(p, session: session, pipeline: pipeline).cached, "nothing to serve")
+        let miss = try render(denoised, session: session, pipeline: pipeline)
+        XCTAssertFalse(miss.cached)
+        let missPixels = try TextureReadback.float16Pixels(of: miss.texture, gpu: gpu)
+        var exposed = denoised
+        exposed.exposureEV = 0.7
+        XCTAssertTrue(try render(exposed, session: session, pipeline: pipeline).cached, "an exposure tick skips it")
+        let hit = try render(denoised, session: session, pipeline: pipeline)
+        XCTAssertTrue(hit.cached)
+        XCTAssertEqual(try TextureReadback.float16Pixels(of: hit.texture, gpu: gpu), missPixels, "same pixels")
+
+        // With Contrast or Smoothness the second pass is the stored one.
+        var refined = denoised
+        refined.noiseDetail.colourSmoothness = 0.6
+        XCTAssertFalse(try render(refined, session: session, pipeline: pipeline).cached)
+        XCTAssertTrue(try render(refined, session: session, pipeline: pipeline).cached)
+    }
+
+    /// A denoised-only entry points at the noise reduction's pooled
+    /// texture. A later render that runs noise reduction into that texture
+    /// on its way to a heal must evict the entry, though the texture it
+    /// stores is the heal's.
+    func testHealRenderEvictsTheDenoisedEntryWhoseTextureItOverwrote() throws {
+        let (gpu, session, pipeline) = try openFixture()
+        var denoised = EditParameters()
+        denoised.denoiseLuminance = 0.5
+        try render(denoised, session: session, pipeline: pipeline)
+        XCTAssertTrue(try render(denoised, session: session, pipeline: pipeline).cached)
+        let reference = try TextureReadback.float16Pixels(of: try render(denoised, session: session, pipeline: pipeline).texture, gpu: gpu)
+
+        var healedOther = base
+        healedOther.denoiseLuminance = 0.9   // writes the same noise reduction texture
+        XCTAssertFalse(try render(healedOther, session: session, pipeline: pipeline).cached)
+
+        let again = try render(denoised, session: session, pipeline: pipeline)
+        XCTAssertFalse(again.cached, "its texture now holds the other render's noise reduction")
+        XCTAssertEqual(try TextureReadback.float16Pixels(of: again.texture, gpu: gpu), reference)
+    }
+
+    /// The cache never holds more than its limit.
+    func testEntriesAreCapped() throws {
+        let (_, session, pipeline) = try openFixture(LinearFixtures.orientation6)
+        var p = EditParameters()
+        p.denoiseLuminance = 0.5
+        // Regions of different sizes: their own pooled textures, their own keys.
+        for k in 0..<(ImageSession.healCacheLimit + 4) {
+            try render(p, scale: .region(x: 0, y: 0, width: 20 + k, height: 20), session: session, pipeline: pipeline)
+            XCTAssertLessThanOrEqual(session.healCacheCount, ImageSession.healCacheLimit)
         }
+        XCTAssertEqual(session.healCacheCount, ImageSession.healCacheLimit)
+        let newest = RenderScale.region(x: 0, y: 0, width: 20 + ImageSession.healCacheLimit + 3, height: 20)
+        XCTAssertTrue(try render(p, scale: newest, session: session, pipeline: pipeline).cached, "the newest stays")
+        XCTAssertFalse(try render(p, scale: .region(x: 0, y: 0, width: 20, height: 20), session: session, pipeline: pipeline).cached,
+                       "the oldest went")
     }
 
     /// Dropping the pooled textures drops the entries; dropping one pool's
