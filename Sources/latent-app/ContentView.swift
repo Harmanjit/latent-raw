@@ -107,6 +107,8 @@ struct ContentView: View {
     @State private var editingText = false
     /// Compare's panes zoom and pan together (see `EditorModel.linkedPane`).
     @State private var compareSyncsView = true
+    /// The Compare pane last clicked, which the Navigator follows.
+    @State private var compareActivePane = ComparePane.candidate
     /// The image Rename (F2) is naming, while its sheet is up.
     @State private var renaming: ImageRecord?
     /// The photos Rename with Template is naming, while its sheet is up.
@@ -166,6 +168,9 @@ struct ContentView: View {
                         ImageViewport(model: model, allowsTools: false, onStep: { _ = perform(.step($0)) },
                                       followsMirrorImageMode: true,
                                       showsLoupeOverlay: true)
+                            .overlay(alignment: .bottomTrailing) {
+                                if !fullScreen.isActive { FloatingNavigator(model: model) }
+                            }
                     }
                 case .compare:
                     compareArea
@@ -808,15 +813,25 @@ struct ContentView: View {
                 CaptionedPane(caption: ImageCaption(record: compareRecord, title: "Select")) {
                     if let compareModel {
                         ImageViewport(model: compareModel, mirror: model, allowsTools: false)
+                            .overlay(alignment: .bottomTrailing) {
+                                if compareActivePane == .select { FloatingNavigator(model: compareModel) }
+                            }
                     } else {
                         prefs.surroundColor
                     }
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Select pane")
+                .background(PaneMouseDownMonitor { if compareModel != nil { compareActivePane = .select } })
                 CaptionedPane(caption: ImageCaption(record: library.selectedImage, title: "Candidate")) {
                     ImageViewport(model: model, mirror: compareModel, allowsTools: false)
+                        .overlay(alignment: .bottomTrailing) {
+                            if compareActivePane.model(select: compareModel, candidate: model) === model {
+                                FloatingNavigator(model: model)
+                            }
+                        }
                 }
+                .background(PaneMouseDownMonitor { compareActivePane = .candidate })
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Candidate pane")
             }

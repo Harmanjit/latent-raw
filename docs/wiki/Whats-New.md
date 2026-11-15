@@ -2,6 +2,10 @@
 
 What has arrived since the 0.9.0 beta, by area. Each line says what the feature does and links to where it is described in full. For a guided tour of the most useful ones, try the tutorials: [Culling and Organising](Tutorial-Culling-and-Organising), [Editing](Tutorial-Editing) and [Printing and Sharing](Tutorial-Printing-and-Sharing).
 
+## Wave 4
+
+- **Navigator in Loupe, Compare and Survey**: View › Show Navigator floats the Navigator in the image's lower right corner, with Fit, Fill, 50%, 100% and 200% presets; in Compare it follows the pane you last clicked, in Survey the focused pane, and Sync carries its moves to the other panes. Develop's Navigator gains the same presets. See [Loupe, Compare and Survey](Library#loupe-compare-and-survey).
+
 ## Organising
 
 - **Collections, smart collections and collection sets** gather photos without moving them; smart ones fill themselves from rules such as "rated 4 or more with the keyword Brittany". See [Collections](Collections-and-Keywords#collections).

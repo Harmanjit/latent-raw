@@ -200,6 +200,8 @@ The left panel shows the selected image's name, rating, flag, colour label, keyw
 
 **Survey** (N, View > Survey, or Survey Selected in the grid's right-click menu) shows two to four selected images side by side, in a row or a grid, whichever shows each image larger. The pane with the blue outline has the keyboard: it is the selected image the left panel shows, and stars, flags, rotation, pasted settings and presets apply to it. Click a pane, or press ← and →, to move the outline. Point at a pane and click its ✕, or press /, to take it out of the survey; that also deselects it, and with one image left Survey becomes Loupe. With Sync on (the default), zooming or panning any pane shows the same part of the scene in every pane, even when the photos differ in size, crop or rotation; turn Sync off to look at each pane on its own. The zoom buttons and ⌘0, ⌘1, ⌘= and ⌘- act on the focused pane. Survey only shows images: to edit one, press D or Return.
 
+**Navigator.** View › Show Navigator puts a small Navigator in the lower right corner of the image in Loupe, Compare and Survey: the whole picture with the part in view outlined. Click or drag in it to move the view there when zoomed in, or use its Fit, Fill, 50%, 100% and 200% buttons; its ✕ hides it. In Compare it sits on, and works on, the pane you last clicked (the Candidate until you click the Select pane); in Survey it sits on the focused pane. With Sync on, what you do in it moves the other panes too, as zooming and panning there always do. It is the same setting as Develop's Navigator section, so showing it in one view shows it in the others. It is hidden in Full-Screen Image.
+
 ## Looking closely
 
 These work in Loupe and Develop; zooming and the magnifier work in Compare too.
