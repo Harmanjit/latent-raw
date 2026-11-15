@@ -772,7 +772,15 @@ final class BrushMaskSet {
                     continue
                 }
                 entry.wanted = nil
-                entry.inFlight = nil
+                // A deferring render leaves this slice current, so the
+                // render showing it is up to date: a redraw still running
+                // is no longer needed. A render that does not defer (the
+                // magnifier, masked scopes, export) only fills its own
+                // texture, while the editor's preview may still show the
+                // old pixels an earlier deferring render kept: the running
+                // redraw stays welcome, and its landing (`apply`) then asks
+                // the editor for the render that shows this slice.
+                if scheduler != nil { entry.inFlight = nil }
                 let drew = entry.raster.update(strokes: strokes, guide: guide) || entry.needsUpload
                 let refineKey = MaskEdgeRefineKey(element.refine, guide: guide)
                 if drew || refinedWith[element.id] != refineKey, let bytes = entry.raster.data {
@@ -822,8 +830,13 @@ final class BrushMaskSet {
                              scheduler: BrushRasterScheduler) {
         if let wanted = entry.wanted, wanted.strokes == strokes, wanted.guide?.id == guide?.id,
            entry.inFlight != nil { return }
+        // A redraw running with nothing wanted only stands for a slice a
+        // render that does not defer brought current (see `sync`): its
+        // bitmap is older than that, so start a fresh one, whose landing
+        // also asks for the render.
+        let runningIsWanted = entry.inFlight != nil && entry.wanted != nil
         entry.wanted = (strokes, guide)
-        if entry.inFlight == nil { startRedraw(entry, elementID: elementID, scheduler: scheduler) }
+        if !runningIsWanted { startRedraw(entry, elementID: elementID, scheduler: scheduler) }
     }
 
     private func startRedraw(_ entry: BrushSlot, elementID: UUID, scheduler: BrushRasterScheduler) {
@@ -836,13 +849,20 @@ final class BrushMaskSet {
 
     /// Takes a finished redraw. True when the caller should render again:
     /// the bitmap can now be brought to the wanted strokes without another
-    /// redraw, so the next sync uploads it. A result that is no longer
+    /// redraw, so the next sync uploads it, or a render that does not
+    /// defer already brought the slice current while the caller's last
+    /// render still shows the old pixels. A result that is no longer
     /// welcome (a newer render brought the slice up to date itself, the
     /// element is gone, the set was replaced) changes nothing.
     func apply(_ result: BrushRasterResult) -> Bool {
         let job = result.job
         guard job.setID == id, let entry = rasterizers[job.elementID], entry.inFlight == job.token else { return false }
         entry.inFlight = nil
+        // A render that does not defer already brought the slice current
+        // (and uploaded it) while this ran, but the editor's preview still
+        // shows the pixels the deferring render kept: nothing to adopt,
+        // only a render to ask for.
+        guard entry.wanted != nil else { return true }
         // Even a redraw for strokes since replaced is a full, consistent
         // bitmap to continue from; it is only uploaded once current.
         guard entry.raster.adopt(result.raster, strokes: job.strokes, guide: job.guide) else {

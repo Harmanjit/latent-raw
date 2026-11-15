@@ -88,4 +88,34 @@ final class BrushRedrawEditorTests: XCTestCase {
         try await waitForRedraw(model, session: session)
         XCTAssertEqual(try bytes(try XCTUnwrap(model.preview?.texture), queue: gpu.commandQueue), try onTheSpot(model))
     }
+
+    /// A render that does not defer (the magnifier's delayed render, the
+    /// masked scope measurement) runs after rerender() but before the
+    /// redraw lands: it brings the slice current in its own texture, and
+    /// the editor must still render again so the preview shows it.
+    func testRenderThatDoesNotDeferBeforeTheRedrawLandsStillUpdatesThePreview() async throws {
+        let savedHQ = ViewingSettings.shared.highQualityPreview
+        ViewingSettings.shared.highQualityPreview = false
+        defer { ViewingSettings.shared.highQualityPreview = savedHQ }
+        let model = try await openModel()
+        let session = try XCTUnwrap(model.session), gpu = try XCTUnwrap(model.gpuContext)
+        var p = model.parameters
+        p.locals = [LocalAdjustment(name: "brush", shape: .brush(strokes: strokes(feather: 0.3)), exposureEV: 1)]
+        model.parameters = p
+        model.rerender()
+        let before = try bytes(try XCTUnwrap(model.preview?.texture), queue: gpu.commandQueue)
+
+        model.parameters.locals[0].shape = .brush(strokes: strokes(feather: 0.8))
+        model.rerender()
+        XCTAssertTrue(session.hasPendingBrushRedraws)
+        // Synchronous on the main actor, so the redraw cannot land first.
+        let current = try onTheSpot(model)
+        // Booleans, so a failure does not print every pixel.
+        XCTAssertTrue(try bytes(try XCTUnwrap(model.preview?.texture), queue: gpu.commandQueue) == before,
+                      "the preview still shows the old mask")
+        XCTAssertTrue(current != before)
+        try await waitForRedraw(model, session: session)
+        XCTAssertTrue(try bytes(try XCTUnwrap(model.preview?.texture), queue: gpu.commandQueue) == current,
+                      "the editor rendered again and shows the current mask")
+    }
 }

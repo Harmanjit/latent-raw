@@ -143,9 +143,12 @@ final class BrushDeferredRedrawTests: XCTestCase {
         XCTAssertEqual(slice(set, index), try expected(device, strokes(5, feather: 0.8)))
     }
 
-    /// A render that may not defer (export, High Quality Preview) brings
-    /// the slice up to date itself; the redraw still running is dropped.
-    /// Undo then redo back to what is drawn drops it too.
+    /// A render that may not defer (export, the magnifier, masked scopes)
+    /// brings the slice up to date itself. The redraw still running is not
+    /// adopted, but its landing still asks for a render, since the
+    /// editor's preview shows the old pixels until one runs. A deferring
+    /// sync that finds the slice current, as after undo then redo back to
+    /// what is drawn, drops it outright.
     func testOnTheSpotSyncOvertakesARunningRedraw() throws {
         let device = try device()
         let set = try XCTUnwrap(BrushMaskSet(device: device, sensorWidth: sensor.width, sensorHeight: sensor.height))
@@ -158,7 +161,11 @@ final class BrushDeferredRedrawTests: XCTestCase {
         let running = jobs.take()
         _ = set.sync(locals: [local(id, three)], aiMasks: [:])
         XCTAssertEqual(slice(set, index), try expected(device, three))
-        XCTAssertFalse(set.apply(try XCTUnwrap(running[0].run())), "overtaken")
+        XCTAssertTrue(set.hasPendingRedraws, "the preview still shows the old mask")
+        XCTAssertTrue(set.apply(try XCTUnwrap(running[0].run())), "asks for the render that shows it")
+        XCTAssertFalse(set.hasPendingRedraws)
+        XCTAssertEqual(slice(set, index), try expected(device, three), "the old result is not adopted")
+        XCTAssertTrue(jobs.take().isEmpty)
         _ = set.sync(locals: [local(id, three)], aiMasks: [:], deferRedraws: jobs.scheduler)
         XCTAssertEqual(slice(set, index), try expected(device, three))
 
@@ -168,6 +175,33 @@ final class BrushDeferredRedrawTests: XCTestCase {
         _ = set.sync(locals: [local(id, three)], aiMasks: [:], deferRedraws: jobs.scheduler)  // undo again: current
         XCTAssertFalse(set.hasPendingRedraws)
         XCTAssertFalse(set.apply(try XCTUnwrap(redo[0].run())))
+        XCTAssertEqual(slice(set, index), try expected(device, three))
+    }
+
+    /// A render that does not defer brings the slice current while a
+    /// redraw runs, then the strokes change again: a fresh redraw starts
+    /// at once (the running one's bitmap is older than the slice), and
+    /// only its result is adopted.
+    func testRedrawAfterAnOnTheSpotSyncStartsAfresh() throws {
+        let device = try device()
+        let set = try XCTUnwrap(BrushMaskSet(device: device, sensorWidth: sensor.width, sensorHeight: sensor.height))
+        let jobs = Jobs()
+        let id = UUID()
+        let five = strokes(5), four = Array(five.prefix(4)), three = Array(five.prefix(3))
+        let index = try XCTUnwrap(set.sync(locals: [local(id, five)], aiMasks: [:], deferRedraws: jobs.scheduler)[id])
+
+        _ = set.sync(locals: [local(id, four)], aiMasks: [:], deferRedraws: jobs.scheduler)
+        let first = jobs.take()
+        _ = set.sync(locals: [local(id, four)], aiMasks: [:])   // the magnifier, say
+        _ = set.sync(locals: [local(id, three)], aiMasks: [:], deferRedraws: jobs.scheduler)
+        let second = jobs.take()
+        XCTAssertEqual(second.count, 1)
+        XCTAssertEqual(second[0].strokes, three)
+        XCTAssertEqual(slice(set, index), try expected(device, four))
+        XCTAssertFalse(set.apply(try XCTUnwrap(first[0].run())), "superseded")
+        XCTAssertTrue(set.apply(try XCTUnwrap(second[0].run())))
+        _ = set.sync(locals: [local(id, three)], aiMasks: [:], deferRedraws: jobs.scheduler)
+        XCTAssertFalse(set.hasPendingRedraws)
         XCTAssertEqual(slice(set, index), try expected(device, three))
     }
 
