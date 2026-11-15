@@ -715,7 +715,7 @@ public final class Library: ObservableObject {
     /// Starts a pass over every stale thumbnail. `urgent` names photos the
     /// user is waiting to see (their edits just changed in bulk): they go
     /// first, and the pass runs at High priority (plan #13).
-    func startThumbnailGeneration(urgent: some Collection<String> = [String]()) {
+    func startThumbnailGeneration(urgent: [String] = []) {
         guard let catalog else { return }
         if !urgent.isEmpty {
             let changed = Set(urgent).subtracting(urgentThumbnailRelPaths)
