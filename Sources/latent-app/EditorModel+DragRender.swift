@@ -112,4 +112,14 @@ extension EditorModel {
         }
         return max(wantedPreviewQuads, Self.analysisQuads)
     }
+
+    /// What a render on screen asks for: the display's output, with the
+    /// coarse blurs on a drag tick when the edit has any to coarsen
+    /// (fix 25), so a render that would come out the same isn't later
+    /// redone as "settling".
+    func draftOutput(_ draft: Bool) -> RenderOutput {
+        var output = displayOutput
+        output.coarseBlurs = draft && RenderPipeline.coarseBlursApply(to: renderParameters)
+        return output
+    }
 }

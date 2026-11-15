@@ -223,16 +223,17 @@ extension EditorModel {
     func renderPreview(session: ImageSession, pipeline: RenderPipeline, draft: Bool) throws -> String {
         let wanted = wantedPreviewQuads
         let quads = draft ? (wantsTile ? draftBackdropQuads : draftPreviewQuads) : wanted
+        let output = draftOutput(draft)
         var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: false)
         let rendered = try pipeline.render(session, scale: .binned(quads: quads),
-                                            parameters: renderParameters, output: displayOutput,
+                                            parameters: renderParameters, output: output,
                                             info: &info)
         var layer = PresentLayer(texture: rendered, coverage: info.sensorRect,
                                  headroom: displayOutput.headroom)
         if displayOutput.rawClipMask { layer.rawClipMask = session.rawClipMask(preview: true) }
         preview = layer
         previewQuads = quads
-        dragRender.previewIsDraft = quads != wanted
+        dragRender.previewIsDraft = quads != wanted || output.coarseBlurs
 
         // Scopes always describe the whole image, whatever's on screen —
         // so they come from a small whole-image render, never from a
@@ -261,16 +262,17 @@ extension EditorModel {
     @discardableResult
     private func renderTile(session: ImageSession, pipeline: RenderPipeline,
                             region: (x: Int, y: Int, width: Int, height: Int), draft: Bool) throws -> String {
+        let output = draftOutput(draft)
         var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: true)
         let rendered = try pipeline.render(
             session,
             scale: .region(x: region.x, y: region.y, width: region.width, height: region.height),
-            parameters: renderParameters, output: displayOutput, info: &info)
+            parameters: renderParameters, output: output, info: &info)
         var layer = PresentLayer(texture: rendered, coverage: info.sensorRect, inset: Self.tileInset,
                                  headroom: displayOutput.headroom)
         if displayOutput.rawClipMask { layer.rawClipMask = session.rawClipMask(preview: false) }
         tile = layer
-        dragRender.tileIsDraft = false
+        dragRender.tileIsDraft = output.coarseBlurs
         // Past the view region the tile can hold a patch that reads outside
         // it (it wasn't needed for the view), which a pan must not reveal.
         tileHealedCoverage = HealPatch.isSelfContained(info.sensorRect, patches: renderParameters.allHealPatches,

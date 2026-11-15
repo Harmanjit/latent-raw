@@ -151,4 +151,43 @@ final class DragRenderTests: XCTestCase {
         XCTAssertEqual(model.previewQuads, SecondaryPreview.previewQuads(mainZoom: nil, secondaryZoom: secondary))
         XCTAssertFalse(model.preview?.texture === model.analysisTexture)
     }
+
+    // MARK: - Coarse blurs (fix 25)
+
+    /// With presence on, a drag tick's tile takes the coarse blurs too,
+    /// and the settle render puts back exactly the full tile.
+    func testDragTileTakesCoarseBlursAndSettlesToTheFullTile() async throws {
+        let model = try await openModel()
+        model.parameters.clarity = 0.4
+        model.toggleZoom(at: CGPoint(x: 1280, y: 800))
+        model.rerenderForViewport()
+        model.resetDragRender()
+        model.parameters.exposureEV = 0.2
+        XCTAssertFalse(model.dragRender.tileIsDraft)
+        model.parameters.exposureEV = 0.3
+        XCTAssertTrue(model.dragRender.tileIsDraft)
+        let gpu = try await GPUContext.shared()
+        let draft = try TextureReadback.float16Pixels(of: try XCTUnwrap(model.tile?.texture), gpu: gpu)
+
+        model.settleDragRender()
+        XCTAssertFalse(model.dragRender.tileIsDraft)
+        XCTAssertFalse(model.dragRender.previewIsDraft)
+        let settled = try TextureReadback.float16Pixels(of: try XCTUnwrap(model.tile?.texture), gpu: gpu)
+        XCTAssertNotEqual(draft, settled)
+        model.resetDragRender()
+        model.rerender()
+        XCTAssertEqual(try TextureReadback.float16Pixels(of: try XCTUnwrap(model.tile?.texture), gpu: gpu), settled)
+    }
+
+    /// Without anything to blur a drag tick's tile is already the full one,
+    /// so nothing is redone when the drag stops.
+    func testNoBlursMeansNoDraftTile() async throws {
+        let model = try await openModel()
+        model.toggleZoom(at: CGPoint(x: 1280, y: 800))
+        model.rerenderForViewport()
+        model.resetDragRender()
+        model.parameters.exposureEV = 0.2
+        model.parameters.exposureEV = 0.3
+        XCTAssertFalse(model.dragRender.tileIsDraft)
+    }
 }

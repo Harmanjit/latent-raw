@@ -432,6 +432,12 @@ public struct RenderOutput: Sendable, Equatable {
     /// Work out the tone equalizer's mask even while every band is at 0,
     /// for its panel's histogram and the readout. Changes no pixel.
     public var toneEqualizerAnalysis = false
+    /// A drag tick on the viewport: presence and the local detail stage
+    /// take their ~4 px and frame-wide blurs from a coarser copy
+    /// (`RenderPipeline.coarseBlurSigma`), slightly softer and much
+    /// cheaper. The full render follows when the drag stops; a file, the
+    /// goldens and the high-quality preview never set it.
+    public var coarseBlurs = false
 
     public init(space: ColorKit.OutputSpace, headroom: Float = 1, encoded: Bool = true,
                 toneMapped: Bool = true) {
@@ -468,6 +474,7 @@ public struct RenderOutput: Sendable, Equatable {
             && a.depthVisualisation == b.depthVisualisation
             && a.hueIsolation == b.hueIsolation
             && a.gradingRangePreview == b.gradingRangePreview
+            && a.coarseBlurs == b.coarseBlurs
             && a.toneEqualizerMaskView == b.toneEqualizerMaskView
             && a.toneEqualizerAnalysis == b.toneEqualizerAnalysis
     }
@@ -1282,6 +1289,30 @@ public final class RenderPipeline {
 
     /// Gaussian taps up to 65 wide (sigma ≤ ~10). Larger blurs run on a
     /// downsampled copy instead of a wider kernel.
+    /// The largest sigma a blur runs at before it downsamples first: 10
+    /// output pixels normally, 2.5 for the medium and large blurs while
+    /// `RenderOutput.coarseBlurs` is set (the ~1 px blur, which carries
+    /// Texture, never coarsens).
+    static let fullBlurSigma: Float = 10
+    static let coarseBlurSigma: Float = 2.5
+
+    /// How far a blur at `sigma` downsamples first: a power of two up to
+    /// 16, until the sigma left is at most `limit`.
+    static func blurDownsampleFactor(sigma: Float, limit: Float) -> Int {
+        var factor = 1
+        while sigma / Float(factor) > limit, factor < 16 { factor *= 2 }
+        return factor
+    }
+
+    /// Whether `RenderOutput.coarseBlurs` changes anything for this edit:
+    /// presence, or a mask's local detail stage that blurs. Without
+    /// either, a drag render is already the full one.
+    public static func coarseBlursApply(to p: EditParameters) -> Bool {
+        if p.wantsLocalContrast { return true }
+        let locals = Array(p.locals.prefix(LocalAdjustment.maximumCount))
+        return wantsLocalDetail(p) && LocalDetailStage.needsBlurs(locals)
+    }
+
     static func wideGaussianWeights(sigma: Float) -> [Float] {
         let s = max(sigma, 0.3)
         let half = min(Int((3 * s).rounded(.up)), 32)
@@ -1323,9 +1354,8 @@ public final class RenderPipeline {
         // 2. Blur at a given sigma (in output pixels), downsampling first
         //    when the kernel would be too wide.
         func blurred(sigma: Float, role: ImageSession.TextureRole,
-                     scratch: ImageSession.TextureRole) throws -> MTLTexture {
-            var factor = 1
-            while sigma / Float(factor) > 10, factor < 16 { factor *= 2 }
+                     scratch: ImageSession.TextureRole, limit: Float = RenderPipeline.fullBlurSigma) throws -> MTLTexture {
+            let factor = Self.blurDownsampleFactor(sigma: sigma, limit: limit)
             var source = pair
             var bw = w, bh = h
             if factor > 1 {
@@ -1354,8 +1384,10 @@ public final class RenderPipeline {
 
         // Scales in sensor pixels, converted to this render's pixels.
         let small = try blurred(sigma: 1.0 / binSpan, role: .presenceSmall, scratch: .presenceDownA)
-        let medium = try blurred(sigma: 4.0 / binSpan, role: .presenceMedium, scratch: .presenceDownB)
-        let large = try blurred(sigma: 0.012 * shortSide / binSpan, role: .presenceLarge, scratch: .presenceDownC)
+        let limit = output.coarseBlurs ? Self.coarseBlurSigma : Self.fullBlurSigma
+        let medium = try blurred(sigma: 4.0 / binSpan, role: .presenceMedium, scratch: .presenceDownB, limit: limit)
+        let large = try blurred(sigma: 0.012 * shortSide / binSpan, role: .presenceLarge, scratch: .presenceDownC,
+                                limit: limit)
 
         // 3. Apply.
         let result = try session.texture(width: w, height: h, pixelFormat: .rgba16Float, role: outputRole)
