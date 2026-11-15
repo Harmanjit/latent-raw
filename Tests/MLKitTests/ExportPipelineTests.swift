@@ -49,6 +49,35 @@ final class ExportPipelineTests: XCTestCase {
         }
     }
 
+    /// A slow photo at the front doesn't let finished ones pile up behind
+    /// it: at most `2 * workers` photos are ever started but not committed
+    /// (a waiting combined-PDF page holds a whole decoded image).
+    func testSlowFirstPhotoBoundsWaitingResults() async {
+        for workers in [1, 2, 3] {
+            var next = 0
+            var committed: [Int] = []
+            var peakUncommitted = 0
+            await ExportPipeline.run(
+                workers: workers,
+                next: { () async -> ExportPipeline.Step<Int, Int>? in
+                    guard next < 20 else { return nil }
+                    defer { next += 1 }
+                    peakUncommitted = max(peakUncommitted, next + 1 - committed.count)
+                    return .run(next)
+                },
+                work: { n in
+                    try? await Task.sleep(for: .milliseconds(n == 0 ? 300 : 2))
+                    return n
+                },
+                commit: { committed.append($0) })
+            XCTAssertEqual(committed, Array(0..<20), "\(workers) workers")
+            XCTAssertLessThanOrEqual(peakUncommitted, 2 * workers, "\(workers) workers")
+            if workers > 1 {
+                XCTAssertEqual(peakUncommitted, 2 * workers, "others ran ahead of the slow photo")
+            }
+        }
+    }
+
     /// A result can send its photo round again (a name taken meanwhile);
     /// it is committed once, in its place.
     func testRetryRunsThePhotoAgainInItsPlace() async {

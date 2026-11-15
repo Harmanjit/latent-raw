@@ -16,6 +16,14 @@ import Foundation
 /// serial run. Only `work` (decode, render, encode, write) runs on other
 /// threads, `workers` at a time.
 ///
+/// Photos that have finished but wait for an earlier one still hold their
+/// result (for a combined PDF, a whole decoded page), so they count against
+/// the limit too: at most `workers` photos are working and at most
+/// `2 * workers` are started but not yet committed. A slow photo at the
+/// front (AI Denoise) lets the others run `workers` photos ahead of it to
+/// keep the GPU busy, then the run waits for it instead of piling up
+/// results without bound.
+///
 /// Cancelling the calling task stops new photos from starting (`next` sees
 /// it and returns nil); photos already started run to the end, so a file
 /// is never left half-written, and are committed before `run` returns.
@@ -68,10 +76,12 @@ public enum ExportPipeline {
         }
 
         while true {
-            // Hand out photos while a worker is free. A held run (paused)
+            // Hand out photos while a worker is free and not too many
+            // finished ones wait for an earlier photo. A held run (paused)
             // takes none while others are under way, and waits in `next`
             // (which waits out the pause) only once they're all committed.
-            while !exhausted, running < workers, running == 0 || !hold() {
+            while !exhausted, running < workers, running + ready.count < 2 * workers,
+                  running == 0 || !hold() {
                 guard let step = await next() else { exhausted = true; break }
                 let sequence = admitted
                 admitted += 1
