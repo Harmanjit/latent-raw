@@ -742,6 +742,11 @@ struct ContentView: View {
                         throw error
                     }
                 },
+                // Asked again once decoded: a rotation made meanwhile
+                // reached only the catalog.
+                currentUserRotation: {
+                    library.selectedImage.flatMap { $0.id == record.id ? $0.userRotation : nil } ?? record.userRotation
+                },
                 // Another folder may have opened meanwhile. The record and
                 // its id belong to the old catalog; opened now, its edits
                 // would be saved onto whatever photo has that id in the new

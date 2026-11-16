@@ -88,6 +88,10 @@ extension EditorModel {
     /// and in the editor, with, if `placeholder` is set (Loupe), the
     /// camera's embedded JPEG over it (#18).
     ///
+    /// `readEdit` runs twice, beside the decode and again once it is
+    /// done, so that an edit stored meanwhile is the one applied;
+    /// `currentUserRotation`, if given, is likewise asked at that point.
+    ///
     /// Latest wins: an open, a synchronous `open` or `closeImage` started
     /// meanwhile makes this one return `.superseded` without touching
     /// anything, as does `isCurrent` turning false (the selection moved on
@@ -96,6 +100,7 @@ extension EditorModel {
     func open(url: URL, userRotation: Int = 0, catalogImageID: Int64?,
               placeholder: Bool = false,
               readEdit: @MainActor () async throws -> String?,
+              currentUserRotation: (@MainActor () -> Int)? = nil,
               isCurrent: @escaping @MainActor () -> Bool = { true }) async -> OpenOutcome {
         // Already passed by (a held arrow key): don't disturb the newer
         // open's decode.
@@ -161,9 +166,23 @@ extension EditorModel {
             return .failed
         }
         guard stillWanted() else { abandon(); return .superseded }
+        // Read the edit again: a Paste Settings, preset or undo stored
+        // during the decode went only to the catalog, since the editor
+        // still held the previous photo's id; the first read would put
+        // the older edit in place and the next save would overwrite the
+        // paste. The same for a rotation. The first read still served the
+        // placeholder's framing and let the decode start beside it.
+        let latestEdit: String?
+        do {
+            latestEdit = try await readEdit()
+        } catch {
+            abandon()
+            return .editUnreadable
+        }
+        guard stillWanted() else { abandon(); return .superseded }
         applied.done = true
-        apply(file, url: url, userRotation: userRotation, catalogImageID: catalogImageID,
-              editStackJSON: editStackJSON, gpu: gpu)
+        apply(file, url: url, userRotation: currentUserRotation?() ?? userRotation, catalogImageID: catalogImageID,
+              editStackJSON: latestEdit, gpu: gpu)
         return hasImage ? .opened : .failed
     }
 
