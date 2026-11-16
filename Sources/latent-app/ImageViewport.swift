@@ -10,7 +10,7 @@ import PixelEngine
 /// here, since replaying this pane's gesture there drifts apart as soon
 /// as the two images differ in size, crop or rotation.
 struct ImageViewport: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject private var prefs = AppPreferences.shared
     var mirror: EditorModel? = nil
     /// Develop only. Viewing modes pass false so a click can never edit.

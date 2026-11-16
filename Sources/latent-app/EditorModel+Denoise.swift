@@ -111,7 +111,7 @@ extension EditorModel {
 
     /// Slider binding: moving it off zero with no result yet starts the run.
     var aiDenoiseStrength: Float {
-        get { parameters.aiDenoise }
+        get { parameter(\.aiDenoise) }
         set {
             parameters.aiDenoise = newValue
             if newValue > 0 { regenerateAIDenoiseIfNeeded() }

@@ -7,7 +7,10 @@ import PixelEngine
 /// the control does.
 struct DetailSliderRow: View {
     let title: String
-    @Binding var value: Float
+    /// Made in this row's body rather than the panel's: making a binding
+    /// reads its value, and the panel would then redraw, and rebuild every
+    /// row, whenever this one slider moves (plan fix #23).
+    private let binding: () -> Binding<Float>
     let range: ClosedRange<Float>
     var format: String = "%.2f"
     var scale: Float = 1
@@ -18,17 +21,32 @@ struct DetailSliderRow: View {
     var label: String? = nil
     var onPress: ((_ pressed: Bool, _ option: Bool) -> Void)? = nil
 
+    init(title: String, value: @autoclosure @escaping () -> Binding<Float>, range: ClosedRange<Float>,
+         format: String = "%.2f", scale: Float = 1, defaultValue: Float = 0, help: String,
+         label: String? = nil, onPress: ((_ pressed: Bool, _ option: Bool) -> Void)? = nil) {
+        self.title = title
+        self.binding = value
+        self.range = range
+        self.format = format
+        self.scale = scale
+        self.defaultValue = defaultValue
+        self.help = help
+        self.label = label
+        self.onPress = onPress
+    }
+
     var body: some View {
+        let value = binding()
         let shown = SliderValueFormat(printf: format, scale: scale)
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 // The field and slider are both named, so VoiceOver skips this.
                 Text(title).font(.subheadline).accessibilityHidden(true)
                 Spacer()
-                SliderValueField(value: $value, in: range, format: shown, label: label ?? title)
+                SliderValueField(value: value, in: range, format: shown, label: label ?? title)
             }
-            ResettableSlider(value: $value, in: range, label: label ?? title, format: shown, onPress: onPress) {
-                value = defaultValue
+            ResettableSlider(value: value, in: range, label: label ?? title, format: shown, onPress: onPress) {
+                value.wrappedValue = defaultValue
             }
             .help(help + " Double-click to reset.")
         }
@@ -51,13 +69,13 @@ struct DetailSubheading: View {
 /// The Detail panel: demosaic, sharpening (with Detail and Masking) and
 /// noise reduction (with Detail, Contrast and Smoothness).
 struct DetailPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Demosaicing only exists for a raw's mosaic.
             if !model.isRenderedImage {
-                Picker("Demosaic", selection: $model.parameters.demosaic) {
+                Picker("Demosaic", selection: model.parameterBinding(\.demosaic)) {
                     ForEach(DemosaicMethod.allCases, id: \.self) { method in
                         Text(method.displayName).tag(method)
                     }
@@ -73,19 +91,19 @@ struct DetailPanel: View {
             }
 
             DetailSubheading(title: "Sharpening")
-            DetailSliderRow(title: "Amount", value: $model.parameters.sharpenAmount, range: 0...2,
+            DetailSliderRow(title: "Amount", value: model.parameterBinding(\.sharpenAmount), range: 0...2,
                             help: "How strongly edges are sharpened. 0 is off.")
-            DetailSliderRow(title: "Radius", value: $model.parameters.sharpenRadius, range: 0.5...3,
+            DetailSliderRow(title: "Radius", value: model.parameterBinding(\.sharpenRadius), range: 0.5...3,
                             format: "%.1f px", defaultValue: 1.0,
                             help: "The size of the detail sharpened, in sensor pixels.")
-            DetailSliderRow(title: "Threshold", value: $model.parameters.sharpenThreshold, range: 0...0.1,
+            DetailSliderRow(title: "Threshold", value: model.parameterBinding(\.sharpenThreshold), range: 0...0.1,
                             format: "%.3f", defaultValue: 0.01,
                             help: "Detail fainter than this (noise, grain) is left unsharpened.")
-            DetailSliderRow(title: "Detail", value: $model.parameters.sharpenDetail, range: 0...1,
+            DetailSliderRow(title: "Detail", value: model.parameterBinding(\.sharpenDetail), range: 0...1,
                             format: "%.0f", scale: 100, defaultValue: SharpenRefinement.neutralDetail,
                             help: "Lower values hold back the bright and dark halos sharpening leaves along edges; 100 is plain unsharp masking.",
                             label: "Sharpening detail")
-            DetailSliderRow(title: "Masking", value: $model.parameters.sharpenMasking, range: 0...1,
+            DetailSliderRow(title: "Masking", value: model.parameterBinding(\.sharpenMasking), range: 0...1,
                             format: "%.0f", scale: 100, defaultValue: SharpenRefinement.neutralMasking,
                             help: "Higher values sharpen only edges, leaving smooth areas such as sky and skin alone. Hold Option while dragging to see the mask: white is sharpened.",
                             label: "Sharpening masking",
@@ -96,30 +114,30 @@ struct DetailPanel: View {
             }
 
             DetailSubheading(title: "Noise Reduction")
-            DetailSliderRow(title: "Luminance", value: $model.parameters.denoiseLuminance, range: 0...1,
+            DetailSliderRow(title: "Luminance", value: model.parameterBinding(\.denoiseLuminance), range: 0...1,
                             help: "Smooths brightness noise (the grainy speckle). 0 is off.")
-            DetailSliderRow(title: "Detail", value: $model.parameters.noiseDetail.luminanceDetail, range: 0...1,
+            DetailSliderRow(title: "Detail", value: model.parameterBinding(\.noiseDetail.luminanceDetail), range: 0...1,
                             format: "%.0f", scale: 100, defaultValue: 0.5,
                             help: "Higher keeps more fine detail from the luminance smoothing, at the cost of some noise.",
                             label: "Luminance noise detail")
-                .disabled(model.parameters.denoiseLuminance == 0)
-            DetailSliderRow(title: "Contrast", value: $model.parameters.noiseDetail.luminanceContrast, range: 0...1,
+                .disabled(model.parameter(\.denoiseLuminance) == 0)
+            DetailSliderRow(title: "Contrast", value: model.parameterBinding(\.noiseDetail.luminanceContrast), range: 0...1,
                             format: "%.0f", scale: 100,
                             help: "Puts back texture and local contrast the luminance smoothing flattened, without the noise.",
                             label: "Luminance noise contrast")
-                .disabled(model.parameters.denoiseLuminance == 0)
-            DetailSliderRow(title: "Colour", value: $model.parameters.denoiseColor, range: 0...1,
+                .disabled(model.parameter(\.denoiseLuminance) == 0)
+            DetailSliderRow(title: "Colour", value: model.parameterBinding(\.denoiseColor), range: 0...1,
                             help: "Removes coloured speckles. 0 is off.")
-            DetailSliderRow(title: "Detail", value: $model.parameters.noiseDetail.colourDetail, range: 0...1,
+            DetailSliderRow(title: "Detail", value: model.parameterBinding(\.noiseDetail.colourDetail), range: 0...1,
                             format: "%.0f", scale: 100, defaultValue: 0.5,
                             help: "Higher keeps thin coloured edges crisp; lower cleans colour noise harder.",
                             label: "Colour noise detail")
-                .disabled(model.parameters.denoiseColor == 0)
-            DetailSliderRow(title: "Smoothness", value: $model.parameters.noiseDetail.colourSmoothness, range: 0...1,
+                .disabled(model.parameter(\.denoiseColor) == 0)
+            DetailSliderRow(title: "Smoothness", value: model.parameterBinding(\.noiseDetail.colourSmoothness), range: 0...1,
                             format: "%.0f", scale: 100,
                             help: "Evens out larger blotches of colour (mottling) that the colour slider is too fine to reach.",
                             label: "Colour noise smoothness")
-                .disabled(model.parameters.denoiseColor == 0)
+                .disabled(model.parameter(\.denoiseColor) == 0)
             Text("Judge both at 100% zoom; the fit-to-window preview is scaled to match but hides fine grain.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -134,7 +152,7 @@ struct DetailPanel: View {
 /// three switches, Remove Chromatic Aberration, the manual sliders and
 /// defringe with its hue ranges and eyedropper.
 struct LensCorrectionsPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -145,16 +163,16 @@ struct LensCorrectionsPanel: View {
             // A rendered file has no lens profile corrections to apply.
             if !model.isRenderedImage {
                 profilePicker
-                Toggle("Distortion", isOn: $model.parameters.lensDistortion)
+                Toggle("Distortion", isOn: model.parameterBinding(\.lensDistortion))
                     .help("Straightens the lens's barrel or pincushion distortion, from the profile")
-                Toggle("Chromatic aberration", isOn: $model.parameters.lensTCA)
+                Toggle("Chromatic aberration", isOn: model.parameterBinding(\.lensTCA))
                     .help("Lines up red and blue with green using the profile's measurements")
-                Toggle("Vignetting", isOn: $model.parameters.lensVignetting)
+                Toggle("Vignetting", isOn: model.parameterBinding(\.lensVignetting))
                     .help("Brightens the corners the lens darkened, from the profile")
                 EmbeddedDNGCorrectionsToggle(model: model)
             }
             Toggle("Remove chromatic aberration (automatic)", isOn: Binding(
-                get: { model.parameters.autoCA != nil },
+                get: { model.parameter(\.autoCA) != nil },
                 set: { model.setRemoveChromaticAberration($0) }))
                 .help("Measures the colour fringes on this photo and lines up red and blue with green, without a profile. Replaces the profile's correction while on.")
                 .disabled(model.measuringChromaticAberration)
@@ -166,34 +184,34 @@ struct LensCorrectionsPanel: View {
             ManualTCASliders(model: model)
 
             DetailSubheading(title: "Manual")
-            DetailSliderRow(title: "Distortion", value: $model.parameters.manualDistortion, range: -0.1...0.1,
+            DetailSliderRow(title: "Distortion", value: model.parameterBinding(\.manualDistortion), range: -0.1...0.1,
                             format: "%+.3f", help: "Corrects distortion by hand: negative pulls a bulging (barrel) picture in.")
-            DetailSliderRow(title: "Vignetting", value: $model.parameters.manualVignetting, range: -1...1,
+            DetailSliderRow(title: "Vignetting", value: model.parameterBinding(\.manualVignetting), range: -1...1,
                             format: "%+.2f", help: "Brightens (positive) or darkens (negative) the corners of the whole frame.")
-            DetailSliderRow(title: "Midpoint", value: $model.parameters.manualVignettingMidpoint, range: 0...1,
+            DetailSliderRow(title: "Midpoint", value: model.parameterBinding(\.manualVignettingMidpoint), range: 0...1,
                             format: "%.0f", scale: 100, defaultValue: ManualVignettingShape.neutralMidpoint,
                             help: "How far in from the corners manual vignetting reaches: lower spreads it towards the centre.")
-                .disabled(model.parameters.manualVignetting == 0)
+                .disabled(model.parameter(\.manualVignetting) == 0)
 
             DetailSubheading(title: "Defringe")
-            DetailSliderRow(title: "Purple", value: $model.parameters.defringePurple, range: 0...1,
+            DetailSliderRow(title: "Purple", value: model.parameterBinding(\.defringePurple), range: 0...1,
                             help: "Removes purple and magenta fringes along high-contrast edges.")
-            HueRangeRow(title: "Purple hue", low: $model.parameters.defringeHues.purpleLow,
-                        high: $model.parameters.defringeHues.purpleHigh, limits: DefringeHueRanges.purpleLimits,
+            HueRangeRow(title: "Purple hue", low: model.parameterBinding(\.defringeHues.purpleLow),
+                        high: model.parameterBinding(\.defringeHues.purpleHigh), limits: DefringeHueRanges.purpleLimits,
                         reset: {
                             model.parameters.defringeHues.purpleLow = DefringeHueRanges.standard.purpleLow
                             model.parameters.defringeHues.purpleHigh = DefringeHueRanges.standard.purpleHigh
                         })
-                .disabled(model.parameters.defringePurple == 0)
-            DetailSliderRow(title: "Green", value: $model.parameters.defringeGreen, range: 0...1,
+                .disabled(model.parameter(\.defringePurple) == 0)
+            DetailSliderRow(title: "Green", value: model.parameterBinding(\.defringeGreen), range: 0...1,
                             help: "Removes green and cyan fringes along high-contrast edges.")
-            HueRangeRow(title: "Green hue", low: $model.parameters.defringeHues.greenLow,
-                        high: $model.parameters.defringeHues.greenHigh, limits: DefringeHueRanges.greenLimits,
+            HueRangeRow(title: "Green hue", low: model.parameterBinding(\.defringeHues.greenLow),
+                        high: model.parameterBinding(\.defringeHues.greenHigh), limits: DefringeHueRanges.greenLimits,
                         reset: {
                             model.parameters.defringeHues.greenLow = DefringeHueRanges.standard.greenLow
                             model.parameters.defringeHues.greenHigh = DefringeHueRanges.standard.greenHigh
                         })
-                .disabled(model.parameters.defringeGreen == 0)
+                .disabled(model.parameter(\.defringeGreen) == 0)
             Button {
                 if model.defringePickerActive { model.defringePickerActive = false } else { model.armDefringePicker() }
             } label: {
@@ -226,23 +244,23 @@ struct LensCorrectionsPanel: View {
                         Section(choices.fitting.isEmpty ? "All lenses" : "Other mounts") { lensMenu(choices.others) }
                     }
                 } label: {
-                    Text(model.parameters.lensProfile ?? "Automatic profile")
+                    Text(model.parameter(\.lensProfile) ?? "Automatic profile")
                         .lineLimit(1).truncationMode(.middle)
                 }
                 .menuStyle(.borderlessButton)
                 .help("Pick the lens profile by hand when the automatic match is wrong or missing")
                 .accessibilityLabel("Lens profile")
-                .accessibilityValue(model.parameters.lensProfile ?? "Automatic")
+                .accessibilityValue(model.parameter(\.lensProfile) ?? "Automatic")
             }
             let remembered = model.rememberedLensProfile
-            if model.parameters.lensProfile != nil || remembered != nil {
-                Button(model.parameters.lensProfile == nil ? "Forget Profile for This Lens"
+            if model.parameter(\.lensProfile) != nil || remembered != nil {
+                Button(model.parameter(\.lensProfile) == nil ? "Forget Profile for This Lens"
                                                            : "Use for All Photos From This Lens") {
                     model.rememberLensProfileForThisLens()
                 }
                 .controlSize(.small)
-                .disabled(model.parameters.lensProfile == remembered && model.parameters.lensProfile != nil)
-                .help(model.parameters.lensProfile == nil
+                .disabled(model.parameter(\.lensProfile) == remembered && model.parameter(\.lensProfile) != nil)
+                .help(model.parameter(\.lensProfile) == nil
                       ? "Go back to the automatic match for every photo from this camera and lens (\(remembered ?? ""))"
                       : "Remember this profile in the catalog for every photo from this camera and lens")
             }
@@ -321,50 +339,50 @@ struct HueRangeRow: View {
 
 /// The Effects panel: post-crop vignetting and grain.
 struct EffectsPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             DetailSubheading(title: "Post-Crop Vignetting")
-            Picker("Style", selection: $model.parameters.postCropVignette.style) {
+            Picker("Style", selection: model.parameterBinding(\.postCropVignette.style)) {
                 ForEach(PostCropVignette.Style.allCases, id: \.self) { Text($0.displayName).tag($0) }
             }
             .pickerStyle(.menu)
             .accessibilityLabel("Vignette style")
             .help("Highlight Priority works like exposure and keeps bright areas bright; Colour Priority changes brightness only and keeps colours as they are.")
-            DetailSliderRow(title: "Amount", value: $model.parameters.postCropVignette.amount, range: -1...1,
+            DetailSliderRow(title: "Amount", value: model.parameterBinding(\.postCropVignette.amount), range: -1...1,
                             format: "%+.0f", scale: 100,
                             help: "Darkens (negative) or lightens (positive) the edges of the cropped picture. 0 is off.")
             Group {
-                DetailSliderRow(title: "Midpoint", value: $model.parameters.postCropVignette.midpoint, range: 0...1,
+                DetailSliderRow(title: "Midpoint", value: model.parameterBinding(\.postCropVignette.midpoint), range: 0...1,
                                 format: "%.0f", scale: 100, defaultValue: 0.5,
                                 help: "How far in from the corners the vignette reaches; lower reaches closer to the centre.")
-                DetailSliderRow(title: "Roundness", value: $model.parameters.postCropVignette.roundness, range: -1...1,
+                DetailSliderRow(title: "Roundness", value: model.parameterBinding(\.postCropVignette.roundness), range: -1...1,
                                 format: "%+.0f", scale: 100,
                                 help: "Negative follows the crop's rectangle, 0 is an oval fitting the crop, positive becomes a circle.")
-                DetailSliderRow(title: "Feather", value: $model.parameters.postCropVignette.feather, range: 0...1,
+                DetailSliderRow(title: "Feather", value: model.parameterBinding(\.postCropVignette.feather), range: 0...1,
                                 format: "%.0f", scale: 100, defaultValue: 0.5,
                                 help: "How soft the vignette's edge is: 0 is a hard edge.")
-                DetailSliderRow(title: "Highlights", value: $model.parameters.postCropVignette.highlights, range: 0...1,
+                DetailSliderRow(title: "Highlights", value: model.parameterBinding(\.postCropVignette.highlights), range: 0...1,
                                 format: "%.0f", scale: 100,
                                 help: "When darkening, how much bright areas such as lights and sky keep their brightness.")
-                    .disabled(model.parameters.postCropVignette.amount >= 0)
+                    .disabled(model.parameter(\.postCropVignette.amount) >= 0)
             }
-            .disabled(!model.parameters.postCropVignette.isActive)
+            .disabled(!model.parameter(\.postCropVignette.isActive))
 
             DetailSubheading(title: "Grain")
-            DetailSliderRow(title: "Amount", value: $model.parameters.grain.amount, range: 0...1,
+            DetailSliderRow(title: "Amount", value: model.parameterBinding(\.grain.amount), range: 0...1,
                             format: "%.0f", scale: 100,
                             help: "Adds film-like grain. 0 is off. The pattern is fixed to this photo, so the export matches the screen.")
             Group {
-                DetailSliderRow(title: "Size", value: $model.parameters.grain.size, range: 0...1,
+                DetailSliderRow(title: "Size", value: model.parameterBinding(\.grain.size), range: 0...1,
                                 format: "%.0f", scale: 100, defaultValue: 0.25,
                                 help: "The size of each grain, relative to the picture.")
-                DetailSliderRow(title: "Roughness", value: $model.parameters.grain.roughness, range: 0...1,
+                DetailSliderRow(title: "Roughness", value: model.parameterBinding(\.grain.roughness), range: 0...1,
                                 format: "%.0f", scale: 100, defaultValue: 0.5,
                                 help: "Low gives smooth, even grain; high gives clumpier, irregular grain.")
             }
-            .disabled(!model.parameters.grain.isActive)
+            .disabled(!model.parameter(\.grain.isActive))
             Text("Judge grain at 100% zoom; zoomed out, the preview shows it softened as a smaller print would.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -378,7 +396,7 @@ struct EffectsPanel: View {
 /// While the defringe eyedropper is armed: a crosshair cursor over the
 /// image, and the click goes to the picker instead of panning.
 struct DefringePickerOverlay: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         GeometryReader { geo in

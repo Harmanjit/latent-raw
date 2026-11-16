@@ -152,7 +152,7 @@ extension EditorModel {
     /// The menu's current choice, nil for a custom setting.
     var whiteBalancePreset: WhiteBalancePreset? {
         let auto = autoWhiteBalance.flatMap { $0.url == sourceURL ? $0.balance : nil }
-        return WhiteBalancePreset.matching(parameters.whiteBalance, asShot: asShotWhiteBalance, auto: auto)
+        return WhiteBalancePreset.matching(parameter(\.whiteBalance), asShot: asShotWhiteBalance, auto: auto)
     }
 
     func applyWhiteBalancePreset(_ preset: WhiteBalancePreset) {
@@ -180,7 +180,7 @@ extension EditorModel {
 
     /// The Kelvin field beside the Temperature slider.
     var temperatureKelvinBinding: Binding<Float> {
-        Binding(get: { self.parameters.whiteBalance.temperature },
+        Binding(get: { self.parameter(\.whiteBalance.temperature) },
                 set: { kelvin in
                     let range = ColorKit.WhiteBalance.temperatureRange
                     self.parameters.whiteBalance.temperature = min(max(kelvin, range.lowerBound), range.upperBound)

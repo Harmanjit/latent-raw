@@ -59,7 +59,7 @@ extension EditorModel {
 /// selected mask under a name, add a saved one to this photo, and rename
 /// or delete them.
 struct MaskPresetsMenu: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var library: MaskPresetLibrary = .shared
     @State private var saving = false
     @State private var renaming: MaskPreset?

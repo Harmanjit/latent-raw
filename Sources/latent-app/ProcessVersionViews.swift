@@ -8,7 +8,7 @@ import PixelEngine
 /// uses (`ProcessVersion`). Choosing another version changes the photo's
 /// edit like any slider, with its own undo step.
 struct ProcessVersionMenu: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @AppStorage(ProcessUpdatePrompt.dontShowKey) private var dontShow = false
 
     var body: some View {
@@ -57,8 +57,12 @@ enum ProcessUpdatePrompt {
 /// photo in the filmstrip, to the current version; preview it first; and
 /// don't show it again.
 struct ProcessUpdatePromptModifier: ViewModifier {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let library: Library
+    /// False while the panel is kept built but hidden under Library's grid
+    /// (plan fix #32): a paste or preset there must not ask, as it didn't
+    /// when the panel wasn't built outside Develop.
+    var isActive = true
     @AppStorage(ProcessUpdatePrompt.dontShowKey) private var dontShow = false
     @State private var trackedURL: URL?
     @State private var asked: Set<URL> = []
@@ -72,7 +76,13 @@ struct ProcessUpdatePromptModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onAppear { trackedURL = model.sourceURL }
+            // Shown again: as appearing was before the panel was kept.
+            .onChange(of: isActive) { _, active in trackedURL = active ? model.sourceURL : nil }
             .onChange(of: model.parameters) { old, new in
+                guard isActive else {
+                    trackedURL = nil
+                    return
+                }
                 // Opening another photo sets its parameters in the same
                 // pass as its URL: that is a load, not an edit.
                 guard let url = model.sourceURL, url == trackedURL else {
@@ -93,7 +103,7 @@ struct ProcessUpdatePromptModifier: ViewModifier {
 }
 
 struct ProcessUpdateDialog: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let library: Library
     let fromVersion: String
     @Binding var dontShow: Bool

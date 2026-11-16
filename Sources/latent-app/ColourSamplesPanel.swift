@@ -146,7 +146,7 @@ extension EditorModel {
 /// Under the colour readout: the pinned samples with their live values,
 /// each with a remove button. Shown only while there are some.
 struct ColourSamplesPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var samples: ColourSamples
     @ObservedObject var settings = ScopeSettings.shared
 
@@ -166,8 +166,8 @@ struct ColourSamplesPanel: View {
                 }
             }
             .font(.system(.caption2, design: .monospaced))
-            .onReceive(model.$preview) { _ in refreshSoon() }
-            .onReceive(model.$tile) { _ in refreshSoon() }
+            .onReceive(model.previewPublisher) { _ in refreshSoon() }
+            .onReceive(model.tilePublisher) { _ in refreshSoon() }
             .onAppear { model.refreshColourSamples() }
         }
     }
@@ -218,7 +218,7 @@ struct ColourSamplesPanel: View {
 /// Numbered markers over the viewport at each pinned sample. Display
 /// only: it never takes a click.
 struct ColourSampleMarkers: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var samples: ColourSamples
 
     var body: some View {

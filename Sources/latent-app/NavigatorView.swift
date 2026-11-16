@@ -25,7 +25,7 @@ final class NavigatorSettings: ObservableObject {
 /// outlined. Click or drag in it to move the view there. Collapsed until
 /// opened, and remembered either way.
 struct NavigatorSection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject private var settings = NavigatorSettings.shared
 
     var body: some View {
@@ -50,7 +50,7 @@ struct NavigatorSection: View {
 /// presenter from its preview (no render of its own), and the viewport's
 /// visible rectangle over it.
 struct NavigatorView: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject private var prefs = AppPreferences.shared
     /// The navigator's drawable, in pixels, for the fit.
     @State private var drawableSize: CGSize = .zero
@@ -150,7 +150,7 @@ enum NavigatorGeometry {
 /// alone; in Compare and Survey a linked view carries the change to the
 /// other panes, as any zoom there does, so Sync off leaves them alone.
 struct NavigatorZoomPresets: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     /// The presets shown, a subset of the status bar's menu.
     static let levels: [ZoomLevel] = [.fit, .fill, .percent(50), .percent(100), .percent(200)]
@@ -190,7 +190,7 @@ struct NavigatorZoomPresets: View {
 /// own ✕ hides it. In Compare and Survey the caller puts it on the active
 /// pane only, so it always shows the pane the keys act on.
 struct FloatingNavigator: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject private var settings = NavigatorSettings.shared
 
     static let width: CGFloat = 200
@@ -252,7 +252,7 @@ enum ComparePane: Equatable {
 /// percentages, beside the − + Fit 100% buttons. In Compare it zooms both
 /// panes, as those buttons do.
 struct ZoomLevelMenu: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     var mirror: EditorModel?
 
     var body: some View {

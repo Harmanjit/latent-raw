@@ -129,7 +129,7 @@ struct RangeControl: View {
 /// range (the selected one does; the mask's own Luminance range only when
 /// no component is selected).
 struct MaskRangeEditor: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @Binding var band: MaskRangeBand
     let channel: MaskChannel?
     let probes: Bool
@@ -163,7 +163,7 @@ struct MaskRangeEditor: View {
 /// A Channel Range component's controls: the channel, the range control
 /// and the numeric sliders.
 struct ChannelRangeControls: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let range: ChannelRange
     let update: (ChannelRange) -> Void
 
@@ -191,7 +191,7 @@ struct ChannelRangeControls: View {
 /// Show Channel for one range component's row: selects the component and
 /// shows what it reads as a grey on the image, or stops showing it.
 struct MaskChannelViewButton: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let component: UUID
     let title: String
 
@@ -216,7 +216,7 @@ struct MaskChannelViewButton: View {
 
 /// Keep tool armed, under a gradient's or radial's tool hint.
 struct MaskShapeToolOptions: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @AppStorage(EditorModel.keepMaskToolArmedKey) private var keepArmed = false
 
     var body: some View {

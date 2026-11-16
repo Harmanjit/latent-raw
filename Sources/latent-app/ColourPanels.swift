@@ -6,7 +6,7 @@ import PixelEngine
 /// Colour, Colour Grading and Calibration, each a disclosure group like the
 /// panel's others.
 struct ColourSections: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @State private var blackAndWhiteExpanded = false
     @State private var pointColourExpanded = false
     @State private var gradingExpanded = false
@@ -46,8 +46,8 @@ struct ColourSections: View {
         DisclosureGroup(isExpanded: $calibrationExpanded) {
             VStack(alignment: .leading, spacing: 10) {
                 ProcessVersionMenu(model: model)
-                CalibrationPanel(calibration: $model.parameters.colour.calibration)
-                CalibrationExtrasPanel(colour: $model.parameters.colour)
+                CalibrationPanel(calibration: model.parameterBinding(\.colour.calibration))
+                CalibrationExtrasPanel(colour: model.parameterBinding(\.colour))
             }
             .disabled(!model.hasImage)
             .padding(.top, 8)
@@ -56,13 +56,13 @@ struct ColourSections: View {
         }
 
         DisclosureGroup(isExpanded: $channelMixerExpanded) {
-            ChannelMixerPanel(mixer: $model.parameters.colour.channelMixer)
+            ChannelMixerPanel(mixer: model.parameterBinding(\.colour.channelMixer))
                 .disabled(!model.hasImage)
                 .padding(.top, 8)
         } label: {
             HStack {
                 ColourSectionLabel(title: "Channel Mixer")
-                if !model.parameters.colour.channelMixer.isNeutral { badge("MIX") }
+                if !model.parameter(\.colour.channelMixer.isNeutral) { badge("MIX") }
             }
         }
     }
@@ -125,7 +125,7 @@ struct ColourSliderRow: View {
 /// The treatment switch and the grey mix: one slider per HSL colour, how
 /// light that colour turns in black and white.
 struct BlackAndWhitePanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     private static let swatches: [Color] = [
         .red, .orange, .yellow, .green, .cyan, .blue, .purple, Color(red: 1, green: 0, blue: 0.6),
@@ -171,7 +171,7 @@ struct BlackAndWhitePanel: View {
                     Spacer()
                     Button("Reset") { model.parameters.colour.blackAndWhite.mix = BlackAndWhite.neutralMix }
                         .controlSize(.mini)
-                        .disabled(model.parameters.colour.blackAndWhite.mixIsNeutral)
+                        .disabled(model.parameter(\.colour.blackAndWhite.mixIsNeutral))
                         .help("Every colour back to its plain luminance")
                 }
             } else {
@@ -189,9 +189,9 @@ struct BlackAndWhitePanel: View {
 /// Picked colours, each with a shift in hue, saturation and luminance for
 /// the colours near it.
 struct PointColourPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
-    private var swatches: [PointColour] { model.parameters.colour.pointColours }
+    private var swatches: [PointColour] { model.parameter(\.colour.pointColours) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

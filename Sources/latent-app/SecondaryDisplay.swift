@@ -265,7 +265,7 @@ final class SecondaryDisplay: ObservableObject {
 /// What the second display's window shows: the image, fitted, over the
 /// surround, with the Loupe's caption under it.
 struct SecondaryLoupeView: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var library: Library
     @ObservedObject var display: SecondaryDisplay
     @ObservedObject private var prefs = AppPreferences.shared

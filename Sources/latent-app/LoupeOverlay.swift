@@ -186,7 +186,7 @@ enum LoupeOverlayGeometry {
 /// mouse, along a thin strip each; everything else lets clicks through to
 /// the image and its tools.
 struct LoupeOverlayView: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var settings = LoupeOverlaySettings.shared
 
     var body: some View {

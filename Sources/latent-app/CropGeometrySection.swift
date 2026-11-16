@@ -7,7 +7,7 @@ import PixelEngine
 /// Transform sliders, the flips and Constrain Crop. R opens the crop
 /// tool; the rectangle is edited on the image.
 struct CropGeometrySection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @AppStorage(CropToolPreferences.guideKey) private var guide: CropGuide = .thirds
     @AppStorage(CropToolPreferences.maskOpacityKey) private var maskOpacity = CropToolPreferences.defaultMaskOpacity
     @State private var transformExpanded = false
@@ -18,7 +18,7 @@ struct CropGeometrySection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             cropControls
-            sliderRow("Straighten", value: Binding(get: { model.parameters.crop.angle },
+            sliderRow("Straighten", value: Binding(get: { model.parameter(\.crop.angle) },
                                                    set: { model.setStraighten($0) }),
                       range: -45...45, format: "%.2f°")
             HStack(spacing: 8) {
@@ -91,7 +91,7 @@ struct CropGeometrySection: View {
             .popover(isPresented: $customAspectShown, arrowEdge: .bottom) { customAspectForm }
             Spacer()
             Button("Reset") { model.resetCrop() }
-                .disabled(model.parameters.crop == .none)
+                .disabled(model.parameter(\.crop) == .none)
                 .help("Remove the crop and straighten")
         }
         .controlSize(.small)
@@ -176,7 +176,7 @@ struct CropGeometrySection: View {
 /// `setTransform`, so Constrain Crop can refit the crop in the same edit
 /// step and Undo takes both back together.
 struct TransformPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -199,13 +199,13 @@ struct TransformPanel: View {
                 }
                 .help("Flip vertical: mirror the picture top to bottom")
                 .accessibilityLabel("Flip vertical")
-                Toggle("Constrain Crop", isOn: Binding(get: { model.parameters.perspective.constrainCrop },
+                Toggle("Constrain Crop", isOn: Binding(get: { model.parameter(\.perspective.constrainCrop) },
                                                        set: { model.setConstrainCrop($0) }))
                     .toggleStyle(.checkbox)
                     .help("Keep the crop inside the picture whenever the transform changes")
                 Spacer()
                 Button("Reset") { model.resetTransform() }
-                    .disabled(model.parameters.perspective.isIdentity && model.parameters.perspective.upright == nil)
+                    .disabled(model.parameter(\.perspective.isIdentity) && model.parameter(\.perspective.upright) == nil)
                     .help("Put Upright, the keystone and the Transform sliders back")
             }
             .controlSize(.small)

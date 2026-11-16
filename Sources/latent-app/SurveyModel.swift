@@ -56,7 +56,6 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
     private(set) var isShowing = false
     let policy: MemoryPolicy
 
-    private var focusObservation: AnyCancellable?
     private var renderObservations: [ObjectIdentifier: AnyCancellable] = [:]
     private var problemObservations: [ObjectIdentifier: AnyCancellable] = [:]
     /// Where a pane's failures go: the status bar reads only the main
@@ -103,7 +102,6 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
         models = next
         panes = new
         relink()
-        observeFocus()
         updateImageAspect()
         let order = [new.focusedID] + new.ids.filter { $0 != new.focusedID }
         for id in order { if let model = models[id] { open(id, model) } }
@@ -115,7 +113,6 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
     func end() {
         guard isShowing else { return }
         isShowing = false
-        focusObservation = nil
         for model in models.values {
             model.linkedGroup = nil
             model.showingBefore = false
@@ -145,7 +142,6 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
         models = [:]
         panes = nil
         isShowing = false
-        focusObservation = nil
         denoiseWaiting = []
     }
 
@@ -156,7 +152,6 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
     func focus(_ id: Int64) -> Bool {
         guard var panes, panes.focusedID != id, panes.focus(id) else { return false }
         self.panes = panes
-        observeFocus()
         return true
     }
 
@@ -165,7 +160,6 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
     func moveFocus(by offset: Int) -> Bool {
         guard var panes, panes.moveFocus(by: offset) else { return false }
         self.panes = panes
-        observeFocus()
         return true
     }
 
@@ -175,7 +169,6 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
         guard var panes, panes.remove(id) else { return false }
         self.panes = panes
         if let model = models.removeValue(forKey: id) { release(model) }
-        observeFocus()
         updateImageAspect()
         return true
     }
@@ -191,7 +184,6 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
         }
         guard panes != before else { return false }
         self.panes = panes
-        observeFocus()
         updateImageAspect()
         return true
     }
@@ -204,10 +196,10 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
         model.measuresScopes = false
         model.aiDenoiseTurn = { [weak self] model in self?.waitForAIDenoise(model) }
         renderObservations[ObjectIdentifier(model)] = Publishers.Merge3(
-            model.$preview.dropFirst().map { _ in () },
-            model.$tile.dropFirst().map { _ in () },
+            model.previewPublisher.dropFirst().map { _ in () },
+            model.tilePublisher.dropFirst().map { _ in () },
             // A run ending, which is another pane's turn.
-            model.$aiDenoiseRunning.dropFirst().filter { !$0 }.map { _ in () }
+            model.aiDenoiseRunningPublisher.dropFirst().filter { !$0 }.map { _ in () }
         )
         .sink { [weak self, weak model] in
             guard let self, let model else { return }
@@ -263,14 +255,6 @@ final class SurveyModel: ObservableObject, LinkedPaneGroup {
     private func relink() {
         let group: (any LinkedPaneGroup)? = isShowing && syncsView ? self : nil
         for model in models.values { model.linkedGroup = group }
-    }
-
-    /// The status bar's zoom readout is the focused pane's, so its changes
-    /// are this model's changes.
-    private func observeFocus() {
-        focusObservation = focusedModel?.objectWillChange.sink { [weak self] _ in
-            MainActor.assumeIsolated { self?.objectWillChange.send() }
-        }
     }
 
     private func updateImageAspect() {
@@ -366,8 +350,8 @@ extension EditorModel {
     /// main editor's, so the owner passes these on to it.
     var paneProblems: AnyPublisher<String, Never> {
         Publishers.Merge(
-            $lastError.compactMap { $0 },
-            $status.filter { $0.hasPrefix(Self.couldNotOpenPrefix) }
+            lastErrorPublisher.compactMap { $0 },
+            statusPublisher.filter { $0.hasPrefix(Self.couldNotOpenPrefix) }
         )
         .eraseToAnyPublisher()
     }

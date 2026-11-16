@@ -6,7 +6,7 @@ import PixelEngine
 /// a menu of Latent's own profiles and the imported DCPs, an Amount slider
 /// for the creative ones, and a switch for a DCP's own tone curve.
 struct ProfilePicker: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     /// Re-read when a profile is imported, so the menu lists it at once.
     @State private var imported: (camera: [CameraProfileLibrary.Entry], other: [CameraProfileLibrary.Entry]) = ([], [])
 
@@ -24,7 +24,7 @@ struct ProfilePicker: View {
                     .frame(maxWidth: 190)
             }
 
-            if let builtIn = model.parameters.profile?.builtIn, builtIn.hasAmount {
+            if let builtIn = model.parameter(\.profile)?.builtIn, builtIn.hasAmount {
                 amountRow(maximum: builtIn.maximumAmount)
             }
 

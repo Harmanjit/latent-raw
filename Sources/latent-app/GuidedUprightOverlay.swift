@@ -14,7 +14,7 @@ import PixelEngine
 /// Drags start only on the image, so scroll and pinch still reach the
 /// Metal view underneath, as with the crop tool.
 struct GuidedUprightOverlay: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @Environment(\.colorSchemeContrast) private var contrast
 
     private enum Drag {

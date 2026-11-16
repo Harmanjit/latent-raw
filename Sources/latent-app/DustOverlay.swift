@@ -10,7 +10,7 @@ import PixelEngine
 /// corrected image, so its ring is placed through the lens map
 /// (`outputNormalized`), on the shadow it heals.
 struct DustOverlay: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {

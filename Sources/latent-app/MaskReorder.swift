@@ -22,7 +22,7 @@ enum MaskDragPayload {
 
 /// A mask row in the Local Adjustments list.
 struct MaskRowReorder: ViewModifier {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let index: Int
     let id: UUID
 
@@ -53,7 +53,7 @@ struct MaskRowReorder: ViewModifier {
 /// A component row in a mask's Components list. The first shape stays
 /// first; the components after it reorder among themselves.
 struct MaskComponentReorder: ViewModifier {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let index: Int
     let id: UUID
     let offset: Int

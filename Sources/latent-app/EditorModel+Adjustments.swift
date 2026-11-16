@@ -8,6 +8,7 @@ extension EditorModel {
 
     /// What the lens panel says about the open image.
     var lensProfileDescription: String {
+        _ = outsideStateRevision
         guard hasImage else { return "" }
         if session?.isRenderedImage == true {
             return "Lens profiles are for raw files; a JPEG or TIFF is usually corrected by the camera or app that made it. Manual sliders still work."
@@ -15,7 +16,7 @@ extension EditorModel {
         if session?.lensCorrectionAlreadyApplied == true {
             return "Lens corrections are already applied in this merged image, so no profile is used. Manual sliders still work."
         }
-        guard let c = session?.lensCorrection(for: parameters) else {
+        guard let c = session?.lensCorrection(for: lensCorrectionParameters) else {
             let lens = session?.file.summary.lens
             let spec = lens.map { l -> String in
                 l.minFocal > 0 ? String(format: "%.0f-%.0fmm f/%.1f", l.minFocal, l.maxFocal,
@@ -29,7 +30,17 @@ extension EditorModel {
         if c.vignetting != nil { parts.append("vignetting") }
         return "\(c.profileName) · \(parts.joined(separator: ", ")) · lensfun \(c.databaseVersion)"
     }
-    var hasLensProfile: Bool { session?.lensCorrection(for: parameters) != nil }
+    var hasLensProfile: Bool {
+        _ = outsideStateRevision
+        return session?.lensCorrection(for: lensCorrectionParameters) != nil
+    }
+
+    /// The parameters, observed only on the two the session's lens
+    /// correction depends on (`ImageSession.lensCorrection(for:)`), so the
+    /// Lens Corrections panel doesn't redraw on every slider tick.
+    private var lensCorrectionParameters: EditParameters {
+        parameters(observing: \.lensProfile, \.embeddedDNGCorrections)
+    }
 
     // MARK: - White balance and resets
 
@@ -37,7 +48,7 @@ extension EditorModel {
     /// its travel is perceptually even — see ColorKit for the reasoning.
     var temperatureSliderBinding: Binding<Float> {
         Binding(
-            get: { ColorKit.sliderValue(forTemperature: self.parameters.whiteBalance.temperature) },
+            get: { ColorKit.sliderValue(forTemperature: self.parameter(\.whiteBalance.temperature)) },
             set: { self.parameters.whiteBalance.temperature = ColorKit.temperature(forSliderValue: $0) }
         )
     }

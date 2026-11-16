@@ -5,7 +5,7 @@ import PixelEngine
 /// that starts closed and opens once used (LocalToneColour.swift has
 /// where they render).
 struct MaskToneColourControls: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let index: Int
     @State private var curveOpen = false
     @State private var colourOpen = false

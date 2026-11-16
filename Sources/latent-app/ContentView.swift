@@ -43,7 +43,7 @@ enum AppMode: String, CaseIterable, Identifiable {
 /// (`FolderSidebar`) is on the left.
 struct ContentView: View {
     // Not the window's own: reopening the window must not build a second set.
-    @ObservedObject private var model = MainWindowModels.shared.model
+    @Bindable private var model = MainWindowModels.shared.model
     @ObservedObject private var library = MainWindowModels.shared.library
     @ObservedObject private var exportQueue = MainWindowModels.shared.exportQueue
     @ObservedObject private var photoMerge = MainWindowModels.shared.photoMerge
@@ -96,6 +96,9 @@ struct ContentView: View {
     @State private var dustExpanded = false
     @State private var touchUpExpanded = false
     @State private var localAdjustmentsExpanded = false
+    /// Develop was the last image mode, so its panel stays built in
+    /// Library (`keepsDevelopPanel`).
+    @State private var developPanelKept = false
     @State private var compareRecord: ImageRecord?
     /// The photo selected before this one, for Previous.
     @State private var previousPhoto = PreviousPhoto()
@@ -145,6 +148,14 @@ struct ContentView: View {
                 set: { if !fullScreen.isActive { sidebarVisible = $0 != .detailOnly } })
     }
 
+    /// Develop's image area and panel are in the window: in Develop, and
+    /// hidden in Library after Develop (unless the second display's Loupe
+    /// shows, when the editor follows the grid and the hidden panel would
+    /// redraw for every photo).
+    private var keepsDevelopPanel: Bool {
+        mode == .develop || (mode == .library && developPanelKept && !secondDisplay.isShowing)
+    }
+
     private var showsFilmstrip: Bool {
         filmstripVisible && (mode == .loupe || mode == .develop) && library.folderURL != nil && !fullScreen.isActive
     }
@@ -156,6 +167,28 @@ struct ContentView: View {
                     libraryPanel
                     Divider()
                 }
+                ZStack {
+                // Develop's side stays built, under the grid, while the grid
+                // shows (plan fix #32): switching back then doesn't rebuild
+                // the panel's hundreds of controls. The image area itself
+                // goes, so nothing hidden reports a size to the editor.
+                if keepsDevelopPanel {
+                    HStack(spacing: 0) {
+                        if mode == .develop {
+                            imageArea
+                        } else {
+                            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        if !fullScreen.isActive {
+                            Divider()
+                            // Frozen while hidden: the grid's changes,
+                            // which rebuild this body, don't rebuild it.
+                            EquatableView(content: FrozenWhileHidden(hidden: mode != .develop) { adjustmentPanel })
+                                .frame(width: 280)
+                        }
+                    }
+                    .modifier(KeptAlivePane(hidden: mode != .develop))
+                }
                 switch mode {
                 case .library:
                     VStack(spacing: 0) {
@@ -163,11 +196,15 @@ struct ContentView: View {
                         Divider()
                         ThumbnailGridView(library: library, onOpen: openInEditor, actions: gridActions)
                     }
+                    // Opaque, over Develop's hidden panel.
+                    .background(Color(nsColor: .windowBackgroundColor))
                     .onDisappear { model.flushPendingSave() }
                 case .loupe:
                     CaptionedPane(showsCaption: !fullScreen.isActive,
                                   caption: ImageCaption(record: library.selectedImage)) {
-                        ImageViewport(model: model, allowsTools: false, onStep: { _ = perform(.step($0)) },
+                        // The state's one swipe closure, so the viewport's
+                        // inputs compare equal when this view rebuilds.
+                        ImageViewport(model: model, allowsTools: false, onStep: developViews.step,
                                       followsMirrorImageMode: true,
                                       showsLoupeOverlay: true,
                                       showsOpeningPlaceholder: true)
@@ -181,12 +218,8 @@ struct ContentView: View {
                     SurveyView(survey: survey, library: library,
                                onRemove: surveyRemove, onSelectionChange: surveyFollowSelection)
                 case .develop:
-                    imageArea
-                    if !fullScreen.isActive {
-                        Divider()
-                        adjustmentPanel
-                            .frame(width: 280)
-                    }
+                    EmptyView()
+                }
                 }
             }
             if showsFilmstrip {
@@ -208,11 +241,13 @@ struct ContentView: View {
                            })
         .background(navigationShortcuts)
         .overlay { ShortcutsOverlay(mode: mode) }
-        .focusedSceneValue(\.commandContext, CommandContext(state: commandState) { command in
+        // Built in a modifier of its own: the command state reads much of
+        // the editor (its parameters among it), and this body must not.
+        .modifier(CommandContextModifier { CommandContext(state: commandState) { command in
             // A sheet over the window has the keyboard; menus wait, as keys do.
             guard NSApp.mainWindow?.attachedSheet == nil else { return }
             _ = perform(command)
-        })
+        } })
         .onChange(of: mode) { old, _ in modeDidChange(from: old) }
         .onChange(of: library.selectedImageID) { followSelectionOnSecondDisplay() }
         .onChange(of: library.selectedImageID) { old, new in
@@ -319,6 +354,8 @@ struct ContentView: View {
         .onAppear {
             viewing.setPrimaryEditor(model)
             viewing.showWelcomeIfFirstRun()
+            // Loupe's swipes, before Develop's image area has ever appeared.
+            developViews.stepHandler = { _ = perform(.step($0)) }
         }
         .sheet(item: $renaming) { record in
             RenameSheet(record: record) { name in
@@ -793,6 +830,17 @@ struct ContentView: View {
         keepOpenedFileOnModeChange = false
         updateCompareLink()
         if fullScreen.isActive, !FullScreenImagePolicy.keepsFullScreen(in: mode) { fullScreen.leave() }
+        if mode == .develop {
+            developPanelKept = true
+        } else if mode != .library {
+            developPanelKept = false
+        }
+        if old == .develop, mode == .library,
+           let window = NSApp.keyWindow, let editor = window.firstResponder as? NSTextView, editor.isFieldEditor {
+            // A value being typed in the panel, which now stays built
+            // while hidden: done with, as when the panel went away.
+            window.makeFirstResponder(nil)
+        }
         if old == .develop {
             model.flushPendingSave()
             // Loupe and Compare share the viewport; a click there must
@@ -1609,7 +1657,7 @@ struct ContentView: View {
         state.touchUpToolActive = model.touchUpToolActive
         state.hasSelectedBlemish = model.hasSelectedBlemish
         state.toolSizeAdjustable = model.toolSizeAdjustable
-        state.canAddMask = model.hasImage && model.parameters.locals.count < LocalAdjustment.maximumCount
+        state.canAddMask = model.hasImage && model.parameter(\.locals.count) < LocalAdjustment.maximumCount
         state.hasSelectedMask = model.selectedLocal != nil
         state.showMaskOverlay = model.showMaskOverlay
         state.hasCopiedMask = maskClipboard.copied != nil
@@ -1942,6 +1990,7 @@ struct ContentView: View {
     }
 
     private var adjustmentPanel: some View {
+        ObservationScope {
         ScrollView {
             ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 20) {
@@ -1958,19 +2007,19 @@ struct ContentView: View {
                 ProfilePicker(model: model)
 
                 DisclosureGroup(isExpanded: $whiteBalanceExpanded) {
-                    whiteBalanceSection.padding(.top, 8)
+                    ObservationScope { whiteBalanceSection }.padding(.top, 8)
                 } label: {
                     disclosureLabel("White Balance")
                 }
 
                 DisclosureGroup(isExpanded: $toneExpanded) {
-                    toneSection.padding(.top, 8)
+                    ObservationScope { toneSection }.padding(.top, 8)
                 } label: {
                     HStack { disclosureLabel("Tone"); PanelPresetsMenu(model: model, groups: [.tone], panel: "Tone") }
                 }
 
                 DisclosureGroup(isExpanded: $presenceExpanded) {
-                    presenceSection.padding(.top, 8)
+                    ObservationScope { presenceSection }.padding(.top, 8)
                 } label: {
                     disclosureLabel("Presence")
                 }
@@ -1990,7 +2039,7 @@ struct ContentView: View {
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 8) {
                         HSLTargetRow(model: model)
-                        HSLPanel(hsl: $model.parameters.hsl, onIsolate: { model.hueIsolationBand = $0 })
+                        HSLPanel(hsl: model.parameterBinding(\.hsl), onIsolate: { model.hueIsolationBand = $0 })
                             .disabled(!model.hasImage)
                     }
                     .padding(.top, 8)
@@ -2010,7 +2059,7 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup {
-                    aiDenoiseSection.padding(.top, 8)
+                    ObservationScope { aiDenoiseSection }.padding(.top, 8)
                 } label: {
                     disclosureLabel("AI Noise Reduction")
                 }
@@ -2026,14 +2075,16 @@ struct ContentView: View {
                 // JPEG or TIFF, whose clipping was settled when it was made.
                 if !model.isRenderedImage {
                     DisclosureGroup {
+                        ObservationScope {
                         VStack(alignment: .leading, spacing: 10) {
                             HighlightMethodPicker(model: model)
                             sliderRow(title: "Recovery",
-                                       value: $model.parameters.highlightRecovery,
+                                       value: model.parameterBinding(\.highlightRecovery),
                                        range: 0...1, format: "%.2f", defaultValue: 1.0)
                             sliderRow(title: "Threshold",
-                                       value: $model.parameters.highlightThreshold,
+                                       value: model.parameterBinding(\.highlightThreshold),
                                        range: 0.5...1.0, format: "%.2f", defaultValue: 0.85)
+                        }
                         }
                         .padding(.top, 8)
                     } label: {
@@ -2058,8 +2109,10 @@ struct ContentView: View {
                 }
 
                 DisclosureGroup(isExpanded: $localAdjustmentsExpanded) {
+                    ObservationScope {
                     LocalAdjustmentsPanel(model: model, pasteMaskToSelection: commandState.isEnabled(.mask(.pasteToSelection))
                                           ? { _ = perform(.mask(.pasteToSelection)) } : nil)
+                    }
                         .padding(.top, 8)
                 } label: {
                     disclosureLabel("Local Adjustments")
@@ -2067,7 +2120,7 @@ struct ContentView: View {
                 .id(Self.localAdjustmentsGroup)
 
                 DisclosureGroup(isExpanded: $healExpanded) {
-                    healSection.padding(.top, 8)
+                    ObservationScope { healSection }.padding(.top, 8)
                 } label: {
                     HStack {
                         disclosureLabel("Spot Removal")
@@ -2167,7 +2220,9 @@ struct ContentView: View {
         }
         // A number typed for one photo must not land on the next.
         .sliderFieldSubject(model.sourceURL)
-        .modifier(ProcessUpdatePromptModifier(model: model, library: library))
+        .modifier(ProcessUpdatePromptModifier(model: model, library: library,
+                                              isActive: mode == .develop || fullScreen.isActive))
+        }
     }
 
     /// Scroll targets in the adjustments panel.
@@ -2195,7 +2250,7 @@ struct ContentView: View {
             ResettableSlider(value: model.temperatureSliderBinding,
                              in: model.temperatureSliderRange, label: "Temperature",
                              accessibilityValue: String(format: "%.0f kelvin",
-                                                        model.parameters.whiteBalance.temperature)) {
+                                                        model.parameter(\.whiteBalance.temperature))) {
                 model.resetWhiteBalance()
             }
             .help("Double-click for the camera's white balance")
@@ -2217,7 +2272,7 @@ struct ContentView: View {
                     WhiteBalancePresetRow(model: model)
                     temperatureRow
                     sliderRow(title: "Tint",
-                               value: $model.parameters.whiteBalance.tint,
+                               value: model.parameterBinding(\.whiteBalance.tint),
                                range: ColorKit.WhiteBalance.tintRange,
                                format: "%+.0f", defaultValue: model.asShotWhiteBalance.tint)
                     HStack {
@@ -2246,16 +2301,16 @@ struct ContentView: View {
                         Spacer()
                     }
                     sliderRow(title: "Exposure",
-                               value: $model.parameters.exposureEV,
+                               value: model.parameterBinding(\.exposureEV),
                                range: -5...5, format: "%+.2f EV")
                     ExposureToolsRow(model: model)
                     sliderRow(title: "Contrast",
-                               value: $model.parameters.contrast,
+                               value: model.parameterBinding(\.contrast),
                                range: 0.5...3.0, format: "%.2f", defaultValue: 1.5)
                     sliderRow(title: "Mid Grey",
-                               value: $model.parameters.greyPoint,
+                               value: model.parameterBinding(\.greyPoint),
                                range: 0.05...0.5, format: "%.3f", defaultValue: 0.1845)
-                    ToneRangeSliders(ranges: $model.parameters.toneRanges, auto: { model.autoToneSlider($0) })
+                    ToneRangeSliders(ranges: model.parameterBinding(\.toneRanges), auto: { model.autoToneSlider($0) })
                         .disabled(!model.hasImage)
 
                     // Only offered on screens that can actually show more
@@ -2285,11 +2340,11 @@ struct ContentView: View {
     /// for on most images, so this group starts open.
     private var presenceSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sliderRow(title: "Texture", value: $model.parameters.texture, range: -1...1, format: "%+.2f")
-            sliderRow(title: "Clarity", value: $model.parameters.clarity, range: -1...1, format: "%+.2f")
-            sliderRow(title: "Dehaze", value: $model.parameters.dehaze, range: -1...1, format: "%+.2f")
-            sliderRow(title: "Vibrance", value: $model.parameters.vibrance, range: -1...1, format: "%+.2f")
-            sliderRow(title: "Saturation", value: $model.parameters.colour.saturation, range: -1...1, format: "%+.2f")
+            sliderRow(title: "Texture", value: model.parameterBinding(\.texture), range: -1...1, format: "%+.2f")
+            sliderRow(title: "Clarity", value: model.parameterBinding(\.clarity), range: -1...1, format: "%+.2f")
+            sliderRow(title: "Dehaze", value: model.parameterBinding(\.dehaze), range: -1...1, format: "%+.2f")
+            sliderRow(title: "Vibrance", value: model.parameterBinding(\.vibrance), range: -1...1, format: "%+.2f")
+            sliderRow(title: "Saturation", value: model.parameterBinding(\.colour.saturation), range: -1...1, format: "%+.2f")
                 .help("Every colour equally: -1 is black and white. Double-click to reset.")
         }
     }
@@ -2415,9 +2470,14 @@ struct ContentView: View {
         }
     }
 
-    private func sliderRow(title: String, value: Binding<Float>,
+    /// The binding is made in the row's own scope: making it reads its
+    /// value, and the section would otherwise redraw, and rebuild every
+    /// row in it, whenever this one slider moves (plan fix #23).
+    private func sliderRow(title: String, value makeValue: @autoclosure @escaping () -> Binding<Float>,
                             range: ClosedRange<Float>, format: String,
                             defaultValue: Float = 0) -> some View {
+        ObservationScope {
+        let value = makeValue()
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 // The field and slider are both named, so VoiceOver skips this.
@@ -2430,6 +2490,7 @@ struct ContentView: View {
                 .help("Double-click to reset")
         }
         .disabled(!model.hasImage)
+        }
     }
 
     /// In Compare, zoom buttons drive both panes.
@@ -2468,6 +2529,7 @@ struct ContentView: View {
     private var currentProblem: String? { model.setupError ?? library.lastError ?? model.lastError }
 
     private var statusBar: some View {
+        ObservationScope {
         HStack(spacing: 12) {
             Picker("Mode", selection: modeBinding) {
                 ForEach(AppMode.allCases) { Text($0.title).tag($0) }
@@ -2527,6 +2589,7 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(Color.red)
             } else {
+                ObservationScope {
                 Text(mode == .library
                      ? Self.libraryStatusText(handOffNotice: handOff.notice, gridNotice: gridNotice.text,
                                               folderStatus: library.statusText)
@@ -2535,6 +2598,7 @@ struct ContentView: View {
                     .foregroundStyle(Color.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                }
             }
 
             Spacer()
@@ -2542,6 +2606,7 @@ struct ContentView: View {
             // Zoom controls. Pinch, option-scroll and double-click do the
             // same things from the image itself; these exist for the
             // keyboard and for people who like buttons.
+            ObservationScope {
             HStack(spacing: 6) {
                 Button("−") { viewedModel.zoomOut(); mirrorModel?.zoomOut() }
                     .accessibilityLabel("Zoom out")
@@ -2564,7 +2629,9 @@ struct ContentView: View {
             // buttons, which would otherwise lose their labels.
             .fixedSize()
             .disabled(!viewedModel.hasImage || !mode.showsImage)
+            }
 
+            ObservationScope {
             if !model.renderReport.isEmpty && mode == .develop && prefs.showRenderTimings {
                 // What the last action rendered and how long it took, on
                 // screen during development: the Phase 1 exit criterion is
@@ -2577,9 +2644,11 @@ struct ContentView: View {
                     .foregroundStyle(model.lastRenderMs < 16 ? Color.secondary : Color.orange)
                     .lineLimit(1)
             }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        }
     }
 }
 
@@ -2604,5 +2673,47 @@ final class GridNotice: ObservableObject {
             guard !Task.isCancelled else { return }
             self?.text = nil
         }
+    }
+}
+
+/// Hands the menu bar the command state (plan fix #16). Built in this
+/// modifier's body rather than ContentView's, so the editor properties the
+/// state reads, its parameters among them, are tracked here: a slider tick
+/// rebuilds this and not the window.
+private struct CommandContextModifier: ViewModifier {
+    let context: () -> CommandContext
+
+    func body(content: Content) -> some View {
+        content.focusedSceneValue(\.commandContext, context())
+    }
+}
+
+/// Develop's kept panel while the grid covers it (plan fix #32): equal to
+/// its last self while hidden, so a change ContentView observes (the
+/// grid's selection, a thumbnail done) doesn't re-run the panel's scopes,
+/// whose closures SwiftUI can't compare. The editor's own changes still
+/// reach them through observation; ContentView's state reaches them when
+/// it shows again, which makes it unequal.
+private struct FrozenWhileHidden<Content: View>: View, Equatable {
+    let hidden: Bool
+    @ViewBuilder let content: () -> Content
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.hidden && rhs.hidden }
+
+    var body: some View { content() }
+}
+
+/// Develop's side while it is kept built but hidden (plan fix #32): under
+/// the grid, which is opaque and takes the clicks, and neither in the
+/// key-view loop nor read by VoiceOver. Not made transparent: SwiftUI
+/// takes a transparent view's AppKit controls out of the window and puts
+/// them back when it shows again, which is most of what rebuilding it cost.
+private struct KeptAlivePane: ViewModifier {
+    let hidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityHidden(hidden)
+            .disabled(hidden)
     }
 }

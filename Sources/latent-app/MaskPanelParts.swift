@@ -102,7 +102,7 @@ struct LocalSliderGroups: View {
 /// The mask's components: its first shape, then each added, subtracted
 /// or intersected one. Selecting a row points the mask tools at it.
 struct MaskComponentList: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let index: Int
 
     var body: some View {
@@ -252,7 +252,7 @@ struct MaskComponentList: View {
 /// Controls for a selected range component: the eyedropper and its
 /// samples for a colour range, the band for a luminance range.
 struct MaskRangeComponentControls: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let index: Int
     let component: MaskComponent
 
@@ -317,7 +317,7 @@ struct MaskRangeComponentControls: View {
 
 /// Overlay ▸ how the selected mask is shown, its colour and strength.
 struct MaskOverlayMenu: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var settings = MaskOverlaySettings.shared
 
     var body: some View {

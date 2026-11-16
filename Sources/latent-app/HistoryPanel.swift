@@ -3,7 +3,7 @@ import PixelEngine
 
 /// Undo/redo, the list of steps, and named snapshots.
 struct HistoryPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @State private var snapshotName = ""
     @State private var showingSnapshotSheet = false
     /// Compare…: the two sides picked in its sheet.

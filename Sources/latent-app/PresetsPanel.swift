@@ -3,7 +3,7 @@ import PixelEngine
 
 /// Presets and the settings clipboard.
 struct PresetsPanel: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     let onApply: (Preset) -> Void
     /// Apply with a mode (Overwrite with Option, or as a new virtual copy);
     /// nil offers plain Apply only.
@@ -117,7 +117,7 @@ struct PresetsPanel: View {
 /// Rename…, Duplicate, Update from Current Edit and Favourite per preset.
 /// Built-ins can only be duplicated, exported and starred.
 struct PresetManagementMenu: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var catalog: PresetCatalog
     @Binding var showingManager: Bool
     @Binding var renaming: Preset?

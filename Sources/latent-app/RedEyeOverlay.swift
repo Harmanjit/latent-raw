@@ -7,7 +7,7 @@ import PixelEngine
 /// spot is stored on the raw grid and the view shows the corrected image,
 /// so its circle is placed through the lens map (`outputNormalized`).
 struct RedEyeOverlay: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {

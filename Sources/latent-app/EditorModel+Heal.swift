@@ -7,8 +7,9 @@ extension EditorModel {
     // MARK: - Spot removal tool
 
     var selectedHeal: HealPatch? {
-        guard let i = selectedHealIndex, i < parameters.heals.count else { return nil }
-        return parameters.heals[i]
+        let heals = parameter(\.heals)
+        guard let i = selectedHealIndex, i < heals.count else { return nil }
+        return heals[i]
     }
 
     /// Radius of the selected patch (or the default), in sensor pixels.
@@ -295,9 +296,12 @@ extension EditorModel {
 
     /// Fill's colour (linear Rec.2020) of the selected Fill patch, or the next one's.
     var activeFillColour: SIMD3<Float> {
-        get { selectedHealIndex(in: .fill).map { parameters.heals[$0].effectiveFillColour } ?? HealModeDefaults.fillColour }
+        get {
+            _ = outsideStateRevision
+            return selectedHealIndex(in: .fill).map { parameters.heals[$0].effectiveFillColour } ?? HealModeDefaults.fillColour
+        }
         set {
-            objectWillChange.send()
+            outsideStateRevision &+= 1
             HealModeDefaults.fillColour = newValue
             if let i = selectedHealIndex(in: .fill) { parameters.heals[i].fillColour = newValue }
         }
@@ -319,9 +323,12 @@ extension EditorModel {
 
     /// Fill's brightness in stops, of the selected Fill patch or the next one.
     var activeFillBrightness: Float {
-        get { selectedHealIndex(in: .fill).map { parameters.heals[$0].effectiveFillBrightness } ?? HealModeDefaults.fillBrightness }
+        get {
+            _ = outsideStateRevision
+            return selectedHealIndex(in: .fill).map { parameters.heals[$0].effectiveFillBrightness } ?? HealModeDefaults.fillBrightness
+        }
         set {
-            objectWillChange.send()
+            outsideStateRevision &+= 1
             HealModeDefaults.fillBrightness = newValue
             if let i = selectedHealIndex(in: .fill) { parameters.heals[i].fillBrightness = newValue == 0 ? nil : newValue }
         }
@@ -335,6 +342,7 @@ extension EditorModel {
     /// Blur's radius in sensor pixels, of the selected Blur patch or the next one.
     var activeBlurRadiusPixels: Float {
         get {
+            _ = outsideStateRevision
             let fraction = selectedHealIndex(in: .blur).map { parameters.heals[$0].effectiveBlurRadius } ?? HealModeDefaults.blurRadius
             return fraction * Float(min(sensorSize.width, sensorSize.height))
         }
@@ -342,7 +350,7 @@ extension EditorModel {
             let short = Float(min(sensorSize.width, sensorSize.height))
             guard short > 0 else { return }
             let r = max(0.0001, min(HealPatch.maximumBlurRadius, newValue / short))
-            objectWillChange.send()
+            outsideStateRevision &+= 1
             HealModeDefaults.blurRadius = r
             if let i = selectedHealIndex(in: .blur) { parameters.heals[i].blurRadius = r }
         }

@@ -6,7 +6,7 @@ import PixelEngine
 /// be renamed, given a note, narrowed to fewer groups, duplicated and
 /// removed; built-ins can be starred, duplicated and exported.
 struct PresetManagerSheet: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @ObservedObject var catalog: PresetCatalog
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""

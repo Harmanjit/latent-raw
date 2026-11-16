@@ -8,7 +8,7 @@ import PixelEngine
 /// faint shadows on screen; dust maps carry one photo's spots to others.
 /// The content of the `DisclosureGroup("Sensor Dust")`, like RedEyeSection.
 struct DustSection: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     /// From dust map…: opens the Remove Dust sheet on the open image
     /// (ContentView presents it; the sheet's Remove calls `applyDustMap`).
     var fromDustMap: () -> Void = {}
@@ -37,7 +37,7 @@ struct DustSection: View {
                 .accessibilityLabel("Dust spot tool")
                 Spacer()
                 Button("Clear") { model.clearDust() }
-                    .disabled(model.parameters.dust.isEmpty)
+                    .disabled(model.parameter(\.dust.isEmpty))
                     .help("Remove every dust spot")
                     .accessibilityLabel("Clear all dust spots")
             }
@@ -78,14 +78,14 @@ struct DustSection: View {
                     .help("Look for the spots of a saved dust map in this photo and heal the ones that are there")
                     .accessibilityLabel("Heal dust from a dust map")
                 Button("Save as dust map…") { model.saveDustMap() }
-                    .disabled(model.parameters.dust.isEmpty || model.findingDust)
+                    .disabled(model.parameter(\.dust.isEmpty) || model.findingDust)
                     .help("Save these spots as a dust map for this camera, to remove the same dust from other photos")
                     .accessibilityLabel("Save the dust spots as a dust map")
                 Spacer()
             }
             .controlSize(.small)
 
-            let n = model.parameters.dust.count
+            let n = model.parameter(\.dust.count)
             Text(n == 0 ? "No dust spots. Find Spots looks for sensor dust."
                  : "\(n) dust spot\(n == 1 ? "" : "s") · click a ring to remove one, click the image to add one")
                 .font(.caption2)

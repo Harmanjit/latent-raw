@@ -12,7 +12,7 @@ import PixelEngine
 /// The White Balance menu (As Shot, Auto, the light sources) and the
 /// selector, above the Temperature and Tint sliders.
 struct WhiteBalancePresetRow: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         HStack(spacing: 8) {
@@ -87,7 +87,7 @@ struct ToneToolHint: View {
 
 /// The Tone Curve's targeted tool switch.
 struct CurveTargetButton: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         Toggle(isOn: Binding(get: { model.toneTool == .curve },
@@ -105,7 +105,7 @@ struct CurveTargetButton: View {
 /// The HSL panel's targeted tool: which of hue, saturation or luminance
 /// a drag on the photo changes, or off.
 struct HSLTargetRow: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     private var selection: Binding<Int> {
         Binding(get: {
@@ -138,7 +138,7 @@ struct HSLTargetRow: View {
 /// The Tone Curve group: point or region editor, presets, the targeted
 /// tool and Refine Saturation.
 struct ToneCurveControls: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -159,14 +159,14 @@ struct ToneCurveControls: View {
             switch model.curveEditorMode {
             case .point:
                 presetRow
-                ToneCurvePanel(master: $model.parameters.toneCurve, channels: $model.parameters.channelCurves)
-                if !model.parameters.parametricCurve.isNeutral {
+                ToneCurvePanel(master: model.parameterBinding(\.toneCurve), channels: model.parameterBinding(\.channelCurves))
+                if !model.parameter(\.parametricCurve.isNeutral) {
                     Text("The region curve is also on; it applies before these points.")
                         .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             case .parametric:
-                ParametricCurvePanel(curve: $model.parameters.parametricCurve)
+                ParametricCurvePanel(curve: model.parameterBinding(\.parametricCurve))
             }
 
             refineSaturationRow
@@ -179,12 +179,12 @@ struct ToneCurveControls: View {
             Text("Point Curve").font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
             Spacer()
             Picker("Point curve preset", selection: Binding(
-                get: { ToneCurve.Preset.matching(model.parameters.toneCurve)?.rawValue ?? "custom" },
+                get: { ToneCurve.Preset.matching(model.parameter(\.toneCurve))?.rawValue ?? "custom" },
                 set: { raw in
                     if let preset = ToneCurve.Preset(rawValue: raw) { model.parameters.toneCurve = preset.curve }
                 })) {
                 ForEach(ToneCurve.Preset.allCases) { Text($0.title).tag($0.rawValue) }
-                if ToneCurve.Preset.matching(model.parameters.toneCurve) == nil {
+                if ToneCurve.Preset.matching(model.parameter(\.toneCurve)) == nil {
                     Divider()
                     Text("Custom").tag("custom")
                 }
@@ -204,10 +204,10 @@ struct ToneCurveControls: View {
             HStack {
                 Text("Refine Saturation").font(.subheadline).accessibilityHidden(true)
                 Spacer()
-                SliderValueField(value: $model.parameters.curveSaturation, in: -1...1, format: format,
+                SliderValueField(value: model.parameterBinding(\.curveSaturation), in: -1...1, format: format,
                                  label: "Refine Saturation")
             }
-            ResettableSlider(value: $model.parameters.curveSaturation, in: -1...1, label: "Refine Saturation",
+            ResettableSlider(value: model.parameterBinding(\.curveSaturation), in: -1...1, label: "Refine Saturation",
                              format: format) { model.parameters.curveSaturation = 0 }
                 .help("How much colour the curve's contrast adds: left keeps only its brightness change, right strengthens it. Double-click to reset")
         }
@@ -358,7 +358,7 @@ private struct Triangle: Shape {
 /// Under the histogram: the colour under the pointer, and the two
 /// clipping switches (J turns both on or off).
 struct PixelReadoutBar: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     /// The clipping warning's options (ViewingSettingsViews.swift).
     @State private var showsClippingOptions = false
 
@@ -441,7 +441,7 @@ struct PixelReadoutText: View {
 /// Exposure, Highlights, Whites from left to right. Hovering names the
 /// region.
 struct HistogramAdjustOverlay: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
     @State private var hovered: HistogramRegion?
     @State private var drag: (region: HistogramRegion, start: Float)?
 

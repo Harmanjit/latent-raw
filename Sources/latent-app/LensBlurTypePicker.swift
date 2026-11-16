@@ -7,9 +7,9 @@ import PixelEngine
 /// Motion keep the focus range sharp over a depth map, and blur the whole
 /// frame evenly until one exists.
 struct LensBlurTypePicker: View {
-    @ObservedObject var model: EditorModel
+    @Bindable var model: EditorModel
 
-    private var blur: LensBlur { model.parameters.lensBlur }
+    private var blur: LensBlur { model.parameter(\.lensBlur) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
