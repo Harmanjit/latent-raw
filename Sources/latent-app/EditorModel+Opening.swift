@@ -232,7 +232,29 @@ extension EditorModel {
     /// this one.
     private func failOpen(url: URL, _ error: any Error) {
         closeImage()
-        status = "Could not open: \(error)"
+        Log.editor.error("Opening \(url.lastPathComponent, privacy: .private) failed: \(String(describing: error), privacy: .private)")
+        status = Self.message(for: error, url: url)
+    }
+
+    /// The status bar's words for a failed open: plain language for the
+    /// raw reader's known failures, whose own descriptions name the
+    /// decoder service and LibRaw (those go to the log instead).
+    static func message(for error: any Error, url: URL) -> String {
+        let name = url.lastPathComponent
+        let unreadable = "Could not open \(name): the file couldn't be read. The camera may not be supported yet, "
+            + "or the file may be damaged. See Limitations in Help."
+        switch error {
+        case RawFileError.libRawOpenFailed, RawFileError.unsupportedCFA:
+            return unreadable
+        case RawDecoderClient.ClientError.serviceFailed(let text):
+            let known = [RawFileError.libRawOpenFailed, .unsupportedCFA].map { String(describing: $0) }
+            if known.contains(where: text.contains) { return unreadable }
+            return "Could not open \(name): \(text)"
+        case RawDecoderClient.ClientError.connectionLost:
+            return "Could not open \(name): the file stopped the raw reader. It may be damaged."
+        default:
+            return "Could not open \(name): \(error)"
+        }
     }
 
     /// Lays a decoded photo in place: its session, stored edit, history
