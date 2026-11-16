@@ -1,6 +1,6 @@
 # Latent speed-up plan
 
-Built on the measurements in [Performance-Profile.md](Performance-Profile.md) (main `62625ef`, November 2026). Every "problem" number below was measured; every "expected gain" is the measuring agent's estimate until someone re-runs the measurement.
+Built on the measurements in [Performance-Profile.md](Performance-Profile.md) (main `62625ef`, November 2026). Every "problem" number below was measured; every "expected gain" is the measuring agent's estimate until someone re-runs the measurement. Phases 1 and 2 were re-measured on `main` `1170c1a`: see the Status column and [What's next](#whats-next).
 
 ## Rules every fix must follow
 
@@ -19,48 +19,50 @@ Score = user-visible gain divided by (effort + risk). Effort: **S** = an afterno
 
 ## Ranked overview
 
-| # | Fix | Problem (measured) | Expected gain | Effort | Risk | Phase |
-|---|---|---|---|---|---|---|
-| 1 | Hash imports with `read()` instead of mmap, 2-4 files at once | Cold import hashing at 583 MB/s on a 2.6 GB/s SSD; 2,000 raws take 104 s | 2,000 cold: about 104 s to 25-30 s | S | Low | 1 |
-| 2 | Memoise the lens-profile list | `LensCorrectionsPanel.body` = 14.9% of main when open (about 7-8 ms per tick) | 7-8 ms per tick with the panel open | S | Low | 1 |
-| 3 | Cheaper backdrop preview at 100% zoom | Heavy 100% tick 51.2 ms, of which 21.8 ms renders a preview the tile hides | 51 to about 30 ms (19 to 33 fps) | S | Low | 1 |
-| 4 | Drag preview at displayed size on retina | Heavy preview binned-1 22.3 ms vs binned-2 5.2 ms | Heavy fit tick about 24 to 7 ms | S | Low | 1 |
-| 5 | Cache the denoise result | Denoise re-runs every tick: 4.66 ms of a 6.95 ms render | About 5 ms per tick when NR is on | S | Low | 1 |
-| 6 | Remove the second SwiftUI pass per tick | 4 main views evaluate exactly 2x per tick | 5-9 ms per tick (plausible, not proven) | S | Low | 1 |
-| 7 | Start the decode while the edit stack is read | Decode waits 45-60 ms for the edit stack read | 45-60 ms off every switch | S | Low | 1 |
-| 8 | Drop the duplicate render in `open(url:)` | Second render 6.3 ms (13.1 worst) on nearly every open | 5-13 ms per switch | S | Low | 1 |
-| 9 | Launch: don't park the open behind the GPU-attach task; warm Lensfun earlier | First photo waits about 230 ms after the window | Warm launch to first photo 0.9 to about 0.65 s | S | Low | 1 |
-| 10 | Skip the 400 ms HQ wait right after an open | Selection to sharp 866 ms (Loupe) | Sharp about 400 ms sooner | S | Low | 1 |
-| 11 | Faster no-change folder refresh | Refresh of 2,000: 215 ms, scan 179 ms | About 60-80 ms | S | Low | 1 |
-| 12 | Subsampled JPEG decode for thumbnails | Full 6000x4000 decode for a 512 px thumb (11.6-14.3 ms) | 6-8 ms per thumbnail | S | Low | 1 |
-| 13 | Higher priority for paste-triggered thumbnails | Paste to 100: 9.2 s at 4 workers | About 2x | S | Low | 1 |
-| 14 | Fix: file argument at launch opens no window | `Latent file.NEF` shows no window for 40 s+ | Bug fix, no timing change | S | Low | 1 |
-| 15 | Develop rendering off the main thread, latest-wins | Main waits for the GPU on every tick (3-65 ms) | Main busy per tick under 1 ms of encode | L | Med | 2 |
-| 16 | Split what SwiftUI observes in EditorModel | 15.3 ms of SwiftUI per change even when nothing renders; 18.9 of 22.2 ms per tick | Tick about 22 to under 16.7 ms *(estimate)*; status changes nearly free | L | Med | 2 |
-| 17 | Decode off main + prefetch neighbours | Main frozen 290-312 ms per photo switch | No freeze; adjacent switch about 345-400 to 30-60 ms | M | Med | 2 |
-| 18 | Loupe: show embedded JPEG first | Loupe first image 346 ms | About 60-100 ms | M | Med | 2 |
-| 19 | Pipeline the export queue (2 workers) | GPU idle 87-95% during export; 2 processes are 1.7-2x faster | Full JPEG about 110 to 190-230 per minute | M | Med | 2 |
-| 20 | HQ preview: keep the full-res pool, render off main | 92 ms base / 209 ms heavy on main | Base about 15 ms, heavy about 110 ms, none on main | M | Med | 2 |
-| 21 | Read EXIF extras in the LibRaw pass | Second ImageIO open: 3.1 ms per file, 6.1 s of a 12.7 s warm import | Warm 2,000 import 12.7 to about 6.6 s | M | Low | 2 |
-| 22 | One-pass, parallel import | Cold 2,000: metadata pass re-reads every file (5.8 s) | With #1: cold heads to the disk limit (about 18 s) | M | Med | 2 |
-| 23 | Equatable slider rows | 149 view bodies per tick with groups open; 52 ms tick | Most of the 34 ms gap between collapsed and expanded | M | Med | 2 |
-| 24 | Per-purpose GPU command queues | Thumbnails, HQ and export share one queue with Develop (contention not measured) | Develop not stuck behind background GPU work | M | Med | 2 |
-| 25 | Lower-resolution presence / local-detail blurs during drags | Presence 7 ms, local detail 9 ms per tick | Up to about 10 ms per tick | M | Med | 2 |
-| 26 | "Selected Mask Only" scopes on the GPU | 9.7 ms on main every 100 ms | About 9 ms | M | Low | 2 |
-| 27 | Brush re-raster off main or on the GPU | 5.8 ms CPU per undo/feather change | About 6 ms+ per such tick | M | Low | 2 |
-| 28 | Edited thumbnails from the live session | 268 ms decode per edited thumbnail | About 250 ms each after a settled edit | M | Low | 2 |
-| 29 | Reuse the embedded preview from import for thumbnails | 2.1 GB of previews cross XPC twice per 2,000 | 1.1 s warm / 5.8 s cold per 2,000 | M | Low | 2 |
-| 30 | Combined PDF with JPEG-backed pages | `add()` 400-680 ms per page; 18 MB pages | 0.4-0.6 s per photo; files 4-6x smaller | S | Med (lossy) | 2 |
-| 31 | Thumbnail cache format (JPEG or reused encoder) | HEIC encode 19-27 ms per thumb | About 2x thumbnail throughput (with #12) | S | Med | 2 |
-| 32 | Mode switch: keep both views alive | Library/Develop switch 134-154 ms, 54-56 ms freezes | Freeze under 16 ms *(estimate)* | M | Med | 2 |
-| 33 | AI Denoise: bigger tiles, faster pack/unpack, re-test the Neural Engine | 14.5 s per photo; Neural Engine run took 10.0 s | 30-50% | M | Med | 3 |
-| 34 | DNG write: colour conversion on the GPU | Writer 190-245 ms per DNG | About 150 ms per DNG | M | Med | 3 |
-| 35 | Half-res proxy cache | Decode is 50-85% of export, thumbnails, contact sheets | Paste-100 thumbnails 9 s to 1-2 s | L | Med | 3 |
-| 36 | White balance without re-demosaic | WB tick at 100% 14.8 ms (vs 4.8 exposure) | 14.8 to about 5 ms | M | **High (goldens)** | 3 |
-| 37 | Ship a precompiled metallib | Cold shader compile 0.9-2.3 s once per update | First launch after update 1.4-2.3 to about 0.65 s | S once approved | Needs download | 3 |
-| 38 | Smaller binary start | First launch after install: about 1 s before our code runs | Perhaps 200-500 ms *(uncertain)* | L | Med | 3 |
-| 39 | Reuse one RenderPipeline across an export batch | 35 ms per photo between GPU end and wait return (cause unconfirmed) | Up to 35 ms per photo | S | Low | 3 (measure first) |
-| 40 | Pre-warm lazy pipelines and export/sharpen pipelines | First LMMSE tile +15 ms; first export sharpen +200 ms; first export render +108 ms | 0.3-0.5 s off the first export | S | Low | 3 (evidence conflicts) |
+Status is as of `main` `1170c1a` (checked against `git log 5a2ceeb..1170c1a`). Wave 1 merged fixes 1-11, 13, 14, 17-19, 22 and 24-31. Fix 21 was folded into 22 but its main idea (no second ImageIO open) did not land. Fix 12 was dropped. Wave 2 merged 15, 16, 20, 23 and 32. The re-measured numbers are in section 0 of [Performance-Profile.md](Performance-Profile.md).
+
+| # | Fix | Problem (measured) | Expected gain | Effort | Risk | Phase | Status |
+|---|---|---|---|---|---|---|---|
+| 1 | Hash imports with `read()` instead of mmap, 2-4 files at once | Cold import hashing at 583 MB/s on a 2.6 GB/s SSD; 2,000 raws take 104 s | 2,000 cold: about 104 s to 25-30 s | S | Low | 1 | Done (wave 1). Cold 2,000: 104 to 19.6 s with #22 |
+| 2 | Memoise the lens-profile list | `LensCorrectionsPanel.body` = 14.9% of main when open (about 7-8 ms per tick) | 7-8 ms per tick with the panel open | S | Low | 1 | Done (wave 1) |
+| 3 | Cheaper backdrop preview at 100% zoom | Heavy 100% tick 51.2 ms, of which 21.8 ms renders a preview the tile hides | 51 to about 30 ms (19 to 33 fps) | S | Low | 1 | Done (wave 1). Heavy 100% drag tick 51.2 to 18.5 ms ready |
+| 4 | Drag preview at displayed size on retina | Heavy preview binned-1 22.3 ms vs binned-2 5.2 ms | Heavy fit tick about 24 to 7 ms | S | Low | 1 | Done (wave 1). Heavy fit drag tick 23.7 to 5.0 ms ready |
+| 5 | Cache the denoise result | Denoise re-runs every tick: 4.66 ms of a 6.95 ms render | About 5 ms per tick when NR is on | S | Low | 1 | Done (wave 1) |
+| 6 | Remove the second SwiftUI pass per tick | 4 main views evaluate exactly 2x per tick | 5-9 ms per tick (plausible, not proven) | S | Low | 1 | Done (wave 1) |
+| 7 | Start the decode while the edit stack is read | Decode waits 45-60 ms for the edit stack read | 45-60 ms off every switch | S | Low | 1 | Done (wave 1) |
+| 8 | Drop the duplicate render in `open(url:)` | Second render 6.3 ms (13.1 worst) on nearly every open | 5-13 ms per switch | S | Low | 1 | Done (wave 1) |
+| 9 | Launch: don't park the open behind the GPU-attach task; warm Lensfun earlier | First photo waits about 230 ms after the window | Warm launch to first photo 0.9 to about 0.65 s | S | Low | 1 | Done (wave 1). Launch to first photo 911 to 668 ms |
+| 10 | Skip the 400 ms HQ wait right after an open | Selection to sharp 866 ms (Loupe) | Sharp about 400 ms sooner | S | Low | 1 | Done (wave 1). Selection to sharp 866 to 204 ms |
+| 11 | Faster no-change folder refresh | Refresh of 2,000: 215 ms, scan 179 ms | About 60-80 ms | S | Low | 1 | Done (wave 1). 215 to 44 ms |
+| 12 | Subsampled JPEG decode for thumbnails | Full 6000x4000 decode for a 512 px thumb (11.6-14.3 ms) | 6-8 ms per thumbnail | S | Low | 1 | Dropped: measured no gain |
+| 13 | Higher priority for paste-triggered thumbnails | Paste to 100: 9.2 s at 4 workers | About 2x | S | Low | 1 | Done (wave 1). 9.2 to 6.5 s median; 5.0-5.6 s only on a quiet Mac |
+| 14 | Fix: file argument at launch opens no window | `Latent file.NEF` shows no window for 40 s+ | Bug fix, no timing change | S | Low | 1 | Done (wave 1) |
+| 15 | Develop rendering off the main thread, latest-wins | Main waits for the GPU on every tick (3-65 ms) | Main busy per tick under 1 ms of encode | L | Med | 2 | Partial (wave 2): encode still on main, but no GPU wait; latest wins |
+| 16 | Split what SwiftUI observes in EditorModel | 15.3 ms of SwiftUI per change even when nothing renders; 18.9 of 22.2 ms per tick | Tick about 22 to under 16.7 ms *(estimate)*; status changes nearly free | L | Med | 2 | Done (wave 2). Default tick 22.2 to 6.3 ms; 67 to 5 bodies |
+| 17 | Decode off main + prefetch neighbours | Main frozen 290-312 ms per photo switch | No freeze; adjacent switch about 345-400 to 30-60 ms | M | Med | 2 | Done (wave 1). Prefetched switch 402 to 83 ms |
+| 18 | Loupe: show embedded JPEG first | Loupe first image 346 ms | About 60-100 ms | M | Med | 2 | Done (wave 1). Camera JPEG at 74 ms |
+| 19 | Pipeline the export queue (2 workers) | GPU idle 87-95% during export; 2 processes are 1.7-2x faster | Full JPEG about 110 to 190-230 per minute | M | Med | 2 | Done (wave 1). 262-278 per minute; Automatic = 3, above this plan's 2-worker rule |
+| 20 | HQ preview: keep the full-res pool, render off main | 92 ms base / 209 ms heavy on main | Base about 15 ms, heavy about 110 ms, none on main | M | Med | 2 | Done (wave 2). Base 92 to 21 ms, heavy 209 to 82 ms, off main |
+| 21 | Read EXIF extras in the LibRaw pass | Second ImageIO open: 3.1 ms per file, 6.1 s of a 12.7 s warm import | Warm 2,000 import 12.7 to about 6.6 s | M | Low | 2 | Partial: folded into #22. The second ImageIO open still runs, now inside the parallel workers. Warm 2,000 import 12.7 to 6.4 s |
+| 22 | One-pass, parallel import | Cold 2,000: metadata pass re-reads every file (5.8 s) | With #1: cold heads to the disk limit (about 18 s) | M | Med | 2 | Done (wave 1) |
+| 23 | Equatable slider rows | 149 view bodies per tick with groups open; 52 ms tick | Most of the 34 ms gap between collapsed and expanded | M | Med | 2 | Done (wave 2), with per-parameter tracking instead of Equatable rows. Expanded tick 52.0 to 12.5 ms |
+| 24 | Per-purpose GPU command queues | Thumbnails, HQ and export share one queue with Develop (contention not measured) | Develop not stuck behind background GPU work | M | Med | 2 | Done (wave 1). Contention still not measured |
+| 25 | Lower-resolution presence / local-detail blurs during drags | Presence 7 ms, local detail 9 ms per tick | Up to about 10 ms per tick | M | Med | 2 | Done (wave 1) |
+| 26 | "Selected Mask Only" scopes on the GPU | 9.7 ms on main every 100 ms | About 9 ms | M | Low | 2 | Done (wave 1). 9.7 to about 1 ms, off main |
+| 27 | Brush re-raster off main or on the GPU | 5.8 ms CPU per undo/feather change | About 6 ms+ per such tick | M | Low | 2 | Done (wave 1). Off main in editor renders; the synchronous path is still CPU |
+| 28 | Edited thumbnails from the live session | 268 ms decode per edited thumbnail | About 250 ms each after a settled edit | M | Low | 2 | Done (wave 1). Not re-measured |
+| 29 | Reuse the embedded preview from import for thumbnails | 2.1 GB of previews cross XPC twice per 2,000 | 1.1 s warm / 5.8 s cold per 2,000 | M | Low | 2 | Done (wave 1) |
+| 30 | Combined PDF with JPEG-backed pages | `add()` 400-680 ms per page; 18 MB pages | 0.4-0.6 s per photo; files 4-6x smaller | S | Med (lossy) | 2 | Done (wave 1). Pages about 16x smaller |
+| 31 | Thumbnail cache format (JPEG or reused encoder) | HEIC encode 19-27 ms per thumb | About 2x thumbnail throughput (with #12) | S | Med | 2 | Done (wave 1) |
+| 32 | Mode switch: keep both views alive | Library/Develop switch 134-154 ms, 54-56 ms freezes | Freeze under 16 ms *(estimate)* | M | Med | 2 | Partial (wave 2): about 30 ms to Develop, about 50 ms back to Library |
+| 33 | AI Denoise: bigger tiles, faster pack/unpack, re-test the Neural Engine | 14.5 s per photo; Neural Engine run took 10.0 s | 30-50% | M | Med | 3 | Not started (Phase 3) |
+| 34 | DNG write: colour conversion on the GPU | Writer 190-245 ms per DNG | About 150 ms per DNG | M | Med | 3 | Not started (Phase 3) |
+| 35 | Half-res proxy cache | Decode is 50-85% of export, thumbnails, contact sheets | Paste-100 thumbnails 9 s to 1-2 s | L | Med | 3 | Not started (Phase 3) |
+| 36 | White balance without re-demosaic | WB tick at 100% 14.8 ms (vs 4.8 exposure) | 14.8 to about 5 ms | M | **High (goldens)** | 3 | Not started (Phase 3) |
+| 37 | Ship a precompiled metallib | Cold shader compile 0.9-2.3 s once per update | First launch after update 1.4-2.3 to about 0.65 s | S once approved | Needs download | 3 | Not started (Phase 3) |
+| 38 | Smaller binary start | First launch after install: about 1 s before our code runs | Perhaps 200-500 ms *(uncertain)* | L | Med | 3 | Not started (Phase 3) |
+| 39 | Reuse one RenderPipeline across an export batch | 35 ms per photo between GPU end and wait return (cause unconfirmed) | Up to 35 ms per photo | S | Low | 3 (measure first) | Not started (Phase 3) |
+| 40 | Pre-warm lazy pipelines and export/sharpen pipelines | First LMMSE tile +15 ms; first export sharpen +200 ms; first export render +108 ms | 0.3-0.5 s off the first export | S | Low | 3 (evidence conflicts) | Not started (Phase 3) |
 
 ## Phase 1: quick wins (S effort, low risk)
 
@@ -122,6 +124,39 @@ Bigger changes. Each needs its own plan, tests first, and the snapshot harness t
 | 38 | First launch after install: about 1 s before `main` runs | Dead-strip, move rarely used code into lazily loaded frameworks, check static initialisers | `Package.swift`, `scripts/make_app.sh` | Perhaps 200-500 ms *(uncertain)* | Medium; once per update only | First-run launch timing |
 | 39 | About 35 ms per photo between GPU end and wait return during export (cause unconfirmed) | Reuse one RenderPipeline/texture pool across a batch | `ExportWorker.swift`, `RenderPipeline.swift` | Up to 35 ms per photo | Low; gain may not appear | `runall.sh`: compare render wall vs GPU |
 | 40 | First LMMSE tile 24 vs 9.6 ms; first export sharpen +200 ms; first export render +108 ms | Build the lazy pipelines in the background after launch or when the export sheet opens | `GPUContext.swift`, `Sources/MLKit/AIMasks.swift` | 0.3-0.5 s off the first export; maybe 15 ms one-time | Low. **Evidence conflicts**: the open agent timed all 54 lazy pipelines at 1.45 ms. Measure which part is really pipeline creation first | `GPUStartupPerfTests`; first-photo rows in `runall.sh` |
+
+## What's next
+
+What is left after waves 1 and 2. Numbers are from the re-measure in [Performance-Profile.md](Performance-Profile.md) section 0.
+
+### Partial fixes
+
+| # | What is left |
+|---|---|
+| 15 | The render is still encoded on main (0.03-0.45 ms per tick). The GPU wait is gone. Moving the encode to a render actor would take the rest off main, but the gain is small |
+| 21 | Import still opens every raw a second time with ImageIO for EXIF extras, now inside the parallel workers. Reading those fields in the LibRaw pass is still open. Warm 2,000 import is 6.4 s; the plan's estimate with #21 and #22 was about 2 s |
+| 32 | Library to Develop's longest main iteration is about 30 ms (target under 16). Develop to Library is still about 50 ms (54 before). Profile Develop to Library first |
+
+### Regressions and new costs to look at
+
+| Item | Measured | Next step |
+|---|---|---|
+| Export memory | Automatic = 3 takes peak footprint to 4.6-5.3 GB; this plan's rule says at most 2 workers on 16 GB | Decide: change the rule, or make Automatic pick 2 here. HEIC gains only 1.6x from 3 workers, and 2 was not measured for it |
+| Kept-alive Develop panel (#32) | First window layout at launch +34 ms (229 to 263); Settings open +7 ms longest iteration; Library selection +1-2 ms; export sheet maybe +20 ms | Profile with `sample` to confirm the cause, then consider building the hidden panel lazily after launch |
+| Brush full re-raster, synchronous path | 5.8 or 13.4 ms (bimodal), against 5.76 | Re-run pinned to high QoS. If it is the efficiency core, run the redraw at a higher QoS |
+| 100% bilinear tile | 3.68 to 4.50 ms | Re-run; no code changed, probably noise |
+| High Quality Preview after an open (engine test) | 99.3 ms call to shown, against 91.7; main 92 to 0.2 ms | Check whether the first HQ after an open allocates the pool again |
+| Single non-drag edit | About 45-50 ms of main with all groups open; about 33 ms after an HQ preview has landed (13 with HQ off) | Profile; the HQ pass may release textures the next edit has to allocate again |
+| Main turn at every photo switch | One turn of about 50-67 ms (worst 107) near the selection; the open itself is 6 ms | Profile the selection change in SwiftUI |
+| Shortfalls against estimates | HQ base 20.8 ms (plan: about 15): the resample still costs about 11 ms. Heavy WB at 100% delivers about 27 fps in a 60 Hz drag (36 ms draft tile) | Keep the resample buffers; #36 for the tile |
+
+### Phase 3 (not started)
+
+All of 33-40 are still open: AI Denoise tiles (#33), DNG colour on the GPU (#34), half-res proxy cache (#35, now the main lever for Paste Settings thumbnails and small exports, which are decode-bound), WB without re-demosaic (#36, blocked by goldens), precompiled metallib (#37, needs approval for the download; cold-shader launch is still 1192 ms), smaller binary start (#38), one RenderPipeline per export batch (#39, measure first), pre-warmed lazy pipelines (#40, evidence still conflicts).
+
+### Still not measured
+
+Real mouse drags, frames reaching the screen, GPU queue contention while exporting (#24 landed without it), the in-app HQ row, first launch after a rebuild, and holding an arrow key.
 
 ## How to measure again
 
@@ -215,6 +250,10 @@ grep PERFUI out.err
 # profiling soak: LATENT_PERF_UI_SOAK=default|expanded|collapsed|status|export|modes (loops 14 s after 'SOAK START pid=N')
 sample <pid> 10 1 -file s.txt
 ```
+
+### Re-measure branches (after waves 1 and 2)
+
+The harnesses above were ported to the async render queue and decode on `remeasure/render`, `remeasure/open`, `remeasure/library`, `remeasure/export` and `remeasure/ui`, in `/Users/harman/latent-wt/re-render`, `re-open`, `re-library`, `re-export` and `re-ui`. Not pushed, never to be merged. Each branch's run commands are the ones above with the worktree changed, plus: render `scripts/perf/run-render-perf.sh EditorTickPerfTests/testPacedDrag out.txt` for 60 Hz drags; open `LATENT_PERF_NO_PREFETCH=1` to force a decode per switch; library `scripts/perf-library/remeasure/run.sh` (adds `sync` and `importthumbs` modes); export `scripts/perf-export/remeasure.sh ten|one|pdf|fmt|dng` and `summarise_remeasure.py`; UI the same `LATENT_PERF_UI=1` run, with an A/B against the old `perf/ui` binary at `/Users/harman/latent-wt/ui/.build/release/latent-app`.
 
 ### Which measurement proves which fix
 
