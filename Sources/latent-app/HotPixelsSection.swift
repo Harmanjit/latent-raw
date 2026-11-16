@@ -48,7 +48,19 @@ struct HotPixelsSection: View {
     }
 
     private func status(for removal: HotPixelRemoval) -> String {
-        guard let fixed = model.session?.hotPixelsFixed(for: removal) else { return "Counting…" }
+        guard let fixed = model.hotPixelsFixedAfterRender(for: removal) else { return "Counting…" }
         return fixed == 1 ? "1 pixel fixed" : "\(fixed.formatted()) pixels fixed"
+    }
+}
+
+extension EditorModel {
+    /// The count the last render stored in the session, which observation
+    /// can't see: reading the rendered layers as well makes a view that
+    /// shows it update when the render that counted lands (both are set
+    /// after the session holds the count), not stay on "Counting…".
+    func hotPixelsFixedAfterRender(for removal: HotPixelRemoval) -> Int? {
+        _ = preview
+        _ = tile
+        return session?.hotPixelsFixed(for: removal)
     }
 }
