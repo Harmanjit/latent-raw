@@ -64,6 +64,11 @@ Open Anyway instead.
    - Open a raw, export a JPEG, run a Photo Merge on a bracket, and check
      Help › Latent Help shows the new What's New and Licences pages and
      About shows the new version and copyright.
+   - Note any prompt macOS shows on that first launch beyond Open Anyway
+     (for instance about the app differing from the version opened
+     before, or about its data), since every ad hoc signature differs;
+     if one appears, describe it in `Installation.md` under Upgrading
+     from 0.9 before publishing.
 4. Tag the commit (`git tag -a v<version> -m "Latent <version>"`), push
    the tag, and create the GitHub Release from it: upload the zip under
    Assets, paste the version's `CHANGELOG.md` section and the SHA-256.

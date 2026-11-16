@@ -30,7 +30,7 @@ Each photo folder is one catalog, stored in a `_latent/` directory inside it:
 _latent/
   catalog.sqlite     the database (a cache; rebuildable)
   xmp/               one sidecar per image (the source of truth)
-  thumbnails/        512 px HEIC previews (excluded from Time Machine)
+  thumbnails/        512 px JPEG previews (excluded from Time Machine)
   backups/           the last five copies of catalog.sqlite
   custom-order.json  your Custom sort arrangement, once you make one
   collections.json   a copy of your collections, once you make one
@@ -52,7 +52,7 @@ Thumbnails are made in the background as soon as a folder opens: from the camera
 
 **Settings › Performance** controls them:
 
-- **Quality**: how finely the 512 px HEIC thumbnails are compressed. Low, Standard (the default) or High. A change applies to thumbnails made from then on.
+- **Quality**: how finely the 512 px JPEG thumbnails are compressed. Low, Standard (the default) or High. A change applies to thumbnails made from then on.
 - **Background generation**: Low makes two at a time on the efficiency cores and leaves the Mac to you; Normal (the default) makes four; High uses every core but two and fills a new folder fastest. It takes effect from the next pass.
 - **Memory for the grid**: how much memory decoded thumbnails may keep, so scrolling back needs no decoding. Automatic is a thirty-second of the Mac's memory, between 64 and 256 MB. Half is given back when macOS runs short of memory, all of it when memory is critical.
 - **Thumbnail cache**: how many files the open folder's `_latent/thumbnails` holds and how much disk they take, including any that no photo uses any more. **Remove Unused** deletes those; **Discard and Rebuild All…** throws every thumbnail of the folder away and makes them all again at the current quality.

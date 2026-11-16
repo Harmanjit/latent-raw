@@ -6,7 +6,7 @@ The problems people hit first, and what to do. For general questions see the [FA
 Try to open it once, then click **Open Anyway** in System Settings > Privacy & Security. Since macOS 15, Control-click > Open no longer skips this step. Alternatively, run `xattr -dr com.apple.quarantine /path/to/Latent.app`. The app is not notarised; see [Installation](Installation).
 
 **I changed the code and the app looks the same.**
-`build/Latent.app` is a snapshot. Run `scripts/make_app.sh` again after any change. `swift run latent-app` always reflects the current source but is slower and unsandboxed.
+`build/Latent.app` is a snapshot. Run `scripts/make_app.sh` again after any change, giving it a version (`scripts/make_app.sh 1.0.0`) or `--dev`; without either it stops, unless a version tag points at the commit. `swift run latent-app` always reflects the current source but is slower and unsandboxed.
 
 **The bundle won't open the folder I pass on the command line.**
 Sandboxed apps cannot read arbitrary paths. Use ⇧⌘O, or a `swift run` build for development.
