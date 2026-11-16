@@ -88,6 +88,10 @@ extension EditorModel {
     /// and in the editor, with, if `placeholder` is set (Loupe), the
     /// camera's embedded JPEG over it (#18).
     ///
+    /// `readEdit` runs twice, beside the decode and again once it is
+    /// done, so that an edit stored meanwhile is the one applied;
+    /// `currentUserRotation`, if given, is likewise asked at that point.
+    ///
     /// Latest wins: an open, a synchronous `open` or `closeImage` started
     /// meanwhile makes this one return `.superseded` without touching
     /// anything, as does `isCurrent` turning false (the selection moved on
@@ -96,6 +100,7 @@ extension EditorModel {
     func open(url: URL, userRotation: Int = 0, catalogImageID: Int64?,
               placeholder: Bool = false,
               readEdit: @MainActor () async throws -> String?,
+              currentUserRotation: (@MainActor () -> Int)? = nil,
               isCurrent: @escaping @MainActor () -> Bool = { true }) async -> OpenOutcome {
         // Already passed by (a held arrow key): don't disturb the newer
         // open's decode.
@@ -161,9 +166,23 @@ extension EditorModel {
             return .failed
         }
         guard stillWanted() else { abandon(); return .superseded }
+        // Read the edit again: a Paste Settings, preset or undo stored
+        // during the decode went only to the catalog, since the editor
+        // still held the previous photo's id; the first read would put
+        // the older edit in place and the next save would overwrite the
+        // paste. The same for a rotation. The first read still served the
+        // placeholder's framing and let the decode start beside it.
+        let latestEdit: String?
+        do {
+            latestEdit = try await readEdit()
+        } catch {
+            abandon()
+            return .editUnreadable
+        }
+        guard stillWanted() else { abandon(); return .superseded }
         applied.done = true
-        apply(file, url: url, userRotation: userRotation, catalogImageID: catalogImageID,
-              editStackJSON: editStackJSON, gpu: gpu)
+        apply(file, url: url, userRotation: currentUserRotation?() ?? userRotation, catalogImageID: catalogImageID,
+              editStackJSON: latestEdit, gpu: gpu)
         return hasImage ? .opened : .failed
     }
 
@@ -213,7 +232,29 @@ extension EditorModel {
     /// this one.
     private func failOpen(url: URL, _ error: any Error) {
         closeImage()
-        status = "Could not open: \(error)"
+        Log.editor.error("Opening \(url.lastPathComponent, privacy: .private) failed: \(String(describing: error), privacy: .private)")
+        status = Self.message(for: error, url: url)
+    }
+
+    /// The status bar's words for a failed open: plain language for the
+    /// raw reader's known failures, whose own descriptions name the
+    /// decoder service and LibRaw (those go to the log instead).
+    static func message(for error: any Error, url: URL) -> String {
+        let name = url.lastPathComponent
+        let unreadable = "Could not open \(name): the file couldn't be read. The camera may not be supported yet, "
+            + "or the file may be damaged. See Limitations in Help."
+        switch error {
+        case RawFileError.libRawOpenFailed, RawFileError.unsupportedCFA:
+            return unreadable
+        case RawDecoderClient.ClientError.serviceFailed(let text):
+            let known = [RawFileError.libRawOpenFailed, .unsupportedCFA].map { String(describing: $0) }
+            if known.contains(where: text.contains) { return unreadable }
+            return "Could not open \(name): \(text)"
+        case RawDecoderClient.ClientError.connectionLost:
+            return "Could not open \(name): the file stopped the raw reader. It may be damaged."
+        default:
+            return "Could not open \(name): \(error)"
+        }
     }
 
     /// Lays a decoded photo in place: its session, stored edit, history

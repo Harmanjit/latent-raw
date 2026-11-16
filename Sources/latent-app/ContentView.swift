@@ -137,6 +137,9 @@ struct ContentView: View {
             mainArea
         }
         .navigationSplitViewStyle(.balanced)
+        // The open folder names the window (title bar, Window menu,
+        // Mission Control).
+        .navigationTitle(library.folderURL?.lastPathComponent ?? "Latent")
         .collectionSheets(library: library)
         .toolbar(fullScreen.isActive ? .hidden : .automatic, for: .windowToolbar)
         .motionFollowsAccessibility()
@@ -741,6 +744,11 @@ struct ContentView: View {
                         editReadError = error
                         throw error
                     }
+                },
+                // Asked again once decoded: a rotation made meanwhile
+                // reached only the catalog.
+                currentUserRotation: {
+                    library.selectedImage.flatMap { $0.id == record.id ? $0.userRotation : nil } ?? record.userRotation
                 },
                 // Another folder may have opened meanwhile. The record and
                 // its id belong to the old catalog; opened now, its edits

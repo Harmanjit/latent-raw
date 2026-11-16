@@ -25,7 +25,7 @@ struct LatentApp: App {
     static let mainWindowID = "main"
 
     var body: some Scene {
-        Window("Latent, a catalog management and RAW editor for macOS", id: Self.mainWindowID) {
+        Window("Latent", id: Self.mainWindowID) {
             ContentView()
                 .frame(minWidth: 900, minHeight: 600)
                 .tint(prefs.accent.color)
@@ -290,6 +290,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !exporting.isEmpty || !exportingOpenImage.isEmpty || libraries.contains(where: \.hasPendingWork)
                 || outputs.isRunning else {
             SafeFileWriter.abandonPendingWrites()
+            // Auto Import isn't pending work, so a copy from a card may be
+            // under way: its hidden whole copy goes, as on the slow path.
+            _ = ImageTransfer.abandonTemporaryCopies()
             _ = PanoramaFrameStore.removeScratchOfThisProcess()
             return .terminateNow
         }
