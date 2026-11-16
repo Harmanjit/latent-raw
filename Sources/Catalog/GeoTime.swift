@@ -24,10 +24,28 @@ public struct GeoPosition: Equatable, Sendable {
         self.altitude = altitude
     }
 
+    /// The furthest from sea level an altitude may be, in metres: well
+    /// past any summit, trench or aircraft, and far inside what a sidecar's
+    /// centimetre rational can hold.
+    public static let maximumAltitude: Double = 100_000
+
+    /// Whether an altitude is one a place can have: finite and in range.
+    public static func isValidAltitude(_ altitude: Double) -> Bool {
+        altitude.isFinite && abs(altitude) <= maximumAltitude
+    }
+
     /// Whether the numbers are a place: finite and in range.
     public var isValid: Bool {
         latitude.isFinite && longitude.isFinite && abs(latitude) <= 90 && abs(longitude) <= 180
-            && (altitude?.isFinite ?? true)
+            && (altitude.map(Self.isValidAltitude) ?? true)
+    }
+
+    /// This position with an impossible altitude dropped, nil when the
+    /// latitude or longitude isn't a place.
+    public var withValidAltitude: GeoPosition? {
+        var p = self
+        if let a = p.altitude, !Self.isValidAltitude(a) { p.altitude = nil }
+        return p.isValid ? p : nil
     }
 
     // MARK: XMP
@@ -81,6 +99,7 @@ public struct GeoPosition: Equatable, Sendable {
         guard let lat = Self.parseXMPCoordinate(latitude), let lon = Self.parseXMPCoordinate(longitude) else { return nil }
         var alt = Self.parseRational(altitude)
         if let a = alt, altitudeRef?.trimmingCharacters(in: .whitespaces) == "1" { alt = -abs(a) }
+        if let a = alt, !Self.isValidAltitude(a) { alt = nil }
         self.init(latitude: lat, longitude: lon, altitude: alt)
         guard isValid else { return nil }
     }
@@ -113,8 +132,10 @@ extension XMPSidecar {
         if let tag = f.geotag {
             lines.append("   <exif:GPSLatitude>\(GeoPosition.xmpCoordinate(tag.latitude, positive: "N", negative: "S"))</exif:GPSLatitude>")
             lines.append("   <exif:GPSLongitude>\(GeoPosition.xmpCoordinate(tag.longitude, positive: "E", negative: "W"))</exif:GPSLongitude>")
-            if let altitude = tag.altitude {
-                let centimetres = Int64((abs(altitude) * 100).rounded())
+            // An altitude that can't be whole centimetres (NaN, infinite or
+            // absurdly large, say from an older catalog row) is left out.
+            if let altitude = tag.altitude, GeoPosition.isValidAltitude(altitude),
+               let centimetres = Int64(exactly: (abs(altitude) * 100).rounded()) {
                 lines.append("   <exif:GPSAltitude>\(centimetres)/100</exif:GPSAltitude>")
                 lines.append("   <exif:GPSAltitudeRef>\(altitude < 0 ? 1 : 0)</exif:GPSAltitudeRef>")
             }
@@ -230,8 +251,10 @@ public struct GeoTimeState: Equatable, Sendable {
         captureTimeOffset = total == 0 ? nil : total
     }
 
-    /// Puts `position` on as the user's geotag.
+    /// Puts `position` on as the user's geotag. An impossible altitude is
+    /// dropped; a position that isn't a place changes nothing.
     public mutating func setGeotag(_ position: GeoPosition) {
+        guard let position = position.withValidAltitude else { return }
         gpsLatitude = position.latitude
         gpsLongitude = position.longitude
         gpsAltitude = position.altitude

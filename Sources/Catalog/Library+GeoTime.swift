@@ -19,6 +19,8 @@ extension Library {
     /// `GeotagPlan`) on its photo as a geotag. Returns how many changed.
     @discardableResult
     public func applyGeotags(_ positions: [Int64: GeoPosition], for records: [ImageRecord]) async throws -> Int {
+        // Only real places are saved, and never an impossible altitude.
+        let positions = positions.compactMapValues(\.withValidAltitude)
         let wanted = records.filter { $0.id.map { positions[$0] != nil } ?? false }
         return try await changeGeoTime(wanted, action: "Geotag from GPX Track") { id, state in
             if let position = positions[id] { state.setGeotag(position) }

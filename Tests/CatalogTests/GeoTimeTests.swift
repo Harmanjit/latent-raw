@@ -243,6 +243,71 @@ final class GeoTimeTests: XCTestCase {
         XCTAssertEqual(try XMPSidecar.read(from: url), fields)
     }
 
+    // MARK: - Out-of-range altitudes
+
+    /// A GPX elevation far beyond any place on Earth is dropped, and so is
+    /// anything interpolated from it.
+    func testHugeGPXElevationIsDropped() throws {
+        let xml = """
+        <gpx version="1.1"><trk><trkseg>
+          <trkpt lat="51.0" lon="-1.0"><ele>1e20</ele><time>2026-05-01T10:00:00Z</time></trkpt>
+          <trkpt lat="51.2" lon="-1.2"><ele>1e20</ele><time>2026-05-01T10:02:00Z</time></trkpt>
+        </trkseg></trk></gpx>
+        """
+        let track = try GPXTrack.parse(Data(xml.utf8))
+        XCTAssertEqual(track.points.count, 2)
+        XCTAssertNil(track.points[0].elevation)
+        let between = try XCTUnwrap(track.position(at: Self.date("2026-05-01T10:01:00Z"), maxGap: 300))
+        XCTAssertNil(between.altitude)
+        let a = GPXPoint(time: Self.date("2026-05-01T10:00:00Z"), latitude: 1, longitude: 1, elevation: .greatestFiniteMagnitude)
+        let b = GPXPoint(time: Self.date("2026-05-01T10:02:00Z"), latitude: 1, longitude: 1, elevation: -.greatestFiniteMagnitude)
+        XCTAssertNil(GPXTrack.interpolate(a, b, 0.5).altitude, "an interpolated inf or NaN is dropped")
+    }
+
+    /// Writing a geotag whose altitude can't be centimetres must not trap;
+    /// the altitude is simply left out.
+    func testUnwritableAltitudeIsLeftOutOfTheSidecar() {
+        for altitude in [1e300, .infinity, -.infinity, .nan, 1e17] {
+            var fields = XMPSidecar.Fields(rating: 1, sourceHash: "xxh64:0011223344556677")
+            fields.geotag = GeoPosition(latitude: 1, longitude: 2, altitude: altitude)
+            let text = XMPSidecar.geoTimeElements(fields)
+            XCTAssertTrue(text.contains("<exif:GPSLatitude>"), "\(altitude)")
+            XCTAssertFalse(text.contains("GPSAltitude"), "\(altitude)")
+        }
+    }
+
+    func testHugeSidecarAltitudeReadsAsNil() {
+        let tag = GeoPosition(xmpLatitude: "51,30.0N", longitude: "0,7.65W", altitude: "1e300", altitudeRef: "0")
+        XCTAssertEqual(try XCTUnwrap(tag).latitude, 51.5)
+        XCTAssertNil(tag?.altitude)
+        XCTAssertFalse(GeoPosition(latitude: 0, longitude: 0, altitude: 1e20).isValid)
+        XCTAssertTrue(GeoPosition(latitude: 0, longitude: 0, altitude: 8_848).isValid)
+    }
+
+    func testSetGeotagDropsAnUnsavableAltitude() {
+        var state = GeoTimeState(ImageRecord(relPath: "A.NEF", size: 1, mtime: 0, xxhash: Data(count: 8), rating: 0, flag: 0))
+        state.setGeotag(GeoPosition(latitude: 1, longitude: 2, altitude: 1e20))
+        XCTAssertEqual(state.gpsLatitude, 1)
+        XCTAssertNil(state.gpsAltitude)
+        var bad = GeoTimeState(ImageRecord(relPath: "A.NEF", size: 1, mtime: 0, xxhash: Data(count: 8), rating: 0, flag: 0))
+        bad.setGeotag(GeoPosition(latitude: 100, longitude: 2))
+        XCTAssertNil(bad.gpsLatitude, "an impossible place isn't saved")
+    }
+
+    /// An impossible altitude already saved by an older build (from a
+    /// sidecar read before the range check) must not trap the Metadata panel.
+    func testImpossibleSavedAltitudeIsNotShown() {
+        for altitude in [1e300, .infinity, .nan] {
+            var r = ImageRecord(relPath: "A.NEF", size: 1, mtime: 0, xxhash: Data(count: 8), rating: 0, flag: 0)
+            r.gpsAltitude = altitude
+            XCTAssertFalse(r.extraMetadataRows.contains { $0.label == "Altitude" }, "\(altitude)")
+            XCTAssertEqual(MetadataFormat.altitude(altitude), "—")
+        }
+        var r = ImageRecord(relPath: "A.NEF", size: 1, mtime: 0, xxhash: Data(count: 8), rating: 0, flag: 0)
+        r.gpsAltitude = -12
+        XCTAssertEqual(r.extraMetadataRows.first { $0.label == "Altitude" }?.value, "−12 m")
+    }
+
     // MARK: - Library
 
     private func openLibrary(_ manager: UndoManager) async throws -> Library {

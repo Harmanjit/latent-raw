@@ -48,9 +48,9 @@ extension MetadataFormat {
         String(format: "%.6f, %.6f", latitude, longitude)
     }
 
-    /// "35 m", "−12 m".
+    /// "35 m", "−12 m"; "—" for a value that isn't a real altitude.
     public static func altitude(_ metres: Double) -> String {
-        let rounded = Int(metres.rounded())
+        guard GeoPosition.isValidAltitude(metres), let rounded = Int(exactly: metres.rounded()) else { return "—" }
         return rounded < 0 ? "−\(-rounded) m" : "\(rounded) m"
     }
 }
@@ -90,7 +90,7 @@ public extension ImageRecord {
         if let gpsLatitude, let gpsLongitude {
             rows.append(("GPS", MetadataFormat.coordinates(latitude: gpsLatitude, longitude: gpsLongitude)))
         }
-        if let gpsAltitude { rows.append(("Altitude", MetadataFormat.altitude(gpsAltitude))) }
+        if let gpsAltitude, GeoPosition.isValidAltitude(gpsAltitude) { rows.append(("Altitude", MetadataFormat.altitude(gpsAltitude))) }
         return rows.map { (label: $0.0, value: $0.1) }
     }
 

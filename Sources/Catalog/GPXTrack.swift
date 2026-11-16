@@ -141,7 +141,7 @@ public struct GPXTrack: Equatable, Sendable {
                 collecting = false
                 if name == "time" { time = GPXTrack.parseTime(text) }
                 if name == "ele", let value = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)),
-                   value.isFinite { elevation = value }
+                   GeoPosition.isValidAltitude(value) { elevation = value }
             } else if Self.pointNames.contains(name) {
                 if let point = current, let time {
                     points.append(GPXPoint(time: time, latitude: point.lat, longitude: point.lon, elevation: elevation))
@@ -207,7 +207,10 @@ public struct GPXTrack: Equatable, Sendable {
         if lon > 180 { lon -= 360 } else if lon < -180 { lon += 360 }
         let lat = a.latitude + f * (b.latitude - a.latitude)
         var altitude: Double?
-        if let ea = a.elevation, let eb = b.elevation { altitude = ea + f * (eb - ea) }
+        if let ea = a.elevation, let eb = b.elevation {
+            let e = ea + f * (eb - ea)
+            altitude = GeoPosition.isValidAltitude(e) ? e : nil
+        }
         return GeoPosition(latitude: lat, longitude: lon, altitude: altitude)
     }
 }
