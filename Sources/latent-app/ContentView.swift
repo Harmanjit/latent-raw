@@ -137,6 +137,9 @@ struct ContentView: View {
             mainArea
         }
         .navigationSplitViewStyle(.balanced)
+        // The open folder names the window (title bar, Window menu,
+        // Mission Control).
+        .navigationTitle(library.folderURL?.lastPathComponent ?? "Latent")
         .collectionSheets(library: library)
         .toolbar(fullScreen.isActive ? .hidden : .automatic, for: .windowToolbar)
         .motionFollowsAccessibility()

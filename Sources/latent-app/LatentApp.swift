@@ -25,7 +25,7 @@ struct LatentApp: App {
     static let mainWindowID = "main"
 
     var body: some Scene {
-        Window("Latent, a catalog management and RAW editor for macOS", id: Self.mainWindowID) {
+        Window("Latent", id: Self.mainWindowID) {
             ContentView()
                 .frame(minWidth: 900, minHeight: 600)
                 .tint(prefs.accent.color)
