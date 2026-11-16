@@ -22,6 +22,7 @@ final class DragRenderTests: XCTestCase {
         model.viewBackingScale = 2
         model.viewportDidResize(to: drawable)
         model.rerenderForViewport()
+        await model.renderSettled()
         // The renders above came moments ago; the test's first edit must
         // not count as a tick of a drag that began with them.
         model.resetDragRender()
@@ -85,6 +86,7 @@ final class DragRenderTests: XCTestCase {
         XCTAssertFalse(model.dragRender.previewIsDraft)
 
         model.parameters.exposureEV = 0.3   // a tick right after it: the draft
+        await model.renderSettled()
         XCTAssertEqual(model.previewQuads, 2)
         XCTAssertTrue(model.dragRender.previewIsDraft)
         XCTAssertEqual(model.preview?.texture.width, fullWidth / 2)
@@ -104,13 +106,16 @@ final class DragRenderTests: XCTestCase {
         let model = try await openModel()
         model.parameters.exposureEV = 0.2
         model.parameters.exposureEV = 0.5
+        await model.renderSettled()
         XCTAssertTrue(model.dragRender.previewIsDraft)
         model.settleDragRender()
+        await model.renderSettled()
         let gpu = try await GPUContext.shared()
         let settled = try TextureReadback.float16Pixels(of: try XCTUnwrap(model.preview?.texture), gpu: gpu)
 
         model.resetDragRender()
         model.rerender()   // not a tick: nothing came before it
+        await model.renderSettled()
         XCTAssertFalse(model.dragRender.previewIsDraft)
         let fresh = try TextureReadback.float16Pixels(of: try XCTUnwrap(model.preview?.texture), gpu: gpu)
         XCTAssertEqual(settled, fresh)
@@ -121,8 +126,10 @@ final class DragRenderTests: XCTestCase {
         let model = try await openModel()
         model.parameters.exposureEV = 0.2
         model.parameters.exposureEV = 0.3
+        await model.renderSettled()
         XCTAssertEqual(model.previewQuads, 2)
         model.rerenderForViewport()
+        await model.renderSettled()
         XCTAssertEqual(model.previewQuads, 1)
         XCTAssertFalse(model.dragRender.previewIsDraft)
     }
@@ -133,8 +140,10 @@ final class DragRenderTests: XCTestCase {
         let model = try await openModel()
         model.parameters.exposureEV = 0.2
         model.parameters.exposureEV = 0.3
+        await model.renderSettled()
         XCTAssertNotNil(model.dragRender.settleTask)
         model.open(url: try TestAssets.d750URL(), catalogImageID: 2)
+        await model.renderSettled()
         XCTAssertNil(model.dragRender.settleTask)
         XCTAssertFalse(model.dragRender.previewIsDraft)
         XCTAssertEqual(model.previewQuads, 1)
@@ -149,6 +158,7 @@ final class DragRenderTests: XCTestCase {
         let model = try await openModel()
         model.toggleZoom(at: CGPoint(x: 1280, y: 800))
         model.rerenderForViewport()
+        await model.renderSettled()
         XCTAssertTrue(model.wantsTile)
         XCTAssertEqual(model.previewQuads, 1)
         let tileWidth = try XCTUnwrap(model.tile?.texture.width)
@@ -156,12 +166,14 @@ final class DragRenderTests: XCTestCase {
         model.parameters.exposureEV = 0.2
         XCTAssertEqual(model.previewQuads, 1, "the first edit renders the full backdrop")
         model.parameters.exposureEV = 0.3
+        await model.renderSettled()
         XCTAssertEqual(model.previewQuads, EditorModel.analysisQuads)
         XCTAssertTrue(model.dragRender.previewIsDraft)
         XCTAssertTrue(model.preview?.texture === model.analysisTexture, "one render serves the backdrop and the scopes")
         XCTAssertEqual(model.tile?.texture.width, tileWidth)
 
         model.settleDragRender()
+        await model.renderSettled()
         XCTAssertEqual(model.previewQuads, 1)
         XCTAssertFalse(model.dragRender.previewIsDraft)
         XCTAssertFalse(model.preview?.texture === model.analysisTexture)
@@ -174,8 +186,10 @@ final class DragRenderTests: XCTestCase {
         model.secondaryViewportDidResize(to: CGSize(width: 5120, height: 2880))
         model.toggleZoom(at: CGPoint(x: 1280, y: 800))
         model.rerenderForViewport()
+        await model.renderSettled()
         model.parameters.exposureEV = 0.2
         model.parameters.exposureEV = 0.3
+        await model.renderSettled()
         let secondary = try XCTUnwrap(model.secondaryFitZoom)
         XCTAssertEqual(model.previewQuads, SecondaryPreview.previewQuads(mainZoom: nil, secondaryZoom: secondary))
         XCTAssertFalse(model.preview?.texture === model.analysisTexture)
@@ -190,21 +204,25 @@ final class DragRenderTests: XCTestCase {
         model.parameters.clarity = 0.4
         model.toggleZoom(at: CGPoint(x: 1280, y: 800))
         model.rerenderForViewport()
+        await model.renderSettled()
         model.resetDragRender()
         model.parameters.exposureEV = 0.2
         XCTAssertFalse(model.dragRender.tileIsDraft)
         model.parameters.exposureEV = 0.3
+        await model.renderSettled()
         XCTAssertTrue(model.dragRender.tileIsDraft)
         let gpu = try await GPUContext.shared()
         let draft = try TextureReadback.float16Pixels(of: try XCTUnwrap(model.tile?.texture), gpu: gpu)
 
         model.settleDragRender()
+        await model.renderSettled()
         XCTAssertFalse(model.dragRender.tileIsDraft)
         XCTAssertFalse(model.dragRender.previewIsDraft)
         let settled = try TextureReadback.float16Pixels(of: try XCTUnwrap(model.tile?.texture), gpu: gpu)
         XCTAssertNotEqual(draft, settled)
         model.resetDragRender()
         model.rerender()
+        await model.renderSettled()
         XCTAssertEqual(try TextureReadback.float16Pixels(of: try XCTUnwrap(model.tile?.texture), gpu: gpu), settled)
     }
 
@@ -214,9 +232,11 @@ final class DragRenderTests: XCTestCase {
         let model = try await openModel()
         model.toggleZoom(at: CGPoint(x: 1280, y: 800))
         model.rerenderForViewport()
+        await model.renderSettled()
         model.resetDragRender()
         model.parameters.exposureEV = 0.2
         model.parameters.exposureEV = 0.3
+        await model.renderSettled()
         XCTAssertFalse(model.dragRender.tileIsDraft)
     }
 }

@@ -435,11 +435,13 @@ final class EditorFixesTests: XCTestCase {
         XCTAssertGreaterThan(reach, 128, "clarity's large blur reads past the 128 px margin on a 24 MP frame")
 
         model.zoomToActualSize()
+        await model.renderSettled()
         XCTAssertNotNil(model.tile)
         let sensor = CGRect(origin: .zero, size: model.sensorSize)
         for step in 0..<6 {
             model.pan(by: CGSize(width: -40, height: step.isMultiple(of: 2) ? -25 : 0))
             model.rerenderForViewport()
+            await model.renderSettled()
             // Whatever the tile on hand shows of the view is at least the
             // reach inside the render's edge.
             XCTAssertTrue(model.tileCoversView)
@@ -486,9 +488,11 @@ final class EditorFixesTests: XCTestCase {
         XCTAssertGreaterThan(edgeGap, 16, "the view is inside the inset")
         XCTAssertLessThan(edgeGap, reach, "the view is within the reach of the edge")
         model.rerenderForViewport()
+        await model.renderSettled()
         XCTAssertTrue(model.tileCoversView)
         model.pan(by: CGSize(width: -4 * sign, height: 0))   // a little away from the edge
         model.rerenderForViewport()
+        await model.renderSettled()
         XCTAssertEqual(model.renderReport, "view moved · no render")
     }
 }

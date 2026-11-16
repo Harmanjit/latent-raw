@@ -58,12 +58,33 @@ extension Exporter {
     func resample(_ texture: MTLTexture, frame: CropFrame, into dest: MTLTexture,
                   sourceIsEncoded: Bool, encode: Bool) throws {
         let canvas = Self.outputSize(frame: frame, maxLongEdge: nil)
-        let w = dest.width, h = dest.height
         guard let sampled = gpu.makePrivateTexture(width: canvas.0, height: canvas.1, pixelFormat: .rgba16Float),
-              let rows = gpu.makePrivateTexture(width: w, height: canvas.1, pixelFormat: .rgba16Float),
+              let rows = gpu.makePrivateTexture(width: dest.width, height: canvas.1, pixelFormat: .rgba16Float),
               let cmdBuffer = gpu.commandQueue.makeCommandBuffer() else {
             throw ExportError.readbackFailed
         }
+        try encodeResample(texture, frame: frame, into: dest, sampled: sampled, rows: rows,
+                           sourceIsEncoded: sourceIsEncoded, encode: encode, cmdBuffer: cmdBuffer)
+        cmdBuffer.commit()
+        cmdBuffer.waitUntilCompleted()
+        guard cmdBuffer.status != .error else { throw ExportError.readbackFailed }
+    }
+
+    /// The scratch sizes `encodeResample` needs for `frame` into a
+    /// `width` x `height` destination: the canvas, then the row pass.
+    static func resampleScratchSizes(frame: CropFrame, width: Int)
+        -> (sampled: (Int, Int), rows: (Int, Int)) {
+        let canvas = outputSize(frame: frame, maxLongEdge: nil)
+        return (canvas, (width, canvas.1))
+    }
+
+    /// `resample`'s three passes, encoded into `cmdBuffer` through the
+    /// caller's scratch textures (`resampleScratchSizes`), not committed.
+    func encodeResample(_ texture: MTLTexture, frame: CropFrame, into dest: MTLTexture,
+                        sampled: MTLTexture, rows: MTLTexture,
+                        sourceIsEncoded: Bool, encode: Bool, cmdBuffer: MTLCommandBuffer) throws {
+        let canvas = Self.outputSize(frame: frame, maxLongEdge: nil)
+        let w = dest.width, h = dest.height
 
         func pass(_ pso: MTLComputePipelineState, _ input: MTLTexture, _ output: MTLTexture,
                   bind: (MTLComputeCommandEncoder) -> Void) throws {
@@ -98,8 +119,5 @@ extension Exporter {
             var u = uniforms(from: canvas.1, to: h, encode: encode)
             encoder.setBytes(&u, length: MemoryLayout<ExportResampleUniforms>.size, index: 0)
         }
-        cmdBuffer.commit()
-        cmdBuffer.waitUntilCompleted()
-        guard cmdBuffer.status != .error else { throw ExportError.readbackFailed }
     }
 }

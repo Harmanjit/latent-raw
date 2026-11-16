@@ -121,10 +121,12 @@ final class ViewerInputTests: XCTestCase {
         let moved = try XCTUnwrap(model.magnifierTile).generation
         try await Task.sleep(for: .milliseconds(50))
         model.parameters.exposureEV = 1
+        await model.renderSettled()   // the loupe follows the view's render
         let edited = try XCTUnwrap(model.magnifierTile).generation
         XCTAssertNotEqual(edited, moved, "an edit re-renders the loupe")
         try await Task.sleep(for: .milliseconds(50))
         model.showingBefore = true
+        await model.renderSettled()
         XCTAssertNotEqual(model.magnifierTile?.generation, edited, "before/after re-renders the loupe")
 
         model.magnifierChanged(nil)

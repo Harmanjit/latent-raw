@@ -43,15 +43,20 @@ extension EditorModel {
     /// slow render (a big file at 100% with many heal spots, a slower Mac)
     /// doesn't eat the window: the settle sleep never ends during the
     /// render and wins the main actor ahead of the next slider event.
+    ///
+    /// An edit arriving while the previous edit's render is still on the
+    /// GPU, or waiting for it, is a drag tick too (EditorModel+RenderQueue.swift).
     func beginEditRender(now: ContinuousClock.Instant = .now) -> Bool {
-        let isDragTick = dragRender.lastEditRender.map { now - $0 < Self.dragTickWindow } ?? false
+        let isDragTick = editRenderOutstanding
+            || (dragRender.lastEditRender.map { now - $0 < Self.dragTickWindow } ?? false)
         dragRender.settleTask?.cancel()
         dragRender.settleTask = nil
         return isDragTick
     }
 
-    /// Notes that an edit render just finished: the drag window and, after
-    /// a drag tick, the settle delay both start now.
+    /// Notes that an edit render just finished (on the GPU, reported by
+    /// the render queue): the drag window and, after a drag tick, the
+    /// settle delay both start now.
     func endEditRender(wasDragTick: Bool, now: ContinuousClock.Instant = .now) {
         dragRender.lastEditRender = now
         dragRender.settleTask?.cancel()
@@ -70,14 +75,24 @@ extension EditorModel {
         dragRender.settleTask?.cancel()
         dragRender.settleTask = nil
         dragRender.lastEditRender = nil
+        guard session != nil, pipeline != nil else { return }
+        // An edit still waiting renders at full quality instead of as the
+        // draft; otherwise the settle render follows whatever is in flight.
+        requestRender { work in
+            if work.edit != nil { work.edit = false } else { work.settle = true }
+        }
+    }
+
+    /// The settle pass, encoded without waiting for the GPU. Nothing to do
+    /// when no draft is on screen by the time it runs.
+    func encodeSettlePass(into outcome: inout EditorRenderQueue.Outcome) {
         guard dragRender.previewIsDraft || dragRender.tileIsDraft else { return }
         guard let session, let pipeline else { return }
         if dragRender.tileIsDraft && wantsTile {
             // Both layers again, as an edit does (not counted as a tick).
-            rerender(asDragTick: false)
+            encodeEditPass(draft: false, into: &outcome)
             return
         }
-        let start = Date()
         // An editor render like any other: a whole brush redraw the drag
         // started is still running off the main thread, and redrawing it
         // here instead would stall the main thread just as the drag ends
@@ -85,14 +100,14 @@ extension EditorModel {
         deferBrushRedraws(in: session)
         defer { session.defersBrushRedraws = false }
         do {
-            let what = try renderPreview(session: session, pipeline: pipeline, draft: false)
-            lastRenderMs = Date().timeIntervalSince(start) * 1000
-            renderReport = what + String(format: " · %.1f ms", lastRenderMs)
+            outcome.what.append(try renderPreview(session: session, pipeline: pipeline, draft: false))
+            outcome.previewRendered = true
+            outcome.didWork = true
         } catch {
-            status = "Render failed: \(error)"
+            outcome.failure = "Render failed: \(error)"
         }
         dragRender.tileIsDraft = false
-        scheduleHighQualityPreview()
+        outcome.schedulesHighQuality = true
     }
 
     /// Renders both layers at full quality and forgets any drag, for a

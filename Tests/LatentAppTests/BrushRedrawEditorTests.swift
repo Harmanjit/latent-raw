@@ -38,6 +38,7 @@ final class BrushRedrawEditorTests: XCTestCase {
         }
         XCTAssertFalse(session.hasPendingBrushRedraws, "the redraw landed")
         await model.brushRedrawRender?.value   // and the render that shows it
+        await model.renderSettled()
     }
 
     /// The preview as a render on the spot (nothing deferred) makes it.
@@ -64,11 +65,13 @@ final class BrushRedrawEditorTests: XCTestCase {
         p.locals = [LocalAdjustment(name: "brush", shape: .brush(strokes: strokes(feather: 0.3)), exposureEV: 1)]
         model.parameters = p
         model.rerender()
+        await model.renderSettled()
         XCTAssertFalse(session.hasPendingBrushRedraws, "a new mask is drawn on the spot")
 
         // Feather: every stroke changes, a whole redraw.
         model.parameters.locals[0].shape = .brush(strokes: strokes(feather: 0.8))
         model.rerender()
+        await model.renderSettled()
         XCTAssertTrue(session.hasPendingBrushRedraws, "redrawn off the main thread")
         try await waitForRedraw(model, session: session)
         let preview = try XCTUnwrap(model.preview?.texture)
@@ -105,15 +108,15 @@ final class BrushRedrawEditorTests: XCTestCase {
         // together are a drag, rendered as the draft, and the settle
         // render `dragSettleDelay` later replaces it at full quality. A
         // redraw slower than that (a slow CI runner) then lands on a
-        // preview of another size than the one measured here, and the
-        // settle render, which does not defer, would show the mask
-        // without the render under test.
+        // preview of another size than the one measured here.
         model.parameters = p
         model.rerenderAtFullQuality()
+        await model.renderSettled()
         let before = try bytes(try XCTUnwrap(model.preview?.texture), queue: gpu.commandQueue)
 
         model.parameters.locals[0].shape = .brush(strokes: strokes(feather: 0.8))
         model.rerenderAtFullQuality()
+        await model.renderSettled()
         XCTAssertNil(model.dragRender.settleTask, "no settle render to show the mask instead")
         XCTAssertTrue(session.hasPendingBrushRedraws)
         // Synchronous on the main actor, so the redraw cannot land first.

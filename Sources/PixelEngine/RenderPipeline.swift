@@ -580,6 +580,9 @@ public final class RenderPipeline {
                         parameters: EditParameters = .neutral,
                         output: RenderOutput? = nil,
                         info: UnsafeMutablePointer<RenderInfo>? = nil) throws -> MTLTexture {
+        // Nothing on the CPU may touch the session's textures while the
+        // editor's last render can still be running (DeferredSubmission.swift).
+        session.waitForDeferredWork()
         prepareBrushGuide(session, parameters: parameters)
         return try renderStages(session, scale: scale, parameters: parameters,
                                 output: output ?? .file(parameters.outputSpace),
@@ -605,6 +608,7 @@ public final class RenderPipeline {
                       cameraRGBOnly: Bool,
                       stopAfterLens: Bool = false,
                       info: UnsafeMutablePointer<RenderInfo>?) throws -> MTLTexture {
+        session.waitForDeferredWork()
         let summary = session.file.summary
         // The Bayer order, or nil for a linear source; any other layout
         // can't be rendered.
@@ -1041,10 +1045,13 @@ public final class RenderPipeline {
                                                           gpu: gpu, commandBuffer: cmdBuffer)
         }
 
-        cmdBuffer.commit()
-        cmdBuffer.waitUntilCompleted()
-        if cmdBuffer.status == .error { throw RenderError.commandBufferFailed }
-        if toneEqualizer != nil { session.toneEqualizerStore.renderDidComplete() }
+        // The editor's renders commit without waiting (DeferredSubmission.swift);
+        // the tone equalizer's readback then runs once the GPU is done. The
+        // heal cache entry is safe to record at commit: anything that reads
+        // it later is queued behind this buffer, and a failed deferred
+        // render drops the cache.
+        let store = session.toneEqualizerStore
+        try session.commitRender(cmdBuffer, after: toneEqualizer != nil ? { store.renderDidComplete() } : nil)
         storePendingHeal()
 
         info?.pointee = renderInfo

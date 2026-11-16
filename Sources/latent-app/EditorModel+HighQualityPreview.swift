@@ -41,7 +41,12 @@ extension EditorModel {
         let key = ObjectIdentifier(self)
         HighQualityPreviewJobs.pending[key]?.cancel()
         HighQualityPreviewJobs.pending[key] = nil
-        guard wantsHighQualityPreview, let generation = preview?.generation else { return }
+        guard wantsHighQualityPreview, let generation = preview?.generation else {
+            // Not wanted now (zoomed in, turned off): give back the
+            // full-resolution buffers kept between renders.
+            session?.releasePooledTextures(in: .highQuality)
+            return
+        }
         let wait = highQualityPreviewWait
         HighQualityPreviewJobs.pending[key] = Task { [weak self] in
             try? await Task.sleep(for: wait)
@@ -53,24 +58,30 @@ extension EditorModel {
     }
 
     /// Renders the whole frame at full resolution and puts it in place of
-    /// the binned preview, resampled to the size it is shown at.
+    /// the binned preview, resampled to the size it is shown at. Queued
+    /// like any render and not waited for (EditorModel+RenderQueue.swift):
+    /// it is shown once the GPU has finished, unless an edit or view
+    /// change came meanwhile. The full-resolution textures and resample
+    /// buffers stay between renders (docs/Performance-Plan.md fix #20).
     func renderHighQualityPreview() {
-        guard let session, let pipeline, let current = preview else { return }
+        guard session != nil, pipeline != nil, let current = preview else { return }
         // From here on, changes wait for things to settle again.
         highQualityPreviewFollowsOpen = false
+        requestRender { $0.highQuality = current.generation }
+    }
+
+    /// The high-quality pass, encoded without waiting for the GPU.
+    func encodeHighQualityPass(generation: UInt64, into outcome: inout EditorRenderQueue.Outcome) {
+        guard let session, let pipeline, let current = preview, current.generation == generation else { return }
         let longEdge = Int((max(sensorSize.width, sensorSize.height) * viewport.zoom).rounded(.up))
-        let start = Date()
         do {
-            var layer = try HighQualityPreview.render(session, pipeline: pipeline, parameters: renderParameters,
-                                                      output: displayOutput, longEdge: longEdge)
-            // Raw clipping's mask covers the same sensor area.
-            layer.rawClipMask = current.rawClipMask
-            preview = layer
-            lastRenderMs = Date().timeIntervalSince(start) * 1000
-            renderReport = "high quality \(layer.texture.width)×\(layer.texture.height)"
-                + String(format: " · %.1f ms", lastRenderMs)
+            let layer = try HighQualityPreview.renderKeepingBuffers(
+                session, pipeline: pipeline, parameters: renderParameters, output: displayOutput,
+                longEdge: longEdge, avoiding: current.texture)
+            outcome.highQuality = (layer, generation)
+            outcome.didWork = true
         } catch {
-            status = "High quality preview failed: \(error)"
+            outcome.failure = "High quality preview failed: \(error)"
         }
     }
 

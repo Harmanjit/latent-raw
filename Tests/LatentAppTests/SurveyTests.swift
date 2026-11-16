@@ -151,6 +151,7 @@ final class SurveyTests: XCTestCase {
         small.show(panes) { _, model in model.open(url: url) }
         let pane = try XCTUnwrap(small.model(for: 2))
         pane.viewportDidResize(to: CGSize(width: 800, height: 600))
+        await pane.renderSettled()   // the open's render, so the zoom's renders at once
         pane.zoomToActualSize()   // renders a full-resolution tile
         XCTAssertNotNil(pane.tile)
         let session = try XCTUnwrap(pane.session)
