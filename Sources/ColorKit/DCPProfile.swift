@@ -109,6 +109,15 @@ public struct DCPProfile: Sendable, Equatable {
     /// corrupt count from asking for gigabytes.
     static let maximumValues = 1 << 21
 
+    /// A tag value as an integer, refusing NaN, infinity and anything
+    /// outside `range` rather than trapping in `Int(_:)`.
+    static func checkedInt(_ v: Float, range: ClosedRange<Int>) throws -> Int {
+        guard v.isFinite, let i = Int(exactly: v.rounded()), range.contains(i) else {
+            throw ParseError.malformed("numeric value")
+        }
+        return i
+    }
+
     /// Reads a .dcp file's bytes. Also accepts a plain TIFF/DNG (magic 42),
     /// whose first IFD can carry the same tags.
     public init(data: Data) throws {
@@ -123,7 +132,7 @@ public struct DCPProfile: Sendable, Equatable {
         }
         func int(_ tag: Int) throws -> Int? {
             guard let e = entries[tag] else { return nil }
-            return try reader.floats(e).first.map { Int($0) }
+            return try reader.floats(e).first.map { try Self.checkedInt($0, range: 0...Int(UInt32.max)) }
         }
         func string(_ tag: Int) throws -> String? {
             guard let e = entries[tag] else { return nil }
@@ -131,7 +140,7 @@ public struct DCPProfile: Sendable, Equatable {
         }
 
         var hueSatDims: [Int]?
-        if let e = entries[Tag.hueSatMapDims] { hueSatDims = try reader.floats(e).map { Int($0) } }
+        if let e = entries[Tag.hueSatMapDims] { hueSatDims = try reader.floats(e).map { try Self.checkedInt($0, range: 0...4_096) } }
         let hueSatSRGB = try int(Tag.hueSatMapEncoding) == 1
         func table(_ tag: Int, dims: [Int]?, sRGB: Bool) throws -> HueSatTable? {
             guard let e = entries[tag], let dims else { return nil }
@@ -158,7 +167,7 @@ public struct DCPProfile: Sendable, Equatable {
         }
 
         var lookDims: [Int]?
-        if let e = entries[Tag.lookTableDims] { lookDims = try reader.floats(e).map { Int($0) } }
+        if let e = entries[Tag.lookTableDims] { lookDims = try reader.floats(e).map { try Self.checkedInt($0, range: 0...4_096) } }
         lookTable = try table(Tag.lookTableData, dims: lookDims,
                               sRGB: try int(Tag.lookTableEncoding) == 1)
 
