@@ -107,7 +107,7 @@ struct ExportFileOptionsSection: View {
                     .help("Lowers the quality, image by image, until the file fits. A photo that won't fit even at "
                           + "the lowest quality is reported, not written.")
                     .accessibilityHint("Lowers the quality of each file until it is no larger than the size given.")
-                TextField("KB", value: $preset.sizeLimitKB, format: .number).frame(width: 70)
+                TextField("KB", value: $preset.sizeLimitKB.clamped(1...ExportPreset.maximumSizeLimitKB), format: .number).frame(width: 70)
                     .disabled(!preset.sizeLimitEnabled)
                     .accessibilityLabel("File size limit in kilobytes")
                 Text("KB").foregroundStyle(.secondary).accessibilityHidden(true)
@@ -298,7 +298,7 @@ struct ExportSizingSection: View {
             Toggle("Resolution", isOn: $preset.ppiEnabled)
                 .help("The pixels per inch written into the file, which sets its print size in other apps. It "
                       + "changes no pixel; matte and glossy sharpening use it.")
-            TextField("ppi", value: $preset.ppi, format: .number).frame(width: 60)
+            TextField("ppi", value: $preset.ppi.clamped(1...9999), format: .number).frame(width: 60)
                 .disabled(!preset.ppiEnabled)
                 .accessibilityLabel("Resolution in pixels per inch")
             Text("ppi").foregroundStyle(.secondary).accessibilityHidden(true)
@@ -316,7 +316,9 @@ struct ExportSizingSection: View {
     private func keepPrintSize(from old: Int, to new: Int) {
         guard preset.formats.sizeUnit != .pixels, old > 0, new > 0, old != new else { return }
         let scale = Double(min(max(new, 1), 9999)) / Double(min(max(old, 1), 9999))
-        func scaled(_ n: Int) -> Int { max(1, Int((Double(n) * scale).rounded())) }
+        func scaled(_ n: Int) -> Int {
+            Int(min(max((Double(n) * scale).rounded(), 1), Double(ExportSizeUnit.maximumPixels)))
+        }
         preset.maxLongEdge = scaled(preset.maxLongEdge)
         preset.shortEdge = scaled(preset.shortEdge)
         preset.boxWidth = scaled(preset.boxWidth)
@@ -338,11 +340,11 @@ struct ExportSizingSection: View {
             number($preset.boxWidth, "×", label: preset.sizingMode == .widthHeight ? "Width in pixels" : "First dimension in pixels")
             number($preset.boxHeight, "px", label: preset.sizingMode == .widthHeight ? "Height in pixels" : "Second dimension in pixels")
         case .megapixels:
-            TextField("MP", value: $preset.megapixels, format: .number).frame(width: 60)
+            TextField("MP", value: $preset.megapixels.clamped(0.01...ExportSizingLimits.maximumMegapixels), format: .number).frame(width: 60)
                 .accessibilityLabel("Megapixels")
             Text("MP").foregroundStyle(.secondary).accessibilityHidden(true)
         case .percentage:
-            TextField("%", value: $preset.percentage, format: .number).frame(width: 60)
+            TextField("%", value: $preset.percentage.clamped(1...ExportSizingLimits.maximumPercentage), format: .number).frame(width: 60)
                 .accessibilityLabel("Percentage of full size")
             Text("%").foregroundStyle(.secondary).accessibilityHidden(true)
         }
@@ -352,7 +354,7 @@ struct ExportSizingSection: View {
         let sizeUnit = preset.formats.sizeUnit
         if sizeUnit == .pixels {
             HStack(spacing: 4) {
-                TextField("px", value: value, format: .number).frame(width: 64).accessibilityLabel(label)
+                TextField("px", value: value.clamped(1...ExportSizeUnit.maximumPixels), format: .number).frame(width: 64).accessibilityLabel(label)
                 Text(unit).foregroundStyle(.secondary).accessibilityHidden(true)
             }
         } else {
@@ -620,6 +622,34 @@ struct ExportHDRSection: View {
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }
+    }
+}
+
+/// The largest megapixels and percentage the sizing row takes: past these
+/// the export is held to `ExportSizing.maximumEdge` anyway.
+enum ExportSizingLimits {
+    static let maximumMegapixels = 10_000.0
+    static let maximumPercentage = 10_000.0
+}
+
+extension Binding where Value == Int {
+    /// The value held within `range` both ways, so a number typed far too
+    /// large is stored as the largest allowed instead of overflowing later.
+    func clamped(_ range: ClosedRange<Int>) -> Binding<Int> {
+        Binding { Swift.min(Swift.max(wrappedValue, range.lowerBound), range.upperBound) } set: {
+            wrappedValue = Swift.min(Swift.max($0, range.lowerBound), range.upperBound)
+        }
+    }
+}
+
+extension Binding where Value == Double {
+    /// As the `Int` one; a value that isn't a number keeps the old one.
+    func clamped(_ range: ClosedRange<Double>) -> Binding<Double> {
+        func clamp(_ x: Double) -> Double { Swift.min(Swift.max(x, range.lowerBound), range.upperBound) }
+        return Binding { wrappedValue.isNaN ? range.lowerBound : clamp(wrappedValue) } set: {
+            guard !$0.isNaN else { return }
+            wrappedValue = clamp($0)
         }
     }
 }

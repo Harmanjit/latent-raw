@@ -296,7 +296,7 @@ final class ExportEstimateModel: ObservableObject {
                                                       records: records,
                                                       maxLongEdge: preset.resize ? preset.maxLongEdge : nil)
             // Each file is held under the limit, so the total is too.
-            let capped = limit.map { min(total, $0 * records.count) } ?? total
+            let capped = ExportSizeEstimate.cappedTotal(total, limit: limit, images: records.count)
             lastBytes = capped
             state = .ready(bytes: capped, images: records.count)
         } catch is CancellationError {
@@ -311,5 +311,16 @@ final class ExportEstimateModel: ObservableObject {
     static func text(bytes: Int, images: Int) -> String {
         let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
         return images == 1 ? "About \(size)" : "About \(size) for \(images) images"
+    }
+}
+
+extension ExportSizeEstimate {
+    /// A batch's estimated `total`, held to `limit` bytes for each of its
+    /// `images` when Limit File Size is on. A limit so large the product
+    /// overflows holds nothing back.
+    static func cappedTotal(_ total: Int, limit: Int?, images: Int) -> Int {
+        guard let limit else { return total }
+        let (all, overflow) = limit.multipliedReportingOverflow(by: max(images, 0))
+        return overflow ? total : min(total, all)
     }
 }

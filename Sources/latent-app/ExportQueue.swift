@@ -144,7 +144,8 @@ struct ExportPreset: Codable, Equatable {
         sharpenMedium = (try? c.decodeIfPresent(OutputSharpening.Medium.self, forKey: .sharpenMedium)) ?? .screen
         sharpenStrength = (try? c.decodeIfPresent(OutputSharpening.Strength.self, forKey: .sharpenStrength)) ?? .standard
         sizeLimitEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .sizeLimitEnabled)) ?? false
-        sizeLimitKB = max((try? c.decodeIfPresent(Int.self, forKey: .sizeLimitKB)) ?? 500, 1)
+        sizeLimitKB = min(max((try? c.decodeIfPresent(Int.self, forKey: .sizeLimitKB)) ?? 500, 1),
+                          Self.maximumSizeLimitKB)
         let tiffBits = (try? c.decodeIfPresent(Int.self, forKey: .tiffBitDepth)) ?? 16
         tiffBitDepth = tiffBits == 8 || tiffBits == 32 ? tiffBits : 16
         tiffCompression = (try? c.decodeIfPresent(TIFFCompression.self, forKey: .tiffCompression)) ?? .none

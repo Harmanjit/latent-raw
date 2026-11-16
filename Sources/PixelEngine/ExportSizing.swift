@@ -72,7 +72,11 @@ public struct ExportSizing: Sendable, Hashable, Codable {
         case .percentage:
             scale = max(1, percentage.isFinite ? percentage : 100) / 100
         }
-        var target = Int((long * scale).rounded())
+        // Clamped while still a Double: a percentage or megapixels typed
+        // far too large would overflow Int on the way.
+        var edge = long * scale
+        if !edge.isFinite || edge > Double(Self.maximumEdge) { edge = Double(Self.maximumEdge) }
+        var target = Int(max(1, edge).rounded())
         if dontEnlarge { target = min(target, Int(long)) }
         return min(max(1, target), Self.maximumEdge)
     }

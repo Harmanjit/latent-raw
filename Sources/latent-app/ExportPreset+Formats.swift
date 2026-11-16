@@ -31,10 +31,14 @@ enum ExportSizeUnit: String, Codable, CaseIterable, Sendable {
     /// `pixels` in this unit.
     func value(pixels: Int, ppi: Int) -> Double { Double(pixels) / pixelsPerUnit(ppi: ppi) }
 
+    /// The most pixels a side typed in the sizing row may have.
+    static let maximumPixels = 1_000_000
+
     /// `value` of this unit in whole pixels, at least one.
     func pixels(value: Double, ppi: Int) -> Int {
         guard value.isFinite else { return 1 }
-        return max(1, min(Int((value * pixelsPerUnit(ppi: ppi)).rounded()), 1_000_000))
+        // Clamped before it becomes an Int, which a huge value overflows.
+        return Int(min(max((value * pixelsPerUnit(ppi: ppi)).rounded(), 1), Double(Self.maximumPixels)))
     }
 }
 

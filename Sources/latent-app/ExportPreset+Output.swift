@@ -130,8 +130,13 @@ extension ExportPreset {
     /// The JPEG size limit in bytes, when it is on and the format has a
     /// quality to lower.
     var sizeLimitBytes: Int? {
-        sizeLimitEnabled && format.supportsQuality && fileKind == .image ? sizeLimitKB * 1024 : nil
+        guard sizeLimitEnabled && format.supportsQuality && fileKind == .image else { return nil }
+        // A limit typed far too large is clamped, not overflowed.
+        return min(max(sizeLimitKB, 1), Self.maximumSizeLimitKB) * 1024
     }
+
+    /// The largest size limit the sheet takes, in KB: about a terabyte.
+    static let maximumSizeLimitKB = 1_000_000_000
 
     /// Whether the export renders an image at all (DNG renders its own
     /// way; originals aren't rendered).
