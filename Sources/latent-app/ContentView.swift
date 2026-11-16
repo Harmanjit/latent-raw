@@ -2467,9 +2467,14 @@ struct ContentView: View {
         }
     }
 
-    private func sliderRow(title: String, value: Binding<Float>,
+    /// The binding is made in the row's own scope: making it reads its
+    /// value, and the section would otherwise redraw, and rebuild every
+    /// row in it, whenever this one slider moves (plan fix #23).
+    private func sliderRow(title: String, value makeValue: @autoclosure @escaping () -> Binding<Float>,
                             range: ClosedRange<Float>, format: String,
                             defaultValue: Float = 0) -> some View {
+        ObservationScope {
+        let value = makeValue()
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 // The field and slider are both named, so VoiceOver skips this.
@@ -2482,6 +2487,7 @@ struct ContentView: View {
                 .help("Double-click to reset")
         }
         .disabled(!model.hasImage)
+        }
     }
 
     /// In Compare, zoom buttons drive both panes.

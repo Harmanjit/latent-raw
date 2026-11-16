@@ -7,7 +7,10 @@ import PixelEngine
 /// the control does.
 struct DetailSliderRow: View {
     let title: String
-    @Binding var value: Float
+    /// Made in this row's body rather than the panel's: making a binding
+    /// reads its value, and the panel would then redraw, and rebuild every
+    /// row, whenever this one slider moves (plan fix #23).
+    private let binding: () -> Binding<Float>
     let range: ClosedRange<Float>
     var format: String = "%.2f"
     var scale: Float = 1
@@ -18,17 +21,32 @@ struct DetailSliderRow: View {
     var label: String? = nil
     var onPress: ((_ pressed: Bool, _ option: Bool) -> Void)? = nil
 
+    init(title: String, value: @autoclosure @escaping () -> Binding<Float>, range: ClosedRange<Float>,
+         format: String = "%.2f", scale: Float = 1, defaultValue: Float = 0, help: String,
+         label: String? = nil, onPress: ((_ pressed: Bool, _ option: Bool) -> Void)? = nil) {
+        self.title = title
+        self.binding = value
+        self.range = range
+        self.format = format
+        self.scale = scale
+        self.defaultValue = defaultValue
+        self.help = help
+        self.label = label
+        self.onPress = onPress
+    }
+
     var body: some View {
+        let value = binding()
         let shown = SliderValueFormat(printf: format, scale: scale)
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 // The field and slider are both named, so VoiceOver skips this.
                 Text(title).font(.subheadline).accessibilityHidden(true)
                 Spacer()
-                SliderValueField(value: $value, in: range, format: shown, label: label ?? title)
+                SliderValueField(value: value, in: range, format: shown, label: label ?? title)
             }
-            ResettableSlider(value: $value, in: range, label: label ?? title, format: shown, onPress: onPress) {
-                value = defaultValue
+            ResettableSlider(value: value, in: range, label: label ?? title, format: shown, onPress: onPress) {
+                value.wrappedValue = defaultValue
             }
             .help(help + " Double-click to reset.")
         }
