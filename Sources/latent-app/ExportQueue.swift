@@ -538,6 +538,7 @@ final class ExportQueue: ObservableObject {
                             written.append(photo.target)
                             writtenInBatch.append(photo.target)
                             if let file = preset.exportedFile(photo.target, from: photo.record) { toCatalog.append(file) }
+                            if let note = o.gpuLimitNote { self.notes.append("\(photo.name) \(note)") }
                             if !o.maskSubstitutions.isEmpty {
                                 substituted += 1
                                 self.notes.append(MaskSubstitutions.exportNote(name: photo.name,

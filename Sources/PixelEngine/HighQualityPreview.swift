@@ -22,7 +22,8 @@ public enum HighQualityPreview {
         return try session.withTexturePool(.analysis) {
             defer { session.releasePooledTextures(in: .analysis) }
             var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: true)
-            let full = try pipeline.render(session, scale: .full, parameters: parameters, output: output, info: &info)
+            let full = try pipeline.render(session, scale: renderScale(session, pipeline: pipeline),
+                                           parameters: parameters, output: output, info: &info)
             let size = targetSize(width: full.width, height: full.height, longEdge: longEdge)
             guard let dest = pipeline.gpu.makePrivateTexture(width: size.width, height: size.height,
                                                              pixelFormat: .rgba16Float) else {
@@ -62,7 +63,8 @@ public enum HighQualityPreview {
         output.rawClipMask = false
         return try session.withTexturePool(.highQuality) {
             var info = RenderInfo(outputWidth: 0, outputHeight: 0, binQuads: 1, isFullResolution: true)
-            let full = try pipeline.render(session, scale: .full, parameters: parameters, output: output, info: &info)
+            let full = try pipeline.render(session, scale: renderScale(session, pipeline: pipeline),
+                                           parameters: parameters, output: output, info: &info)
             let size = targetSize(width: full.width, height: full.height, longEdge: longEdge)
             let frame = CropFrame(sensorSize: CGSize(width: full.width, height: full.height))
             let sizes = Exporter.resampleScratchSizes(frame: frame, width: size.width)
@@ -87,6 +89,15 @@ public enum HighQualityPreview {
             try session.commitRender(cmdBuffer, after: nil)
             return PresentLayer(texture: dest, coverage: info.sensorRect, headroom: output.headroom)
         }
+    }
+
+    /// Full resolution, or for a photo wider than the GPU's largest
+    /// texture (a big panorama TIFF, a pixel-shift raw) the least binning
+    /// that fits: still finer than the editor's preview, where a full
+    /// render would only fail to allocate.
+    static func renderScale(_ session: ImageSession, pipeline: RenderPipeline) -> RenderScale {
+        ExportPlan.scale(for: session.file.summary, maxLongEdge: nil,
+                         maxTextureSide: ExportPlan.maxTextureSide(pipeline.gpu.device))
     }
 
     /// The resampled size: the render's aspect, the long edge `longEdge`
