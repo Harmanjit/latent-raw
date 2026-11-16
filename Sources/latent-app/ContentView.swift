@@ -181,7 +181,9 @@ struct ContentView: View {
                         }
                         if !fullScreen.isActive {
                             Divider()
-                            adjustmentPanel
+                            // Frozen while hidden: the grid's changes,
+                            // which rebuild this body, don't rebuild it.
+                            EquatableView(content: FrozenWhileHidden(hidden: mode != .develop) { adjustmentPanel })
                                 .frame(width: 280)
                         }
                     }
@@ -2218,7 +2220,8 @@ struct ContentView: View {
         }
         // A number typed for one photo must not land on the next.
         .sliderFieldSubject(model.sourceURL)
-        .modifier(ProcessUpdatePromptModifier(model: model, library: library))
+        .modifier(ProcessUpdatePromptModifier(model: model, library: library,
+                                              isActive: mode == .develop || fullScreen.isActive))
         }
     }
 
@@ -2683,6 +2686,21 @@ private struct CommandContextModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.focusedSceneValue(\.commandContext, context())
     }
+}
+
+/// Develop's kept panel while the grid covers it (plan fix #32): equal to
+/// its last self while hidden, so a change ContentView observes (the
+/// grid's selection, a thumbnail done) doesn't re-run the panel's scopes,
+/// whose closures SwiftUI can't compare. The editor's own changes still
+/// reach them through observation; ContentView's state reaches them when
+/// it shows again, which makes it unequal.
+private struct FrozenWhileHidden<Content: View>: View, Equatable {
+    let hidden: Bool
+    @ViewBuilder let content: () -> Content
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.hidden && rhs.hidden }
+
+    var body: some View { content() }
 }
 
 /// Develop's side while it is kept built but hidden (plan fix #32): under
