@@ -144,6 +144,7 @@ final class ViewerInputTests: XCTestCase {
         let first = try XCTUnwrap(model.magnifierTile).generation
         try await Task.sleep(for: .milliseconds(50))
         model.rerender()
+        await model.renderSettled()   // the loupe follows the view's render
         XCTAssertNotEqual(model.magnifierTile?.generation, first)
     }
 
