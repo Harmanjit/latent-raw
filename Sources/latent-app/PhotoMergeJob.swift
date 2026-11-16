@@ -95,8 +95,9 @@ struct MergeProgress: Equatable, Sendable {
 ///
 /// **Without the dialog** (HDR Merge Without Dialog, ⌃⇧H), the job measures
 /// the photos itself first, with the options the dialog was last left with.
-/// A failure goes to the status bar as usual; so do the warnings the dialog
-/// would have shown, once the merge is done.
+/// A failure goes to the status bar as usual; the warnings the dialog
+/// would have shown become notes in the library panel once the merge is
+/// done (`notes`).
 @MainActor
 final class PhotoMergeQueue: ObservableObject {
     @Published private(set) var isRunning = false
