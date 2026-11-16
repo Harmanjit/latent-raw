@@ -1,7 +1,14 @@
 #!/bin/bash
 # Builds Latent.app from the SwiftPM release binaries.
 #
-#   scripts/make_app.sh [version] [--dev]     # version defaults to 0.9.0
+#   scripts/make_app.sh 1.0.0             # a release build, version 1.0.0
+#   scripts/make_app.sh                   # the version of the tag on HEAD (v1.0.0 -> 1.0.0)
+#   scripts/make_app.sh --dev [version]   # unsandboxed test build; version defaults to 1.0.0
+#
+# A release build needs a version: given, or read from a tag that points
+# exactly at HEAD (git describe --tags --exact-match). Without either it
+# stops, so a bundle can never go out carrying a stale default version.
+# scripts/make_release.sh builds, checks and zips a release in one step.
 #
 # SwiftPM produces a bare executable plus resource bundles; macOS wants an
 # .app folder with an Info.plist so it can sit in the Dock, remember its
@@ -44,7 +51,22 @@ for arg in "$@"; do
       VERSION="$arg" ;;
   esac
 done
-VERSION="${VERSION:-0.9.0}"
+if [ -z "$VERSION" ]; then
+  TAG=$(git describe --tags --exact-match 2>/dev/null || true)
+  if [ -n "$TAG" ]; then
+    VERSION="${TAG#v}"
+    echo "Version $VERSION, from the tag $TAG on HEAD"
+  elif [ "$DEV" = "1" ]; then
+    VERSION="1.0.0"
+  else
+    echo "make_app.sh: give a version (scripts/make_app.sh 1.0.0), tag HEAD, or pass --dev" >&2; exit 2
+  fi
+fi
+# Numbers and dots, with an optional suffix such as -ci or -rc1: it lands
+# in CFBundleShortVersionString and in merged DNGs' Software tag.
+if ! [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}([-+][0-9A-Za-z.]+)?$ ]]; then
+  echo "make_app.sh: '$VERSION' is not a version like 1.0.0" >&2; exit 2
+fi
 
 echo "Building release…"
 swift build -c release --product latent-app 2>&1 | tail -1
@@ -135,6 +157,7 @@ cat > "$XPC/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleInfoDictionaryVersion</key> <string>6.0</string>
   <key>CFBundleName</key>               <string>LatentRawDecoder</string>
   <key>CFBundleIdentifier</key>         <string>com.latent.app.rawdecoder</string>
   <key>CFBundleExecutable</key>         <string>LatentRawDecoder</string>
@@ -160,6 +183,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleInfoDictionaryVersion</key> <string>6.0</string>
   <key>CFBundleName</key>               <string>Latent</string>
   <key>CFBundleDisplayName</key>        <string>Latent</string>
   <key>CFBundleIdentifier</key>         <string>com.latent.app</string>
@@ -180,7 +204,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
       <array><string>public.camera-raw-image</string><string>public.image</string><string>public.folder</string></array>
     </dict>
   </array>
-  <key>NSHumanReadableCopyright</key>   <string>GPLv3. Third-party licences: Help › Latent Help › Licences</string>
+  <key>LSApplicationCategoryType</key>  <string>public.app-category.photography</string>
+  <key>NSHumanReadableCopyright</key>   <string>Copyright © 2026 Harmanjit. GPLv3, with no warranty. Third-party licences: Help › Latent Help › Licences</string>
 </dict>
 </plist>
 PLIST
