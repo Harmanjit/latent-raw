@@ -2,6 +2,7 @@
 // (docs/PhotoMerge.md section 8, phase 9).
 
 import Foundation
+import RawCore
 
 /// One selected photo, as the grouping understands it. Everything here
 /// comes from the file's metadata, so grouping needs no pixels.
@@ -35,10 +36,10 @@ public struct HDRPanoramaPhoto: Sendable, Equatable {
         var parts: [String] = []
         if exposureSeconds > 0 {
             parts.append(exposureSeconds >= 1 ? String(format: "%g s", exposureSeconds)
-                : "1/\(Int((1 / exposureSeconds).rounded())) s")
+                : "1/\(SaneExposure.wholeNumber(1 / exposureSeconds)) s")
         }
         if aperture > 0 { parts.append(String(format: "ƒ/%g", (aperture * 10).rounded() / 10)) }
-        if iso > 0 { parts.append("ISO \(Int(iso.rounded()))") }
+        if iso > 0 { parts.append("ISO \(SaneExposure.wholeNumber(iso))") }
         return parts.joined(separator: " · ")
     }
 }
@@ -280,7 +281,7 @@ public enum HDRPanoramaGrouper {
                 throw HDRPanoramaError.sameExposure
             }
             let distinct = lights.count == indices.count
-                && Set(lights.map { Int(($0 * exposureStepsPerStop).rounded()) }).count == indices.count
+                && Set(lights.map { SaneExposure.wholeNumber($0 * exposureStepsPerStop) }).count == indices.count
             guard distinct, indices.count <= maximumBracket else { throw HDRPanoramaError.cantTellPositions }
             return ([indices], nil)
         }
@@ -289,7 +290,7 @@ public enum HDRPanoramaGrouper {
     /// The run cut where the exposures start repeating, or nil when they
     /// don't repeat, the metadata doesn't say, or there is only one period.
     static func cutByExposurePattern(_ indices: [Int], photos: [HDRPanoramaPhoto]) -> [[Int]]? {
-        let steps = indices.compactMap { photos[$0].lightStops.map { Int(($0 * exposureStepsPerStop).rounded()) } }
+        let steps = indices.compactMap { photos[$0].lightStops.map { SaneExposure.wholeNumber($0 * exposureStepsPerStop) } }
         guard steps.count == indices.count, steps.count >= 3, Set(steps).count > 1 else { return nil }
         for period in 2...(steps.count - 1) {
             // A bracket takes each exposure once, and the pattern must hold

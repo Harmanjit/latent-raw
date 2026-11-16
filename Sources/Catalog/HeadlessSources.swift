@@ -189,7 +189,7 @@ public enum HeadlessSources {
             record.captureTime = s.captureTime.timeIntervalSince1970 > 0 ? Int64(s.captureTime.timeIntervalSince1970) : nil
             record.camera = camera.isEmpty ? nil : camera
             record.lens = s.lensModel.isEmpty ? nil : s.lensModel
-            record.iso = s.iso > 0 ? Int(s.iso) : nil
+            record.iso = s.iso > 0 ? SaneExposure.wholeNumber(s.iso) : nil
             record.shutter = s.shutter > 0 ? s.shutter : nil
             record.aperture = s.aperture > 0 ? s.aperture : nil
             record.focal = s.focalLength > 0 ? s.focalLength : nil

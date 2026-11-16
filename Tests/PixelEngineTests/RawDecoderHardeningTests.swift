@@ -71,6 +71,32 @@ final class RawDecoderHardeningTests: XCTestCase {
         XCTAssertThrowsError(try meta.validate(withPlane: true))
     }
 
+    /// Exposure values a damaged raw can carry (finite but absurd, or not
+    /// finite at all) come out of the reply as 0, "unknown", so nothing
+    /// downstream traps converting them to Int.
+    func testAbsurdExposureValuesAreZeroed() throws {
+        var meta = try linearFixture().snapshotMetadata
+        meta.iso = 1e20; meta.shutter = 1e-30; meta.aperture = 1e30; meta.focalLength = .infinity
+        let opened = try RawFile(serviceReply: meta, plane: nil, preview: nil, metadataOnly: true)
+        XCTAssertEqual(opened.summary.iso, 0)
+        XCTAssertEqual(opened.summary.shutter, 0)
+        XCTAssertEqual(opened.summary.aperture, 0)
+        XCTAssertEqual(opened.summary.focalLength, 0)
+
+        meta.iso = .nan; meta.shutter = 1e7; meta.aperture = -2; meta.focalLength = 1e6
+        let again = try RawFile(serviceReply: meta, plane: nil, preview: nil, metadataOnly: true)
+        XCTAssertEqual([again.summary.iso, again.summary.shutter, again.summary.aperture, again.summary.focalLength],
+                       [0, 0, 0, 0])
+
+        // Real values pass through untouched.
+        meta.iso = 6400; meta.shutter = 1.0 / 8000; meta.aperture = 1.4; meta.focalLength = 600
+        let fine = try RawFile(serviceReply: meta, plane: nil, preview: nil, metadataOnly: true)
+        XCTAssertEqual(fine.summary.iso, 6400)
+        XCTAssertEqual(fine.summary.shutter, 1.0 / 8000)
+        XCTAssertEqual(fine.summary.aperture, 1.4)
+        XCTAssertEqual(fine.summary.focalLength, 600)
+    }
+
     /// An embedded preview over the cap is dropped rather than handed to
     /// ImageIO in the app; one at the cap is kept.
     func testOversizedPreviewIsDropped() throws {

@@ -1,4 +1,5 @@
 import Foundation
+import RawCore
 
 /// Turns the numbers LibRaw gives us into the strings photographers read.
 ///
@@ -9,18 +10,21 @@ public enum MetadataFormat {
     /// Exposure time as photographers write it: "1/250 s" below a second,
     /// "2.5 s" above, "1/3 s" for the awkward middle. Camera shutters step
     /// in thirds, so 0.3333 must become 1/3, not 1/3.0003.
+    ///
+    /// Values outside what a camera records (`SaneExposure`), as a damaged
+    /// file can carry them, read as unknown rather than trapping an Int().
     public static func shutter(_ seconds: Double) -> String {
-        guard seconds > 0 else { return "—" }
+        guard SaneExposure.shutter(seconds) > 0 else { return "—" }
         if seconds >= 1 {
             // Whole seconds print as integers, otherwise one decimal.
             let rounded = (seconds * 10).rounded() / 10
             return rounded == rounded.rounded()
-                ? "\(Int(rounded)) s"
+                ? "\(SaneExposure.wholeNumber(rounded)) s"
                 : String(format: "%.1f s", rounded)
         }
         let denominator = 1 / seconds
         // Nearest integer reciprocal; 0.004 → 250, 0.3333 → 3.
-        let d = Int(denominator.rounded())
+        let d = SaneExposure.wholeNumber(denominator)
         if d >= 1, abs(denominator - Double(d)) / denominator < 0.02 {
             return "1/\(d) s"
         }
@@ -30,10 +34,10 @@ public enum MetadataFormat {
     /// "ƒ/2.8", or "ƒ/8" when the decimal is zero. The ƒ (U+0192) is the
     /// conventional glyph; it reads as a lens marking, not a variable.
     public static func aperture(_ f: Double) -> String {
-        guard f > 0 else { return "—" }
+        guard SaneExposure.aperture(f) > 0 else { return "—" }
         let tenths = (f * 10).rounded() / 10
         return tenths == tenths.rounded()
-            ? "ƒ/\(Int(tenths))"
+            ? "ƒ/\(SaneExposure.wholeNumber(tenths))"
             : String(format: "ƒ/%.1f", tenths)
     }
 
@@ -43,10 +47,10 @@ public enum MetadataFormat {
 
     /// "50 mm" or "24.5 mm". Zooms report fractional focal lengths.
     public static func focalLength(_ mm: Double) -> String {
-        guard mm > 0 else { return "—" }
+        guard SaneExposure.focalLength(mm) > 0 else { return "—" }
         let tenths = (mm * 10).rounded() / 10
         return tenths == tenths.rounded()
-            ? "\(Int(tenths)) mm"
+            ? "\(SaneExposure.wholeNumber(tenths)) mm"
             : String(format: "%.1f mm", tenths)
     }
 
@@ -54,7 +58,7 @@ public enum MetadataFormat {
     /// makers quote them.
     public static func dimensions(width: Int, height: Int) -> String {
         guard width > 0, height > 0 else { return "—" }
-        let mp = Double(width * height) / 1_000_000
+        let mp = Double(width) * Double(height) / 1_000_000
         return String(format: "%d × %d (%.1f MP)", width, height, mp)
     }
 
@@ -84,10 +88,10 @@ public enum MetadataFormat {
     public static func exposureLine(shutter: Double?, aperture: Double?,
                                     iso: Int?, focal: Double?) -> String {
         var parts: [String] = []
-        if let s = shutter, s > 0 { parts.append(Self.shutter(s)) }
-        if let a = aperture, a > 0 { parts.append(Self.aperture(a)) }
+        if let s = shutter, SaneExposure.shutter(s) > 0 { parts.append(Self.shutter(s)) }
+        if let a = aperture, SaneExposure.aperture(a) > 0 { parts.append(Self.aperture(a)) }
         if let i = iso, i > 0 { parts.append(Self.iso(i)) }
-        if let f = focal, f > 0 { parts.append(focalLength(f)) }
+        if let f = focal, SaneExposure.focalLength(f) > 0 { parts.append(focalLength(f)) }
         return parts.joined(separator: " · ")
     }
 }
@@ -100,10 +104,10 @@ public extension ImageRecord {
         var rows: [(String, String)] = []
         if let camera { rows.append(("Camera", camera)) }
         if let lens { rows.append(("Lens", lens)) }
-        if let shutter, shutter > 0 { rows.append(("Shutter", MetadataFormat.shutter(shutter))) }
-        if let aperture, aperture > 0 { rows.append(("Aperture", MetadataFormat.aperture(aperture))) }
+        if let shutter, SaneExposure.shutter(shutter) > 0 { rows.append(("Shutter", MetadataFormat.shutter(shutter))) }
+        if let aperture, SaneExposure.aperture(aperture) > 0 { rows.append(("Aperture", MetadataFormat.aperture(aperture))) }
         if let iso, iso > 0 { rows.append(("ISO", "\(iso)")) }
-        if let focal, focal > 0 { rows.append(("Focal length", MetadataFormat.focalLength(focal))) }
+        if let focal, SaneExposure.focalLength(focal) > 0 { rows.append(("Focal length", MetadataFormat.focalLength(focal))) }
         if let captureTime { rows.append(("Captured", MetadataFormat.captureTime(captureTime))) }
         if let width, let height, width > 0, height > 0 {
             rows.append(("Size", MetadataFormat.dimensions(width: width, height: height)))

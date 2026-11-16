@@ -129,6 +129,36 @@ public struct RawSummary: Sendable {
     public var cameraWhiteBalancePresets: [CameraWhiteBalancePreset] = []
 }
 
+/// The range a real camera's exposure metadata falls in. LibRaw passes a
+/// damaged file's values through unchanged, finite but absurd (an ISO of
+/// 1e19 from a Canon maker-note gain, a shutter of 2^-70 s from a stray
+/// APEX value) or not finite at all, and every later `Int(...)` of one
+/// would trap. Anything outside the range becomes 0, "unknown", once,
+/// where the summary is built.
+public enum SaneExposure {
+    public static func iso(_ value: Double) -> Double { within(value, 0...10_000_000) }
+    public static func shutter(_ seconds: Double) -> Double { within(seconds, 1e-7...1e6) }
+    public static func aperture(_ f: Double) -> Double { within(f, 0...1000) }
+    public static func focalLength(_ mm: Double) -> Double { within(mm, 0...100_000) }
+
+    /// `Int(value.rounded())` that never traps: NaN and infinities are 0,
+    /// and a value past Int's range is clamped to it. For the places that
+    /// turn an exposure value into a whole number to print or compare.
+    public static func wholeNumber(_ value: Double) -> Int {
+        guard value.isFinite else { return 0 }
+        let rounded = value.rounded()
+        // Double(Int.max) is 2^63, one past Int.max; Double(Int.min) is exact.
+        if rounded >= Double(Int.max) { return .max }
+        if rounded < Double(Int.min) { return .min }
+        return Int(rounded)
+    }
+
+    /// NaN is in no range, so it comes out as 0 too.
+    private static func within(_ value: Double, _ range: ClosedRange<Double>) -> Double {
+        range.contains(value) ? value : 0
+    }
+}
+
 /// What the file says about the lens, beyond its (often empty) name.
 public struct LensIdentity: Sendable, Equatable {
     public let make: String
@@ -492,7 +522,8 @@ public final class RawFile: @unchecked Sendable {
             dataMaximum: c.data_maximum, baselineExposure: c.baseline_exposure, mergeInfo: mergeInfo,
             cameraMake: str(c.camera_make, 64), cameraModel: str(c.camera_model, 64),
             lensModel: recipeLens?.model ?? str(c.lens_model, 64),
-            iso: c.iso, shutter: c.shutter, aperture: c.aperture, focalLength: c.focal_length,
+            iso: SaneExposure.iso(c.iso), shutter: SaneExposure.shutter(c.shutter),
+            aperture: SaneExposure.aperture(c.aperture), focalLength: SaneExposure.focalLength(c.focal_length),
             captureTime: Date(timeIntervalSince1970: TimeInterval(c.timestamp)),
             orientation: Int(c.orientation),
             lens: recipeLens?.identity ?? LensIdentity(
