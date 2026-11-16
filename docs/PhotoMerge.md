@@ -42,7 +42,7 @@
 - **Deghost overlay:** the area each photo was left out of, tinted in the colour of the photo it comes from (Okabe–Ito palette) with a white-and-black outline, and matching dots in the list.
 - **Reference picking** by clicking a row; `HDRMergeAnalysis.warnings(reference:)` and `alignmentShifts(reference:)` redo the alignment warnings for it.
 - **Auto Settings** (`HDRAutoSettings`): Develop's Auto Adjust of the written DNG, stored through `Library.saveEditStack` before the result is selected.
-- **HDR Merge Without Dialog (⌃⇧H)** analyses and merges with the remembered options; errors and the dialog's warnings go to the status bar.
+- **HDR Merge Without Dialog (⌃⇧H)** analyses and merges with the remembered options; errors go to the status bar; the dialog's warnings show as orange notes in the left panel, where the progress was.
 - **Undo to Trash is dropped:** Harman chose not to have a Move to Trash feature in Latent.
 - **RawCore:** `RawFile.bayerSource` (a Bayer raw made in memory) was added for the reduced frames.
 

@@ -100,7 +100,7 @@ jobs:
             echo "::error title=make_app.sh failed::$(grep -E 'error:|make_app.sh:' package.log | head -20 | tr '\n' ' ' | cut -c1-1500)"
             exit 1
           fi
-          scripts/check_app_bundle.sh build/Latent.app
+          scripts/check_app_bundle.sh build/Latent.app --version 0.0.0-ci
 
       # A golden-image failure writes the render and an amplified
       # difference image; keep them so the failure can be seen.

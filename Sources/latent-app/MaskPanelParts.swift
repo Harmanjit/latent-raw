@@ -143,11 +143,18 @@ struct MaskComponentList: View {
             if let subject = ModelMenus.defaultEntry(kind: .subjectSegmentation, registry: .shared) {
                 Button("Subject") { model.addMaskComponent(.subject(subject), mode: mode) }
             }
+            let classNotice = ModelMenus.classMenuLicenceNotice(registry: .shared)
             Menu("Select by Class") {
                 ForEach(AIMaskKind.allCases.filter { $0 != .subject }, id: \.self) { kind in
                     Button(kind.displayName) { model.addMaskComponent(.aiClass(kind), mode: mode) }
                 }
+                // The same licence notice as the Masks panel's own menu.
+                if let classNotice {
+                    Divider()
+                    Text(classNotice)
+                }
             }
+            .help(classNotice ?? "")
             if let prompted = ModelMenus.defaultEntry(kind: .promptedSegmentation, registry: .shared) {
                 Button("Click to Select") { model.addMaskComponent(.clickToSelect(prompted), mode: mode) }
                 Button("Select Objects (Box)") { model.addMaskComponent(.objects(prompted), mode: mode) }
