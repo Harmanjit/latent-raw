@@ -8,8 +8,9 @@ extension EditorModel {
     // MARK: - Local adjustments
 
     var selectedLocal: LocalAdjustment? {
-        guard let i = selectedLocalIndex, i < parameters.locals.count else { return nil }
-        return parameters.locals[i]
+        let locals = parameter(\.locals)
+        guard let i = selectedLocalIndex, i < locals.count else { return nil }
+        return locals[i]
     }
 
     /// Adds a local with sensible starting geometry, selects it, and arms

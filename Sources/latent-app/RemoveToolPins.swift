@@ -89,12 +89,13 @@ extension EditorModel {
         var ids = healPinSelection
         if let h = selectedHeal { ids.insert(h.id) }
         guard !ids.isEmpty else { return [] }
-        return ids.intersection(parameters.heals.map(\.id))
+        return ids.intersection(parameter(\.heals).map(\.id))
     }
 
     var selectedHealIndices: Set<Int> {
         let ids = selectedHealIDs
-        return Set(parameters.heals.indices.filter { ids.contains(parameters.heals[$0].id) })
+        let heals = parameter(\.heals)
+        return Set(heals.indices.filter { ids.contains(heals[$0].id) })
     }
 
     /// Selects pin `index`, or with `extending` adds it to the selection or

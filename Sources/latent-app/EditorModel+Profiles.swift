@@ -10,12 +10,12 @@ extension EditorModel {
     /// The profile the open image renders with, for the picker. Standard
     /// when the edit has none.
     var profileTitle: String {
-        guard let choice = parameters.profile else { return BuiltInProfile.standard.name }
+        guard let choice = parameter(\.profile) else { return BuiltInProfile.standard.name }
         return choice.name
     }
 
     func isProfileSelected(_ id: String) -> Bool {
-        (parameters.profile?.id ?? BuiltInProfile.standardID) == id
+        (parameter(\.profile)?.id ?? BuiltInProfile.standardID) == id
     }
 
     /// Switches profile. The Amount goes back to 100% and a DCP's tone
@@ -23,7 +23,7 @@ extension EditorModel {
     /// profile already in use changes nothing.
     func chooseProfile(_ choice: ProfileChoice?) {
         let next = choice?.sanitized
-        guard next?.id != parameters.profile?.id else { return }
+        guard next?.id != parameter(\.profile)?.id else { return }
         parameters.profile = next
     }
 
@@ -37,23 +37,23 @@ extension EditorModel {
 
     /// The built-in profile in use, if it is one.
     var selectedBuiltInProfile: BuiltInProfile {
-        parameters.profile?.builtIn ?? .standard
+        parameter(\.profile)?.builtIn ?? .standard
     }
 
     /// The Amount slider's value, 0...maximum (1 is 100%).
     var profileAmountBinding: Binding<Float> {
-        Binding(get: { self.parameters.profile?.effectiveAmount ?? 1 },
+        Binding(get: { self.parameter(\.profile)?.effectiveAmount ?? 1 },
                 set: { amount in
-                    guard var choice = self.parameters.profile else { return }
+                    guard var choice = self.parameter(\.profile) else { return }
                     choice.amount = amount
                     self.parameters.profile = choice.sanitized
                 })
     }
 
     var profileToneCurveBinding: Binding<Bool> {
-        Binding(get: { self.parameters.profile?.toneCurve == true },
+        Binding(get: { self.parameter(\.profile)?.toneCurve == true },
                 set: { on in
-                    guard var choice = self.parameters.profile, choice.isDCP else { return }
+                    guard var choice = self.parameter(\.profile), choice.isDCP else { return }
                     choice.toneCurve = on
                     self.parameters.profile = choice.sanitized
                 })
@@ -61,14 +61,14 @@ extension EditorModel {
 
     /// The DCP the edit asks for, if it is in the library.
     var selectedImportedProfile: CameraProfileLibrary.Entry? {
-        guard let choice = parameters.profile, choice.isDCP else { return nil }
+        guard let choice = parameter(\.profile), choice.isDCP else { return nil }
         return CameraProfileLibrary.shared.entry(id: choice.id)
     }
 
     /// Set when the edit names a DCP this Mac doesn't have: the image then
     /// renders with Latent Standard, and the panel says so.
     var missingProfileName: String? {
-        guard let choice = parameters.profile, choice.isDCP, selectedImportedProfile == nil else { return nil }
+        guard let choice = parameter(\.profile), choice.isDCP, selectedImportedProfile == nil else { return nil }
         return choice.name
     }
 

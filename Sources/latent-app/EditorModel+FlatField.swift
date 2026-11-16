@@ -25,7 +25,7 @@ extension EditorModel {
     /// What the panel says about the correction when it can't apply it.
     var flatFieldProblem: String? {
         _ = outsideStateRevision
-        guard let flat = parameters.flatField, FlatFieldCache.shared.gainMap(for: flat.hash) == nil else { return nil }
+        guard let flat = parameter(\.flatField), FlatFieldCache.shared.gainMap(for: flat.hash) == nil else { return nil }
         return FlatFieldCache.shared.failure(for: flat.hash).map { $0 + " The correction is off." }
             ?? "Measuring the reference…"
     }

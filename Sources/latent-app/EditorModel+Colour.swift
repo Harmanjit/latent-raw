@@ -6,7 +6,7 @@ import PixelEngine
 extension EditorModel {
     // MARK: - Treatment and B&W Mix
 
-    var isBlackAndWhite: Bool { parameters.colour.blackAndWhite.enabled }
+    var isBlackAndWhite: Bool { parameter(\.colour.blackAndWhite.enabled) }
 
     /// Switches between Color and Black & White. The first switch to
     /// Black & White on an image whose mix was never set also sets the mix

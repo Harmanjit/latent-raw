@@ -48,7 +48,7 @@ extension EditorModel {
     /// its travel is perceptually even — see ColorKit for the reasoning.
     var temperatureSliderBinding: Binding<Float> {
         Binding(
-            get: { ColorKit.sliderValue(forTemperature: self.parameters.whiteBalance.temperature) },
+            get: { ColorKit.sliderValue(forTemperature: self.parameter(\.whiteBalance.temperature)) },
             set: { self.parameters.whiteBalance.temperature = ColorKit.temperature(forSliderValue: $0) }
         )
     }

@@ -24,7 +24,7 @@ struct ProfilePicker: View {
                     .frame(maxWidth: 190)
             }
 
-            if let builtIn = model.parameters.profile?.builtIn, builtIn.hasAmount {
+            if let builtIn = model.parameter(\.profile)?.builtIn, builtIn.hasAmount {
                 amountRow(maximum: builtIn.maximumAmount)
             }
 

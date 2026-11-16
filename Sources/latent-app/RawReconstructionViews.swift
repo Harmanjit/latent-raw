@@ -18,7 +18,7 @@ extension EditorModel {
 
     /// The menu tag of the camera preset the current setting is, if any.
     var cameraWhiteBalanceTag: String? {
-        let wb = parameters.whiteBalance
+        let wb = parameter(\.whiteBalance)
         guard !wb.isAsShot else { return nil }
         return cameraWhiteBalanceChoices.first {
             abs($0.balance.temperature - wb.temperature) < 0.5 && abs($0.balance.tint - wb.tint) < 0.05

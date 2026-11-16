@@ -6,7 +6,7 @@ extension EditorModel {
 
     /// The geometry of the stored crop (what export uses).
     private var cropFrame: CropFrame {
-        CropFrame(sensorSize: sensorSize, crop: parameters.crop, rotation: rotation)
+        CropFrame(sensorSize: sensorSize, crop: parameter(\.crop), rotation: rotation)
     }
 
     /// The geometry the viewport shows: the crop, or with the tool open,

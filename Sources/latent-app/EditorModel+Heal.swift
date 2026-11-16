@@ -7,8 +7,9 @@ extension EditorModel {
     // MARK: - Spot removal tool
 
     var selectedHeal: HealPatch? {
-        guard let i = selectedHealIndex, i < parameters.heals.count else { return nil }
-        return parameters.heals[i]
+        let heals = parameter(\.heals)
+        guard let i = selectedHealIndex, i < heals.count else { return nil }
+        return heals[i]
     }
 
     /// Radius of the selected patch (or the default), in sensor pixels.
