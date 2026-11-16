@@ -1,12 +1,19 @@
-# What's New
+# What's New in 1.0.0
 
-What has arrived since the 0.9.0 beta, by area. Each line says what the feature does and links to where it is described in full. For a guided tour of the most useful ones, try the tutorials: [Culling and Organising](Tutorial-Culling-and-Organising), [Editing](Tutorial-Editing) and [Printing and Sharing](Tutorial-Printing-and-Sharing).
+Latent 1.0.0 is the first public release. This page lists what has arrived since the 0.9.0 beta, by area, starting with what got faster. Each line says what the feature does and links to where it is described in full. For a guided tour of the most useful ones, try the tutorials: [Culling and Organising](Tutorial-Culling-and-Organising), [Editing](Tutorial-Editing) and [Printing and Sharing](Tutorial-Printing-and-Sharing).
 
-## Wave 4
+## Speed
 
+Most of what you do is quicker than in 0.9, and the window no longer freezes while a photo opens. Measured on an M4 with 16 GB:
+
+- **Opening and switching photos.** The raw is decoded in the background and the next photos are decoded before you ask for them, so moving to the next photo takes about 70-80 ms instead of 350-450 ms. While a photo opens, Loupe shows the camera's own embedded JPEG straight away, then the full render replaces it.
+- **Smooth slider drags.** Each slider redraws only itself, renders no longer wait on the main thread, and a drag shows a quicker draft that the full-quality render replaces as soon as you stop, so even a heavy edit drags at full frame rate when the photo is fitted to the window. High Quality Preview is about four times faster.
+- **Faster launch, import and thumbnails.** Launch to the first photo is about a quarter faster; importing 2,000 raws from a cold disk takes about 20 seconds instead of over 100; refreshing an unchanged folder is about five times faster, and thumbnails are made about twice as fast and stored in a new format (made once, the first time 1.0.0 opens each folder).
 - **Faster export: several photos at once.** A batch export now works on several photos together, one decoding while another renders and a third is written, with the same files, names and order as before. **Speed › Photos at once** in the export sheet is Automatic (3 on a 16 GB M4, about twice as fast as one at a time) or a count up to what your Mac can take for the photos being exported, and combined PDF pages now store JPEG photos at the export's Quality (Lossless is still there), so they're several times smaller and quicker to write. See [Photos at once](Export#photos-at-once) and [PDF export](Export#pdf-export).
-
 - **Faster large folders.** On a 10,000-photo folder, smart collections with date rules evaluate about thirty times faster, rating many photos while a collection is shown no longer stalls the window, the Collections section counts in the background, and search keystrokes, keyword completion and the smart collection sheet do far less work each time. The tone equalizer's mask summary is worked out off the main thread. Nothing looks or behaves differently. See [Thumbnails and performance](Library#thumbnails-and-performance).
+
+## Metadata, filtering, masks and scopes
+
 - **Edit Capture Time…** (Metadata menu) shifts the selection's capture times by days, hours, minutes and seconds, sets the first photo to an exact time and moves the rest with it, or changes time zone. The raw files are never rewritten; the corrected time is kept in the catalog and sidecar, sorting and date filters use it, and it can be undone. See [Capture time and geotagging](Library#capture-time-and-geotagging).
 - **Geotag from GPX Track…** (Metadata menu) places the selection on a GPX track you choose, interpolating between track points, with a camera clock offset, a largest gap to bridge, and a count of matches before anything is written. Photos that already have a position keep it unless you tick Replace existing positions. See [Capture time and geotagging](Library#capture-time-and-geotagging).
 - **File integrity filter and smart collection rule**: show or collect the photos Verify Files found damaged, found OK, or hasn't checked; Save Filter as Smart Collection carries it. See [Verifying files](Library#verifying-files) and [Smart collections](Collections-and-Keywords#smart-collections).
@@ -159,6 +166,9 @@ What has arrived since the 0.9.0 beta, by area. Each line says what the feature 
 
 ## Masks and retouching
 
+- **Sensor Dust**: Find Spots finds the faint round shadows of sensor dust and heals each one, with Sensitivity, Spot Size, Visualise Spots and a ring tool to add or drop a spot; a dust map saved from one photo applies to others from the same camera, and **Photo › Remove Dust…** does it for a whole selection in the background. See [Modules](Develop#modules) and [Remove Dust](Library#remove-dust).
+- **Touch-up**: Find Faces, then Skin Smoothing, Teeth Whitening and Brighten Eyes per face, and Find Blemishes heals spots on the skin. Faces are found on this Mac with Apple's Vision framework. See [Modules](Develop#modules).
+- **A choice of models**: Settings › AI › Models lists the models behind subject and click-to-select masks, with BiRefNet Lite bundled for subjects, and **Add Model…** adds one you converted yourself, checked before it is kept. See [Models](Models).
 - **Mask components**: build a mask from up to seven parts that add, subtract or intersect, such as a subject minus a brush. See [Components](Masking#components-add-subtract-intersect).
 - **More local sliders**: Amount, Highlights, Shadows, Whites, Blacks, Tint, Hue, Texture, Clarity, Dehaze, Sharpness, Noise and Defringe inside a mask. See [The sliders](Masking#the-sliders).
 - **Colour Range** and **Luminance Range** masks, and a brush with **Density**. See [Making a mask](Masking#making-a-mask).

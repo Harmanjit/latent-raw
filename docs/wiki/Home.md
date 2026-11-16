@@ -4,7 +4,7 @@
 
 Latent opens a folder of raw files, keeps a catalog inside that folder, and edits every image on the GPU without touching the original. It is in the same family as Lightroom, darktable and RawTherapee, but it targets one platform only and uses everything that platform has: unified memory, Metal compute, and on-device machine learning.
 
-- **Status:** version 0.9, a beta for review. **HDR Panorama** works but is marked **experimental**, because no real bracketed sweep has ever been merged with it, and panoramas are single-row only. Since the first beta build Latent has gained a great deal: collections and keywords, colour labels, virtual copies, JPEG and HEIC support, profiles, colour grading, Upright, masks built from several parts, Remove, Lens Blur, DNG export and soft proofing among them; [What's New](Whats-New) lists it all. Expect rough edges, and read [Limitations](Limitations) before relying on it. Please report bugs as [issues on GitHub](https://github.com/Harmanjit/latent-raw/issues); see [Report an issue or get help](FAQ#report-an-issue-or-get-help).
+- **Status:** version 1.0.0, the first public release. **HDR Panorama** works but is marked **experimental**, because no real bracketed sweep has ever been merged with it, and panoramas are single-row only. Since the 0.9.0 beta Latent has gained a great deal: collections and keywords, colour labels, virtual copies, stacks, JPEG and HEIC support, profiles, colour grading, the tone equalizer, Upright, masks built from several parts, Remove, Lens Blur, DNG and PDF export, soft proofing, and much faster opening, editing, importing and exporting among them; [What's New](Whats-New) lists it all. Read [Limitations](Limitations) before relying on it for something that matters. Please report bugs as [issues on GitHub](https://github.com/Harmanjit/latent-raw/issues); see [Report an issue or get help](FAQ#report-an-issue-or-get-help).
 - **Licence:** GPLv3. The code, data and models Latent carries from other projects, and their licences, are on [Licences](Licences).
 - **Platform:** macOS 15 or newer on Apple Silicon. Verified on M1 Pro and M4.
 
@@ -17,7 +17,7 @@ These pages are also in the app: **Help > Latent Help** (⌘?) shows them with s
 | | |
 |---|---|
 | [Getting Started](Getting-Started) | First launch, choosing a folder, the Library → Develop → Export loop, where the help is |
-| [What's New](Whats-New) | Everything added since the 0.9.0 beta, by area |
+| [What's New](Whats-New) | What's new in 1.0.0: everything added since the 0.9.0 beta, by area, and what got faster |
 | [Tutorial: Culling and Organising](Tutorial-Culling-and-Organising) | Cull and rate a shoot; organise it with collections, smart collections and keywords |
 | [Tutorial: Editing](Tutorial-Editing) | A basic edit, masking a sky, removing a distraction, Lens Blur |
 | [Tutorial: Printing and Sharing](Tutorial-Printing-and-Sharing) | Soft proofing and printing or exporting for a lab; exporting for the web with a watermark |
