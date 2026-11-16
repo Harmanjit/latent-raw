@@ -2,14 +2,14 @@
 
 ## Requirements
 
-- macOS 15 (Sequoia) or 26 (Tahoe).
+- macOS 15 (Sequoia) or newer. Verified on macOS 15, 26 (Tahoe) and 27.
 - Apple Silicon. Verified on an M4 MacBook Air and an M1 Pro MacBook Pro; any M-series chip should work. The M1 Pro, with its larger GPU, is if anything faster in the editor.
 
 ## Download
 
-Version 0.9.0 is a beta, published for review. The [Releases page](https://github.com/Harmanjit/latent-raw/releases) offers it as `Latent-0.9.0.zip`, for macOS 15 or newer on Apple Silicon.
+The [Releases page](https://github.com/Harmanjit/latent-raw/releases) offers each version as `Latent-<version>.zip` under **Assets**, for macOS 15 or newer on Apple Silicon. Version 1.0.0 is the first public release; the release notes give the zip's SHA-256 if you want to check your download with `shasum -a 256 Latent-<version>.zip`.
 
-1. Download `Latent-0.9.0.zip` and unzip it.
+1. Download `Latent-<version>.zip` from under **Assets** and unzip it (double-click it in Finder).
 2. Drag `Latent.app` to Applications.
 3. Open it. The first time, Gatekeeper stops it, because the app is not notarised; follow [The Gatekeeper dialog](#the-gatekeeper-dialog).
 
@@ -17,7 +17,7 @@ Version 0.9.0 is a beta, published for review. The [Releases page](https://githu
 
 Building needs, as well as the requirements above:
 
-- **Xcode 16 or newer**, the full application from the App Store, not just the Command Line Tools. The build needs `xcodebuild`, and Xcode must be the active developer directory:
+- **Xcode 16.3 (Swift 6.1) or newer**, the full application from the App Store, not just the Command Line Tools. The build needs `xcodebuild`, and Xcode must be the active developer directory:
 
 ```bash
 sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
@@ -36,7 +36,7 @@ git clone https://github.com/Harmanjit/latent-raw.git
 cd latent-raw
 brew install autoconf automake libtool pkg-config
 scripts/build_libraw.sh          # builds the LibRaw framework from a pinned commit, once
-scripts/make_app.sh 0.9.0        # release build, assembles build/Latent.app, signs it
+scripts/make_app.sh 1.0.0        # release build, assembles build/Latent.app, signs it
 open build/Latent.app
 ```
 
@@ -48,18 +48,25 @@ Drag `build/Latent.app` to Applications if you want it in the Dock.
 
 ## The Gatekeeper dialog
 
-The app is signed ad hoc, not by an Apple Developer ID, and isn't notarised, so Gatekeeper stops it the first time it is opened from a download or a copy on another Mac. The Mac that built it opens it straight away.
+The app is signed ad hoc, not by an Apple Developer ID, and isn't notarised, so Gatekeeper stops it the first time it is opened from a download or a copy on another Mac. The Mac that built it opens it straight away. On macOS 15, 26 and later:
 
-1. Try to open the app once and dismiss the dialog.
-2. Open **System Settings > Privacy & Security**, scroll to the message about Latent, and click **Open Anyway**.
+1. Double-click Latent in Applications. macOS says it can't open it, or can't check it for malicious software. Click **Done** (not Move to Trash).
+2. Open **System Settings › Privacy & Security** and scroll down to **Security**. A line says Latent was blocked; click **Open Anyway** beside it. The line shows for about an hour after the blocked launch, so if it isn't there, try to open Latent again first.
+3. Confirm with your password or Touch ID, then click **Open Anyway** in the dialog that follows. Latent opens.
 
-Since macOS 15, Control-click > Open no longer skips this step. Alternatively, remove the quarantine attribute:
+Since macOS 15, Control-click (or right-click) › Open no longer skips this step: only **Open Anyway** in Privacy & Security does. Alternatively, if you are comfortable in Terminal, remove the quarantine attribute that marks the app as downloaded:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Latent.app
 ```
 
-This is a one-time step per Mac. The app is sandboxed and hardened regardless of the dialog; see [Security and Privacy](Security-and-Privacy).
+This is a one-time step per Mac and per downloaded version: a newer zip is a new download, and macOS asks once more for it. The app is sandboxed and hardened regardless of the dialog; see [Security and Privacy](Security-and-Privacy).
+
+## Upgrading from 0.9
+
+Quit Latent, unzip the new version and drag it to Applications, replacing the old one. Your settings, presets, favourite folders and the other folders you gave Latent access to carry over, because they live in the app's container, which keeps the same name.
+
+The first time 1.0.0 opens a folder catalogued by 0.9, it updates the catalog in `_latent/` to the new format. This is one way: going back to 0.9 with that folder afterwards isn't supported. Before changing anything Latent saves a copy of the old catalog in that folder's `_latent/backups/` (see [Backups](Library#the-catalog)). Thumbnails are made again once, in the background, in a new format. Edits, ratings, keywords and sidecars are untouched.
 
 ## Development builds
 

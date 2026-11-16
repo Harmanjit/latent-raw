@@ -13,7 +13,7 @@ Local adjustments change part of the picture: a mask says where, and the mask's 
 - **Subject** selects the main subject in one go with BiRefNet Lite (bundled) or Apple Vision.
 - **Click to Select** uses Segment Anything 2.1: click the thing you want, option-click to leave something out.
 - **Select Objects (Box)** also uses Segment Anything: drag a rectangle around the object and it is selected. You can add clicks to the same selection afterwards with **Click to select**, and **Draw box** draws the box again.
-- **Select by Class** picks sky, people, vegetation, water, buildings, ground, mountains, animals or vehicles.
+- **Select by Class** picks sky, people, vegetation, water, buildings, ground, mountains, animals or vehicles. It uses the bundled SegFormer model, whose licence from NVIDIA allows research and evaluation use only, not commercial work; Settings › AI › Models marks it **Research use only**. See [Licences](Licences#bundled-models).
 - **Colour Range** selects colours you pick from the image (below).
 - **Luminance Range** selects a band of tones, from **Low** to **High**, with a **Feather**. See [Luminance and Channel Range](#luminance-and-channel-range).
 

@@ -10,13 +10,13 @@ A model added with Add Model… is a folder from your disk holding Core ML packa
 
 ## Sandbox and hardened runtime
 
-The app runs in the App Sandbox with the hardened runtime, signed ad hoc. It can reach only folders and files you choose in an open panel, folders you add to the sidebar's favourites (by Add Folder… or by dragging them in) and everything inside those, plus its own container under `~/Library/Containers/com.latent.app`. Each is remembered between launches by a security-scoped bookmark; removing a favourite forgets its bookmark. The same kind of bookmark remembers the last five folders you moved or copied images to, the folder and applications chosen for Edit in External Editor, and the songs added to the slideshow. No Apple developer account is involved; the sandbox is enforced from the signature regardless.
+The app runs in the App Sandbox with the hardened runtime, signed ad hoc. It can reach only folders and files you choose in an open panel, folders you add to the sidebar's favourites (by Add Folder… or by dragging them in) and everything inside those, plus its own container under `~/Library/Containers/com.latent.app`. Each is remembered between launches by a security-scoped bookmark; removing a favourite forgets its bookmark. The same kind of bookmark remembers the last five folders you moved or copied images to, Auto Import's watched folder and destination, the folder and applications chosen for Edit in External Editor, and the songs added to the slideshow. No Apple developer account is involved; the sandbox is enforced from the signature regardless.
 
 Besides files and bookmarks, the app has one entitlement: `com.apple.security.print`, without which the sandbox refuses to let File > Print… reach the printing system. It grants nothing else, no network and no files.
 
 ## Isolated raw decoding
 
-Raw files are parsed by LibRaw, a large C++ library that processes files you did not create. Latent runs it in a separate XPC service, `LatentRawDecoder.xpc`, sandboxed with no file access and no network. The app hands it an open file descriptor per file and receives pixels back. A crafted file that exploits the decoder gets a process that can do nothing, and the app shows an error instead of crashing.
+Raw files are parsed by LibRaw, a large C++ library that processes files you did not create. Latent runs it in a separate XPC service, `LatentRawDecoder.xpc`, sandboxed with no network and no access to your files; it can write only to its own container. The app hands it an open file descriptor per file and receives pixels back. A crafted file that exploits the decoder gets a process that can do nothing, and the app shows an error instead of crashing.
 
 JPEG, HEIC, TIFF, PNG, WebP and AVIF files are not raws and don't go to the service. They are read in the app by ImageIO, the same system decoder Finder, Preview and Quick Look use on them, so opening one in Latent exposes nothing those don't.
 
@@ -28,7 +28,9 @@ Exports carry the photo's own metadata by default: artist, copyright, camera and
 
 ## Your files
 
-Latent never changes the contents of a raw file. It moves, copies or renames one only when you ask, with Move to Folder, Copy to Folder, a drop on a sidebar folder or Rename, and only into folders the sandbox already lets it reach: the open folder, a favourite, a folder you pick in the panel, or a recent destination. It never writes over a file: a name that is taken gets a number. Undoing a copy puts the copy in the Trash rather than deleting it, and only if it is still the file Latent made.
+Latent never changes the contents of a raw file. It moves, copies or renames one only when you ask, with Move to Folder, Copy to Folder, Duplicate (a second copy beside the original), a drop on a sidebar folder or Rename, and only into folders the sandbox already lets it reach: the open folder, a favourite, a folder you pick in the panel, or a recent destination. **Auto Import**, once you turn it on in Settings › Folders, brings new raws from the folder it watches into the destination you chose, by **moving** them unless you switch it to copying; it keeps a ledger of the files it has brought in (name, size and date, the last 20,000) so a file it copied is not copied again. It never writes over a file: a name that is taken gets a number. Undoing a copy or a duplicate puts it in the Trash rather than deleting it, and only if it is still the file Latent made.
+
+**Photo Merge** writes one new file, a DNG beside the reference photo, or for a panorama the first photo joined (`<name>-HDR.dng`, `-Pano.dng` or `-HDRPano.dng`, numbered when the name is taken), with its sidecar in `_latent/`; the photos it read are never changed. A panorama's prepared frames and HDR Panorama's intermediate DNGs go to the temporary folder while a merge runs and are removed when it ends.
 
 Finder tags are read from each file's `com.apple.metadata:_kMDItemUserTags` attribute and never written. Dragging thumbnails out gives the other application the original files' locations; Finder makes copies. Edit in External Editor writes a TIFF to the folder chosen for it and asks macOS to open it in the application chosen; that application then does with it whatever it does, outside Latent's sandbox. The TIFF's metadata and location follow Export open image…'s switches, so location is left out unless you turned it on there. Prints and contact sheets carry no metadata, only the captions you choose.
 
@@ -46,7 +48,7 @@ LibRaw is pinned by commit hash and refused if the tag moves. The one Swift depe
 
 ## What is written, and where
 
-- `_latent/` inside each photo folder: catalog, sidecars, thumbnails, `custom-order.json` once you arrange a Custom sort, and a set-aside `catalog.damaged-<date>.sqlite` if a database was ever found damaged. Nothing else in your folders is touched unless you move, copy or rename images.
-- The app container: settings, bookmarks for the last folder, export folders, favourites, recent move and copy destinations, the external editor's folder and applications and slideshow songs, compiled models, saved presets.
+- `_latent/` inside each photo folder: catalog, sidecars, thumbnails, catalog backups, `custom-order.json` once you arrange a Custom sort, and a set-aside `catalog.damaged-<date>.sqlite` if a database was ever found damaged. Nothing else in your folders is touched unless you move, copy, duplicate or rename images, Auto Import brings photos into its destination, or Photo Merge writes its DNG beside the reference photo.
+- The app container: settings, bookmarks for the last folder, export folders, favourites, recent move and copy destinations, Auto Import's watched folder and destination, the external editor's folder and applications and slideshow songs, Auto Import's ledger of the names, sizes and dates of files already brought in, compiled models, saved presets.
 - Exports, contact sheets and TIFFs for an external editor: only where you choose, written under a temporary name and then moved into place; location and serial numbers only when asked for, and metadata can be stripped altogether.
 - The unified log receives failure messages with file names marked private.
