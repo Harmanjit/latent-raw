@@ -14,6 +14,8 @@ struct PresetsPanel: View {
     @State private var showingManager = false
     /// The preset a Rename… sheet is renaming.
     @State private var renaming: Preset?
+    /// The preset Delete preset asks to remove; nil when no dialog shows.
+    @State private var deleting: Preset?
     /// The Amount the next preset applies at, and the last one re-blends
     /// at while it is still the photo's last change (`PresetAmountSession`).
     @AppStorage(PresetAmountSession.amountKey) private var amount = 1.0
@@ -32,7 +34,7 @@ struct PresetsPanel: View {
                         Divider()
                         Menu("Delete preset") {
                             ForEach(user) { preset in
-                                Button(preset.name, role: .destructive) { model.deletePreset(preset) }
+                                Button(preset.name + "…", role: .destructive) { deleting = preset }
                             }
                         }
                     }
@@ -109,6 +111,14 @@ struct PresetsPanel: View {
             PresetNameSheet(title: "Rename preset", initial: preset.name, action: "Rename") { name in
                 model.renamePreset(preset, to: name)
             }
+        }
+        // Matches Manage Presets… (PresetManagerSheet), which already asks.
+        .confirmationDialog("Remove “\(deleting?.name ?? "")”?", isPresented: Binding(
+            get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            presenting: deleting) { preset in
+            Button("Remove Preset", role: .destructive) { model.deletePreset(preset) }
+        } message: { _ in
+            Text("Photos it was applied to keep their settings. Export it first to keep a copy.")
         }
     }
 }
