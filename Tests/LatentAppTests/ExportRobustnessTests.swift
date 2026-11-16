@@ -49,9 +49,9 @@ final class ExportRobustnessTests: XCTestCase {
         json.append(["not": "a preset"])
         let data = try JSONSerialization.data(withJSONObject: json)
 
-        let key = ExportPresetStore.key
-        let saved = UserDefaults.standard.data(forKey: key)
-        defer { UserDefaults.standard.set(saved, forKey: key) }
+        let key = ExportPresetStore.key, backup = ExportPresetStore.unreadableKey
+        let saved = UserDefaults.standard.data(forKey: key), savedBackup = UserDefaults.standard.data(forKey: backup)
+        defer { UserDefaults.standard.set(saved, forKey: key); UserDefaults.standard.set(savedBackup, forKey: backup) }
         UserDefaults.standard.set(data, forKey: key)
 
         let loaded = ExportPresetStore.load()
@@ -60,6 +60,7 @@ final class ExportRobustnessTests: XCTestCase {
         XCTAssertEqual(loaded.first?.preset.maxLongEdge, 1234)
         XCTAssertEqual(loaded.first?.preset.collision, ExportPreset().collision)
         XCTAssertEqual(loaded.last?.preset.format, .tiff)
+        XCTAssertEqual(UserDefaults.standard.data(forKey: backup), data, "the dropped entry is kept aside")
     }
 
     /// A list that can't be read at all is kept aside before the built-ins
