@@ -209,6 +209,13 @@ extension EditorModel {
         cropToolActive = false
         geometry.guidedToolActive = false
         maskTool = .none
+        // Escape mid-drag: the release no longer reaches maskToolEnded
+        // (no tool is armed), so end the drag here or the overlay sticks.
+        isDraggingMask = false
+        lastDab = nil
+        maskDragBox = nil
+        radialMoveOffset = nil
+        maskShapeEditing.drag = nil
         pointColourPicking = false
         toneTool = .none
         defringePickerActive = false
