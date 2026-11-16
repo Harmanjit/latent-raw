@@ -59,7 +59,8 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
         channelBlackLevels = [black[0], black[1], black[2], black[3]]
         dataMaximum = s.dataMaximum; baselineExposure = s.baselineExposure; mergeInfo = s.mergeInfo
         cameraMake = s.cameraMake; cameraModel = s.cameraModel; lensModel = s.lensModel
-        iso = s.iso; shutter = s.shutter; aperture = s.aperture; focalLength = s.focalLength
+        iso = SaneExposure.iso(s.iso); shutter = SaneExposure.shutter(s.shutter)
+        aperture = SaneExposure.aperture(s.aperture); focalLength = SaneExposure.focalLength(s.focalLength)
         timestamp = Int64(s.captureTime.timeIntervalSince1970)
         orientation = s.orientation
         lensMake = s.lens.make; lensMakerNotesName = s.lens.makerNotesName
@@ -121,7 +122,10 @@ public struct RawSnapshotMetadata: Codable, Sendable, Equatable {
                 : SIMD4(repeating: blackLevel),
             dataMaximum: dataMaximum, baselineExposure: baselineExposure, mergeInfo: mergeInfo,
             cameraMake: cameraMake, cameraModel: cameraModel, lensModel: lensModel,
-            iso: iso, shutter: shutter, aperture: aperture, focalLength: focalLength,
+            // Range-checked here as well as where the service built them,
+            // so no reply hands the app a value that traps an Int().
+            iso: SaneExposure.iso(iso), shutter: SaneExposure.shutter(shutter),
+            aperture: SaneExposure.aperture(aperture), focalLength: SaneExposure.focalLength(focalLength),
             captureTime: Date(timeIntervalSince1970: TimeInterval(timestamp)),
             orientation: orientation,
             lens: LensIdentity(make: lensMake, makerNotesName: lensMakerNotesName, makerLensID: makerLensID,
