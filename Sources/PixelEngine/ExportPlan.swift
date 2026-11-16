@@ -1,4 +1,5 @@
 import Foundation
+import Metal
 import RawCore
 import ColorKit
 
@@ -30,12 +31,45 @@ public enum ExportPlan {
     /// the long edge of the exported image, which is `crop` of the render:
     /// the whole frame binned to the target would come out smaller than
     /// asked once cropped, since the exporter never enlarges.
+    ///
+    /// `maxTextureSide`, the GPU's largest texture side, caps the render:
+    /// a photo wider than it (a big panorama TIFF, a pixel-shift raw) is
+    /// binned as little as makes it fit, since a texture past it can't be
+    /// made at all. Nil, no cap.
     public static func scale(for summary: RawSummary, crop: CropParameters = .none,
-                             maxLongEdge: Int?) -> RenderScale {
-        scale(rawWidth: summary.rawWidth, rawHeight: summary.rawHeight, crop: crop, maxLongEdge: maxLongEdge)
+                             maxLongEdge: Int?, maxTextureSide: Int? = nil) -> RenderScale {
+        scale(rawWidth: summary.rawWidth, rawHeight: summary.rawHeight, crop: crop, maxLongEdge: maxLongEdge,
+              maxTextureSide: maxTextureSide)
     }
 
-    static func scale(rawWidth: Int, rawHeight: Int, crop: CropParameters, maxLongEdge: Int?) -> RenderScale {
+    static func scale(rawWidth: Int, rawHeight: Int, crop: CropParameters, maxLongEdge: Int?,
+                      maxTextureSide: Int? = nil) -> RenderScale {
+        let planned = uncappedScale(rawWidth: rawWidth, rawHeight: rawHeight, crop: crop, maxLongEdge: maxLongEdge)
+        guard let limit = maxTextureSide, limit > 0,
+              renderLongEdge(rawWidth: rawWidth, rawHeight: rawHeight, scale: planned) > limit else { return planned }
+        // A binned render is the sensor over twice the quads, rounded down.
+        let long = max(rawWidth, rawHeight)
+        var quads = max(1, (long + 2 * limit - 1) / (2 * limit))
+        while long / (2 * quads) > limit { quads += 1 }
+        return .binned(quads: quads)
+    }
+
+    /// The long edge of the texture a render of the whole sensor at
+    /// `scale` makes.
+    public static func renderLongEdge(rawWidth: Int, rawHeight: Int, scale: RenderScale) -> Int {
+        switch RenderPipeline.plan(rawWidth: rawWidth, rawHeight: rawHeight, scale: scale) {
+        case .fullResolution(_, let size): max(size.width, size.height)
+        case .binned(let quads): max(rawWidth, rawHeight) / (2 * quads)
+        }
+    }
+
+    /// The largest texture side `device` can make: what `scale` is capped to.
+    public static func maxTextureSide(_ device: MTLDevice) -> Int {
+        device.supportsFamily(.apple3) || device.supportsFamily(.mac2) ? 16_384 : 8_192
+    }
+
+    private static func uncappedScale(rawWidth: Int, rawHeight: Int, crop: CropParameters,
+                                      maxLongEdge: Int?) -> RenderScale {
         guard let target = maxLongEdge, target > 0 else { return .full }
         // The cropped long edge a render of `width` x `height` gives, as the
         // exporter measures it (quarter turns don't change it).

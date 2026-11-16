@@ -18,6 +18,19 @@ struct ExportBatch: Codable, Equatable {
 struct ExportFileResult: Sendable {
     var pixelCount: Int
     var maskSubstitutions: [String]
+    /// The photo's full long edge when it was too wide for the GPU and
+    /// written smaller (`ExportWorker.Rendered.reducedFromLongEdge`).
+    var reducedFromLongEdge: Int? = nil
+    /// The written file's long edge, where it is known.
+    var longEdge = 0
+
+    /// The export panel's note for a file written smaller than asked
+    /// because the photo was wider than the GPU's largest texture.
+    var gpuLimitNote: String? {
+        guard let full = reducedFromLongEdge else { return nil }
+        return "written at \(longEdge) px on its long side, smaller than asked: the photo is \(full) px across, "
+            + "wider than this Mac's GPU can render in one piece, so it was rendered at the largest size that fits."
+    }
 }
 
 /// One photo's file: the work `ExportQueue` hands to a detached task.
@@ -63,7 +76,9 @@ struct ExportFileJob: Sendable {
         case .image:
             let outcome = try await ExportWorker.export(request, gpu: gpu)
             return ExportFileResult(pixelCount: outcome.pixelWidth * outcome.pixelHeight,
-                                    maskSubstitutions: outcome.maskSubstitutions)
+                                    maskSubstitutions: outcome.maskSubstitutions,
+                                    reducedFromLongEdge: outcome.reducedFromLongEdge,
+                                    longEdge: max(outcome.pixelWidth, outcome.pixelHeight))
         case .dng:
             if dngContent == .original, DNGExportContent.isDNG(request.sourceURL) {
                 // Already a DNG: the file itself, mosaic and all.
@@ -79,7 +94,7 @@ struct ExportFileJob: Sendable {
                 ? RenderedDNGExport.BakedLook(contrast: defaults.contrast, greyPoint: defaults.greyPoint) : nil
             let destination = request.destinationURL
             let source = MergeRecipe.Source(
-                path: RenderedDNGExport.relativePath(of: request.sourceURL, from: destination.deletingLastPathComponent()),
+                path: RenderedDNGExport.recordedPath(of: request.sourceURL),
                 hash: sourceHash, captureTime: captureTime)
             try RenderedDNGExport.write(texture: rendered.texture, commandQueue: gpu.commandQueue,
                                         summary: rendered.summary, cameraToXYZ: rendered.cameraToXYZ,

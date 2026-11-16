@@ -81,6 +81,8 @@ public enum ExportWorker {
         public let maskSubstitutions: [String]
         /// Where the time went, in seconds: "unpack", "masks", "render", "pack", "write".
         public let phases: [(String, TimeInterval)]
+        /// As `Rendered.reducedFromLongEdge`.
+        public var reducedFromLongEdge: Int? = nil
 
         public var description: String {
             let parts = phases.map { String(format: "%@ %.0f ms", $0.0, $0.1 * 1000) }
@@ -112,6 +114,11 @@ public enum ExportWorker {
         let colorSpace: ColorKit.OutputSpace
         let sourceName: String
         let readMetadata: ExportMetadata
+        /// The photo's full long edge when it was wider than the GPU's
+        /// largest texture and so rendered binned to fit
+        /// (`ExportPlan.scale`): the file is smaller than asked. Nil
+        /// otherwise.
+        public internal(set) var reducedFromLongEdge: Int?
 
         init(image: Exporter.EncodableImage, metadata: ExportMetadata?, settings: ExportSettings, masksGenerated: Int,
              maskSubstitutions: [String] = [], phases: [(String, TimeInterval)], start: Date,
@@ -151,10 +158,13 @@ public enum ExportWorker {
             var carried = readMetadata
             if let metadataLevel { carried.level = metadataLevel }
             carried.includeLocation = includeLocation && carried.level.allowsLocation
-            return Rendered(image: try image.watermarked(settings.watermark, colorSpace: colorSpace),
-                            metadata: includeMetadata ? carried : nil, settings: settings,
-                            masksGenerated: masksGenerated, maskSubstitutions: maskSubstitutions, phases: phases,
-                            start: start, colorSpace: colorSpace, sourceName: sourceName, readMetadata: readMetadata)
+            var finished = Rendered(image: try image.watermarked(settings.watermark, colorSpace: colorSpace),
+                                    metadata: includeMetadata ? carried : nil, settings: settings,
+                                    masksGenerated: masksGenerated, maskSubstitutions: maskSubstitutions,
+                                    phases: phases, start: start, colorSpace: colorSpace, sourceName: sourceName,
+                                    readMetadata: readMetadata)
+            finished.reducedFromLongEdge = reducedFromLongEdge
+            return finished
         }
     }
 
@@ -176,7 +186,8 @@ public enum ExportWorker {
         let phases = rendered.phases + [("write", Date().timeIntervalSince(mark))]
         return Outcome(pixelWidth: rendered.pixelWidth, pixelHeight: rendered.pixelHeight,
                        seconds: Date().timeIntervalSince(rendered.start), masksGenerated: rendered.masksGenerated,
-                       maskSubstitutions: rendered.maskSubstitutions, phases: phases)
+                       maskSubstitutions: rendered.maskSubstitutions, phases: phases,
+                       reducedFromLongEdge: rendered.reducedFromLongEdge)
     }
 
     /// The export's pixels and metadata without writing a file; the request's
@@ -253,7 +264,16 @@ public enum ExportWorker {
             return (masks, depthStandIn)
         }
 
-        let scale = ExportPlan.scale(for: file.summary, crop: parameters.crop, maxLongEdge: maxLongEdge)
+        // Never past the GPU's largest texture: a photo wider than that is
+        // binned to fit and the file reported smaller than asked.
+        let textureLimit = ExportPlan.maxTextureSide(gpu.device)
+        let scale = ExportPlan.scale(for: file.summary, crop: parameters.crop, maxLongEdge: maxLongEdge,
+                                     maxTextureSide: textureLimit)
+        let uncapped = ExportPlan.scale(for: file.summary, crop: parameters.crop, maxLongEdge: maxLongEdge)
+        let rawLongEdge = max(file.summary.rawWidth, file.summary.rawHeight)
+        let reducedFromLongEdge = ExportPlan.renderLongEdge(rawWidth: file.summary.rawWidth,
+                                                            rawHeight: file.summary.rawHeight,
+                                                            scale: uncapped) > textureLimit ? rawLongEdge : nil
         let texture = try pipeline.render(session, scale: scale,
                                           parameters: parameters, output: .file(renderSpace))
         lap("render")
@@ -264,7 +284,7 @@ public enum ExportWorker {
         metadata.cameraMake = s.cameraMake.isEmpty ? nil : s.cameraMake
         metadata.cameraModel = s.cameraModel.isEmpty ? nil : s.cameraModel
         metadata.lensModel = session.lensCorrection(for: parameters)?.profileName ?? (s.lensModel.isEmpty ? nil : s.lensModel)
-        metadata.iso = s.iso > 0 ? Int(s.iso) : nil
+        metadata.iso = Self.metadataISO(s.iso)
         metadata.shutter = s.shutter > 0 ? s.shutter : nil
         metadata.aperture = s.aperture > 0 ? s.aperture : nil
         metadata.focalLength = s.focalLength > 0 ? s.focalLength : nil
@@ -313,12 +333,22 @@ public enum ExportWorker {
                 try pipeline.render(session, scale: scale, parameters: parameters, output: output)
             })
         lap("pack")
-        return Rendered(image: image, metadata: request.includeMetadata ? metadata : nil, settings: settings,
-                        masksGenerated: masks.count, maskSubstitutions: masks.substituted + (depthStandIn.map { [$0] } ?? []),
-                        phases: phases,
-                        start: start, colorSpace: renderSpace,
-                        sourceName: request.sourceURL.deletingPathExtension().lastPathComponent,
-                        readMetadata: metadata)
+        var rendered = Rendered(image: image, metadata: request.includeMetadata ? metadata : nil, settings: settings,
+                                masksGenerated: masks.count,
+                                maskSubstitutions: masks.substituted + (depthStandIn.map { [$0] } ?? []),
+                                phases: phases,
+                                start: start, colorSpace: renderSpace,
+                                sourceName: request.sourceURL.deletingPathExtension().lastPathComponent,
+                                readMetadata: metadata)
+        rendered.reducedFromLongEdge = reducedFromLongEdge
+        return rendered
+    }
+
+    /// The raw's ISO as the file's metadata writes it: nil when there is
+    /// none, or when a damaged file gives one no camera could (which made
+    /// a whole number would trap).
+    static func metadataISO(_ iso: Double) -> Int? {
+        iso.isFinite && iso > 0 && iso <= 10_000_000 ? Int(iso) : nil
     }
 
     /// What a model mask is made from, here and in the editor: the
