@@ -43,7 +43,17 @@ extension EditorModel {
 
         let quads = max(previewQuads, 4)   // as renderPreview makes the analysis render
         let parameters = renderParameters
-        defer { session.releasePooledTextures(in: .analysis) }
+        // The mask must be the current one, never a brush slice a
+        // deferring render kept while its whole redraw runs off the main
+        // thread: these renders bring every slice up to date, whoever
+        // calls (the redraw still landing then asks for the render that
+        // measures the scopes again, BrushMaskSet.apply).
+        let defersBrushRedraws = session.defersBrushRedraws
+        session.defersBrushRedraws = false
+        defer {
+            session.defersBrushRedraws = defersBrushRedraws
+            session.releasePooledTextures(in: .analysis)
+        }
         func render(_ output: RenderOutput) -> MTLTexture? {
             try? session.withTexturePool(.analysis) {
                 let texture = try pipeline.render(session, scale: .binned(quads: quads),
