@@ -47,7 +47,7 @@ final class RenderQueueTests: XCTestCase {
         let model = try await openModel()
         let gpu = try XCTUnwrap(model.gpuContext)
         var renders = 0
-        let watch = model.$preview.dropFirst().sink { if $0 != nil { renders += 1 } }
+        let watch = model.previewPublisher.dropFirst().sink { if $0 != nil { renders += 1 } }
         defer { watch.cancel() }
 
         model.parameters.exposureEV = 0.1
