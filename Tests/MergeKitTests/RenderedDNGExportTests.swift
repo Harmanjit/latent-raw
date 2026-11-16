@@ -33,13 +33,10 @@ final class RenderedDNGExportTests: XCTestCase {
         XCTAssertNil(RenderedDNGExport.workingToCamera(cameraToXYZ: [0, 0, 0, 0, 0, 0, 0, 0, 0]))
     }
 
-    func testOriginalPathIsRelativeToTheDNGsFolder() {
+    /// The recipe names the original by its file name alone, wherever the
+    /// DNG is written: no folder names travel with the file.
+    func testOriginalIsRecordedByNameOnly() {
         let original = URL(fileURLWithPath: "/Users/a/Photos/Day 1/DSC_0107.NEF")
-        XCTAssertEqual(RenderedDNGExport.relativePath(of: original, from: URL(fileURLWithPath: "/Users/a/Photos/Day 1")),
-                       "DSC_0107.NEF")
-        XCTAssertEqual(RenderedDNGExport.relativePath(of: original, from: URL(fileURLWithPath: "/Users/a/Exports/DNG")),
-                       "../../Photos/Day 1/DSC_0107.NEF")
-        XCTAssertEqual(RenderedDNGExport.relativePath(of: original, from: URL(fileURLWithPath: "/Volumes/Card")),
-                       "DSC_0107.NEF")
+        XCTAssertEqual(RenderedDNGExport.recordedPath(of: original), "DSC_0107.NEF")
     }
 }

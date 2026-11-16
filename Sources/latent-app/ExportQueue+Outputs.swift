@@ -79,7 +79,7 @@ struct ExportFileJob: Sendable {
                 ? RenderedDNGExport.BakedLook(contrast: defaults.contrast, greyPoint: defaults.greyPoint) : nil
             let destination = request.destinationURL
             let source = MergeRecipe.Source(
-                path: RenderedDNGExport.relativePath(of: request.sourceURL, from: destination.deletingLastPathComponent()),
+                path: RenderedDNGExport.recordedPath(of: request.sourceURL),
                 hash: sourceHash, captureTime: captureTime)
             try RenderedDNGExport.write(texture: rendered.texture, commandQueue: gpu.commandQueue,
                                         summary: rendered.summary, cameraToXYZ: rendered.cameraToXYZ,

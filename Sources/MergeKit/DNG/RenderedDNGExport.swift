@@ -150,15 +150,12 @@ public enum RenderedDNGExport {
         }
     }
 
-    /// The original's path as the recipe records it: relative to the
-    /// DNG's folder when they share a volume path prefix, else its name.
-    public static func relativePath(of original: URL, from folder: URL) -> String {
-        let from = folder.standardizedFileURL.pathComponents
-        let to = original.standardizedFileURL.pathComponents
-        var common = 0
-        while common < min(from.count, to.count), from[common] == to[common] { common += 1 }
-        guard common > 1 else { return original.lastPathComponent }
-        let ups = Array(repeating: "..", count: from.count - common)
-        return (ups + to[common...]).joined(separator: "/")
+    /// The original's path as the recipe records it: its file name only.
+    /// A path relative to the DNG's folder would carry the names of the
+    /// folders between them to anyone the DNG is sent to; finding the
+    /// original again goes by the recipe's hash, which the name alone
+    /// serves as well.
+    public static func recordedPath(of original: URL) -> String {
+        original.lastPathComponent
     }
 }
