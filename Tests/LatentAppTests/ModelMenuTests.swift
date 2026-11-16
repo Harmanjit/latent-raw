@@ -127,6 +127,27 @@ final class ModelMenuTests: XCTestCase {
         XCTAssertTrue(ModelMenus.alternatives(for: prompted, registry: registry).isEmpty, "Small is the only one installed")
     }
 
+    /// Select by Class and its mask rows say when the class model making
+    /// the mask is research-only (SegFormer's NVIDIA licence); nothing is
+    /// said when the built-in estimate stands in or for a subject mask.
+    func testResearchOnlyClassModelIsNoted() throws {
+        let sky = MaskShape.ai(kind: "sky", modelVersion: "segformer-b2-ade20k-512@1")
+        let subject = MaskShape.ai(kind: "subject", modelVersion: "birefnet-lite@1")
+        let without = try fixture()
+        XCTAssertNil(ModelMenus.classMenuLicenceNotice(registry: without), "the built-in estimate stands in")
+        XCTAssertNil(ModelMenus.licenceNotice(for: sky, registry: without))
+
+        try Self.json(id: "segformer-b2-ade20k-512", name: "SegFormer B2", kind: "semanticSegmentation",
+                      licence: "NVIDIA Source Code License", commercialUse: false)
+            .write(to: bundled.appendingPathComponent("segformer-b2-ade20k-512.model.json"), atomically: true, encoding: .utf8)
+        let with = ModelRegistry(bundled: bundled, external: external, catalogue: catalogue, defaults: defaults)
+        XCTAssertEqual(ModelMenus.classMenuLicenceNotice(registry: with), "SegFormer B2: research and evaluation use only")
+        XCTAssertEqual(ModelMenus.licenceNotice(for: sky, registry: with), "SegFormer B2: research and evaluation use only")
+        XCTAssertEqual(ModelMenus.licenceNotice(for: .ai(kind: "person", modelVersion: "segformer-b2-ade20k-512.1"),
+                                                registry: with), "SegFormer B2: research and evaluation use only")
+        XCTAssertNil(ModelMenus.licenceNotice(for: subject, registry: with), "subject models are not class models")
+    }
+
     /// A mask whose model this Mac lacks says so, with what stands in: a
     /// subject model gives way to Apple Vision, a click-to-select model to
     /// the default one. What the registry cannot name is shown as stored.

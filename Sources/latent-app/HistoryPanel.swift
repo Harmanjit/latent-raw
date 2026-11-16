@@ -10,6 +10,8 @@ struct HistoryPanel: View {
     @State private var showingCompareSheet = false
     @State private var compareLeft: ComparisonSource = .current
     @State private var compareRight: ComparisonSource = .current
+    /// The snapshot a trash click asks to delete; nil when no dialog shows.
+    @State private var deletingSnapshot: EditSnapshot?
 
     private static let time: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
@@ -108,9 +110,9 @@ struct HistoryPanel: View {
                         .help(isBefore ? "Clear Before: back to the unedited photo"
                                        : "Compare as Before: show this snapshot beside the current edit")
                         .accessibilityLabel(isBefore ? "Clear Before" : "Compare snapshot \(snapshot.name) as Before")
-                        Button { model.deleteSnapshot(snapshot) } label: { Image(systemName: "trash") }
+                        Button { deletingSnapshot = snapshot } label: { Image(systemName: "trash") }
                             .buttonStyle(.plain).foregroundStyle(.secondary)
-                            .help("Delete this snapshot")
+                            .help("Delete this snapshot…")
                             .accessibilityLabel("Delete snapshot \(snapshot.name)")
                     }
                     .font(.caption)
@@ -124,6 +126,13 @@ struct HistoryPanel: View {
                     }
                 }
             }
+        }
+        .confirmationDialog("Delete snapshot “\(deletingSnapshot?.name ?? "")”?", isPresented: Binding(
+            get: { deletingSnapshot != nil }, set: { if !$0 { deletingSnapshot = nil } }),
+            presenting: deletingSnapshot) { snapshot in
+            Button("Delete Snapshot", role: .destructive) { model.deleteSnapshot(snapshot) }
+        } message: { _ in
+            Text("This can’t be undone. The photo’s current edit is not changed.")
         }
         .sheet(isPresented: $showingSnapshotSheet) {
             VStack(alignment: .leading, spacing: 12) {

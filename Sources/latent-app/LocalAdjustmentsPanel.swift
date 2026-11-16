@@ -58,11 +58,19 @@ struct LocalAdjustmentsPanel: View {
                 .disabled(!model.promptedModelAvailable)
             modelMenu("Select Objects (Box)", kind: .promptedSegmentation) { model.addObjectsMask(model: $0) }
                 .disabled(!model.promptedModelAvailable)
+            let classNotice = ModelMenus.classMenuLicenceNotice(registry: .shared)
             Menu("Select by Class") {
                 ForEach(AIMaskKind.allCases.filter { $0 != .subject }, id: \.self) { kind in
                     Button(kind.displayName) { model.addAIMask(kind) }
                 }
+                // SegFormer's NVIDIA licence: say so where it is used, not
+                // only in Settings › AI › Models.
+                if let classNotice {
+                    Divider()
+                    Text(classNotice)
+                }
             }
+            .help(classNotice ?? "")
             Divider()
             Button("Colour Range") { model.addColourRangeMask() }
             Button("Luminance Range") { model.addLuminanceRangeMask() }
@@ -326,6 +334,12 @@ struct LocalAdjustmentsPanel: View {
                     modelSwitch(i, element: element.id, shape: shape)
                 }
                 missingModelRow(shape)
+                if let notice = ModelMenus.licenceNotice(for: shape, registry: .shared) {
+                    Text(notice)
+                        .font(.caption2).foregroundStyle(.orange)
+                        .help("The class model's licence allows research and evaluation use only, "
+                              + "not commercial work. See Settings › AI › Models.")
+                }
             }
         case .prompted(let points, let version):
             let shape = element.shape
@@ -636,6 +650,25 @@ enum ModelMenus {
         default:
             return ""
         }
+    }
+
+    /// "SegFormer B2: research and evaluation use only" when the class
+    /// model Select by Class would use carries a licence that does not
+    /// allow commercial use; nil when the built-in estimate stands in.
+    static func classMenuLicenceNotice(registry: ModelRegistry) -> String? {
+        researchOnlyNotice(registry.installed(ModelRef(id: SegmentationModel.modelID, version: 1)))
+    }
+
+    /// The same notice for a class mask's row, naming the model making it.
+    static func licenceNotice(for shape: MaskShape, registry: ModelRegistry) -> String? {
+        guard case .ai(let kindName, let version) = shape,
+              let kind = AIMaskKind(storedName: kindName), kind != .subject else { return nil }
+        return researchOnlyNotice(semanticEntry(running: version, registry: registry))
+    }
+
+    private static func researchOnlyNotice(_ entry: ModelEntry?) -> String? {
+        guard let entry, !entry.manifest.licence.commercialUse else { return nil }
+        return "\(entry.manifest.displayName): research and evaluation use only"
     }
 
     /// "SAM 2.1 Large · 3 points · Image encoded in 640 ms — …", or the
