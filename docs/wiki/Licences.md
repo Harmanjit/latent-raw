@@ -10,6 +10,9 @@ The app carries code, data and models made by other people. Each is listed here 
 |---|---|---|---|
 | [LibRaw](https://www.libraw.org) 0.22.2, © 2008-2025 LibRaw LLC | Reading raw files, in the sandboxed decoder service. Built from source at a pinned commit and linked statically | GNU LGPL 2.1, or CDDL 1.0, at the user's choice | `LibRaw-COPYRIGHT.txt`, `LibRaw-LGPL-2.1.txt`, `LibRaw-CDDL-1.0.txt`, `LibRaw-DCB-FBDD-BSD.txt`, `LibRaw-X3F-BSD.txt` |
 | [GRDB.swift](https://github.com/groue/GRDB.swift) 6.29, © 2015-2024 Gwendal Roué | The catalog database | MIT | `GRDB-MIT.txt` |
+| RCD demosaic (Ratio Corrected Demosaicing), © 2017-2020 Luis Sanz Rodriguez, tiled implementation by Ingo Weyrich, from [RawTherapee](https://www.rawtherapee.com) (`rtengine/rcd_demosaic.cc`) | The default demosaic, turning the sensor's mosaic into colour. Ported to Metal in `Sources/PixelEngine/Shaders/RCD.metal` | GNU GPL 3, the same as Latent's own | `LICENSE` (Latent's own) |
+
+The RCD port is a derivative of RawTherapee's code, which is why it is possible at all: both projects are under the GPL, version 3, and the port stays under it as part of Latent.
 
 LibRaw contains code from dcraw (Dave Coffin), the DCB and FBDD demosaic and denoise (Jacek Gozdz, BSD-style), the X3F library (Roland Karlsson, BSD-style) and the Adobe DNG SDK (MIT); `LibRaw-COPYRIGHT.txt` names each. The BSD licences of the DCB/FBDD and X3F code ask for their copyright notice, conditions and disclaimer to travel with any binary, so their texts, copied from the headers of those LibRaw sources, are in `LibRaw-DCB-FBDD-BSD.txt` and `LibRaw-X3F-BSD.txt`. Because LibRaw is linked statically, the LGPL lets you relink Latent against a LibRaw you have changed: the whole of Latent's source is available, and `scripts/build_libraw.sh` builds the library it links, so building from source with your own LibRaw does exactly that.
 

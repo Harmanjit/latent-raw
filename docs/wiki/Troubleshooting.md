@@ -32,6 +32,9 @@ A catalog write or read failed, or a folder couldn't be opened, and the app is t
 **"Raw decoder connection lost."**
 A file crashed the isolated decoder. The app is unaffected; the file is likely corrupt or unsupported. If a valid file does this reproducibly, please open an issue with the camera model.
 
+**A photo "couldn't be read", or "the camera may not be supported".**
+LibRaw, the raw reader inside Latent, couldn't make a picture from the file. The usual reasons are a camera newer than Latent's copy of LibRaw, a sensor type Latent doesn't render (Fujifilm X-Trans, Sigma Foveon, monochrome and four-colour sensors; see [Limitations](Limitations)), a floating-point raw DNG such as HDRMerge writes, or a file that is damaged or was only partly copied. Latent never writes to the file, so nothing is lost by trying. Check whether the same file opens in Preview; if it does and your camera isn't one of those types, please open an issue naming the camera model. **Photo › Verify Files…** tells you whether the file has changed since it was catalogued.
+
 **A folder opens with no thumbnails.**
 Thumbnails come from the cameras' embedded previews; a few cameras write none, and those images get a rendered thumbnail instead, which takes longer. The status bar reports thumbnails failed if a file could not be read.
 
@@ -89,11 +92,8 @@ Latent saves the last edit and waits for catalog writes to reach the sidecars be
 **The Help window is empty or out of date.**
 Help shows the pages copied into the app by `scripts/make_app.sh`; rebuild the app after changing `docs/wiki`. A `swift run` build reads `docs/wiki` directly.
 
-**Everything went back to defaults after updating.**
-Settings moved into the app container when the sandbox was introduced. Set them again once in ⌘,.
-
 **Build fails with a linker error after pulling.**
-Stale objects in `.build/release`. Run `rm -rf .build/release` and build again.
+Stale objects in `.build`. Run `rm -rf .build` and build again; the first build afterwards takes as long as a fresh clone's.
 
 **Build fails saying `xcodebuild` is missing, although Xcode is installed.**
 The active developer directory is pointing at the Command Line Tools. Fix it once:

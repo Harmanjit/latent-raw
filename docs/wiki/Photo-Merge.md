@@ -50,7 +50,7 @@ Because it is small, fine detail differs a little from the full-size merge. The 
 
 ### HDR Merge Without Dialog
 
-**Photo › Photo Merge › HDR Merge Without Dialog** (**⌃⇧H**) merges the selected photos straight away, with the options the dialog was last left with (Auto Align, Deghost, Auto Settings) and the reference chosen automatically. The photos are read and merged in the background; progress shows in the left panel above the Export section, as usual. If the photos can't be merged, the reason shows in the status bar. When it finishes, any warning the dialog would have shown (a photo that couldn't be aligned or was left out, say) shows in the status bar too.
+**Photo › Photo Merge › HDR Merge Without Dialog** (**⌃⇧H**) merges the selected photos straight away, with the options the dialog was last left with (Auto Align, Deghost, Auto Settings) and the reference chosen automatically. The photos are read and merged in the background; progress shows in the left panel above the Export section, as usual. If the photos can't be merged, the reason shows in the status bar. When it finishes, any warning the dialog would have shown (a photo that couldn't be aligned or was left out, say) shows as an orange note in the left panel, where the progress was, not in the status bar; the notes stay until the next merge starts.
 
 ## Auto Align
 
