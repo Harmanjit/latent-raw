@@ -106,28 +106,28 @@ struct ExportPreset: Codable, Equatable {
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        format = try c.decodeIfPresent(ExportSettings.Format.self, forKey: .format) ?? .jpeg
-        quality = try c.decodeIfPresent(Float.self, forKey: .quality) ?? 0.92
-        colorSpaceIsP3 = try c.decodeIfPresent(Bool.self, forKey: .colorSpaceIsP3) ?? false
-        resize = try c.decodeIfPresent(Bool.self, forKey: .resize) ?? false
-        maxLongEdge = try c.decodeIfPresent(Int.self, forKey: .maxLongEdge) ?? 2048
-        suffix = try c.decodeIfPresent(String.self, forKey: .suffix) ?? ""
-        template = try c.decodeIfPresent(String.self, forKey: .template) ?? ExportNaming.defaultTemplate
+        format = (try? c.decodeIfPresent(ExportSettings.Format.self, forKey: .format)) ?? .jpeg
+        quality = (try? c.decodeIfPresent(Float.self, forKey: .quality)) ?? 0.92
+        colorSpaceIsP3 = (try? c.decodeIfPresent(Bool.self, forKey: .colorSpaceIsP3)) ?? false
+        resize = (try? c.decodeIfPresent(Bool.self, forKey: .resize)) ?? false
+        maxLongEdge = (try? c.decodeIfPresent(Int.self, forKey: .maxLongEdge)) ?? 2048
+        suffix = (try? c.decodeIfPresent(String.self, forKey: .suffix)) ?? ""
+        template = (try? c.decodeIfPresent(String.self, forKey: .template)) ?? ExportNaming.defaultTemplate
         if !suffix.isEmpty, !template.contains(suffix) { template += suffix; suffix = "" }
-        sequenceStart = try c.decodeIfPresent(Int.self, forKey: .sequenceStart) ?? 1
-        sequenceStep = try c.decodeIfPresent(Int.self, forKey: .sequenceStep) ?? 1
-        sequencePadding = try c.decodeIfPresent(Int.self, forKey: .sequencePadding) ?? 3
+        sequenceStart = (try? c.decodeIfPresent(Int.self, forKey: .sequenceStart)) ?? 1
+        sequenceStep = (try? c.decodeIfPresent(Int.self, forKey: .sequenceStep)) ?? 1
+        sequencePadding = (try? c.decodeIfPresent(Int.self, forKey: .sequencePadding)) ?? 3
         letterCase = (try? c.decodeIfPresent(ExportNaming.LetterCase.self, forKey: .letterCase)) ?? .unchanged
-        uppercaseExtension = try c.decodeIfPresent(Bool.self, forKey: .uppercaseExtension) ?? false
-        collision = try c.decodeIfPresent(ExportNaming.Collision.self, forKey: .collision) ?? .addNumber
-        dateSubfolders = try c.decodeIfPresent(Bool.self, forKey: .dateSubfolders) ?? false
-        includeMetadata = try c.decodeIfPresent(Bool.self, forKey: .includeMetadata) ?? true
-        includeLocation = try c.decodeIfPresent(Bool.self, forKey: .includeLocation) ?? false
-        revealWhenDone = try c.decodeIfPresent(Bool.self, forKey: .revealWhenDone) ?? true
-        hdrGainMap = try c.decodeIfPresent(Bool.self, forKey: .hdrGainMap) ?? false
+        uppercaseExtension = (try? c.decodeIfPresent(Bool.self, forKey: .uppercaseExtension)) ?? false
+        collision = (try? c.decodeIfPresent(ExportNaming.Collision.self, forKey: .collision)) ?? .addNumber
+        dateSubfolders = (try? c.decodeIfPresent(Bool.self, forKey: .dateSubfolders)) ?? false
+        includeMetadata = (try? c.decodeIfPresent(Bool.self, forKey: .includeMetadata)) ?? true
+        includeLocation = (try? c.decodeIfPresent(Bool.self, forKey: .includeLocation)) ?? false
+        revealWhenDone = (try? c.decodeIfPresent(Bool.self, forKey: .revealWhenDone)) ?? true
+        hdrGainMap = (try? c.decodeIfPresent(Bool.self, forKey: .hdrGainMap)) ?? false
         hdrMaximizeCompatibility = (try? c.decodeIfPresent(Bool.self, forKey: .hdrMaximizeCompatibility)) ?? true
         dngContent = (try? c.decodeIfPresent(DNGExportContent.self, forKey: .dngContent)) ?? .sceneReferred
-        watermarkEnabled = try c.decodeIfPresent(Bool.self, forKey: .watermarkEnabled) ?? false
+        watermarkEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .watermarkEnabled)) ?? false
         watermark = (try? c.decodeIfPresent(ExportWatermark.self, forKey: .watermark)) ?? ExportWatermark()
         fileKind = (try? c.decodeIfPresent(ExportFileKind.self, forKey: .fileKind)) ?? .image
         profile = (try? c.decodeIfPresent(ExportProfileChoice.self, forKey: .profile)) ?? nil
@@ -198,14 +198,47 @@ struct NamedExportPreset: Codable, Equatable, Identifiable {
     var id = UUID()
     var name: String
     var preset: ExportPreset
+
+    init(id: UUID = UUID(), name: String, preset: ExportPreset) {
+        self.id = id; self.name = name; self.preset = preset
+    }
+
+    // Lenient, as ExportPreset is: a hand-edited or newer entry still loads.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        preset = (try? c.decodeIfPresent(ExportPreset.self, forKey: .preset)) ?? ExportPreset()
+    }
 }
 
 enum ExportPresetStore {
     static let key = "latent.exportPresets"
+    /// Where a saved list that couldn't be read whole is kept, untouched,
+    /// before the next save writes over `key`.
+    static let unreadableKey = "latent.exportPresets.unreadable"
+
+    /// The saved presets, entry by entry: one this build can't read is
+    /// left out rather than costing the rest. When anything was left out
+    /// (or nothing could be read) the saved data is first copied to
+    /// `unreadableKey`, so the next save can't destroy it.
     static func load() -> [NamedExportPreset] {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let list = try? JSONDecoder().decode([NamedExportPreset].self, from: data) else { return builtIns }
-        return list
+        guard let data = UserDefaults.standard.data(forKey: key) else { return builtIns }
+        let entries = try? JSONDecoder().decode([Lossy<NamedExportPreset>].self, from: data)
+        guard let entries else {
+            UserDefaults.standard.set(data, forKey: unreadableKey)
+            return builtIns
+        }
+        let list = entries.compactMap(\.value)
+        guard list.count != entries.count else { return list }
+        UserDefaults.standard.set(data, forKey: unreadableKey)
+        return list.isEmpty ? builtIns : list
+    }
+
+    /// One element of a list, or nil when it couldn't be decoded.
+    private struct Lossy<Value: Decodable>: Decodable {
+        let value: Value?
+        init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
     }
     static func save(_ list: [NamedExportPreset]) {
         if let data = try? JSONEncoder().encode(list) { UserDefaults.standard.set(data, forKey: key) }
