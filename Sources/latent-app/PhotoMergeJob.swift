@@ -514,14 +514,14 @@ final class PhotoMergeQueue: ObservableObject {
                         do {
                             try removeStrayResult(destination)
                         } catch {
-                            Log.export.error("\(job.kind.title, privacy: .public): could not remove the unfinished \(destination.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+                            Log.export.error("\(job.kind.title, privacy: .public): could not remove the unfinished \(destination.lastPathComponent, privacy: .private): \(String(describing: error), privacy: .private)")
                         }
                     }
                     do {
                         try await library.discardMergeRecipe(forNewImageAt: relPath, in: catalog,
                                                              fileTookTheName: fileTaken)
                     } catch {
-                        Log.export.error("\(job.kind.title, privacy: .public): could not remove the sidecar of \(relPath, privacy: .private): \(String(describing: error), privacy: .public)")
+                        Log.export.error("\(job.kind.title, privacy: .public): could not remove the sidecar of \(relPath, privacy: .private): \(String(describing: error), privacy: .private)")
                     }
                 }
                 if error is CancellationError || Task.isCancelled { return .cancelled }
