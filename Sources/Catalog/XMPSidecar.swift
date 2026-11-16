@@ -235,14 +235,35 @@ public enum XMPSidecar {
     /// `]]]]><![CDATA[>`. A reader joins adjacent sections back together,
     /// so the text comes back byte for byte.
     static func cdata(_ text: String) -> String {
-        "<![CDATA[" + text.replacingOccurrences(of: "]]>", with: "]]]]><![CDATA[>") + "]]>"
+        "<![CDATA[" + xmlLegal(text).replacingOccurrences(of: "]]>", with: "]]]]><![CDATA[>") + "]]>"
     }
 
     private static func escape(_ s: String) -> String {
-        s.replacingOccurrences(of: "&", with: "&amp;")
+        xmlLegal(s).replacingOccurrences(of: "&", with: "&amp;")
          .replacingOccurrences(of: "\"", with: "&quot;")
          .replacingOccurrences(of: "<", with: "&lt;")
          .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    /// Whether XML 1.0 allows this character at all (its Char production):
+    /// tab, line feed, carriage return and everything from space up, but
+    /// not U+FFFE and U+FFFF. Surrogates never occur in a Swift string.
+    static func isXMLLegal(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x09, 0x0A, 0x0D: true
+        case 0x00...0x1F, 0xFFFE, 0xFFFF: false
+        default: true
+        }
+    }
+
+    /// The text without the characters XML 1.0 forbids. One of them, raw or
+    /// escaped, makes the whole sidecar unreadable (#100), so a caption
+    /// pasted with a vertical tab from a PDF loses only that character.
+    static func xmlLegal(_ s: String) -> String {
+        guard !s.unicodeScalars.allSatisfy(isXMLLegal) else { return s }
+        var scalars = String.UnicodeScalarView()
+        scalars.append(contentsOf: s.unicodeScalars.filter(isXMLLegal))
+        return String(scalars)
     }
 
     // MARK: - Read

@@ -138,6 +138,30 @@ final class XMPSidecarTests: XCTestCase {
         XCTAssertEqual(try XMPSidecar.read(from: url), original)
     }
 
+    /// Characters XML 1.0 forbids (a vertical tab or form feed pasted from
+    /// a PDF) used to be written raw, and no sidecar with one could ever be
+    /// read back (#100). They are dropped; the rest is escaped as before.
+    func testXMLIllegalCharactersAreDroppedAndTheSidecarReadsBack() throws {
+        let dirty = "a\u{0B}b\u{0C}c\u{01}<d> \"e\" & f\u{FFFE}"
+        let clean = "abc<d> \"e\" & f"
+        var fields = XMPSidecar.Fields(rating: 3, label: "Red" + dirty, keywords: ["key" + dirty],
+                                       sourceHash: "xxh64:00")
+        fields.title = "title" + dirty
+        fields.caption = "line1\nline2\t" + dirty
+        fields.more[.city] = "city" + dirty
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("illegal-\(UUID().uuidString).xmp")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try XMPSidecar.write(fields, to: url)
+        let back = try XMPSidecar.read(from: url)
+        XCTAssertEqual(back.label, "Red" + clean)
+        XCTAssertEqual(back.keywords, ["key" + clean])
+        XCTAssertEqual(back.title, "title" + clean)
+        XCTAssertEqual(back.caption, "line1\nline2\t" + clean)
+        XCTAssertEqual(back.more[.city], "city" + clean)
+        XCTAssertEqual(back.rating, 3)
+    }
+
     /// Sidecars from before the rename use `rawhead:`; a merge block under
     /// that prefix is read like the other elements.
     func testReadsMergeBlockUnderPreRenamePrefix() throws {

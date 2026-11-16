@@ -162,9 +162,11 @@ final class FolderSwitchTests: XCTestCase {
         XCTAssertNil(library.selectedImageID)
     }
 
-    /// A folder that fails to open (here an included subfolder that can't
-    /// be read) leaves the open folder as it was, not its catalog paired
-    /// with the old folder's records.
+    /// A folder that fails to open (here one whose own listing can't be
+    /// read, though its catalog can be made) leaves the open folder as it
+    /// was, not its catalog paired with the old folder's records. An
+    /// unreadable subfolder no longer fails the open; see
+    /// `testUnreadableSubfolderDoesNotStopTheFolderOpening`.
     func testFailedOpenLeavesTheOpenFolderWhole() async throws {
         let library = Library()
         try await library.open(folder: first)
@@ -172,14 +174,14 @@ final class FolderSwitchTests: XCTestCase {
         let a = try XCTUnwrap(library.images.first)
         let status = library.statusText
 
-        let locked = second.appendingPathComponent("Locked", isDirectory: true)
-        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
-        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
-        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+        // Write and search, no read: _latent can be made, the folder can't
+        // be listed.
+        try FileManager.default.setAttributes([.posixPermissions: 0o300], ofItemAtPath: second.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: second.path) }
 
         do {
             try await library.open(folder: second, defaultSubfolderMode: .included)
-            XCTFail("an unreadable included subfolder fails the reconcile")
+            XCTFail("a folder that can't be listed fails the reconcile")
         } catch {}
 
         XCTAssertTrue(library.catalog === oldCatalog)
@@ -189,6 +191,21 @@ final class FolderSwitchTests: XCTestCase {
         XCTAssertFalse(library.isBusy)
         XCTAssertNotNil(library.requestDisplayThumbnail(for: a, pixelSize: 256) { _ in },
                         "thumbnails still load for the open folder")
+    }
+
+    /// One included subfolder that can't be read (#61) is reported, and the
+    /// folder around it opens with everything else in it.
+    func testUnreadableSubfolderDoesNotStopTheFolderOpening() async throws {
+        let library = Library()
+        let locked = second.appendingPathComponent("Locked", isDirectory: true)
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+
+        try await library.open(folder: second, defaultSubfolderMode: .included)
+        XCTAssertEqual(library.folderURL?.lastPathComponent, "Second")
+        XCTAssertEqual(library.images.map(\.fileName), ["Z.NEF"])
+        XCTAssertTrue(library.statusText.contains("1 failed"), library.statusText)
     }
 
     /// A batch rating still writing when another folder opens: the writes
