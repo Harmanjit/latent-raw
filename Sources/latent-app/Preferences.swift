@@ -115,11 +115,16 @@ final class AppPreferences: ObservableObject {
     /// not save its bookmark again.
     private var restoringExportFolder = false
 
+    /// The stored render-timing choice; the readout is for developers.
+    static func showRenderTimings(in defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: "latent.showRenderTimings") as? Bool ?? false
+    }
+
     private init() {
         appearance = Appearance(rawValue: defaults.string(forKey: "latent.appearance") ?? "") ?? .system
         accent = Accent(rawValue: defaults.string(forKey: "latent.accent") ?? "") ?? .system
         surround = Surround(rawValue: defaults.string(forKey: "latent.surround") ?? "") ?? .dark
-        showRenderTimings = defaults.object(forKey: "latent.showRenderTimings") as? Bool ?? true
+        showRenderTimings = Self.showRenderTimings(in: defaults)
         defaultSubfolderMode = SubfolderMode(rawValue: defaults.string(forKey: "latent.defaultSubfolderMode") ?? "") ?? .ask
         defaultExportFolder = nil
         mlCompute = MLCompute(rawValue: defaults.string(forKey: CoreMLStore.computePreferenceKey) ?? "") ?? .gpu
