@@ -294,6 +294,20 @@ final class GeoTimeTests: XCTestCase {
         XCTAssertNil(bad.gpsLatitude, "an impossible place isn't saved")
     }
 
+    /// An impossible altitude already saved by an older build (from a
+    /// sidecar read before the range check) must not trap the Metadata panel.
+    func testImpossibleSavedAltitudeIsNotShown() {
+        for altitude in [1e300, .infinity, .nan] {
+            var r = ImageRecord(relPath: "A.NEF", size: 1, mtime: 0, xxhash: Data(count: 8), rating: 0, flag: 0)
+            r.gpsAltitude = altitude
+            XCTAssertFalse(r.extraMetadataRows.contains { $0.label == "Altitude" }, "\(altitude)")
+            XCTAssertEqual(MetadataFormat.altitude(altitude), "—")
+        }
+        var r = ImageRecord(relPath: "A.NEF", size: 1, mtime: 0, xxhash: Data(count: 8), rating: 0, flag: 0)
+        r.gpsAltitude = -12
+        XCTAssertEqual(r.extraMetadataRows.first { $0.label == "Altitude" }?.value, "−12 m")
+    }
+
     // MARK: - Library
 
     private func openLibrary(_ manager: UndoManager) async throws -> Library {
