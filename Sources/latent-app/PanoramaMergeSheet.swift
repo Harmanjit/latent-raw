@@ -1,5 +1,6 @@
 import SwiftUI
 import Catalog
+import RawCore
 import MergeKit
 
 /// The Panorama dialog's state (Photo › Photo Merge › Panorama…): the engine
@@ -283,7 +284,7 @@ final class PanoramaMergeSheetModel: ObservableObject, Identifiable {
         guard let result = analysisResult else { return [] }
         return result.frames.enumerated().map { index, frame in
             let exposure = MetadataFormat.exposureLine(shutter: frame.exposureSeconds, aperture: frame.aperture,
-                                                       iso: Int(frame.iso.rounded()), focal: nil)
+                                                       iso: SaneExposure.wholeNumber(frame.iso), focal: nil)
             let brightness = frame.leftOut ? "" : Self.evText(frame.gainStops)
             let direction = frame.leftOut ? "" : Self.directionText(frame.yawPitchRoll?.x)
             var spoken = [frame.url.lastPathComponent]

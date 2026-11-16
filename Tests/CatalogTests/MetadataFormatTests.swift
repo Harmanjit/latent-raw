@@ -62,4 +62,18 @@ final class MetadataFormatTests: XCTestCase {
         record.aperture = 2.8
         XCTAssertTrue(record.metadataRows.map(\.label).contains("Aperture"))
     }
+
+    /// Values no camera records, as a damaged file can carry them, print
+    /// as something rather than trapping in an Int conversion.
+    func testAbsurdValuesDoNotTrap() {
+        for v in [1e-30, 1e30, -1e30, Double.infinity, -Double.infinity, Double.nan,
+                  Double.greatestFiniteMagnitude, Double.leastNonzeroMagnitude] {
+            _ = MetadataFormat.shutter(v)
+            _ = MetadataFormat.aperture(v)
+            _ = MetadataFormat.focalLength(v)
+            _ = MetadataFormat.exposureLine(shutter: v, aperture: v, iso: Int.max, focal: v)
+        }
+        XCTAssertEqual(MetadataFormat.shutter(.nan), "—")
+        XCTAssertEqual(MetadataFormat.aperture(.infinity), "—")
+    }
 }

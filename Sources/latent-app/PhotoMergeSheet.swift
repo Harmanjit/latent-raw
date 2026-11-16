@@ -1,5 +1,6 @@
 import SwiftUI
 import Catalog
+import RawCore
 import MergeKit
 
 /// The HDR Merge dialog's state (Photo › Photo Merge › HDR…): the engine
@@ -318,7 +319,7 @@ final class HDRMergeSheetModel: ObservableObject, Identifiable {
         return result.frames.enumerated().map { index, frame in
             let stops = frame.relativeEV - referenceEV
             let exposure = MetadataFormat.exposureLine(shutter: frame.exposureSeconds, aperture: frame.aperture,
-                                                       iso: Int(frame.iso.rounded()), focal: nil)
+                                                       iso: SaneExposure.wholeNumber(frame.iso), focal: nil)
             let isReference = index == reference
             let isLeftOut = leftOut.contains(index)
             var spoken = [frame.url.lastPathComponent]

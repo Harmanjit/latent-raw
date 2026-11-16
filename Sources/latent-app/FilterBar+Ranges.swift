@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Catalog
+import RawCore
 
 /// The shooting values the Ranges popover filters on.
 enum FilterRangeField: String, CaseIterable, Identifiable {
@@ -38,12 +39,12 @@ enum FilterRangeField: String, CaseIterable, Identifiable {
     /// "ISO 800", "35 mm", "f/2.8", "1/250 s".
     func format(_ value: Double) -> String {
         switch self {
-        case .iso: return "\(Int(value.rounded()))"
-        case .focal: return "\(Int(value.rounded())) mm"
+        case .iso: return "\(SaneExposure.wholeNumber(value))"
+        case .focal: return "\(SaneExposure.wholeNumber(value)) mm"
         case .aperture: return String(format: "f/%.1f", value)
         case .shutter:
             if value >= 1 { return String(format: value < 10 ? "%.1f s" : "%.0f s", value) }
-            return "1/\(Int((1 / value).rounded())) s"
+            return "1/\(SaneExposure.wholeNumber(1 / value)) s"
         }
     }
 }
