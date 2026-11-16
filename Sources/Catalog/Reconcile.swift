@@ -26,6 +26,9 @@ public struct ReconcileReport: Sendable, CustomStringConvertible {
     /// Files that couldn't be read, with the reason. They're skipped, not
     /// fatal — one corrupt file must not stop a folder from opening.
     public var failures: [(relPath: String, reason: String)] = []
+    /// Included subfolders that couldn't be listed this pass. Their rows
+    /// stay as they are, and the failure is in `failures`.
+    public var unreadableSubfolders: [String] = []
     public var duration: TimeInterval = 0
 
     public var description: String {
@@ -193,6 +196,16 @@ extension Catalog {
         //    changes the size). When a kept row's path holds another file
         //    now, that file is held too, along with the row it would have
         //    taken, so the plan is redone until nothing more needs holding.
+        //
+        //    Rows are kept the same way while a subfolder awaits a decision
+        //    and holds a file of their size: an included subfolder renamed
+        //    in Finder is a new, undecided subfolder, and its photos must
+        //    still find their rows (and sidecars) when it is included. And
+        //    rows inside an included subfolder that couldn't be listed stay
+        //    as they are.
+        let undecidedSizes = report.undecidedSubfolders.isEmpty || knownByPath.isEmpty && modifiedFiles.isEmpty
+            ? Set<Int64>() : indexedFileSizes(underSubfolders: report.undecidedSubfolders)
+        let unreadablePrefixes = report.unreadableSubfolders.map { $0 + "/" }
         var heldModified = Set<String>()
         var keptIDs = Set<Int64>()
         var renames: [(from: ImageRecord, to: DiskFile)] = []
@@ -256,11 +269,14 @@ extension Catalog {
             }
 
             // Whatever no file claimed has gone, unless it may be in iCloud
-            // under another name.
+            // or an undecided subfolder under another name, or is in a
+            // subfolder that couldn't be read.
             removals = []
             var replan = false
             for record in claimable.values.flatMap({ $0 }) {
-                let keep = pendingSizes.contains(record.size) || record.id.map(keptIDs.contains) == true
+                let keep = pendingSizes.contains(record.size) || undecidedSizes.contains(record.size)
+                    || unreadablePrefixes.contains(where: record.relPath.hasPrefix)
+                    || record.id.map(keptIDs.contains) == true
                 guard keep else {
                     removals.append(record)
                     continue
@@ -402,6 +418,11 @@ extension Catalog {
             }
         }
 
+        // A new photo with no sidecar of its own may be one whose row went
+        // while its sidecar stayed (a subfolder renamed, then made
+        // independent before it was included): it takes that sidecar back.
+        adoptOrphanedSidecars(forNew: inserts, report: &report)
+
         // 9. Sidecars: re-read only those whose mtime moved. Copies whose
         //    sidecar is here but whose row is not (a rebuilt database) get a
         //    row first, for this pass to fill.
@@ -411,6 +432,12 @@ extension Catalog {
             && inserts.isEmpty && tagChanges.isEmpty
         report.sidecarsRead = try syncSidecars(report: &report, leaving: moved.sidecarsMissing,
                                                rows: rowsUnchanged ? everything : nil)
+        // A file changed in place (rotated in Preview, keywords written by
+        // exiftool) has new content, and its sidecar must say so: one still
+        // naming the old content is set aside, not applied, by a rebuild.
+        // After the sidecar pass, so a sidecar changed alongside is read
+        // first rather than overwritten.
+        refreshSourceHashes(ofChanged: updates, report: &report)
         // 10. Photos that arrived with another application's sidecar and
         //     none of Latent's (ForeignSidecar), and EXIF extras for rows
         //     made before they were read (ExifExtras), a batch per pass.
@@ -444,8 +471,18 @@ extension Catalog {
         // One bulk listing: name, kind, size, times and flags for every
         // entry, no per-file calls but the Finder-tag read, and that only
         // for files whose status-change time moved since the last pass.
-        let entries = try DirectoryListing.entries(of: directory)
-            .sorted { $0.name < $1.name }
+        let listed: [DirectoryListing.Entry]
+        do {
+            listed = try DirectoryListing.entries(of: directory)
+        } catch where !relPrefix.isEmpty {
+            // One subfolder that can't be read (no permission, a volume
+            // gone) must not stop the folder from opening. Its rows stay
+            // as they are this pass (see `unreadableSubfolders`).
+            report.failures.append((relPrefix, "folder not readable: \(error)"))
+            report.unreadableSubfolders.append(relPrefix)
+            return
+        }
+        let entries = listed.sorted { $0.name < $1.name }
         // Asked per directory: a subfolder can be another volume's mount.
         let tagMemoTrusted = Self.tagMemoTrusted(for: directory)
 
@@ -504,6 +541,32 @@ extension Catalog {
                                        memoTrusted: tagMemoTrusted),
                 isDataless: Self.isDataless(url, flags: entry.flags)))
         }
+    }
+
+    /// The sizes of the indexable files in these subfolders and the folders
+    /// inside them, read from directory listings only (nothing is opened).
+    /// What can't be listed is left out.
+    private func indexedFileSizes(underSubfolders relPaths: [String]) -> Set<Int64> {
+        var sizes = Set<Int64>()
+        var pending = relPaths.map { fileURL(forRelPath: $0) }
+        while let directory = pending.popLast() {
+            guard let entries = try? DirectoryListing.entries(of: directory) else { continue }
+            for entry in entries where !entry.isHidden {
+                switch entry.kind {
+                case .directory:
+                    guard entry.name != Self.containerName, entry.name != Self.legacyContainerName else { continue }
+                    let url = directory.appendingPathComponent(entry.name, isDirectory: true)
+                    if (try? url.resourceValues(forKeys: [.isPackageKey]))?.isPackage == true { continue }
+                    if FolderAccess.hasCatalog(url) { continue }
+                    pending.append(url)
+                case .file where Self.indexedExtensions.contains((entry.name as NSString).pathExtension.lowercased()):
+                    sizes.insert(entry.size)
+                default:
+                    continue
+                }
+            }
+        }
+        return sizes
     }
 
     /// The file's Finder tags in stored form. On APFS, setting a tag (an
@@ -583,7 +646,7 @@ extension Catalog {
             camera: camera.isEmpty ? nil : camera,
             lens: s.lensModel.isEmpty ? nil : s.lensModel,
             lensId: nil,
-            iso: s.iso > 0 ? Int(s.iso) : nil,
+            iso: isoValue(s.iso),
             shutter: s.shutter > 0 ? s.shutter : nil,
             aperture: s.aperture > 0 ? s.aperture : nil,
             focal: s.focalLength > 0 ? s.focalLength : nil,
@@ -594,6 +657,12 @@ extension Catalog {
         return record
     }
 
+
+    /// The ISO as stored, nil when unknown. A value no Int can hold (a
+    /// damaged file's) would trap the conversion.
+    static func isoValue(_ iso: Double) -> Int? {
+        iso > 0 && iso < 1e9 ? Int(iso) : nil
+    }
 
     // MARK: - Renames
 
@@ -730,6 +799,79 @@ extension Catalog {
 
     // MARK: - Sidecars
 
+    /// Rewrites the sidecars of rows whose file changed in place, and of
+    /// their virtual copies, where the sidecar names other content. A
+    /// sidecar that can't be read is left as it is.
+    private func refreshSourceHashes(ofChanged updates: [ImageRecord], report: inout ReconcileReport) {
+        for master in updates {
+            guard let id = master.id else { continue }
+            let copies = (try? virtualCopyIDs(ofMaster: id)) ?? []
+            for imageID in [id] + copies {
+                guard let row = try? dbQueue.read({ db in try ImageRecord.fetchOne(db, key: imageID) }) else { continue }
+                let url = sidecarURL(forRelPath: row.relPath)
+                guard let fields = try? XMPSidecar.read(from: url), fields.sourceHash != row.hashString else { continue }
+                do {
+                    try writeSidecar(forImageID: imageID)
+                } catch {
+                    report.failures.append((row.relPath + ".xmp", "sidecar not updated for the changed file: \(error)"))
+                }
+            }
+        }
+    }
+
+    /// Gives each new photo that has no sidecar the sidecar of a photo that
+    /// is gone, when it was written for exactly this content: its row was
+    /// removed while the sidecar stayed, as sidecars do. Only sidecars of
+    /// the same file name are read, and only those with no row and no file
+    /// at their own path; virtual copies' sidecars are left to
+    /// `restoreVirtualCopiesFromSidecars`. The sidecar is moved, never
+    /// copied, and the sidecar pass then applies it like any new photo's.
+    private func adoptOrphanedSidecars(forNew records: [ImageRecord], report: inout ReconcileReport) {
+        let wanting = records.filter { !FileOperations.itemExists(sidecarURL(forRelPath: $0.relPath)) }
+        guard !wanting.isEmpty else { return }
+        let names = Set(wanting.map { (($0.relPath as NSString).lastPathComponent + ".xmp").lowercased() })
+
+        // Sidecars of those names anywhere under xmp/, by the photo path
+        // each was written for. Hidden names are skipped, and with them
+        // the copies' folder (`VirtualCopy.companionFolder`).
+        var candidates: [String: [String]] = [:]
+        let root = xmpDirectory.standardizedFileURL.resolvingSymlinksInPath()
+        let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey],
+                                                          options: [.skipsHiddenFiles]) else { return }
+        for case let url as URL in walker {
+            let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+            guard path.hasPrefix(rootPath) else { continue }
+            let relative = String(path.dropFirst(rootPath.count))
+            let name = url.lastPathComponent.lowercased()
+            guard names.contains(name), (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != true
+            else { continue }
+            candidates[name, default: []].append(String(relative.dropLast(".xmp".count)))
+        }
+        guard !candidates.isEmpty,
+              let livePaths = try? dbQueue.read({ db in try String.fetchAll(db, sql: "SELECT rel_path FROM images") })
+        else { return }
+        var taken = Set(livePaths.map { $0.lowercased() })
+
+        for record in wanting {
+            let name = ((record.relPath as NSString).lastPathComponent + ".xmp").lowercased()
+            for photoPath in (candidates[name] ?? []).sorted() where !taken.contains(photoPath.lowercased()) {
+                guard !FileOperations.itemExists(fileURL(forRelPath: photoPath)) else { continue }
+                let from = sidecarURL(forRelPath: photoPath)
+                guard let fields = try? XMPSidecar.read(from: from), fields.sourceHash == record.hashString else { continue }
+                let to = sidecarURL(forRelPath: record.relPath)
+                do {
+                    try FileManager.default.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try FileOperations.renameExclusively(from, to: to)
+                    taken.insert(photoPath.lowercased())
+                } catch {
+                    report.failures.append((record.relPath + ".xmp", "sidecar of \(photoPath) not taken back: \(error)"))
+                }
+                break
+            }
+        }
+    }
+
     /// Applies any sidecar whose mtime differs from what the row recorded.
     /// Sidecars are authoritative (DESIGN.md §5.3), so their rating, label,
     /// keywords and edit stack overwrite the row's. Returns how many were
@@ -840,7 +982,9 @@ extension Catalog {
 
     static func replaceKeywords(_ names: [String], forImageID id: Int64, in db: Database) throws {
         try db.execute(sql: "DELETE FROM image_keywords WHERE image_id = ?", arguments: [id])
-        for name in Set(names) {
+        // A keyword with a character XML can't hold would make every
+        // sidecar written from it unreadable (#100).
+        for name in Set(names.map(XMPSidecar.xmlLegal).filter { !$0.isEmpty }) {
             var keywordID = try Int64.fetchOne(
                 db, sql: "SELECT id FROM keywords WHERE name = ? AND parent_id IS NULL", arguments: [name])
             if keywordID == nil {
