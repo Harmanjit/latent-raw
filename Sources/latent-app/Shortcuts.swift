@@ -422,7 +422,7 @@ extension Shortcuts {
         ]),
         ("Photo Merge", [
             ShortcutPageRow([.photoMergeHDR], "HDR merge of the selected photos into one DNG beside them (see [Photo Merge](Photo-Merge)); not while typing in a text field, where ⌃H deletes backward"),
-            ShortcutPageRow([.photoMergeHDRWithoutDialog], "HDR merge without the dialog, with the options it was last left with; problems show in the status bar"),
+            ShortcutPageRow([.photoMergeHDRWithoutDialog], "HDR merge without the dialog, with the options it was last left with; warnings show as notes in the library panel, a failure in the status bar"),
             ShortcutPageRow([.photoMergePanorama], "Stitch the selected photos into one panorama DNG beside them (see [Photo Merge](Photo-Merge)); not while typing in a text field"),
             ShortcutPageRow([.photoMergeHDRPanorama], "Merge a bracket at each position and stitch the results into one DNG (experimental; see [Photo Merge](Photo-Merge)); not while typing in a text field"),
         ]),

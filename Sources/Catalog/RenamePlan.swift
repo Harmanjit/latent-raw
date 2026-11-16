@@ -124,11 +124,16 @@ public struct RenamePlan: Sendable {
     /// Plans renaming `records`, in this order for the sequence numbers.
     /// `isTaken` says whether a relative path is already held by a file or
     /// a catalogued photo; the photos being renamed are allowed for.
+    /// `companions` gives the file names of the JPEGs that travel with a
+    /// photo (RAW+JPEG pairs, `Library.companionsTravelling`): each takes
+    /// the photo's new name with its own extension, so that name must be
+    /// free too, or the photo isn't renamed and the pair stays whole.
     public static func make(_ records: [ImageRecord], template: String, customText: String,
                             start: Int = 1, padding: Int = 3, catalogName: String = "",
                             letterCase: ExportNaming.LetterCase = .unchanged,
                             timeZone: TimeZone = .current,
                             keywords: [Int64: [String]] = [:],
+                            companions: (ImageRecord) -> [String] = { _ in [] },
                             isTaken: (String) -> Bool) -> RenamePlan {
         let namer = ExportNaming.Namer(template: RenameTemplate.marked(template), timeZone: timeZone)
         var items: [Item] = records.enumerated().map { index, record in
@@ -160,15 +165,50 @@ public struct RenamePlan: Sendable {
         // that is giving it up is free once that photo has moved on.
         let current = Dictionary(items.enumerated().map { (key($0.element.record.relPath), $0.offset) },
                                  uniquingKeysWith: { first, _ in first })
-        var waitsFor: [Int: Int] = [:]
+        var waitsFor: [Int: Set<Int>] = [:]
         for (index, item) in items.enumerated() where item.willRename {
             let wanted = key(item.newRelPath)
             if wanted == key(item.record.relPath) { continue }   // its own name, in another case
             if let holder = current[wanted] {
-                waitsFor[index] = holder
+                waitsFor[index, default: []].insert(holder)
             } else if isTaken(item.newRelPath) {
                 items[index].problem = "“\(item.newName)” is already taken"
                 items[index].newName = item.record.fileName
+            }
+        }
+
+        // The same for the JPEGs of RAW+JPEG pairs, which follow their
+        // photos to the new name: one held by another photo's JPEG of the
+        // batch is free once that photo (and its JPEG) has moved on.
+        func sibling(_ item: Item, _ name: String) -> String {
+            let folder = (item.record.relPath as NSString).deletingLastPathComponent
+            return folder.isEmpty ? name : folder + "/" + name
+        }
+        let companionNames = items.map { companions($0.record) }
+        var companionHolder: [String: Int] = [:]
+        for (index, names) in companionNames.enumerated() {
+            for name in names { companionHolder[key(sibling(items[index], name))] = index }
+        }
+        var companionClaims: [String: Set<Int>] = [:]
+        for (index, item) in items.enumerated() where item.willRename {
+            for name in companionNames[index] {
+                let target = RawJPEGPairs.companionName(forRawName: item.newName, companion: name)
+                let wanted = key(sibling(item, target))
+                companionClaims[wanted, default: []].insert(index)
+                if wanted == key(sibling(item, name)) { continue }   // its own name, in another case
+                if let holder = companionHolder[wanted] {
+                    if holder != index { waitsFor[index, default: []].insert(holder) }
+                } else if isTaken(sibling(item, target)) {
+                    items[index].problem = "its JPEG’s new name “\(target)” is already taken"
+                    items[index].newName = item.record.fileName
+                    break
+                }
+            }
+        }
+        for (_, indexes) in companionClaims where indexes.count > 1 {
+            for index in indexes where items[index].willRename {
+                items[index].problem = "another photo’s JPEG would get the same name; add {seq} to the template"
+                items[index].newName = items[index].record.fileName
             }
         }
 
@@ -178,7 +218,8 @@ public struct RenamePlan: Sendable {
         var changed = true
         while changed {
             changed = false
-            for (index, holder) in waitsFor where items[index].willRename && !items[holder].willRename {
+            for (index, holders) in waitsFor
+            where items[index].willRename && holders.contains(where: { !items[$0].willRename }) {
                 items[index].problem = "“\(items[index].newName)” is already taken"
                 items[index].newName = items[index].record.fileName
                 changed = true
@@ -189,8 +230,8 @@ public struct RenamePlan: Sendable {
         func place(_ index: Int, _ path: Set<Int>) -> Bool {
             if placed.contains(index) { return true }
             if path.contains(index) { return false }
-            if let holder = waitsFor[index], items[holder].willRename, !place(holder, path.union([index])) {
-                return false
+            for holder in waitsFor[index, default: []] where items[holder].willRename {
+                if !place(holder, path.union([index])) { return false }
             }
             placed.insert(index)
             order.append(index)
@@ -208,7 +249,7 @@ public struct RenamePlan: Sendable {
         while changed {
             changed = false
             for index in order where items[index].willRename {
-                if let holder = waitsFor[index], !items[holder].willRename {
+                if waitsFor[index, default: []].contains(where: { !items[$0].willRename }) {
                     items[index].problem = "“\(items[index].newName)” is already taken"
                     items[index].newName = items[index].record.fileName
                     changed = true

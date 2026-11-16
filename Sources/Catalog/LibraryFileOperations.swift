@@ -73,13 +73,15 @@ public final class LibraryFileOperations: ObservableObject {
     /// Duplicate: a true copy of each of `records`' files in its own folder,
     /// numbered ("DSC_0107 2.NEF"), with its ratings, keywords, edit,
     /// history, snapshots and sidecar, as Copy to Folder into that folder
-    /// makes. One undo puts the duplicates in the Trash.
+    /// makes, and its paired JPEG beside it ("DSC_0107 2.JPG"). One undo puts the duplicates in the Trash.
     @discardableResult
     public func duplicate(_ records: [ImageRecord]) async -> TransferReport {
         guard let library else { return TransferReport() }
         let requests = Self.uniqueFiles(records, in: library)
             .map { TransferRequest(source: $0, folder: $0.deletingLastPathComponent()) }
-        let report = await execute(.transfer(requests, .copy), title: "Duplicating")
+        let companions = library.companionURLsTravelling(with: records)
+        var report = await execute(.transfer(requests, .copy), title: "Duplicating")
+        report.merge(await transferCompanions(companions, following: report.completed, mode: .copy, title: "Duplicating"))
         registerUndo(report.completed, actionName: Self.actionName("Duplicate", report.completed))
         return report
     }
@@ -111,8 +113,8 @@ public final class LibraryFileOperations: ObservableObject {
     }
 
     /// Renames the photos of `plan` (RenamePlan) in its order, each in its
-    /// own folder, as one undoable action. Photos the plan found a problem
-    /// with are left alone; a name taken since the plan was made fails that
+    /// own folder, as one undoable action, each with the JPEG of its
+    /// RAW+JPEG pair. Photos the plan found a problem with are left alone; a name taken since the plan was made fails that
     /// photo and the rest go on. Returns what happened.
     @discardableResult
     public func rename(_ plan: RenamePlan) async -> TransferReport {
@@ -122,8 +124,16 @@ public final class LibraryFileOperations: ObservableObject {
             return TransferRequest(source: url, folder: url.deletingLastPathComponent(), name: item.newName)
         }
         guard !requests.isEmpty else { return TransferReport() }
-        let report = await execute(.transfer(requests, .move), title: "Renaming")
-        registerUndo(report.completed, actionName: Self.actionName("Rename", report.completed))
+        let companions = library.companionURLsTravelling(with: plan.renames.map(\.record))
+        let photos = await execute(.transfer(requests, .move), title: "Renaming")
+        let following = await transferCompanions(companions, following: photos.completed, mode: .move, title: "Renaming")
+        var report = photos
+        report.merge(following)
+        // Named for the photos renamed: a pair counts as one.
+        registerUndo(report.completed, actionName: Self.actionName("Rename", photos.completed))
+        if !following.failures.isEmpty {
+            library.lastError = "Renamed, but \(following.failures.count == 1 ? "a paired JPEG" : "\(following.failures.count) paired JPEGs") kept \(following.failures.count == 1 ? "its name" : "their names"): \(following.failureDescription)"
+        }
         return report
     }
 

@@ -244,6 +244,63 @@ final class RenderedImageCatalogTests: XCTestCase {
         XCTAssertFalse(exists("Sunset.JPG"))
     }
 
+    func testATemplateRenameRenamesTheJPEGAndUndoBringsBothBack() async throws {
+        let (library, undo) = try await openLibrary()
+        let raw = try XCTUnwrap(record(library, "A.NEF"))
+        let plan = library.renamePlan(for: [raw], template: "B", customText: "")
+        XCTAssertEqual(plan.renameCount, 1, plan.items.compactMap(\.problem).joined())
+        let report = await library.fileOperations.rename(plan)
+        XCTAssertEqual(report.completed.count, 2, report.failureDescription)
+        XCTAssertTrue(exists("B.NEF"))
+        XCTAssertTrue(exists("B.JPG"), "the JPEG took the raw's new name")
+        XCTAssertFalse(exists("A.JPG"))
+        XCTAssertNil(library.lastError)
+        XCTAssertEqual(Set(library.visibleImages.map(\.relPath)), ["B.NEF", "Other.JPG"])
+
+        await undoing(undo, library)
+        XCTAssertTrue(exists("A.NEF"))
+        XCTAssertTrue(exists("A.JPG"))
+        XCTAssertFalse(exists("B.NEF"))
+        XCTAssertFalse(exists("B.JPG"))
+    }
+
+    func testATemplateRenameRefusesANameWhoseJPEGNameIsTaken() async throws {
+        let (library, _) = try await openLibrary()
+        let raw = try XCTUnwrap(record(library, "A.NEF"))
+        let plan = library.renamePlan(for: [raw], template: "Other", customText: "")
+        XCTAssertEqual(plan.renameCount, 0, "Other.JPG would take the pair's JPEG name")
+        XCTAssertNotNil(plan.items.first?.problem)
+        XCTAssertEqual(plan.items.first?.newName, "A.NEF")
+    }
+
+    func testRenamePlanLetsAJPEGTakeANameItsBatchGivesUp() {
+        func record(_ name: String) -> ImageRecord {
+            ImageRecord(relPath: name, size: 1, mtime: 0, xxhash: Data(count: 8), captureTime: nil, camera: nil,
+                        rating: 0, flag: 0)
+        }
+        // 1→2 while 2→3: 2.JPG is free once the second pair has moved on.
+        let plan = RenamePlan.make([record("1.NEF"), record("2.NEF")], template: "{seq}", customText: "",
+                                   start: 2, padding: 1,
+                                   companions: { [($0.fileName as NSString).deletingPathExtension + ".JPG"] },
+                                   isTaken: { ["1.JPG", "2.JPG"].contains($0) })
+        XCTAssertEqual(plan.renameCount, 2, plan.items.compactMap(\.problem).joined(separator: "; "))
+        // 1→3 alone: 3.JPG is held by a file not in the batch.
+        let blocked = RenamePlan.make([record("1.NEF")], template: "{seq}", customText: "", start: 3, padding: 1,
+                                      companions: { _ in ["1.JPG"] }, isTaken: { $0 == "3.JPG" })
+        XCTAssertEqual(blocked.renameCount, 0)
+    }
+
+    func testDuplicateCopiesTheJPEGToo() async throws {
+        let (library, undo) = try await openLibrary()
+        let raw = try XCTUnwrap(record(library, "A.NEF"))
+        let report = await library.fileOperations.duplicate([raw])
+        XCTAssertEqual(report.completed.map { $0.destination.lastPathComponent }.sorted(), ["A 2.JPG", "A 2.NEF"],
+                       report.failureDescription)
+        XCTAssertTrue(exists("A.JPG"))
+        XCTAssertEqual(Set(library.visibleImages.map(\.relPath)), ["A.NEF", "A 2.NEF", "Other.JPG"])
+        XCTAssertEqual(undo.undoActionName, "Duplicate 2 Images")
+    }
+
     func testShownSeparatelyTheJPEGStaysBehind() async throws {
         let (library, _) = try await openLibrary()
         library.showsPairedCompanions = true

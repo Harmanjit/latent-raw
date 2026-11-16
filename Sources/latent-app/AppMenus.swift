@@ -382,6 +382,11 @@ struct LatentCommands: Commands {
             item("Duplicate", .duplicatePhoto)
         }
 
+        // Latent's Print… is above; SwiftUI's own Print… and Page Setup…
+        // would be a second ⌘P that reaches the system's print while
+        // Latent's is disabled.
+        CommandGroup(replacing: .printItem) { }
+
         CommandGroup(replacing: .undoRedo) {
             textAwareItem(state.undoTitle, .undo, textAction: "undo:")
             textAwareItem(state.redoTitle, .redo, textAction: "redo:")
@@ -537,7 +542,17 @@ struct LatentCommands: Commands {
     }
 
     private func isEnabled(_ command: KeyCommand) -> Bool {
-        context?.state.isEnabled(command) ?? false
+        Self.isEnabled(command, context: context?.state, keyWindowEditingText: keyWindowText.isEditingText)
+    }
+
+    /// Whether `command`'s item is enabled, given the main window's state
+    /// (nil without it) and whether the key window is editing text.
+    /// Typing in any window (the export sheet's watermark field, Help's
+    /// search) counts, so ⌃H there stays delete-backward and isn't a merge.
+    static func isEnabled(_ command: KeyCommand, context: CommandState?, keyWindowEditingText: Bool) -> Bool {
+        guard var state = context else { return false }
+        state.isEditingText = state.isEditingText || keyWindowEditingText
+        return state.isEnabled(command)
     }
 
     private func item(_ title: String, _ command: KeyCommand) -> some View {

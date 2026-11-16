@@ -3,7 +3,8 @@ import Foundation
 extension Library {
     /// Plans renaming `records` (in this order, for the sequence numbers)
     /// with a filename template, checking each new name against the files
-    /// in the folder and the photos in the catalog. See `RenamePlan`.
+    /// in the folder and the photos in the catalog, and the new names of the
+    /// JPEGs of RAW+JPEG pairs that will follow them. See `RenamePlan`.
     public func renamePlan(for records: [ImageRecord], template: String, customText: String,
                            start: Int = 1, padding: Int = 3,
                            letterCase: ExportNaming.LetterCase = .unchanged) -> RenamePlan {
@@ -13,7 +14,8 @@ extension Library {
         return RenamePlan.make(records, template: template, customText: customText, start: start, padding: padding,
                                catalogName: folderURL?.lastPathComponent ?? "", letterCase: letterCase,
                                keywords: template.range(of: "{keywords", options: .caseInsensitive) == nil
-                                   ? [:] : keywordIndex.mapValues { Array($0) }) { relPath in
+                                   ? [:] : keywordIndex.mapValues { Array($0) },
+                               companions: { companionsTravelling(with: $0).map(\.fileName) }) { relPath in
             if catalogued.contains(relPath.lowercased()) { return true }
             guard let root else { return false }
             // A file the catalog doesn't index (a JPEG beside the raws), or

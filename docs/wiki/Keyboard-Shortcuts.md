@@ -113,7 +113,7 @@ These are the default keys. Settings › Keyboard changes any of them, gives key
 | Keys | Action |
 |---|---|
 | ⌃H | HDR merge of the selected photos into one DNG beside them (see [Photo Merge](Photo-Merge)); not while typing in a text field, where ⌃H deletes backward |
-| ⌃⇧H | HDR merge without the dialog, with the options it was last left with; problems show in the status bar |
+| ⌃⇧H | HDR merge without the dialog, with the options it was last left with; warnings show as notes in the library panel, a failure in the status bar |
 | ⌃M | Stitch the selected photos into one panorama DNG beside them (see [Photo Merge](Photo-Merge)); not while typing in a text field |
 | ⌃⇧M | Merge a bracket at each position and stitch the results into one DNG (experimental; see [Photo Merge](Photo-Merge)); not while typing in a text field |
 

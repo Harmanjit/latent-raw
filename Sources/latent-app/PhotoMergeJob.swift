@@ -95,8 +95,9 @@ struct MergeProgress: Equatable, Sendable {
 ///
 /// **Without the dialog** (HDR Merge Without Dialog, ⌃⇧H), the job measures
 /// the photos itself first, with the options the dialog was last left with.
-/// A failure goes to the status bar as usual; so do the warnings the dialog
-/// would have shown, once the merge is done.
+/// A failure goes to the status bar as usual; the warnings the dialog
+/// would have shown become notes in the library panel once the merge is
+/// done (`notes`).
 @MainActor
 final class PhotoMergeQueue: ObservableObject {
     @Published private(set) var isRunning = false
@@ -514,14 +515,14 @@ final class PhotoMergeQueue: ObservableObject {
                         do {
                             try removeStrayResult(destination)
                         } catch {
-                            Log.export.error("\(job.kind.title, privacy: .public): could not remove the unfinished \(destination.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+                            Log.export.error("\(job.kind.title, privacy: .public): could not remove the unfinished \(destination.lastPathComponent, privacy: .private): \(String(describing: error), privacy: .private)")
                         }
                     }
                     do {
                         try await library.discardMergeRecipe(forNewImageAt: relPath, in: catalog,
                                                              fileTookTheName: fileTaken)
                     } catch {
-                        Log.export.error("\(job.kind.title, privacy: .public): could not remove the sidecar of \(relPath, privacy: .private): \(String(describing: error), privacy: .public)")
+                        Log.export.error("\(job.kind.title, privacy: .public): could not remove the sidecar of \(relPath, privacy: .private): \(String(describing: error), privacy: .private)")
                     }
                 }
                 if error is CancellationError || Task.isCancelled { return .cancelled }
