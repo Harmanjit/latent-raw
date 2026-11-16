@@ -41,6 +41,10 @@ final class MaskedScopesAsyncTests: XCTestCase {
         // does instead: full quality, no settle render waiting.
         model.rerenderAtFullQuality()
         await model.renderSettled()
+        // The edit that set the mask may still have queued a settle
+        // render behind it: run it now, not mid-test.
+        model.settleDragRender()
+        await model.renderSettled()
         return model
     }
 
@@ -116,6 +120,10 @@ final class MaskedScopesAsyncTests: XCTestCase {
         ScopeSettings.shared.selectedMaskOnly = true
         model.showMaskOverlay = true
         model.rerenderAtFullQuality()
+        await model.renderSettled()
+        // The edit that set the mask may still have queued a settle
+        // render behind it: run it now, not mid-test.
+        model.settleDragRender()
         await model.renderSettled()
         XCTAssertNotNil(model.displayOutput.maskOverlay, "the analysis render carries the tint")
         model.scope = .waveformVectorscope

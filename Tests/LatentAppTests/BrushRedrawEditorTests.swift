@@ -112,12 +112,15 @@ final class BrushRedrawEditorTests: XCTestCase {
         model.parameters = p
         model.rerenderAtFullQuality()
         await model.renderSettled()
+        model.settleDragRender()
+        await model.renderSettled()
         let before = try bytes(try XCTUnwrap(model.preview?.texture), queue: gpu.commandQueue)
 
+        // The edit renders at once (nothing is on the GPU) and leaves the
+        // whole redraw to run off the main thread. Not awaited: the redraw
+        // may land while waiting, and this checks a render before it does.
         model.parameters.locals[0].shape = .brush(strokes: strokes(feather: 0.8))
-        model.rerenderAtFullQuality()
-        await model.renderSettled()
-        XCTAssertNil(model.dragRender.settleTask, "no settle render to show the mask instead")
+        XCTAssertFalse(model.dragRender.previewIsDraft, "a full-quality render, not a drag draft")
         XCTAssertTrue(session.hasPendingBrushRedraws)
         // Synchronous on the main actor, so the redraw cannot land first.
         let current = try onTheSpot(model)
@@ -126,6 +129,10 @@ final class BrushRedrawEditorTests: XCTestCase {
                       "the preview still shows the old mask")
         XCTAssertTrue(current != before)
         try await waitForRedraw(model, session: session)
+        // The redraw's render follows the edit's closely, so it may be a
+        // drag draft; the full-quality settle render follows it.
+        await model.dragRender.settleTask?.value
+        await model.renderSettled()
         XCTAssertTrue(try bytes(try XCTUnwrap(model.preview?.texture), queue: gpu.commandQueue) == current,
                       "the editor rendered again and shows the current mask")
     }
